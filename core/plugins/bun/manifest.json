@@ -1,0 +1,31 @@
+{
+  "id": "bun",
+  "url": "bun.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.bun",
+    "appattic.script.bun",
+    "appattic.dialog.bun"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "bun"
+      ],
+      "denySubstrings": [
+        "remove",
+        "add",
+        "install",
+        "update"
+      ]
+    }
+  },
+  "config": {
+    "globalOnly": true
+  },
+  "disabled": false
+}

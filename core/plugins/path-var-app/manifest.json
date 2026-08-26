@@ -1,0 +1,30 @@
+{
+  "id": "path-var-app",
+  "url": "path_var_app.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-var-app",
+    "appattic.script.path-var-app",
+    "appattic.dialog.path-var-app"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/.var/app"
+  },
+  "disabled": false
+}

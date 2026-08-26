@@ -1,0 +1,30 @@
+{
+  "id": "path-xdg-lib",
+  "url": "path_xdg_lib.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-xdg-lib",
+    "appattic.script.path-xdg-lib",
+    "appattic.dialog.path-xdg-lib"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/.local/lib"
+  },
+  "disabled": false
+}

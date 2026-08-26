@@ -1,0 +1,33 @@
+{
+  "id": "pip",
+  "url": "pip.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.pip",
+    "appattic.script.pip",
+    "appattic.dialog.pip"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "pip",
+        "pip3"
+      ],
+      "denySubstrings": [
+        "pip install",
+        "pip uninstall",
+        "pip3 install",
+        "pip3 uninstall"
+      ]
+    }
+  },
+  "config": {
+    "userSiteOnly": true,
+    "reportOnlyUpgrade": true
+  },
+  "disabled": false
+}

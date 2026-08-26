@@ -1,0 +1,33 @@
+{
+  "id": "apt",
+  "url": "apt.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.apt",
+    "appattic.script.apt",
+    "appattic.dialog.apt"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "apt",
+        "apt-get"
+      ],
+      "denySubstrings": [
+        "apt-get upgrade",
+        "apt upgrade",
+        "dist-upgrade",
+        "full-upgrade",
+        "-Syu"
+      ]
+    }
+  },
+  "config": {
+    "reportOnlyUpgrade": true
+  },
+  "disabled": false
+}

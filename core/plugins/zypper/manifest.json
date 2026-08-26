@@ -1,0 +1,33 @@
+{
+  "id": "zypper",
+  "url": "zypper.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.zypper",
+    "appattic.script.zypper",
+    "appattic.dialog.zypper"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "zypper"
+      ],
+      "denySubstrings": [
+        "zypper update",
+        "dist-upgrade",
+        "-Syu",
+        "zypper dup",
+        "zypper rm",
+        "install -y"
+      ]
+    }
+  },
+  "config": {
+    "reportOnlyUpgrade": true
+  },
+  "disabled": false
+}

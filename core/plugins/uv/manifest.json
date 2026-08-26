@@ -1,0 +1,31 @@
+{
+  "id": "uv",
+  "url": "uv.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.uv",
+    "appattic.script.uv",
+    "appattic.dialog.uv"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "uv"
+      ],
+      "denySubstrings": [
+        "uninstall",
+        "install",
+        "pip install",
+        "sync"
+      ]
+    }
+  },
+  "config": {
+    "toolsOnly": true
+  },
+  "disabled": false
+}

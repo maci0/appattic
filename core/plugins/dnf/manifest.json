@@ -1,0 +1,39 @@
+{
+  "id": "dnf",
+  "url": "dnf.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.dnf",
+    "appattic.script.dnf",
+    "appattic.dialog.dnf"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "dnf5",
+        "dnf",
+        "yum"
+      ],
+      "denySubstrings": [
+        "dnf upgrade",
+        "dnf5 upgrade",
+        "yum upgrade",
+        "dist-upgrade",
+        "-Syu",
+        "remove -y",
+        "erase",
+        "leaves",
+        "install -y"
+      ]
+    }
+  },
+  "config": {
+    "reportOnlyUpgrade": true,
+    "yumAlias": true
+  },
+  "disabled": false
+}

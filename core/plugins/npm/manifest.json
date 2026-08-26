@@ -1,0 +1,32 @@
+{
+  "id": "npm",
+  "url": "npm.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.npm",
+    "appattic.script.npm",
+    "appattic.dialog.npm"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "npm"
+      ],
+      "denySubstrings": [
+        "uninstall",
+        "install",
+        "update",
+        "--prefix",
+        "npm install"
+      ]
+    }
+  },
+  "config": {
+    "globalOnly": true
+  },
+  "disabled": false
+}

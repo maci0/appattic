@@ -1,0 +1,30 @@
+{
+  "id": "path-xdg-config",
+  "url": "path_xdg_config.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-xdg-config",
+    "appattic.script.path-xdg-config",
+    "appattic.dialog.path-xdg-config"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/.config"
+  },
+  "disabled": false
+}

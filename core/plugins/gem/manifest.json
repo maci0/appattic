@@ -1,0 +1,32 @@
+{
+  "id": "gem",
+  "url": "gem.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.gem",
+    "appattic.script.gem",
+    "appattic.dialog.gem"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "gem"
+      ],
+      "denySubstrings": [
+        "gem uninstall",
+        "gem update ",
+        "gem install",
+        "gem pristine"
+      ]
+    }
+  },
+  "config": {
+    "userInstallOnly": true,
+    "reportOnlyUpgrade": true
+  },
+  "disabled": false
+}

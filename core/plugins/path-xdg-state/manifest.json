@@ -1,0 +1,30 @@
+{
+  "id": "path-xdg-state",
+  "url": "path_xdg_state.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-xdg-state",
+    "appattic.script.path-xdg-state",
+    "appattic.dialog.path-xdg-state"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/.local/state"
+  },
+  "disabled": false
+}

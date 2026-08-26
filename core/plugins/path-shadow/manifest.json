@@ -1,0 +1,31 @@
+{
+  "id": "path-shadow",
+  "url": "path_shadow.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-shadow",
+    "appattic.script.path-shadow",
+    "appattic.dialog.path-shadow"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls",
+        "readlink"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/.local/bin"
+  },
+  "disabled": false
+}

@@ -1,0 +1,30 @@
+{
+  "id": "path-home-dot",
+  "url": "path_home_dot.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-home-dot",
+    "appattic.script.path-home-dot",
+    "appattic.dialog.path-home-dot"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "$HOME leaf dots"
+  },
+  "disabled": false
+}

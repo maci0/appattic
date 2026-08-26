@@ -1,0 +1,30 @@
+{
+  "id": "pacman",
+  "url": "pacman.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.pacman",
+    "appattic.script.pacman",
+    "appattic.dialog.pacman"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "pacman"
+      ],
+      "denySubstrings": [
+        "upgrade",
+        "dist-upgrade",
+        "-Syu"
+      ]
+    }
+  },
+  "config": {
+    "reportOnlyUpgrade": true
+  },
+  "disabled": false
+}

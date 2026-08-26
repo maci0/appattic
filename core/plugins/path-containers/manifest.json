@@ -1,0 +1,30 @@
+{
+  "id": "path-containers",
+  "url": "path_containers.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-containers",
+    "appattic.script.path-containers",
+    "appattic.dialog.path-containers"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/Library/Containers"
+  },
+  "disabled": false
+}

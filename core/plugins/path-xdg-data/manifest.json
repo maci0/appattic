@@ -1,0 +1,30 @@
+{
+  "id": "path-xdg-data",
+  "url": "path_xdg_data.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-xdg-data",
+    "appattic.script.path-xdg-data",
+    "appattic.dialog.path-xdg-data"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/.local/share"
+  },
+  "disabled": false
+}

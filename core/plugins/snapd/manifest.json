@@ -1,0 +1,28 @@
+{
+  "id": "snapd",
+  "url": "snapd.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.snapd",
+    "appattic.script.snapd",
+    "appattic.dialog.snapd"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "snap",
+        "ls"
+      ],
+      "denySubstrings": [
+        "snap remove --purge",
+        "rm /usr/bin/snap"
+      ]
+    }
+  },
+  "config": {},
+  "disabled": false
+}

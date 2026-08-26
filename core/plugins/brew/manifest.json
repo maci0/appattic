@@ -1,0 +1,30 @@
+{
+  "id": "brew",
+  "url": "brew.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.brew",
+    "appattic.script.brew",
+    "appattic.dialog.brew"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "brew"
+      ],
+      "denySubstrings": [
+        "uninstall",
+        "upgrade",
+        "--greedy"
+      ]
+    }
+  },
+  "config": {
+    "untrustedCasksListedNotUpdated": true
+  },
+  "disabled": false
+}

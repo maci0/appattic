@@ -1,0 +1,29 @@
+{
+  "id": "flatpak",
+  "url": "flatpak.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.flatpak",
+    "appattic.script.flatpak",
+    "appattic.dialog.flatpak"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "flatpak"
+      ],
+      "denySubstrings": [
+        "rm /usr/bin/flatpak",
+        "update -y",
+        "uninstall -y",
+        "remote-ls"
+      ]
+    }
+  },
+  "config": {},
+  "disabled": false
+}

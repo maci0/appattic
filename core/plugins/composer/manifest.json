@@ -1,0 +1,33 @@
+{
+  "id": "composer",
+  "url": "composer.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.composer",
+    "appattic.script.composer",
+    "appattic.dialog.composer"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "composer"
+      ],
+      "denySubstrings": [
+        "composer global update",
+        "composer global remove",
+        "composer global require",
+        "composer install",
+        "--working-dir"
+      ]
+    }
+  },
+  "config": {
+    "globalOnly": true,
+    "reportOnlyUpgrade": true
+  },
+  "disabled": false
+}

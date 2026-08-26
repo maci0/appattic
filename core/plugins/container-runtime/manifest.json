@@ -1,0 +1,34 @@
+{
+  "id": "container-runtime",
+  "url": "container_runtime.wasm",
+  "inject": [
+    "host.exec",
+    "host.clock",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.container-runtime",
+    "appattic.script.container-runtime",
+    "appattic.dialog.container-runtime"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "docker",
+        "podman"
+      ],
+      "denySubstrings": [
+        "system prune",
+        "rmi -f",
+        "rmi -af",
+        "volume prune"
+      ]
+    }
+  },
+  "config": {
+    "idleDays": 30,
+    "engine": "auto"
+  },
+  "disabled": false
+}

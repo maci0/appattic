@@ -1,0 +1,32 @@
+{
+  "id": "pnpm",
+  "url": "pnpm.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.pnpm",
+    "appattic.script.pnpm",
+    "appattic.dialog.pnpm"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "pnpm"
+      ],
+      "denySubstrings": [
+        "remove",
+        "add",
+        "install",
+        "update",
+        "--prefix"
+      ]
+    }
+  },
+  "config": {
+    "globalOnly": true
+  },
+  "disabled": false
+}

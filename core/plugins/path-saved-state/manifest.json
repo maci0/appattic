@@ -1,0 +1,30 @@
+{
+  "id": "path-saved-state",
+  "url": "path_saved_state.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-saved-state",
+    "appattic.script.path-saved-state",
+    "appattic.dialog.path-saved-state"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/Library/Saved Application State"
+  },
+  "disabled": false
+}

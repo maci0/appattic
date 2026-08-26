@@ -1,0 +1,13 @@
+.build/
+core/out/
+ui/linux-qt/build/
+.deps/
+.zig-cache/
+.zig-cache-local/
+.swiftpm/
+__pycache__/
+*.pyc
+.DS_Store
+AppAttic.app/Contents/MacOS/AppAttic
+build-cache/
+.tmp-shots/

@@ -1,0 +1,30 @@
+{
+  "id": "path-launchagents",
+  "url": "path_launchagents.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-launchagents",
+    "appattic.script.path-launchagents",
+    "appattic.dialog.path-launchagents"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/Library/LaunchAgents"
+  },
+  "disabled": false
+}

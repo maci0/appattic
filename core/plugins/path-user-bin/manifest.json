@@ -1,0 +1,32 @@
+{
+  "id": "path-user-bin",
+  "url": "path_user_bin.wasm",
+  "inject": [
+    "host.exec",
+    "host.fs",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.path-user-bin",
+    "appattic.script.path-user-bin",
+    "appattic.dialog.path-user-bin"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls",
+        "readlink",
+        "test"
+      ],
+      "denySubstrings": [
+        "rm -rf",
+        "rm /usr/bin"
+      ]
+    }
+  },
+  "config": {
+    "root": "~/.local/bin and ~/bin"
+  },
+  "disabled": false
+}

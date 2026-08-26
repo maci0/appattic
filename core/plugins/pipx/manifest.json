@@ -1,0 +1,29 @@
+{
+  "id": "pipx",
+  "url": "pipx.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.pipx",
+    "appattic.script.pipx",
+    "appattic.dialog.pipx"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "pipx"
+      ],
+      "denySubstrings": [
+        "uninstall",
+        "install",
+        "upgrade",
+        "inject"
+      ]
+    }
+  },
+  "config": {},
+  "disabled": false
+}

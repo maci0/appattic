@@ -1,0 +1,114 @@
+name: linux
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "5.10"
+      - name: Install Qt 6
+        run: sudo bash scripts/linux-deps.sh --install
+      - name: Distro deps
+        run: bash scripts/linux-deps.sh
+      - name: Install Wasmtime C API
+        run: |
+          sudo bash scripts/linux-deps.sh --install-wasmtime
+          echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
+      - name: Put zig on PATH
+        run: |
+          echo /opt/zig >> "$GITHUB_PATH"
+          echo /usr/local/bin >> "$GITHUB_PATH"
+      - name: Test scan library
+        run: swift test --filter AppAtticScanTests
+      - name: Build CLI
+        run: swift build -c debug --product appattic
+      - name: Link Qt UI
+        run: |
+          set -euo pipefail
+          bash scripts/linux-qt-link.sh
+          grep -q '^LINUX_QT_LINK=ok$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -q '^LINUX_QT_SMOKE=ok$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -q '^plugin:path-shadow$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -Eq '^wasm: ok \([1-9][0-9]* plugins\)$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[1-9][0-9]*' ui/linux-qt/build/LINUX_QT_LINK.txt
+      - name: Upload Qt link proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-qt-link-${{ github.job }}
+          path: ui/linux-qt/build/LINUX_QT_LINK.txt
+          if-no-files-found: error
+
+  jammy:
+    runs-on: ubuntu-24.04
+    container: swift:5.10-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt 6
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+          bash scripts/linux-deps.sh --install
+      - name: Install Wasmtime C API
+        run: |
+          bash scripts/linux-deps.sh --install-wasmtime
+          echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
+      - name: Put zig on PATH
+        run: |
+          echo /opt/zig >> "$GITHUB_PATH"
+          echo /usr/local/bin >> "$GITHUB_PATH"
+      - name: Test scan library
+        run: swift test --filter AppAtticScanTests
+      - name: Build CLI
+        run: swift build -c debug --product appattic
+      - name: Link Qt UI
+        run: |
+          set -euo pipefail
+          bash scripts/linux-qt-link.sh
+          grep -q '^LINUX_QT_LINK=ok$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -q '^LINUX_QT_SMOKE=ok$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -q '^plugin:path-shadow$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -Eq '^wasm: ok \([1-9][0-9]* plugins\)$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[1-9][0-9]*' ui/linux-qt/build/LINUX_QT_LINK.txt
+      - name: Upload Qt link proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-qt-link-${{ github.job }}
+          path: ui/linux-qt/build/LINUX_QT_LINK.txt
+          if-no-files-found: error
+
+  archlinux:
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    steps:
+      - name: Install Qt 6 and build tools
+        run: pacman -Syu --noconfirm --needed git qt6-base cmake ninja pkgconf gcc clang binutils curl tar xz libxml2 ncurses python zig libglvnd xorg-server-xvfb
+      - uses: actions/checkout@v4
+      - name: Distro deps
+        run: bash scripts/linux-deps.sh
+      - name: Install Wasmtime C API
+        run: |
+          bash scripts/linux-deps.sh --install-wasmtime
+          echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
+      - name: Link Qt UI
+        run: |
+          set -euo pipefail
+          bash scripts/linux-qt-link.sh
+          grep -q '^LINUX_QT_LINK=ok$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -q '^LINUX_QT_SMOKE=ok$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -q '^plugin:path-shadow$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -Eq '^wasm: ok \([1-9][0-9]* plugins\)$' ui/linux-qt/build/LINUX_QT_LINK.txt
+          grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[1-9][0-9]*' ui/linux-qt/build/LINUX_QT_LINK.txt
+      - name: Upload Qt link proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-qt-link-${{ github.job }}
+          path: ui/linux-qt/build/LINUX_QT_LINK.txt
+          if-no-files-found: error
