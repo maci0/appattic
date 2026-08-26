@@ -72,6 +72,12 @@
 #include <utility>
 #include <vector>
 
+static void resetWidgetPalette(QWidget *w) {
+    if (!w) return;
+    w->setAttribute(Qt::WA_SetPalette, false);
+    w->setPalette(QApplication::palette());
+}
+
 enum class Page : int {
     Overview = 0,
     Leftovers,
@@ -901,7 +907,7 @@ public:
         m_sidebar = new QListWidget;
         m_sidebar->setFixedWidth(220);
         m_sidebar->setFrameShape(QFrame::NoFrame);
-        m_sidebar->setViewportMargins(8, 8, 8, 8);
+        m_sidebar->setContentsMargins(8, 8, 8, 8);
         m_sidebar->setItemDelegate(new SidebarDelegate(m_sidebar));
         m_sidebar->setSpacing(2);
         m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -1471,7 +1477,7 @@ private:
         auto *row = new QHBoxLayout;
         row->setSpacing(32);
 
-        auto *scanCol = section(QStringLiteral("Scan"));
+        auto scanCol = section(QStringLiteral("Scan"));
         m_includeSystem = new QCheckBox(QStringLiteral("Include system apps in scan"));
         auto *scanHint = hintLabel(
             QStringLiteral("Off by default. System apps are easy to misread as unused.")
@@ -1479,7 +1485,7 @@ private:
         scanCol.second->addWidget(m_includeSystem);
         scanCol.second->addWidget(scanHint);
 
-        auto *delCol = section(QStringLiteral("Deletion"));
+        auto delCol = section(QStringLiteral("Deletion"));
         m_confirmBox = new QCheckBox(QStringLiteral("Confirm before running"));
         m_confirmBox->setChecked(true);
         auto *delHint = hintLabel(
@@ -1488,7 +1494,7 @@ private:
         delCol.second->addWidget(m_confirmBox);
         delCol.second->addWidget(delHint);
 
-        auto *ignCol = section(QStringLiteral("Ignored leftovers"));
+        auto ignCol = section(QStringLiteral("Ignored leftovers"));
         m_ignoredList = new QLabel;
         m_ignoredList->setWordWrap(true);
         QFont small = smallFont();
@@ -2282,12 +2288,12 @@ private:
     void applySystemAppearance() {
         if (!m_table || m_applyingAppearance) return;
         m_applyingAppearance = true;
-        m_table->unsetPalette();
-        if (m_inspectorHost) m_inspectorHost->unsetPalette();
-        if (m_inspectorScroll) m_inspectorScroll->unsetPalette();
-        if (m_empty) m_empty->unsetPalette();
-        if (m_ovLeftovers) m_ovLeftovers->unsetPalette();
-        if (m_ovStale) m_ovStale->unsetPalette();
+        resetWidgetPalette(m_table);
+        resetWidgetPalette(m_inspectorHost);
+        resetWidgetPalette(m_inspectorScroll);
+        resetWidgetPalette(m_empty);
+        resetWidgetPalette(m_ovLeftovers);
+        resetWidgetPalette(m_ovStale);
         if (m_sidebar) m_sidebar->setAutoFillBackground(false);
         m_applyingAppearance = false;
     }

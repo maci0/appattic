@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 
 let indexWindowS: TimeInterval = 120
 let maxHistoryLines = 500_000
