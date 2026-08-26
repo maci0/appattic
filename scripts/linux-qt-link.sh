@@ -54,8 +54,47 @@ command -v pkg-config >/dev/null 2>&1 || fail_dep \
     "pkg-config missing" \
     "Install Qt 6 headers: bash scripts/linux-deps.sh --install"
 
-if ! pkg-config --exists Qt6Widgets && ! pkg-config --exists Qt6Core; then
-    fail_dep "pkg-config Qt6Widgets failed" "Install Qt 6 headers: bash scripts/linux-deps.sh --install"
+ensure_pkg_config_path() {
+    local archdir d extra=""
+    archdir="$(uname -m)"
+    for d in "/usr/lib/${archdir}-linux-gnu/pkgconfig" \
+             "/usr/lib/pkgconfig" \
+             "/usr/share/pkgconfig"; do
+        [[ -d "$d" ]] || continue
+        if [[ -z "$extra" ]]; then
+            extra="$d"
+        else
+            extra="$extra:$d"
+        fi
+    done
+    if [[ -n "$extra" ]]; then
+        if [[ -z "${PKG_CONFIG_PATH:-}" ]]; then
+            export PKG_CONFIG_PATH="$extra"
+        else
+            export PKG_CONFIG_PATH="$extra:$PKG_CONFIG_PATH"
+        fi
+    fi
+}
+
+qt6_pkg_config_ok() {
+    ensure_pkg_config_path
+    pkg-config --exists Qt6Widgets 2>/dev/null && return 0
+    pkg-config --exists Qt6Core 2>/dev/null && return 0
+    return 1
+}
+
+qt6_cmake_ok() {
+    local archdir p
+    archdir="$(uname -m)"
+    for p in "/usr/lib/${archdir}-linux-gnu/cmake/Qt6/Qt6Config.cmake" \
+             "/usr/lib/cmake/Qt6/Qt6Config.cmake"; do
+        [[ -f "$p" ]] && return 0
+    done
+    return 1
+}
+
+if ! qt6_pkg_config_ok && ! qt6_cmake_ok; then
+    fail_dep "Qt 6 development files missing" "Install Qt 6 headers: bash scripts/linux-deps.sh --install"
 fi
 
 command -v clang++ >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || fail_dep \
@@ -90,10 +129,14 @@ fi
 
 echo "os: Linux $ARCH"
 echo "cmake: $(cmake --version | head -n 1)"
-if pkg-config --exists Qt6Widgets; then
-    echo "Qt6Widgets: $(pkg-config --modversion Qt6Widgets)"
-elif pkg-config --exists Qt6Core; then
-    echo "Qt6Core: $(pkg-config --modversion Qt6Core)"
+if qt6_pkg_config_ok; then
+    if pkg-config --exists Qt6Widgets; then
+        echo "Qt6Widgets: $(pkg-config --modversion Qt6Widgets)"
+    elif pkg-config --exists Qt6Core; then
+        echo "Qt6Core: $(pkg-config --modversion Qt6Core)"
+    fi
+elif qt6_cmake_ok; then
+    echo "Qt6: cmake config present (no pkg-config .pc on this distro)"
 fi
 echo "WASMTIME_DIR: $WASMTIME_DIR"
 echo "zig: $(zig version | head -n 1)"
