@@ -32,6 +32,7 @@ jobs:
           generate_release_notes: true
 
   macos-ui:
+    if: false  # optional; re-enable when AppAtticUI CI build is stable
     runs-on: macos-14
     continue-on-error: true
     steps:
