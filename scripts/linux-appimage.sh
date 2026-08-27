@@ -142,6 +142,18 @@ if [[ ! -x "$BIN" ]]; then
     exit 1
 fi
 
+if command -v ldd >/dev/null 2>&1; then
+    deps="$(ldd "$BIN")"
+    if echo "$deps" | grep -E 'libgtk-[0-9]' >/dev/null; then
+        echo "error: binary linked Gtk; Linux UI must be Qt 6 only" >&2
+        exit 1
+    fi
+    if ! echo "$deps" | grep -E 'libQt6Widgets' >/dev/null; then
+        echo "error: binary missing libQt6Widgets" >&2
+        exit 1
+    fi
+fi
+
 cp -L "$WASMTIME_SO" "$APPDIR/usr/bin/libwasmtime.so"
 
 WASM_DEST="$APPDIR/usr/share/appattic"
@@ -239,18 +251,6 @@ mkdir -p "$DIST"
 rm -f "$OUT"
 echo "appimagetool: $OUT"
 ARCH="$APPIMAGE_ARCH" run_appimage_tool "$APPIMAGETOOL" "$APPDIR" "$OUT"
-
-if command -v ldd >/dev/null 2>&1; then
-    deps="$(ldd "$BIN")"
-    if echo "$deps" | grep -E 'libgtk-[0-9]' >/dev/null; then
-        echo "error: binary linked Gtk; Linux UI must be Qt 6 only" >&2
-        exit 1
-    fi
-    if ! echo "$deps" | grep -E 'libQt6Widgets' >/dev/null; then
-        echo "error: binary missing libQt6Widgets" >&2
-        exit 1
-    fi
-fi
 
 echo "AppImage: $OUT"
 echo "run:    $OUT"
