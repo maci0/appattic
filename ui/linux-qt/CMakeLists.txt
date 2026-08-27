@@ -73,6 +73,19 @@ if(UNIX AND NOT APPLE)
     get_filename_component(_wasmtime_libdir "${WASMTIME_LIBRARY}" DIRECTORY)
     set_target_properties(appattic-qt PROPERTIES
         BUILD_RPATH "${_wasmtime_libdir}"
-        INSTALL_RPATH "${_wasmtime_libdir}"
+        INSTALL_RPATH "\$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH OFF
+        INSTALL_RPATH_USE_LINK_PATH OFF
     )
+endif()
+
+install(TARGETS appattic-qt RUNTIME DESTINATION bin)
+
+if(EXISTS "${APPATTIC_ROOT}/packaging/appattic.desktop")
+    install(FILES "${APPATTIC_ROOT}/packaging/appattic.desktop"
+        DESTINATION share/applications)
+endif()
+if(EXISTS "${APPATTIC_ROOT}/packaging/appattic.svg")
+    install(FILES "${APPATTIC_ROOT}/packaging/appattic.svg"
+        DESTINATION share/icons/hicolor/scalable/apps)
 endif()

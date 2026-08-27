@@ -73,6 +73,17 @@ export PATH="/opt/swift/usr/bin:$PATH"
 bash scripts/linux-qt-link.sh
 ```
 
+AppImage (portable Qt UI, no system Qt at runtime):
+
+```bash
+bash scripts/linux-deps.sh --install
+bash scripts/linux-deps.sh --install-wasmtime
+bash scripts/linux-appimage.sh
+# dist/AppAttic-x86_64.AppImage  (or aarch64 on arm64 hosts)
+```
+
+Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downloads linuxdeploy, linuxdeploy-plugin-qt, and appimagetool into `dist/.appimage-tools/`. WASM modules ship under `usr/share/appattic/`; `libwasmtime.so` sits next to the binary.
+
 Container builds:
 
 ```bash

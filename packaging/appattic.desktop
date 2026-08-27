@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AppAttic
+Comment=Local cleanup tool for leftover app data
+Exec=appattic-qt
+Icon=appattic
+Categories=Utility;System;
+Terminal=false
+StartupWMClass=appattic-qt
