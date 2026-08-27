@@ -168,6 +168,18 @@ fetch_appimage_tool() {
     chmod +x "$dest"
 }
 
+# GitHub Actions and other minimal hosts often lack libfuse.so.2 for AppImage tools.
+run_appimage_tool() {
+    local tool="$1"
+    shift
+    if [[ "${APPIMAGE_EXTRACT_AND_RUN:-}" == 1 ]] \
+        || ! ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
+        "$tool" --appimage-extract-and-run "$@"
+    else
+        "$tool" "$@"
+    fi
+}
+
 fetch_appimage_tool "linuxdeploy-${APPIMAGE_ARCH}.AppImage" \
     "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${APPIMAGE_ARCH}.AppImage"
 fetch_appimage_tool "linuxdeploy-plugin-qt-${APPIMAGE_ARCH}.AppImage" \
@@ -187,7 +199,7 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 export LINUXDEPLOY_PLUGIN_QT="$PLUGIN_QT"
 
 echo "linuxdeploy: bundling Qt 6 into AppDir…"
-"$LINUXDEPLOY" --appdir "$APPDIR" \
+run_appimage_tool "$LINUXDEPLOY" --appdir "$APPDIR" \
     --executable "$BIN" \
     --desktop-file "$DESKTOP" \
     --icon-file "$ICON" \
@@ -226,7 +238,7 @@ patch_apprun
 mkdir -p "$DIST"
 rm -f "$OUT"
 echo "appimagetool: $OUT"
-ARCH="$APPIMAGE_ARCH" "$APPIMAGETOOL" "$APPDIR" "$OUT"
+ARCH="$APPIMAGE_ARCH" run_appimage_tool "$APPIMAGETOOL" "$APPDIR" "$OUT"
 
 if command -v ldd >/dev/null 2>&1; then
     deps="$(ldd "$BIN")"
