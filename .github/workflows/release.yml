@@ -1,0 +1,53 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux-appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Qt 6 and build tools
+        run: sudo bash scripts/linux-deps.sh --install
+      - name: Install Wasmtime C API
+        run: sudo bash scripts/linux-deps.sh --install-wasmtime
+      - name: Put zig on PATH
+        run: |
+          echo /opt/zig >> "$GITHUB_PATH"
+          echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
+      - name: Build AppImage
+        run: bash scripts/linux-appimage.sh
+      - name: Publish AppImage
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AppAttic-x86_64.AppImage
+          generate_release_notes: true
+
+  macos-ui:
+    runs-on: macos-14
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "5.10"
+      - name: Build AppAtticUI
+        run: swift build -c release --product AppAtticUI
+      - name: Package macOS zip
+        run: |
+          mkdir -p dist
+          cp .build/release/AppAtticUI dist/
+          (cd dist && zip -r AppAttic-macos-arm64.zip AppAtticUI)
+      - name: Publish macOS zip
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AppAttic-macos-arm64.zip
