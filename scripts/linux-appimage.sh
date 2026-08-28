@@ -209,6 +209,8 @@ if [[ -z "$QMAKE" ]]; then
 fi
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 export LINUXDEPLOY_PLUGIN_QT="$PLUGIN_QT"
+# linuxdeploy bundles an old strip that chokes on .relr.dyn (newer toolchains)
+export NO_STRIP=1
 
 echo "linuxdeploy: bundling Qt 6 into AppDir…"
 run_appimage_tool "$LINUXDEPLOY" --appdir "$APPDIR" \
@@ -227,13 +229,15 @@ patch_apprun() {
   # Qt 6 plugin skips apprun-hooks; linuxdeploy leaves AppRun as a symlink to the
   # binary. sed would edit the ELF. Replace with a script that exports wasm path
   # (qt.conf beside the binary covers Qt plugins for Qt 6).
-    if [[ -f "$apprun" ]] && grep -q 'APPATTIC_CORE_OUT=' "$apprun" 2>/dev/null; then
+    if [[ ! -L "$apprun" ]] && [[ -f "$apprun" ]] \
+        && grep -q 'APPATTIC_CORE_OUT=' "$apprun" 2>/dev/null; then
         return 0
     fi
+    rm -f "$apprun"
     cat > "$apprun" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-APPDIR="$(dirname "$(readlink -f "$0")")"
+APPDIR="$(cd "$(dirname "$0")" && pwd)"
 export APPATTIC_CORE_OUT="${APPDIR}/usr/share/appattic"
 if [[ -d "${APPDIR}/apprun-hooks" ]]; then
     for hook in "${APPDIR}/apprun-hooks"/*.sh; do
