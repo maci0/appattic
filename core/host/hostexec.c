@@ -5,6 +5,7 @@
 #include <string.h>
 
 #ifndef _WIN32
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -215,7 +216,7 @@ int appattic_host_exec_allowed(const char *cmdline) {
         return (has_repoquery && has_unneeded) || (has_list && has_upgrades) || has_check_update;
     }
     if (is_zypper) return (has_packages && has_unneeded) || has_list_updates;
-    if (is_flatpak) return has_uninstall && has_unused && has_s;
+    if (is_flatpak) return has_uninstall && has_unused;
     if (is_npm || is_pnpm) return has_g && (has_list || has_outdated);
     if (is_bun) return has_pm && has_list && has_g;
     if (is_pipx) return has_list;
@@ -508,6 +509,12 @@ static int run_live(char **argv, char *out, size_t cap) {
         close(fds[0]);
         if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(127);
         close(fds[1]);
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
         execvp(argv[0], argv);
         _exit(127);
     }

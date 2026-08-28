@@ -71,10 +71,9 @@ int main(void) {
     rc |= expect_allow("/usr/bin/zypper packages --unneeded");
     rc |= expect_allow("zypper --non-interactive list-updates");
     rc |= expect_allow("/usr/bin/zypper list-updates");
-    rc |= expect_allow("flatpak uninstall --unused --dry-run");
-    rc |= expect_allow("flatpak uninstall --dry-run --unused");
-    rc |= expect_allow("flatpak remove --unused --dry-run");
-    rc |= expect_allow("/usr/bin/flatpak uninstall --unused --dry-run");
+    rc |= expect_allow("flatpak uninstall --unused");
+    rc |= expect_allow("flatpak remove --unused");
+    rc |= expect_allow("/usr/bin/flatpak uninstall --unused");
     rc |= expect_allow("npm ls -g --depth=0 --json");
     rc |= expect_allow("npm ls -g --depth=0");
     rc |= expect_allow("npm outdated -g --json");
@@ -333,7 +332,7 @@ int main(void) {
     out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
     if (!strstr(out, "2.45.1-1.1") || !strstr(out, "vim")) return fail("zypper list-updates fixture text");
 
-    n = appattic_host_exec("flatpak uninstall --unused --dry-run", out, sizeof out);
+    n = appattic_host_exec("flatpak uninstall --unused", out, sizeof out);
     if (n <= 0) return fail("flatpak fixture missing");
     out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
     if (!strstr(out, "org.freedesktop.Platform.GL.default") || strstr(out, "remote-ls")) {

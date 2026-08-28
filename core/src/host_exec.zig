@@ -392,7 +392,7 @@ test "native fixture routes apt pacman snap ls dnf zypper flatpak npm pnpm bun p
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(zu)], "2.45.1-1.1") != null);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(zu)], "vim") != null);
 
-    const f = run("flatpak uninstall --unused --dry-run", &buf);
+    const f = run("flatpak uninstall --unused", &buf);
     try std.testing.expect(f > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(f)], "org.freedesktop.Platform.GL.default") != null);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(f)], "remote-ls") == null);
