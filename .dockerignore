@@ -17,3 +17,5 @@ dist
 __pycache__
 *.pyc
 ui-*.png
+packaging/AppIcon.appiconset
+

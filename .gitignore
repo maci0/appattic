@@ -18,3 +18,4 @@ build-cache/
 .impeccable/
 .playwright-mcp/
 ui-*.png
+packaging/AppIcon.appiconset/

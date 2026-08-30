@@ -1,8 +1,7 @@
 FROM archlinux:latest
 
 RUN pacman -Syu --noconfirm --needed \
-        git qt6-base cmake ninja pkgconf gcc clang binutils curl tar xz \
-        libxml2 ncurses python zig libglvnd xorg-server-xvfb \
+        git curl tar xz zig \
     && pacman -Scc --noconfirm
 
 COPY scripts/linux-deps.sh /tmp/linux-deps.sh
@@ -12,10 +11,7 @@ ENV WASMTIME_DIR=/opt/wasmtime-c-api
 
 WORKDIR /src
 COPY . .
-# AppAttic Qt 6 link is proven by scripts/linux-qt-link.sh (ldd libQt6Widgets + --smoke).
-RUN pkg-config --exists Qt6Widgets \
-    && pkg-config --modversion Qt6Widgets \
-    && bash scripts/linux-qt-link.sh \
+RUN bash scripts/linux-qt-link.sh \
     && grep -q '^LINUX_QT_LINK=ok$' src/linux/build/LINUX_QT_LINK.txt \
     && grep -q '^LINUX_QT_SMOKE=ok$' src/linux/build/LINUX_QT_LINK.txt \
     && grep -q '^plugin:path-shadow$' src/linux/build/LINUX_QT_LINK.txt \
