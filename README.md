@@ -120,7 +120,7 @@ AppAttic follows the design principles of Task Manager OG ([TMOG](https://tmog.o
 | `src/cli/` | Headless `appattic` command-line executable |
 | `src/macos/` | Native macOS UI application (SwiftCrossUI / AppKit) |
 | `src/linux/` | Native Linux application (Zig) |
-| `packaging/` | Platform metadata, icons, and desktop entries (`Info.plist`, `AppAttic.icns`, `.desktop`, `.svg`) |
+| `packaging/` | Platform metadata, PKGBUILD, icons, and desktop entries (`PKGBUILD`, `Info.plist`, `AppAttic.icns`, `.desktop`, `.svg`) |
 | `scripts/` | Platform build and dependency scripts (`linux-deps.sh`, `linux-qt-link.sh`, `linux-appimage.sh`) |
 | `tests/AppAtticScanTests/` | Comprehensive test suites for scanner, packages, models, caching, and packaging |
 | `docs/` | TMOG design language specifications, research transcripts, and architecture documentation |
