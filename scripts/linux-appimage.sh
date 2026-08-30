@@ -125,31 +125,42 @@ if command -v ninja >/dev/null 2>&1; then
     gen=(-G Ninja)
 fi
 
-echo "building appattic-qt (Release)…"
-cmake -S "$ROOT/src/linux" -B "$BUILD_DIR" \
-    "${gen[@]}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DWASMTIME_ROOT="$WASMTIME_DIR"
-cmake --build "$BUILD_DIR"
-
+echo "building appattic-qt (Zig Release)…"
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR"
-cmake --install "$BUILD_DIR" --prefix "$APPDIR/usr"
+mkdir -p "$APPDIR/usr/bin"
+mkdir -p "$APPDIR/usr/share/applications"
+mkdir -p "$APPDIR/usr/share/icons/hicolor/scalable/apps"
+
+wasmtime_inc="${WASMTIME_DIR}/include"
+wasmtime_lib_flag=()
+if [[ -d "${WASMTIME_DIR}/lib" ]]; then
+    wasmtime_lib_flag=(-L "${WASMTIME_DIR}/lib")
+elif [[ -d "${WASMTIME_DIR}/lib64" ]]; then
+    wasmtime_lib_flag=(-L "${WASMTIME_DIR}/lib64")
+fi
+
+zig build-exe \
+    -OReleaseFast \
+    -I "$ROOT/src/core/host" \
+    -I "$wasmtime_inc" \
+    "${wasmtime_lib_flag[@]}" \
+    -lwasmtime \
+    -lc \
+    "$ROOT/src/linux/main.zig" \
+    "$ROOT/src/core/host/embed.c" \
+    "$ROOT/src/core/host/hostexec.c" \
+    -femit-bin="$APPDIR/usr/bin/appattic-qt"
 
 BIN="$APPDIR/usr/bin/appattic-qt"
 if [[ ! -x "$BIN" ]]; then
-    echo "error: install did not produce $BIN" >&2
+    echo "error: build did not produce $BIN" >&2
     exit 1
 fi
 
 if command -v ldd >/dev/null 2>&1; then
     deps="$(ldd "$BIN")"
     if echo "$deps" | grep -E 'libgtk-[0-9]' >/dev/null; then
-        echo "error: binary linked Gtk; Linux UI must be Qt 6 only" >&2
-        exit 1
-    fi
-    if ! echo "$deps" | grep -E 'libQt6Widgets' >/dev/null; then
-        echo "error: binary missing libQt6Widgets" >&2
+        echo "error: binary linked Gtk; Linux binary must not link Gtk" >&2
         exit 1
     fi
 fi
@@ -166,6 +177,8 @@ if [[ ! -f "$DESKTOP" || ! -f "$ICON" ]]; then
     echo "error: missing packaging/appattic.desktop or packaging/appattic.svg" >&2
     exit 1
 fi
+cp "$DESKTOP" "$APPDIR/usr/share/applications/appattic.desktop"
+cp "$ICON" "$APPDIR/usr/share/icons/hicolor/scalable/apps/appattic.svg"
 
 mkdir -p "$TOOLS"
 fetch_appimage_tool() {

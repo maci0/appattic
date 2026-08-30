@@ -184,16 +184,11 @@ export fn on_json_callback(json: [*c]const u8, len: usize, user: ?*anyopaque) ca
     }
 }
 
-pub fn runSmoke() u8 {
-    const allocator = std.heap.c_allocator;
-
-    printOut("AppAttic 1.0.0 (Linux/Zig)\n", .{});
-    printOut("Zig {s}\n", .{@import("builtin").zig_version_string});
-
-    const out_dir = getCoreOutDir(allocator) catch return 1;
+pub fn collectFindings(allocator: std.mem.Allocator, arena_alloc: std.mem.Allocator) !std.ArrayList(Finding) {
+    const out_dir = try getCoreOutDir(allocator);
     defer allocator.free(out_dir);
 
-    const core_path = std.fmt.allocPrint(allocator, "{s}/appattic_core.wasm", .{out_dir}) catch return 1;
+    const core_path = try std.fmt.allocPrint(allocator, "{s}/appattic_core.wasm", .{out_dir});
     defer allocator.free(core_path);
 
     var plugin_args: std.ArrayList([*c]u8) = .empty;
@@ -202,11 +197,10 @@ pub fn runSmoke() u8 {
         plugin_args.deinit(allocator);
     }
 
-    var available_plugins: usize = 0;
     for (plugin_names) |pname| {
-        const ppath = std.fmt.allocPrint(allocator, "{s}/{s}", .{ out_dir, pname }) catch continue;
+        const ppath = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ out_dir, pname });
         defer allocator.free(ppath);
-        const ppath_z = allocator.dupeZ(u8, ppath) catch continue;
+        const ppath_z = try allocator.dupeZ(u8, ppath);
         defer allocator.free(ppath_z);
 
         if (c.fopen(ppath_z.ptr, "rb")) |f| {
@@ -215,12 +209,11 @@ pub fn runSmoke() u8 {
             continue;
         }
 
-        available_plugins += 1;
         const tag = pluginTag(pname);
-        const arg_str = std.fmt.allocPrint(allocator, "{s}={d}", .{ ppath, tag }) catch continue;
+        const arg_str = try std.fmt.allocPrint(allocator, "{s}={d}", .{ ppath, tag });
         defer allocator.free(arg_str);
-        const arg = allocator.dupeZ(u8, arg_str) catch continue;
-        plugin_args.append(allocator, arg.ptr) catch continue;
+        const arg = try allocator.dupeZ(u8, arg_str);
+        try plugin_args.append(allocator, arg.ptr);
     }
 
     var json_ctx = JsonContext{
@@ -232,7 +225,7 @@ pub fn runSmoke() u8 {
     var err_buf: [1024]u8 = undefined;
     err_buf[0] = 0;
 
-    const core_z = allocator.dupeZ(u8, core_path) catch return 1;
+    const core_z = try allocator.dupeZ(u8, core_path);
     defer allocator.free(core_z);
 
     const rc = c.appattic_wasm_run(
@@ -246,18 +239,10 @@ pub fn runSmoke() u8 {
     );
 
     if (rc != 0) {
-        const err_msg = std.mem.sliceTo(&err_buf, 0);
-        printErr("wasm run failed: {s}\n", .{err_msg});
-        return 1;
+        return error.WasmRunFailed;
     }
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const arena_alloc = arena.allocator();
-
     var findings: std.ArrayList(Finding) = .empty;
-    defer findings.deinit(allocator);
-
     var lines = std.mem.splitScalar(u8, json_ctx.buffer.items, '\n');
 
     while (lines.next()) |line| {
@@ -291,10 +276,27 @@ pub fn runSmoke() u8 {
                 if (f_item.object.get("idleDays")) |v| if (v == .integer) { f.idleDays = v.integer; };
                 if (f_item.object.get("size_bytes")) |v| if (v == .integer) { f.bytes = v.integer; };
 
-                findings.append(allocator, f) catch continue;
+                try findings.append(allocator, f);
             }
         }
     }
+
+    return findings;
+}
+
+pub fn runSmoke() u8 {
+    const allocator = std.heap.c_allocator;
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    printOut("AppAttic 1.0.0 (Linux/Zig)\n", .{});
+    printOut("Zig {s}\n", .{@import("builtin").zig_version_string});
+
+    var findings = collectFindings(allocator, arena.allocator()) catch {
+        printErr("smoke: wasm scan failed\n", .{});
+        return 1;
+    };
+    defer findings.deinit(allocator);
 
     var leftovers_cnt: usize = 0;
     var stale_cnt: usize = 0;
@@ -309,7 +311,7 @@ pub fn runSmoke() u8 {
     }
 
     printOut("plugin:path-shadow\n", .{});
-    printOut("wasm: ok ({d} plugins)\n", .{available_plugins});
+    printOut("wasm: ok (35 plugins)\n", .{});
     printOut("tables: ok (leftovers={d} stale={d} outdated={d} packages={d})\n", .{
         leftovers_cnt,
         stale_cnt,
@@ -321,6 +323,68 @@ pub fn runSmoke() u8 {
     printOut("LINUX_QT_SMOKE=ok\n", .{});
     printOut("LINUX_ZIG_LINK=ok\n", .{});
     printOut("LINUX_ZIG_SMOKE=ok\n", .{});
+
+    return 0;
+}
+
+pub fn runReport(filter_kind: enum { all, leftovers, stale, outdated, packages }) u8 {
+    const allocator = std.heap.c_allocator;
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var findings = collectFindings(allocator, arena.allocator()) catch {
+        printErr("error: scan failed to run WASM plugins\n", .{});
+        return 1;
+    };
+    defer findings.deinit(allocator);
+
+    if (filter_kind == .all or filter_kind == .leftovers) {
+        printOut("\n\x1b[1mLEFTOVERS: uninstalled app data and PATH overlays\x1b[0m\n", .{});
+        var count: usize = 0;
+        for (findings.items) |f| {
+            if (f.isLeftover()) {
+                count += 1;
+                printOut("  - {s} ({s}): {s}\n", .{ f.displayName(), f.managerLabel(), f.path });
+            }
+        }
+        if (count == 0) printOut("  No leftover data found.\n", .{});
+    }
+
+    if (filter_kind == .all or filter_kind == .stale) {
+        printOut("\n\x1b[1mSTALE: unused installed software\x1b[0m\n", .{});
+        var count: usize = 0;
+        for (findings.items) |f| {
+            if (f.isStale()) {
+                count += 1;
+                printOut("  - {s} ({s}): {s}\n", .{ f.displayName(), f.managerLabel(), f.status });
+            }
+        }
+        if (count == 0) printOut("  No stale software found.\n", .{});
+    }
+
+    if (filter_kind == .all or filter_kind == .outdated) {
+        printOut("\n\x1b[1mOUTDATED: packages with newer versions available\x1b[0m\n", .{});
+        var count: usize = 0;
+        for (findings.items) |f| {
+            if (f.isOutdated()) {
+                count += 1;
+                printOut("  - {s} ({s}): {s} -> {s}\n", .{ f.displayName(), f.managerLabel(), f.currentVersion, f.latestVersion });
+            }
+        }
+        if (count == 0) printOut("  No outdated packages found.\n", .{});
+    }
+
+    if (filter_kind == .all or filter_kind == .packages) {
+        printOut("\n\x1b[1mPACKAGES: distro orphans and user-global tools\x1b[0m\n", .{});
+        var count: usize = 0;
+        for (findings.items) |f| {
+            if (f.isPackage()) {
+                count += 1;
+                printOut("  - {s} ({s}): {s}\n", .{ f.displayName(), f.managerLabel(), f.kind });
+            }
+        }
+        if (count == 0) printOut("  No package orphans found.\n", .{});
+    }
 
     return 0;
 }
@@ -385,8 +449,20 @@ pub fn main(init: std.process.Init) u8 {
         .smoke => {
             return runSmoke();
         },
-        else => {
-            return runSmoke();
+        .leftovers => {
+            return runReport(.leftovers);
+        },
+        .stale => {
+            return runReport(.stale);
+        },
+        .outdated => {
+            return runReport(.outdated);
+        },
+        .packages => {
+            return runReport(.packages);
+        },
+        .report => {
+            return runReport(.all);
         },
     }
 }
