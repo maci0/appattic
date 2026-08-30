@@ -2,7 +2,7 @@
 import PackageDescription
 
 #if os(Linux)
-// Linux UI is src/linux (C++ Qt 6, formerly ui/linux-qt), not SwiftCrossUI Gtk.
+// Linux UI is src/linux (pure Zig, formerly ui/linux-qt), not SwiftCrossUI Gtk.
 let uiProducts: [Product] = []
 let uiTargets: [Target] = []
 let uiDeps: [Package.Dependency] = []
