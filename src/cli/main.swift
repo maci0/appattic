@@ -337,7 +337,7 @@ func runShellScript(_ script: String) -> Int32 {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [url.path]
         var env = ProcessInfo.processInfo.environment
-        let extras = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+        let extras = cleanupPathDirectories()
         var seen = Set<String>()
         var parts: [String] = []
         for dir in extras + (env["PATH"] ?? "").split(separator: ":").map(String.init) {

@@ -93,6 +93,14 @@ private let managerLabel: [String: String] = [
     "pacman": "pacman",
     "dnf": "dnf",
     "zypper": "zypper",
+    "gem": "RubyGems",
+    "composer": "Composer",
+    "pip": "pip",
+    "npm": "npm",
+    "pnpm": "pnpm",
+    "bun": "bun",
+    "pipx": "pipx",
+    "uv": "uv",
 ]
 
 public let outdatedSkippedManagersNote =

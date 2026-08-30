@@ -1163,7 +1163,7 @@ private slots:
             m_findings.clear();
             m_scanOk = false;
             m_scanAt.clear();
-            showError(QStringLiteral("WASM core missing. Run ./core/build.sh then Rescan."));
+            showError(QStringLiteral("WASM core missing. Run ./src/core/build.sh then Rescan."));
             fillCurrent();
             return;
         }
@@ -2586,7 +2586,7 @@ static int runSmoke(int argc, char **argv) {
     const QString core = out + QStringLiteral("/appattic_core.wasm");
     if (!QFileInfo::exists(core)) {
         std::fprintf(stderr, "wasm: core missing (%s)\n", core.toUtf8().constData());
-        std::fprintf(stderr, "build with: bash core/build.sh\n");
+        std::fprintf(stderr, "build with: bash src/core/build.sh\n");
         return 1;
     }
     const QStringList plugins = pluginWasmFiles(out);

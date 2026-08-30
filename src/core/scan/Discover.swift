@@ -164,6 +164,8 @@ public func isJunkAppBlurb(_ text: String) -> Bool {
     return false
 }
 
+private let versionRE = try! NSRegularExpression(pattern: "^[\\d.]+$")
+
 public func plistDescription(_ info: [String: Any], appName: String) -> String? {
     let raw = (info["NSHumanReadableDescription"] as? String) ?? (info["CFBundleGetInfoString"] as? String)
     guard var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
@@ -177,7 +179,6 @@ public func plistDescription(_ info: [String: Any], appName: String) -> String? 
         }
     }
     if text.isEmpty || isJunkAppBlurb(text) { return nil }
-    let versionRE = try! NSRegularExpression(pattern: "^[\\d.]+$")
     func fullMatch(_ s: String) -> Bool {
         versionRE.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
             && versionRE.rangeOfFirstMatch(in: s, range: NSRange(s.startIndex..., in: s)).length == (s as NSString).length
