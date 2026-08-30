@@ -50,7 +50,7 @@ AppAttic follows the architecture, density, tree actions, and installed-apps tab
 
 | TMOG | AppAttic |
 |------|----------|
-| Native UI + shared core + OS helpers | AppKit on macOS, Qt 6 on Linux (`ui/linux-qt`), WinUI on Windows. WASM core + per-manager plugins |
+| Native UI + shared core + OS helpers | AppKit on macOS (`src/macos`), Qt 6 on Linux (`src/linux`), WinUI on Windows. Shared core (`src/core`) with Swift scan engine + WASM core/plugins |
 | Summary, then tabs | Overview, then Leftovers / Stale / Outdated / Packages / Settings |
 | Process tree: kill parent or one node | Package tree: remove leaf/parent plus unused deps, or one package |
 | Installed apps: sort by size, uninstall | Packages page: installed packages, size column, script-preview uninstall |

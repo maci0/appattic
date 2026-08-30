@@ -3,7 +3,7 @@
 # then run headless --smoke (QT_QPA_PLATFORM=offscreen, else minimal).
 # Homebrew Qt on macOS is not a Linux Qt link. Exit 3 on non-Linux.
 # Usage: scripts/linux-qt-link.sh [--smoke]
-#   (default)  build core/out WASM, link Qt binary, ldd gate, --smoke gate
+#   (default)  build src/core/out WASM, link Qt binary, ldd gate, --smoke gate
 #   --smoke    skip cmake rebuild; re-run ldd + binary --smoke on existing build
 # Binary flags: --smoke / --version (strict WASM load on --smoke only).
 set -euo pipefail
@@ -141,7 +141,7 @@ fi
 echo "WASMTIME_DIR: $WASMTIME_DIR"
 echo "zig: $(zig version | head -n 1)"
 
-CORE_OUT="$ROOT/core/out"
+CORE_OUT="$ROOT/src/core/out"
 export APPATTIC_CORE_OUT="$CORE_OUT"
 
 wasmtime_ldpath() {
@@ -181,8 +181,8 @@ ensure_qt_platform_plugins() {
 }
 
 ensure_wasm_core() {
-  echo "building WASM core + plugins (core/build.sh)…"
-  bash "$ROOT/core/build.sh"
+  echo "building WASM core + plugins (src/core/build.sh)…"
+  bash "$ROOT/src/core/build.sh"
 }
 
 require_wasm_artifacts() {
@@ -194,10 +194,10 @@ require_wasm_artifacts() {
     fi
   done
   if [[ "$missing" -ne 0 ]]; then
-    echo "Run: bash core/build.sh" >&2
+    echo "Run: bash src/core/build.sh" >&2
     exit 1
   fi
-  echo "wasm: core/out ready ($(find "$CORE_OUT" -maxdepth 1 -name '*.wasm' | wc -l | tr -d ' ') modules)"
+  echo "wasm: src/core/out ready ($(find "$CORE_OUT" -maxdepth 1 -name '*.wasm' | wc -l | tr -d ' ') modules)"
 }
 
 for p in /usr/lib/x86_64-linux-gnu/cmake /usr/lib/aarch64-linux-gnu/cmake /usr/lib/cmake; do
@@ -215,8 +215,8 @@ fi
 find_binary() {
   bin=""
   for c in \
-      "$ROOT/ui/linux-qt/build/appattic-qt" \
-      "$ROOT/ui/linux-qt/build/Debug/appattic-qt"; do
+      "$ROOT/src/linux/build/appattic-qt" \
+      "$ROOT/src/linux/build/Debug/appattic-qt"; do
       if [[ -f "$c" && -x "$c" ]]; then
           bin="$c"
           break
@@ -232,11 +232,11 @@ if [[ "$SMOKE_ONLY" -eq 0 ]]; then
   ensure_wasm_core
   require_wasm_artifacts
   echo "building appattic-qt (Qt 6 Widgets + Wasmtime)…"
-  WASMTIME_DIR="$WASMTIME_DIR" cmake -S "$ROOT/ui/linux-qt" -B "$ROOT/ui/linux-qt/build" \
+  WASMTIME_DIR="$WASMTIME_DIR" cmake -S "$ROOT/src/linux" -B "$ROOT/src/linux/build" \
       "${gen[@]}" \
       -DCMAKE_BUILD_TYPE=Debug \
       -DWASMTIME_ROOT="$WASMTIME_DIR"
-  cmake --build "$ROOT/ui/linux-qt/build"
+  cmake --build "$ROOT/src/linux/build"
 else
   require_wasm_artifacts
 fi
@@ -244,7 +244,7 @@ fi
 find_binary
 echo "binary: $bin"
 wasmtime_ldpath
-proof="$ROOT/ui/linux-qt/build/LINUX_QT_LINK.txt"
+proof="$ROOT/src/linux/build/LINUX_QT_LINK.txt"
 mkdir -p "$(dirname "$proof")"
 smoke_plat=""
 smoke_dump=""

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Build AppAttic: Foundation scan library, Gtk-free CLI, native UI.
 # macOS: AppAttic.app + ad-hoc codesign (SwiftCrossUI AppKit).
-# Linux: CLI always. UI is C++ Qt 6 (ui/linux-qt) if Qt6Widgets is present.
+# Linux: CLI always. UI is C++ Qt 6 (src/linux) if Qt6Widgets is present.
 # Usage: ./build.sh [release|debug]
 
 cd "$(dirname "$0")"
@@ -87,7 +87,7 @@ if [[ "$OS" == Darwin ]]; then
     echo "CLI:    ./run.sh report"
     echo "        ${CLI}"
 elif [[ "$OS" == Linux && "$HAVE_QT" -eq 1 ]]; then
-    echo "Linux UI: ui/linux-qt/build/appattic-qt"
+    echo "Linux UI: src/linux/build/appattic-qt"
     echo "CLI:      ${CLI}"
     echo "Launch UI: ./run.sh --ui"
     echo "Launch CLI: ./run.sh report"

@@ -2,7 +2,7 @@
 
 Local cleanup tool for leftover data from uninstalled apps, unused installed software, and packages that have a newer version available. Nothing is deleted until you review a script or confirm in the UI.
 
-macOS and Linux. Today: one Foundation scan library (`AppAtticScan`), a Gtk-free CLI (`appattic`), a SwiftCrossUI AppKit window on macOS (`AppAtticUI`), and a C++ Qt 6 window on Linux (`ui/linux-qt`). Direction: Zig core compiled to WASM, extra package managers and dialog copy as WASM plugins, native widgets only in the shell. Spec: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Linux UI is Qt 6, same toolkit as TMOG Linux. Qt-on-Linux is not claimed linked until `scripts/linux-qt-link.sh` runs on a real Linux host.
+macOS and Linux. Today: one Foundation scan library (`AppAtticScan` in `src/core/scan`), a Gtk-free CLI (`appattic` in `src/cli`), a SwiftCrossUI AppKit window on macOS (`AppAtticUI` in `src/macos`), and a C++ Qt 6 window on Linux (`src/linux`). Direction: Zig core compiled to WASM in `src/core`, extra package managers and dialog copy as WASM plugins, native widgets only in the shell. Spec: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Linux UI is Qt 6, same toolkit as TMOG Linux. Qt-on-Linux is not claimed linked until `scripts/linux-qt-link.sh` runs on a real Linux host.
 
 ## What it reports
 
@@ -95,21 +95,37 @@ podman build -t appattic-arch -f Dockerfile.arch .
 
 Ubuntu image installs Qt 6, runs `AppAtticScanTests`, and links the CLI plus the Qt window. `Dockerfile.arch` does the same on Arch. GitHub Actions `.github/workflows/linux.yml` runs both Ubuntu and archlinux jobs.
 
-Sidebar: Overview, Leftovers, Stale Apps, Outdated, Settings. The last scan is shown immediately if one was saved. AppAttic then checks in the background whether that scan is still current, and rescans only if apps, brew, leftover folders, or the 24-hour age limit changed. Checkmarks on leftovers, stale apps, and outdated packages survive a background refresh if those items are still present. Settings (include system apps, confirm before running) and ignored leftover paths persist across launches. Ignore a leftover from its inspector to hide it on later scans. Include-in-cleanup uses the inspector toggle and toolbar Select All.
+Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Settings. The last scan is shown immediately if one was saved. AppAttic then checks in the background whether that scan is still current, and rescans only if apps, brew, leftover folders, or the 24-hour age limit changed. Checkmarks on leftovers, stale apps, and outdated packages survive a background refresh if those items are still present. Settings (include system apps, confirm before running) and ignored leftover paths persist across launches. Ignore a leftover from its inspector to hide it on later scans. Include-in-cleanup uses the inspector toggle and toolbar Select All.
+
+## TMOG Design Principles
+
+AppAttic follows the design principles of Task Manager OG ([TMOG](https://tmog.org)), adapted for native cleanup and package management:
+
+1. **Native per OS, one product**: Native UI on every platform (AppKit on macOS via SwiftCrossUI in `src/macos`, Qt 6 Widgets on Linux in `src/linux`, WinUI on Windows). Shared core and scan engine (`src/core`), with platform-specific helpers where OS APIs differ.
+2. **Summary first**: Boots directly to an Overview summary with machine totals and largest reclaimable items without requiring navigation.
+3. **Depth is one click away**: Structured views for Leftovers, Stale Apps, Outdated packages, and Packages, keeping full depth accessible in the same window.
+4. **Show the control when data is missing**: Empty states and unavailable manager indicators stay visible with honest status rather than disappearing.
+5. **Act on a tree or on one node**: Package management operates on entire dependency trees (removing unused deps with the parent) or individual leaves.
+6. **Installed software is a table with a verb**: Software and packages are listed in dense, size-sorted tables with first-class removal and "mark manual" actions.
+7. **Orphans vs. Globals / Leaves vs. Globals**: Clean categorization distinguishing unneeded dependencies from explicit user-global tools.
+8. **Non-blocking and lightweight**: Background scans, cache-first instant loading, and minimal runtime footprint.
+9. **Native system appearance**: Follows system light and dark themes with standard platform control density (Finder / Activity Monitor / GNOME Settings density) rather than custom web-dashboard cards or phosphor gimmicks.
 
 ## Layout
 
 | Path | Role |
 |------|------|
-| `Sources/AppAtticScan/` | Discover, usage, brew, leftovers, outdated, recommend, full scan |
-| `Sources/AppAtticCLI/` | `appattic` command line |
-| `Sources/AppAttic/` | SwiftCrossUI app (AppKit on macOS) |
-| `ui/linux-qt/` | C++ Qt 6 Widgets shell (Linux) |
-| `tests/AppAtticScanTests/` | XCTest port of the old scanner cases |
+| `src/core/scan/` | Shared Foundation scan library (discover, usage, brew, leftovers, outdated, packages, recommend, settings, cache) |
+| `src/core/` | Shared Zig `wasm32` core, WASM plugins, and C host embedder |
+| `src/cli/` | Headless `appattic` command-line executable |
+| `src/macos/` | Native macOS UI application (SwiftCrossUI / AppKit) |
+| `src/linux/` | Native Linux UI application (C++ Qt 6 Widgets) |
+| `packaging/` | Platform metadata, icons, and desktop entries (`Info.plist`, `AppAttic.icns`, `.desktop`, `.svg`) |
+| `scripts/` | Platform build and dependency scripts (`linux-deps.sh`, `linux-qt-link.sh`, `linux-appimage.sh`) |
+| `tests/AppAtticScanTests/` | Comprehensive test suites for scanner, packages, models, caching, and packaging |
+| `docs/` | TMOG design language specifications, research transcripts, and architecture documentation |
+| `DESIGN.md` | Native UI design system specifications |
 | `generate_icon.py` | One-off PNG icon generator. Not used at scan or UI runtime. |
-| `DESIGN.md` | Native UI visual rules |
-| `docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md` | Zig WASM core + plugin split |
-| `core/` | Zig `wasm32` spike (core + plugins + C Wasmtime embedder) |
 
 ## Notes
 

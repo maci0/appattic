@@ -2,7 +2,7 @@
 import PackageDescription
 
 #if os(Linux)
-// Linux UI is ui/linux-qt (C++ Qt 6), not SwiftCrossUI Gtk.
+// Linux UI is src/linux (C++ Qt 6, formerly ui/linux-qt), not SwiftCrossUI Gtk.
 let uiProducts: [Product] = []
 let uiTargets: [Target] = []
 let uiDeps: [Package.Dependency] = []
@@ -18,7 +18,8 @@ let uiTargets: [Target] = [
             "AppAtticScan",
             .product(name: "SwiftCrossUI", package: "swift-cross-ui"),
             .product(name: "DefaultBackend", package: "swift-cross-ui"),
-        ]
+        ],
+        path: "src/macos"
     ),
 ]
 let uiDeps: [Package.Dependency] = [
@@ -37,8 +38,15 @@ let package = Package(
     ] + uiProducts,
     dependencies: uiDeps,
     targets: [
-        .target(name: "AppAtticScan"),
-        .executableTarget(name: "AppAtticCLI", dependencies: ["AppAtticScan"]),
+        .target(
+            name: "AppAtticScan",
+            path: "src/core/scan"
+        ),
+        .executableTarget(
+            name: "AppAtticCLI",
+            dependencies: ["AppAtticScan"],
+            path: "src/cli"
+        ),
         .testTarget(
             name: "AppAtticScanTests",
             dependencies: ["AppAtticScan"],
@@ -46,3 +54,4 @@ let package = Package(
         ),
     ] + uiTargets
 )
+
