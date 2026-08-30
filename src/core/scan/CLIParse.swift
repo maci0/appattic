@@ -51,7 +51,7 @@ usage: appattic [--version] [--help] [command] [options]
 Find leftover data from uninstalled apps, unused installed software, and outdated packages.
 
 commands:
-  report      full report: leftovers + stale + outdated (default)
+  report      full report: leftovers + stale + outdated + packages (default)
   leftovers   only orphaned data from uninstalled apps
   stale       unused installed software (review and remove)
   outdated    installed packages with a newer version available

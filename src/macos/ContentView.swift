@@ -308,6 +308,7 @@ struct ContentView: View {
         let leftoverRows = vm.overviewLeftovers
         let staleRows = vm.overviewStale
         let outdatedRows = vm.overviewOutdated
+        let packageRows = vm.allPackages
         return VStack(alignment: .leading, spacing: 0) {
             if let totals = vm.scanData?.totals {
                 HStack(alignment: .top, spacing: 28) {
@@ -320,15 +321,16 @@ struct ContentView: View {
                         Color.appYellow
                     )
                     overviewStat("Outdated", "\(totals.outdated_apps ?? 0)", Color.appYellow)
+                    overviewStat("Packages", "\(packageRows.count)", Color.appText)
                     overviewStat("Last scan", lastScanLabel, Color.appDim)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            if leftoverRows.isEmpty && staleRows.isEmpty && outdatedRows.isEmpty {
+            if leftoverRows.isEmpty && staleRows.isEmpty && outdatedRows.isEmpty && packageRows.isEmpty {
                 if vm.scanData != nil {
-                    emptyState("Nothing to review", "No leftover data, stale apps, or outdated packages in this scan.")
+                    emptyState("Nothing to review", "No leftover data, stale apps, outdated packages, or package orphans in this scan.")
                 }
             } else {
                 HRule()
@@ -348,7 +350,7 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        if !leftoverRows.isEmpty && (!staleRows.isEmpty || !outdatedRows.isEmpty) {
+                        if !leftoverRows.isEmpty && (!staleRows.isEmpty || !outdatedRows.isEmpty || !packageRows.isEmpty) {
                             VRule()
                         }
                         if !staleRows.isEmpty {
@@ -361,7 +363,7 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        if !staleRows.isEmpty && !outdatedRows.isEmpty {
+                        if !staleRows.isEmpty && (!outdatedRows.isEmpty || !packageRows.isEmpty) {
                             VRule()
                         }
                         if !outdatedRows.isEmpty {
@@ -376,6 +378,23 @@ struct ContentView: View {
                                     ) {
                                         outdatedSel = item.id
                                         selected = .outdated
+                                    }
+                                }
+                            }
+                        }
+                        if !outdatedRows.isEmpty && !packageRows.isEmpty {
+                            VRule()
+                        }
+                        if !packageRows.isEmpty {
+                            overviewColumn(title: "Unused packages") {
+                                ForEach(Array(packageRows.prefix(12)), id: \.id) { item in
+                                    overviewTappableRow(
+                                        item.name,
+                                        item.manager,
+                                        packageSizeLabel(item)
+                                    ) {
+                                        packageSel = item.id
+                                        selected = .packages
                                     }
                                 }
                             }
