@@ -1,0 +1,37 @@
+# Maintainer: Marcel W. Wysocki <maci.stgn@gmail.com>
+pkgname=appattic
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Native cleanup utility for leftovers, unused apps, and outdated packages"
+arch=('x86_64' 'aarch64')
+url="https://github.com/maci0/appattic"
+license=('MIT')
+depends=('wasmtime')
+makedepends=('zig' 'git')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/maci0/appattic/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "${pkgname}-${pkgver}"
+    bash src/core/build.sh
+    mkdir -p src/linux/build
+    zig build-exe \
+        -OReleaseFast \
+        -I src/core/host \
+        -lwasmtime \
+        -lc \
+        src/linux/main.zig \
+        src/core/host/embed.c \
+        src/core/host/hostexec.c \
+        -femit-bin=src/linux/build/appattic
+}
+
+package() {
+    cd "${pkgname}-${pkgver}"
+    install -Dm755 src/linux/build/appattic "${pkgdir}/usr/bin/appattic"
+    install -Dm644 packaging/appattic.desktop "${pkgdir}/usr/share/applications/appattic.desktop"
+    install -Dm644 packaging/appattic.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/appattic.svg"
+
+    install -d "${pkgdir}/usr/share/appattic"
+    install -Dm644 src/core/out/*.wasm "${pkgdir}/usr/share/appattic/"
+}
