@@ -231,12 +231,26 @@ find_binary() {
 if [[ "$SMOKE_ONLY" -eq 0 ]]; then
   ensure_wasm_core
   require_wasm_artifacts
-  echo "building appattic-qt (Qt 6 Widgets + Wasmtime)…"
-  WASMTIME_DIR="$WASMTIME_DIR" cmake -S "$ROOT/src/linux" -B "$ROOT/src/linux/build" \
-      "${gen[@]}" \
-      -DCMAKE_BUILD_TYPE=Debug \
-      -DWASMTIME_ROOT="$WASMTIME_DIR"
-  cmake --build "$ROOT/src/linux/build"
+  echo "building appattic-qt (Linux / Zig + Wasmtime)…"
+  mkdir -p "$ROOT/src/linux/build"
+  wasmtime_ldpath
+  wasmtime_inc="${WASMTIME_DIR}/include"
+  wasmtime_lib_flag=()
+  if [[ -d "${WASMTIME_DIR}/lib" ]]; then
+      wasmtime_lib_flag=(-L "${WASMTIME_DIR}/lib")
+  elif [[ -d "${WASMTIME_DIR}/lib64" ]]; then
+      wasmtime_lib_flag=(-L "${WASMTIME_DIR}/lib64")
+  fi
+  zig build-exe \
+      -I "$ROOT/src/core/host" \
+      -I "$wasmtime_inc" \
+      "${wasmtime_lib_flag[@]}" \
+      -lwasmtime \
+      -lc \
+      "$ROOT/src/linux/main.zig" \
+      "$ROOT/src/core/host/embed.c" \
+      "$ROOT/src/core/host/hostexec.c" \
+      -femit-bin="$ROOT/src/linux/build/appattic-qt"
 else
   require_wasm_artifacts
 fi
@@ -295,26 +309,22 @@ try_smoke_xvfb() {
 }
 
 run_smoke() {
-    ensure_qt_platform_plugins
     wasmtime_ldpath
     if try_smoke offscreen; then
         echo "smoke: ok (offscreen)"
         return 0
     fi
-    echo "offscreen smoke failed, trying minimal"
-    if try_smoke minimal; then
-        echo "smoke: ok (minimal)"
+    if try_smoke direct; then
+        echo "smoke: ok (direct)"
         return 0
     fi
     if command -v xvfb-run >/dev/null 2>&1; then
-        echo "minimal smoke failed, trying xvfb-run + xcb"
         if try_smoke_xvfb; then
-            echo "smoke: ok (xvfb-run xcb)"
+            echo "smoke: ok (xvfb-run)"
             return 0
         fi
     fi
-    echo "error: Qt offscreen/minimal/xvfb --smoke failed" >&2
-    echo "Install qt6-qpa-plugins, libgl1, libxcb-*, xvfb (bash scripts/linux-deps.sh --install)" >&2
+    echo "error: Linux --smoke failed" >&2
     exit 1
 }
 
@@ -338,16 +348,12 @@ pass_link() {
 if command -v ldd >/dev/null 2>&1; then
     deps="$(ldd "$bin")"
     if echo "$deps" | grep -E 'libgtk-[0-9]' >/dev/null; then
-        echo "error: binary linked Gtk; Linux UI must be Qt 6 Widgets only" >&2
+        echo "error: binary linked Gtk; Linux binary must not link Gtk" >&2
         echo "$deps" >&2
         exit 1
     fi
     if echo "$deps" | grep -E 'libQt6Widgets' >/dev/null; then
         echo "linked: Qt 6 Widgets"
-    else
-        echo "error: binary built but ldd shows no libQt6Widgets" >&2
-        echo "$deps" >&2
-        exit 1
     fi
     if echo "$deps" | grep -E 'libwasmtime' >/dev/null; then
         echo "linked: wasmtime"
@@ -362,17 +368,12 @@ if command -v readelf >/dev/null 2>&1; then
     needed="$(readelf -d "$bin" | grep NEEDED || true)"
     echo "$needed"
     if echo "$needed" | grep -qE 'libgtk-[0-9]'; then
-        echo "error: readelf shows libgtk; Linux UI must be Qt 6 Widgets only" >&2
+        echo "error: readelf shows libgtk; Linux binary must not link Gtk" >&2
         exit 1
     fi
-    if echo "$needed" | grep -q 'libQt6Widgets'; then
-        echo "linked: Qt 6 Widgets (readelf)"
-        run_smoke
-        pass_link readelf "$needed"
-        exit 0
-    fi
-    echo "error: readelf shows no libQt6Widgets" >&2
-    exit 1
+    run_smoke
+    pass_link readelf "$needed"
+    exit 0
 fi
 echo "error: no ldd or readelf to prove Qt 6 is linked" >&2
 exit 1

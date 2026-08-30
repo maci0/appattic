@@ -2,7 +2,7 @@
 
 Local cleanup tool for leftover data from uninstalled apps, unused installed software, and packages that have a newer version available. Nothing is deleted until you review a script or confirm in the UI.
 
-macOS and Linux. Today: one Foundation scan library (`AppAtticScan` in `src/core/scan`), a Gtk-free CLI (`appattic` in `src/cli`), a SwiftCrossUI AppKit window on macOS (`AppAtticUI` in `src/macos`), and a C++ Qt 6 window on Linux (`src/linux`). Direction: Zig core compiled to WASM in `src/core`, extra package managers and dialog copy as WASM plugins, native widgets only in the shell. Spec: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Linux UI is Qt 6, same toolkit as TMOG Linux. Qt-on-Linux is not claimed linked until `scripts/linux-qt-link.sh` runs on a real Linux host.
+macOS and Linux. Today: one Foundation scan library (`AppAtticScan` in `src/core/scan`), a Gtk-free CLI (`appattic` in `src/cli`), a SwiftCrossUI AppKit window on macOS (`AppAtticUI` in `src/macos`), and a native Zig application on Linux (`src/linux`). Direction: Zig core compiled to WASM in `src/core`, extra package managers and dialog copy as WASM plugins, native widgets in the shell. Spec: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Built with pure Zig on Linux.
 
 ## What it reports
 
@@ -101,7 +101,7 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Settings. The last
 
 AppAttic follows the design principles of Task Manager OG ([TMOG](https://tmog.org)), adapted for native cleanup and package management:
 
-1. **Native per OS, one product**: Native UI on every platform (AppKit on macOS via SwiftCrossUI in `src/macos`, Qt 6 Widgets on Linux in `src/linux`, WinUI on Windows). Shared core and scan engine (`src/core`), with platform-specific helpers where OS APIs differ.
+1. **Native per OS, one product**: Native UI on every platform (AppKit on macOS via SwiftCrossUI in `src/macos`, native Zig application on Linux in `src/linux`, WinUI on Windows). Shared core and scan engine (`src/core`), with platform-specific helpers where OS APIs differ.
 2. **Summary first**: Boots directly to an Overview summary with machine totals and largest reclaimable items without requiring navigation.
 3. **Depth is one click away**: Structured views for Leftovers, Stale Apps, Outdated packages, and Packages, keeping full depth accessible in the same window.
 4. **Show the control when data is missing**: Empty states and unavailable manager indicators stay visible with honest status rather than disappearing.
@@ -119,7 +119,7 @@ AppAttic follows the design principles of Task Manager OG ([TMOG](https://tmog.o
 | `src/core/` | Shared Zig `wasm32` core, WASM plugins, and C host embedder |
 | `src/cli/` | Headless `appattic` command-line executable |
 | `src/macos/` | Native macOS UI application (SwiftCrossUI / AppKit) |
-| `src/linux/` | Native Linux UI application (C++ Qt 6 Widgets) |
+| `src/linux/` | Native Linux application (Zig) |
 | `packaging/` | Platform metadata, icons, and desktop entries (`Info.plist`, `AppAttic.icns`, `.desktop`, `.svg`) |
 | `scripts/` | Platform build and dependency scripts (`linux-deps.sh`, `linux-qt-link.sh`, `linux-appimage.sh`) |
 | `tests/AppAtticScanTests/` | Comprehensive test suites for scanner, packages, models, caching, and packaging |

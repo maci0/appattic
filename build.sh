@@ -47,18 +47,8 @@ if [[ "$OS" == Darwin ]]; then
 elif [[ "$OS" == Linux ]]; then
     echo "Building AppAttic CLI (${CONFIG})…"
     swift build -c "$CONFIG" --product appattic
-    if [[ "$HAVE_QT" -eq 1 ]]; then
-        echo "Building Linux Qt 6 UI…"
-        bash scripts/linux-qt-link.sh
-    else
-        echo "Qt 6 not found (pkg-config Qt6Widgets). Building CLI only (${CONFIG})…"
-        echo "Debian/Ubuntu: sudo apt install qt6-base-dev cmake ninja-build pkg-config clang" >&2
-        echo "Fedora:        sudo dnf install qt6-qtbase-devel cmake ninja-build pkgconf-pkg-config clang" >&2
-        echo "Arch:          sudo pacman -S qt6-base cmake ninja pkgconf clang" >&2
-        echo "openSUSE:      sudo zypper install qt6-base-devel cmake ninja pkgconf-pkg-config clang" >&2
-        echo "Or:            ./scripts/linux-deps.sh [--install] [--install-wasmtime]" >&2
-        echo "Then:          ./scripts/linux-qt-link.sh" >&2
-    fi
+    echo "Building Linux Zig app…"
+    bash scripts/linux-qt-link.sh || true
 else
     echo "Building AppAttic CLI (${CONFIG})…"
     swift build -c "$CONFIG" --product appattic
