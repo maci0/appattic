@@ -49,7 +49,7 @@ components:
 
 AppAttic is a native utility (Finder / Activity Monitor / GNOME Settings density), not a web dashboard. Same design principles as [TMOG](https://tmog.org), documented from Dave Plummer's Dave's Attic walkthrough in [`docs/tmog-design-language.md`](docs/tmog-design-language.md) ([Shop Talk #91](https://www.youtube.com/watch?v=c3EEs-O3bGE)). Native chrome on each OS, one shared core, system-specific helpers, summary first then deeper lists, tree actions on a parent or one child, installed software sortable by size with uninstall as a first-class verb. Missing platform data stays on screen (empty or "unknown"), it is not hidden. Phosphor / VFD / saturation-11 is Dave's personal chrome, not AppAttic.
 
-Software stack follows that native-per-OS split. macOS: SwiftCrossUI `DefaultBackend` (AppKit). Windows: WinUI via SwiftCrossUI if present. Linux: C++ Qt 6 Widgets in `ui/linux-qt`, same toolkit as TMOG Linux. Zig WASM core is the loader only. Every package manager and every leftover scan path is a WASM plugin. Native code keeps windows, lists, inspector, buttons, and system alerts. Current tree still ships `AppAtticScan` in Swift until that port lands. Direction: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Build on the distro you run (Arch, Fedora, Debian/Ubuntu, openSUSE). An Ubuntu-built binary is not assumed to start on Arch. Pacman vs apt is the same job through different plugins.
+Software stack follows that native-per-OS split. macOS: SwiftCrossUI `DefaultBackend` (AppKit) in `src/macos`. Windows: WinUI via SwiftCrossUI if present. Linux: C++ Qt 6 Widgets in `src/linux` (formerly `ui/linux-qt`), same toolkit as TMOG Linux. Shared core: `src/core` with `src/core/scan` Foundation engine and Zig WASM core loader + plugins in `src/core/src` & `src/core/plugins`. Native code keeps windows, lists, inspector, buttons, and system alerts. Current tree still ships `AppAtticScan` in Swift until that port lands. Direction: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Build on the distro you run (Arch, Fedora, Debian/Ubuntu, openSUSE). An Ubuntu-built binary is not assumed to start on Arch. Pacman vs apt is the same job through different plugins.
 
 Brand is the product language (leftovers, stale, outdated), not a split wordmark or GitHub-canvas chrome.
 
@@ -122,7 +122,7 @@ Delete and Update: system alert. Script preview: sheet with copyable `sh`. Never
 
 - Don't revive the GitHub-dark web dashboard (metric cards, underline tabs, sticky 44px marketing header).
 - Don't import AppKit-only types in SwiftCrossUI sources (no `NSImage`, no SF Symbols, no materials).
-- Don't use Gtk, Electron, or a web view for the Linux UI. TMOG Linux is Qt 6. AppAttic Linux is `ui/linux-qt`.
+- Don't use Gtk, Electron, or a web view for the Linux UI. TMOG Linux is Qt 6. AppAttic Linux is `src/linux`.
 - Don't `rm` Flatpak or Snap wrapper binaries (`/usr/bin/flatpak`, `/usr/bin/snap`). Uninstall through `flatpak uninstall` / `snap remove`.
 - Don't put KEEP or system items in generated cleanup scripts.
 - Don't treat outdated (newer version) as unused (stale) or as a package leaf. They are separate lists.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a portable AppImage for the Qt 6 Linux UI (appattic-qt).
-# Bundles Qt via linuxdeploy-plugin-qt, libwasmtime.so ($ORIGIN), and core/out WASM.
+# Bundles Qt via linuxdeploy-plugin-qt, libwasmtime.so ($ORIGIN), and src/core/out WASM.
 # Usage: bash scripts/linux-appimage.sh
 #   ARCH=aarch64 bash scripts/linux-appimage.sh   # override host arch for tool names
 # Requires Linux, Qt 6 dev, zig, wasmtime (scripts/linux-deps.sh). Exit 3 on Darwin.
@@ -34,8 +34,8 @@ DIST="$ROOT/dist"
 APPDIR="$DIST/AppDir"
 TOOLS="$DIST/.appimage-tools"
 OUT="$DIST/AppAttic-${APPIMAGE_ARCH}.AppImage"
-BUILD_DIR="$ROOT/ui/linux-qt/build-release"
-CORE_OUT="$ROOT/core/out"
+BUILD_DIR="$ROOT/src/linux/build-release"
+CORE_OUT="$ROOT/src/core/out"
 
 fail_dep() {
     echo "error: $1" >&2
@@ -97,8 +97,8 @@ echo "WASMTIME_DIR: $WASMTIME_DIR"
 echo "zig: $(zig version | head -n 1)"
 
 export APPATTIC_HOST_EXEC_FIXTURE=1
-echo "building WASM core + plugins (core/build.sh)…"
-bash "$ROOT/core/build.sh"
+echo "building WASM core + plugins (src/core/build.sh)…"
+bash "$ROOT/src/core/build.sh"
 
 wasm_count=0
 for f in "$CORE_OUT"/*.wasm; do
@@ -126,7 +126,7 @@ if command -v ninja >/dev/null 2>&1; then
 fi
 
 echo "building appattic-qt (Release)…"
-cmake -S "$ROOT/ui/linux-qt" -B "$BUILD_DIR" \
+cmake -S "$ROOT/src/linux" -B "$BUILD_DIR" \
     "${gen[@]}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DWASMTIME_ROOT="$WASMTIME_DIR"

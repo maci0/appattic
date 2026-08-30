@@ -3,4 +3,17 @@
 AppAttic.app
 .git
 .tmp-shots
+.impeccable
+.playwright-mcp
 build-cache
+.zig-cache
+.zig-cache-local
+src/core/out
+src/linux/build
+src/linux/build-release
+core/out
+ui/linux-qt/build
+dist
+__pycache__
+*.pyc
+ui-*.png

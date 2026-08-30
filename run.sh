@@ -38,7 +38,7 @@ find_bin() {
 if [[ "${1:-}" == "--ui" ]]; then
     shift
     if [[ "$APPATTIC_OS" == Linux ]]; then
-        for qt in "$ROOT/ui/linux-qt/build/appattic-qt" "$ROOT/ui/linux-qt/build/Debug/appattic-qt"; do
+        for qt in "$ROOT/src/linux/build/appattic-qt" "$ROOT/src/linux/build/Debug/appattic-qt" "$ROOT/ui/linux-qt/build/appattic-qt" "$ROOT/ui/linux-qt/build/Debug/appattic-qt"; do
             if [[ -x "$qt" ]]; then
                 exec "$qt" "$@"
             fi

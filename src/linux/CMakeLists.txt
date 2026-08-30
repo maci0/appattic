@@ -58,15 +58,15 @@ set_target_properties(wasmtime PROPERTIES
 
 add_executable(appattic-qt
     main.cpp
-    "${APPATTIC_ROOT}/core/host/embed.c"
-    "${APPATTIC_ROOT}/core/host/hostexec.c"
+    "${APPATTIC_ROOT}/src/core/host/embed.c"
+    "${APPATTIC_ROOT}/src/core/host/hostexec.c"
 )
 target_include_directories(appattic-qt PRIVATE
-    "${APPATTIC_ROOT}/core/host"
+    "${APPATTIC_ROOT}/src/core/host"
     "${WASMTIME_INCLUDE_DIR}"
 )
 target_compile_definitions(appattic-qt PRIVATE
-    APPATTIC_CORE_OUT="${APPATTIC_ROOT}/core/out"
+    APPATTIC_CORE_OUT="${APPATTIC_ROOT}/src/core/out"
 )
 target_link_libraries(appattic-qt PRIVATE Qt6::Widgets wasmtime)
 if(UNIX AND NOT APPLE)

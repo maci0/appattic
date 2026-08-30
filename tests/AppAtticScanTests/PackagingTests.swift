@@ -40,10 +40,10 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(pkg.contains("swift-cross-ui"), pkg)
         XCTAssertTrue(pkg.contains("DefaultBackend"), pkg)
         XCTAssertTrue(pkg.contains("os(Linux)"), pkg)
-        XCTAssertTrue(pkg.contains("ui/linux-qt"), pkg)
+        XCTAssertTrue(pkg.contains("src/linux") || pkg.contains("ui/linux-qt"), pkg)
         let design = try String(contentsOf: root.appendingPathComponent("DESIGN.md"), encoding: .utf8)
         XCTAssertTrue(design.contains("Qt 6"), design)
-        XCTAssertTrue(design.contains("ui/linux-qt"), design)
+        XCTAssertTrue(design.contains("src/linux") || design.contains("ui/linux-qt"), design)
         XCTAssertTrue(design.contains("tmog"), design.lowercased())
         XCTAssertFalse(design.contains("Linux UI stays Gtk"), design)
         let workflow = root.appendingPathComponent(".github/workflows/linux.yml")
@@ -113,7 +113,7 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(linkText.contains("LINUX_QT_LINK=ok"), linkText)
         XCTAssertTrue(linkText.contains("libgtk-"), linkText)
         XCTAssertFalse(linkText.contains("pkg-config --exists gtk4"), linkText)
-        let qtMain = try String(contentsOf: root.appendingPathComponent("ui/linux-qt/main.cpp"), encoding: .utf8)
+        let qtMain = try String(contentsOf: root.appendingPathComponent("src/linux/main.cpp"), encoding: .utf8)
         XCTAssertTrue(qtMain.contains("QMainWindow"), qtMain)
         XCTAssertTrue(qtMain.contains("appattic_wasm_run"), qtMain)
         XCTAssertTrue(qtMain.contains("QTreeWidget"), qtMain)
@@ -131,7 +131,7 @@ final class PackagingTests: XCTestCase {
         XCTAssertFalse(qtMain.contains("gtk.h"), qtMain)
         XCTAssertFalse(qtMain.contains("Gtk"), qtMain)
         XCTAssertFalse(qtMain.lowercased().contains("phosphor"), qtMain)
-        let ui = try String(contentsOf: root.appendingPathComponent("Sources/AppAttic/ContentView.swift"), encoding: .utf8)
+        let ui = try String(contentsOf: root.appendingPathComponent("src/macos/ContentView.swift"), encoding: .utf8)
         XCTAssertTrue(ui.contains("case packages = \"Packages\""), ui)
         XCTAssertFalse(qtMain.contains("0x1e, 0x1e, 0x1e"), qtMain)
         XCTAssertTrue(qtMain.contains("pluginWasmFiles"), qtMain)
@@ -158,17 +158,17 @@ final class PackagingTests: XCTestCase {
             "path-var-app": "path_var_app.wasm",
             "path-shadow": "path_shadow.wasm",
         ]
-        let build = try String(contentsOf: root.appendingPathComponent("core/build.sh"), encoding: .utf8)
-        let qtMain = try String(contentsOf: root.appendingPathComponent("ui/linux-qt/main.cpp"), encoding: .utf8)
+        let build = try String(contentsOf: root.appendingPathComponent("src/core/build.sh"), encoding: .utf8)
+        let qtMain = try String(contentsOf: root.appendingPathComponent("src/linux/main.cpp"), encoding: .utf8)
         for (id, wasm) in needed {
-            let manifestURL = root.appendingPathComponent("core/plugins/\(id)/manifest.json")
+            let manifestURL = root.appendingPathComponent("src/core/plugins/\(id)/manifest.json")
             let manifest = try String(contentsOf: manifestURL, encoding: .utf8)
             XCTAssertTrue(manifest.contains("\"url\": \"\(wasm)\""), manifest)
             XCTAssertTrue(build.contains(wasm), "build.sh missing \(wasm)")
             XCTAssertTrue(qtMain.contains(wasm), "main.cpp missing \(wasm)")
         }
         let overlay = try String(
-            contentsOf: root.appendingPathComponent("core/plugins/path-overlay-shadow/manifest.json"),
+            contentsOf: root.appendingPathComponent("src/core/plugins/path-overlay-shadow/manifest.json"),
             encoding: .utf8
         )
         XCTAssertTrue(overlay.contains("\"url\": null"), overlay)
@@ -177,7 +177,7 @@ final class PackagingTests: XCTestCase {
         XCTAssertFalse(qtMain.contains("appstore.wasm"), qtMain)
         XCTAssertFalse(qtMain.contains("steam.wasm"), qtMain)
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: root.appendingPathComponent("core/plugins/chocolatey/manifest.json").path
+            atPath: root.appendingPathComponent("src/core/plugins/chocolatey/manifest.json").path
         ))
     }
 
@@ -195,10 +195,10 @@ final class PackagingTests: XCTestCase {
         let exportFixture = try XCTUnwrap(linkText.range(of: "export APPATTIC_HOST_EXEC_FIXTURE=1"))
         XCTAssertLessThan(exit3.lowerBound, exportFixture.lowerBound)
 
-        let coreBuild = try String(contentsOf: root.appendingPathComponent("core/build.sh"), encoding: .utf8)
+        let coreBuild = try String(contentsOf: root.appendingPathComponent("src/core/build.sh"), encoding: .utf8)
         XCTAssertTrue(coreBuild.contains("Linux) export APPATTIC_HOST_EXEC_FIXTURE=1"), coreBuild)
 
-        let qtMain = try String(contentsOf: root.appendingPathComponent("ui/linux-qt/main.cpp"), encoding: .utf8)
+        let qtMain = try String(contentsOf: root.appendingPathComponent("src/linux/main.cpp"), encoding: .utf8)
         XCTAssertTrue(qtMain.contains("static int runSmoke"), qtMain)
         let runSmokeBody = qtMain.components(separatedBy: "static int runSmoke").dropFirst().first ?? ""
         XCTAssertTrue(

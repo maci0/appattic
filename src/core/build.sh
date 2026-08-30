@@ -4,8 +4,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 out="$root/out"
 mkdir -p "$out"
 
-export ZIG_GLOBAL_CACHE_DIR="${ZIG_GLOBAL_CACHE_DIR:-$root/../.zig-cache}"
-export ZIG_LOCAL_CACHE_DIR="${ZIG_LOCAL_CACHE_DIR:-$root/../.zig-cache-local}"
+export ZIG_GLOBAL_CACHE_DIR="${ZIG_GLOBAL_CACHE_DIR:-$root/../../.zig-cache}"
+export ZIG_LOCAL_CACHE_DIR="${ZIG_LOCAL_CACHE_DIR:-$root/../../.zig-cache-local}"
 mkdir -p "$ZIG_GLOBAL_CACHE_DIR" "$ZIG_LOCAL_CACHE_DIR"
 
 if ! command -v zig >/dev/null 2>&1; then
@@ -13,8 +13,8 @@ if ! command -v zig >/dev/null 2>&1; then
         export PATH="/opt/zig:$PATH"
     elif [ -x /usr/local/bin/zig ]; then
         export PATH="/usr/local/bin:$PATH"
-    elif [ -x "$root/../.deps/zig/zig" ]; then
-        export PATH="$root/../.deps/zig:$PATH"
+    elif [ -x "$root/../../.deps/zig/zig" ]; then
+        export PATH="$root/../../.deps/zig:$PATH"
     fi
 fi
 if ! command -v zig >/dev/null 2>&1; then
@@ -137,8 +137,8 @@ elif [ -n "${WASMTIME_DIR:-}" ] && wasmtime_from_prefix "$WASMTIME_DIR"; then
     :
 elif [ -f /opt/wasmtime-c-api/include/wasmtime.h ]; then
     wasmtime_from_prefix /opt/wasmtime-c-api
-elif [ -f "$root/../.deps/wasmtime-c-api/include/wasmtime.h" ]; then
-    wasmtime_from_prefix "$root/../.deps/wasmtime-c-api"
+elif [ -f "$root/../../.deps/wasmtime-c-api/include/wasmtime.h" ]; then
+    wasmtime_from_prefix "$root/../../.deps/wasmtime-c-api"
 elif command -v pkg-config >/dev/null 2>&1 && pkg-config --exists wasmtime; then
     wasmtime_cflags="$(pkg-config --cflags wasmtime)"
     wasmtime_libs="$(pkg-config --libs wasmtime)"

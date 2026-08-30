@@ -2,7 +2,7 @@
 
 Date: 2026-08-26
 
-Replace in-process Swift scan logic with a Zig core compiled to WebAssembly. **Every package manager and every leftover scan path is a WASM plugin.** Native SwiftCrossUI stays on macOS (AppKit). Linux UI is C++ Qt 6 Widgets (`ui/linux-qt`), matching TMOG Linux. Do not silent-delete. Distro upgrades stay report-only. Qt-on-Linux is not claimed proven until `scripts/linux-qt-link.sh` succeeds on a real Linux host.
+Replace in-process Swift scan logic with a Zig core compiled to WebAssembly. **Every package manager and every leftover scan path is a WASM plugin.** Native SwiftCrossUI stays on macOS (AppKit) in `src/macos`. Linux UI is C++ Qt 6 Widgets (`src/linux`), matching TMOG Linux. Do not silent-delete. Distro upgrades stay report-only. Qt-on-Linux is not claimed proven until `scripts/linux-qt-link.sh` succeeds on a real Linux host.
 
 Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability*, https://github.com/cordiverse/paper (PDF, 88 pages). Text taken with `pdftotext` from `paper.pdf` on 2026-08-26. Cordis is TypeScript. AppAttic follows the same composability rules in Zig + WASM.
 
