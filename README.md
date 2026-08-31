@@ -122,7 +122,7 @@ AppAttic follows the design principles of Task Manager OG ([TMOG](https://tmog.o
 | `src/linux/` | Native Linux application (Zig) |
 | `packaging/` | Platform metadata, PKGBUILD, icons, and desktop entries (`PKGBUILD`, `Info.plist`, `AppAttic.icns`, `.desktop`, `.svg`) |
 | `scripts/` | Platform build and dependency scripts (`linux-deps.sh`, `linux-qt-link.sh`, `linux-appimage.sh`) |
-| `tests/AppAtticScanTests/` | Comprehensive test suites for scanner, packages, models, caching, and packaging |
+| `tests/AppAtticScanTests/` | Test suites for scanner, packages, models, caching, and packaging |
 | `docs/` | TMOG design language specifications, research transcripts, and architecture documentation |
 | `DESIGN.md` | Native UI design system specifications |
 | `generate_icon.py` | One-off PNG icon generator. Not used at scan or UI runtime. |
