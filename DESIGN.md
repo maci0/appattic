@@ -4,6 +4,8 @@ description: Native cleanup utility for leftovers, unused apps, and outdated pac
 colors:
   bg: "#ffffff"
   chrome: "#e6e6e6"
+  darkBg: "#1e1e1e"
+  darkChrome: "#2e2e2e"
   text: "#1f1f1f"
   dim: "#525252"
   blue: "#0a84ff"
@@ -49,7 +51,7 @@ components:
 
 AppAttic is a native utility (Finder / Activity Monitor / GNOME Settings density), not a web dashboard. Same design principles as [TMOG](https://tmog.org), documented from Dave Plummer's Dave's Attic walkthrough in [`docs/tmog-design-language.md`](docs/tmog-design-language.md) ([Shop Talk #91](https://www.youtube.com/watch?v=c3EEs-O3bGE)). Native chrome on each OS, one shared core, system-specific helpers, summary first then deeper lists, tree actions on a parent or one child, installed software sortable by size with uninstall as a first-class verb. Missing platform data stays on screen (empty or "unknown"), it is not hidden. Phosphor / VFD / saturation-11 is Dave's personal chrome, not AppAttic.
 
-Software stack follows that native-per-OS split. macOS: SwiftCrossUI `DefaultBackend` (AppKit). Windows: WinUI via SwiftCrossUI if present. Linux: C++ Qt 6 Widgets in `ui/linux-qt`, same toolkit as TMOG Linux. Zig WASM core is the loader only. Every package manager and every leftover scan path is a WASM plugin. Native code keeps windows, lists, inspector, buttons, and system alerts. Current tree still ships `AppAtticScan` in Swift until that port lands. Direction: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Build on the distro you run (Arch, Fedora, Debian/Ubuntu, openSUSE). An Ubuntu-built binary is not assumed to start on Arch. Pacman vs apt is the same job through different plugins.
+Software stack follows that native-per-OS split. macOS: SwiftCrossUI `DefaultBackend` (AppKit). Windows: WinUI via SwiftCrossUI if present (not shipped). Linux: C++ Qt 6 Widgets in `ui/linux-qt`, same toolkit as TMOG Linux. Zig WASM core is the loader only. Every package manager and every leftover scan path is a WASM plugin. Native code keeps windows, lists, inspector, buttons, and system alerts. Current tree still ships `AppAtticScan` in Swift until that port lands. Direction: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Build on the distro you run (Arch, Fedora, Debian/Ubuntu, openSUSE). An Ubuntu-built binary is not assumed to start on Arch. Pacman vs apt is the same job through different plugins.
 
 Brand is the product language (leftovers, stale, outdated), not a split wordmark or GitHub-canvas chrome.
 
@@ -58,6 +60,8 @@ Brand is the product language (leftovers, stale, outdated), not a split wordmark
 List and inspector fill is white in light mode, `#1e1e1e` in dark mode. Sidebar has no solid fill: AppKit uses the split-view sidebar material, Qt uses a source-list `QListWidget`. Status bar uses window chrome gray. Secondary text is darker gray in light mode (`Color(white: 0.32)`) so 11pt counts stay readable on white and on the sidebar material.
 
 Interactive accent is system blue. Status: system red (orphaned / REMOVE), amber (REVIEW / outdated version; darker than system yellow in light mode), green (KEEP). Never use color alone. Rows keep a text status.
+
+The product mark (`packaging/appattic.svg`, `generate_icon.py`) uses that same dark fill `#1e1e1e`, dark chrome `#2e2e2e`, accent `#0a84ff`, KEEP `#30d158`, and REMOVE `#ff453a`. GitHub canvas (`#0d1117`, `#58a6ff`, `#21262d`) is not the mark.
 
 ## Typography
 
@@ -73,7 +77,7 @@ Lists are compact table-style rows with a header and secondary columns, sorted b
 
 Packages follows TMOG installed-apps plus process tree: one dense list of installed packages, default sort by size, manager and kind columns. Kind is Orphan (distro auto, nothing still needs it) or Global (npm/pnpm/bun -g, pipx, uv tool). Filter chips or a segmented control: All, Leaves, Globals. Expand a row to see dependency children when the manager gives a tree. Remove the parent the way TMOG kills a process tree (unused deps go with it). Remove one child only when that node is selected alone. Mark as manually installed is a keep verb for apt/pacman/dnf/zypper only. Same confirm + `sh` preview as leftover cleanup. Outdated stays version skew. Packages is keep-or-drop.
 
-Overview: compact totals (label column + value), then one scrolling pair of equal lists (largest leftovers, largest stale). Tapping a row opens that list with the item selected.
+Overview: compact totals (label column + value), then one scrolling row of equal lists (largest leftovers, largest stale, outdated packages). Tapping a row opens that list with the item selected. While a scan is running and no results exist yet, totals read as in progress and lists say Scanning, not an empty clean machine.
 
 Selected list row uses system blue with on-accent (white) text, including secondary columns. Gray secondary text is not used on the selected row.
 
@@ -99,7 +103,7 @@ Platform controls. No custom pills or metric cards.
 
 Tappable source-list rows (`ScrollView` + `onTapGesture`). Changing selection switches the detail pane. Do not use AppKit `List` for this sidebar.
 
-Toolbar: tools only. Rescan always. Search on Leftovers, Stale Apps, Outdated, and Packages. Select All on leftover, stale, outdated, and packages lists (updatable Homebrew/Flatpak only on Outdated). Count of visible rows sits on the leading edge in 11pt secondary text. Scan age (cached or live) sits next to the count when a scan is not running. Destructive delete, package remove, mark-manual, and package update only after confirm when Settings says so.
+Toolbar: tools only. Rescan always. Search on Leftovers, Stale Apps, Outdated, and Packages. Select All on leftover, stale, outdated, and packages lists (updatable Homebrew/Flatpak only on Outdated). Count of visible rows sits on the leading edge in 11pt secondary text. Scan age (cached or live) sits next to the count when a scan is not running. A running scan replaces that age with Scanning. Empty search results say what missed and offer Clear search. Destructive delete, package remove, mark-manual, and package update only after confirm when Settings says so. Action buttons stay disabled while a scan or script is running.
 
 ### Tables / rows
 

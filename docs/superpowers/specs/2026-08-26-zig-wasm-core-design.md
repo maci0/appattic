@@ -1,16 +1,20 @@
 # AppAttic Zig WASM core
 
 Date: 2026-08-26
+Updated: 2026-09-02
+Status: Accepted
 
-Replace in-process Swift scan logic with a Zig core compiled to WebAssembly. **Every package manager and every leftover scan path is a WASM plugin.** Native SwiftCrossUI stays on macOS (AppKit). Linux UI is C++ Qt 6 Widgets (`ui/linux-qt`), matching TMOG Linux. Do not silent-delete. Distro upgrades stay report-only. Qt-on-Linux is not claimed proven until `scripts/linux-qt-link.sh` succeeds on a real Linux host.
+Follow-on to [`2026-08-17-swift-scan-port-design.md`](2026-08-17-swift-scan-port-design.md) (that port is implemented; `AppAtticScan` remains until a later Zig copy of its tests). This record is the decision that has been made, not a proposal.
+
+Replace in-process Swift scan logic with a Zig core compiled to WebAssembly. **Every package manager and every leftover scan path is a WASM plugin.** Native SwiftCrossUI stays on macOS (AppKit). Linux UI is C++ Qt 6 Widgets (`ui/linux-qt`), matching TMOG Linux. Do not silent-delete. Distro upgrades stay report-only. `scripts/linux-qt-link.sh` is the Linux link step; CI and the Dockerfiles require `LINUX_QT_LINK=ok`. Build on the distro you run.
 
 Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability*, https://github.com/cordiverse/paper (PDF, 88 pages). Text taken with `pdftotext` from `paper.pdf` on 2026-08-26. Cordis is TypeScript. AppAttic follows the same composability rules in Zig + WASM.
 
 ## Rule
 
-The Zig WASM core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. Core has no switch on `apt` vs `pacman` vs `npm`. Core does not own filesystem roots. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only. Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
+The Zig WASM core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. Core has no switch on `apt` vs `pacman` vs `npm`. Core does not own filesystem roots. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; Darwin and CI may inject fixtures via `APPATTIC_HOST_EXEC_FIXTURE`). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
 
-`AppAtticScan` keeps building until a later port copies its tests into Zig. This spike does not delete it. Live CLI parsers are not in this spike. Findings WASM that exists today is canned.
+`AppAtticScan` keeps building until a later port copies its tests into Zig. This spike does not delete it. The Swift CLI (`appattic`) still parses in `AppAtticScan`; it is not a WASM guest. Linux Qt loads `appattic_core.wasm` through `core/host/embed.c`.
 
 ## Paper principles that bind AppAttic
 
@@ -63,34 +67,34 @@ Result JSON:
 
 ## Inventory (in scope)
 
-Manifest dir: `core/plugins/<id>/manifest.json`. `url` is set only for WASM built in this spike. Others are manifest-only stubs (`url` null). No live query.
+Manifest dir: `core/plugins/<id>/manifest.json`. `url` names the built `.wasm`. The only in-scope url-null stub is `path-overlay-shadow` (see Shadowing). Backlog ids have no manifest and must not be added to the host load list. Query plugins call `host.exec`.
 
 ### Manager plugins
 
 | id | Coeffect | Reports | Suggested commands (named objects only) |
 |---|---|---|---|
-| `apt` | `host.exec` `apt` | Outdated (report-only). Leaves/orphans later on Packages. | Never silent `apt upgrade`. Named `apt-get purge` only after confirm. Distro upgrade stays comment-only. |
-| `pacman` | `host.exec` `pacman` | Outdated report-only. Orphans (`-Qtd`) later. | Named `pacman -Rns`. No `-Syu` in cleanup. |
-| `dnf` | `host.exec` `dnf5` or `dnf` or `yum` (first found; yum is an alias, not its own id) | Outdated report-only. Leaves later. | Named `dnf remove`. No `dnf upgrade`. |
-| `zypper` | `host.exec` `zypper` | Outdated report-only. | Named `zypper rm`. Distro upgrade report-only. |
+| `apt` | `host.exec` `apt` | Outdated (report-only, `apt list --upgradable`). Orphans from `apt-get -s autoremove`. | Never silent `apt upgrade`. Named `apt-get purge` only after confirm. Distro upgrade stays comment-only. |
+| `pacman` | `host.exec` `pacman` | Outdated report-only (`-Qu`). Orphans (`-Qdt`). | Named `pacman -Rns`. No `-Syu` in cleanup. |
+| `dnf` | `host.exec` `dnf5` or `dnf` or `yum` (first found; yum is an alias, not its own id) | Outdated report-only. Unneeded packages (`repoquery --unneeded`). | Named `dnf remove`. No `dnf upgrade`. |
+| `zypper` | `host.exec` `zypper` | Outdated report-only (`list-updates`). Unneeded (`packages --unneeded`). | Named `zypper rm`. Distro upgrade report-only. |
 | `brew` | `host.exec` `brew` | Outdated formulas/casks. Untrusted casks listed, not updated. Uninstall lines. | `brew uninstall` / `brew uninstall --cask` named. No greedy auto-cask force. |
-| `flatpak` | `host.exec` `flatpak` | Outdated (updatable after confirm). Unused runtimes. User leftover dirs under `.var/app` when the app id is gone. | `flatpak uninstall` named. Never `rm /usr/bin/flatpak`. |
+| `flatpak` | `host.exec` `flatpak` | Unused runtimes (`flatpak uninstall --unused`). Outdated and leftover `.var/app` stay on Swift / `path-var-app` until this plugin takes them. | `flatpak uninstall` named. Never `rm /usr/bin/flatpak`. |
 | `snapd` | `host.exec` `snap` | Disabled leftover **revisions**. Orphan `~/snap/<name>` when the snap is not installed. Snap cache: review-only if not user-owned. Not the uninstall of still-installed snap apps (that stays Swift Stale/Outdated until the core port). | `snap remove <name> --revision <n>` named. `rm -rf` named `~/snap/<name>` only. Never silent `snap remove`. Never `rm /usr/bin/snap`. Never `snap remove --purge '*'`. |
 | `npm` | `host.exec` `npm` | User-global `-g` leftovers. Not every repo `node_modules`. | `npm -g uninstall` named. |
 | `pnpm` | `host.exec` `pnpm` | User-global leftovers. | `pnpm remove -g` named. |
 | `bun` | `host.exec` `bun` | User-global leftovers. | `bun remove -g` named. |
-| `pip` | `host.exec` `pip` or `pip3` | User-site leftovers. Not walking every venv. | `pip uninstall` named. |
+| `pip` | `host.exec` `pip` or `pip3` | User-site outdated (`pip list --user --outdated`). Report-only. Not walking every venv. | `pip uninstall` named. |
 | `pipx` | `host.exec` `pipx` | Unused pipx tools. | `pipx uninstall` named. |
 | `uv` | `host.exec` `uv` | `uv tool` leftovers. | `uv tool uninstall` named. |
-| `gem` | `host.exec` `gem` | User-install gem leftovers. | `gem uninstall` named. |
-| `composer` | `host.exec` `composer` | Global composer leftovers. Not every project `vendor/`. | `composer global remove` named. |
-| `container-runtime` | `host.exec` `docker` and/or `podman` | Dangling images, idle images, unused volumes, stopped containers, abandoned pods/compose, unnamed build cache (review, no command). | Named `rmi` / `volume rm` / `rm` / `pod rm` / `compose -p … down`. Never `system prune -af`. Never delete the engine binary. |
+| `gem` | `host.exec` `gem` | User-install outdated (`gem outdated`). Report-only. | `gem uninstall` named. |
+| `composer` | `host.exec` `composer` | Global outdated (`composer global outdated`). Report-only. Not every project `vendor/`. | `composer global remove` named. |
+| `container-runtime` | `host.exec` `docker` and/or `podman` | Dangling images, dangling volumes, exited containers. Idle-days skipped. Abandoned compose/pods and unnamed build cache not queried this turn. | Named `rmi` / `volume rm` / `rm`. Never `system prune -af`. Never delete the engine binary. |
 
 `~/snap` orphan dirs belong to `snapd`, not a second path plugin.
 
 ### Path plugins
 
-Each leftover root that Swift `scanRootsForPlatform` / `homeDataLeaves` / overlay helpers walk today. Classify (owned / system / orphaned) stays in the plugin later. Spike: canned WASM for Linux leftover roots (`path-xdg-config`, `path-xdg-data`, `path-xdg-cache`, `path-xdg-state`, `path-xdg-lib`, `path-var-app`) plus `path-shadow`. Other path ids stay manifest-only.
+Each leftover root that Swift `scanRootsForPlatform` / `homeDataLeaves` / overlay helpers walk today. Classify (owned / system / orphaned) stays in the plugin later. Built WASM covers the Linux leftover roots, Darwin leftover roots, `path-user-bin`, `path-home-dot`, and `path-shadow`. Path plugins query via `ls` on `host.exec`. `path-user-bin` also uses `test` (`-h` / `-e`). `path-shadow` also uses `realpath` (one path, no flags) and `test -f`. `path-overlay-shadow` stays a url-null stub so it does not duplicate `path-shadow`.
 
 | id | Coeffect (path) | Reports | Suggested commands |
 |---|---|---|---|
@@ -111,7 +115,8 @@ Each leftover root that Swift `scanRootsForPlatform` / `homeDataLeaves` / overla
 | `path-httpstorages` | `~/Library/HTTPStorages` | Orphan HTTP storage | named `rm` |
 | `path-launchagents` | `~/Library/LaunchAgents` and `/Library/LaunchAgents` | Agents whose program is gone | named `rm` of the plist only |
 | `path-home-dot` | listed `homeDotData` leaves (`.mozilla`, `.wine`, …) | Leaf leftovers at `$HOME` | named `rm`. `.steam` here is a dir leaf, not the `steam` backlog plugin |
-| `path-overlay-shadow` | overlay dirs vs packaged dirs | User overlays that hide a same-named packaged file (`status` shadow). Cleanup removes the overlay only | named `rm` of overlay path |
+| `path-shadow` | overlay dirs vs packaged dirs | User overlays that hide a same-named packaged file (`status` shadow). Cleanup removes the overlay only | named `rm` of overlay path |
+| `path-overlay-shadow` | (none; `url` null) | Stub. Do not ship a second overlay wasm; `path-shadow` is the implementation | none |
 | `path-user-bin` | `~/.local/bin`, `~/bin` | Broken symlinks | named `rm` of the link |
 
 ## Backlog
@@ -125,41 +130,67 @@ Not in this spike. No WASM. No `core/plugins/<id>/` manifest this turn. Not on t
 | `appstore` | Microsoft Store leftovers and outdated on Windows. macOS App Store / `mas` stays in Swift until a later `mas` plugin; that is a different id |
 | `steam` | Steam games/leftovers on Windows. Linux/macOS Steam stays in Swift for now. Remaining Steam leftover work as this plugin later |
 
-## Spike host load list
+## Host load list
 
-Only these WASM modules, plus core:
-
-1. `container-runtime` (`container_runtime.wasm`)
-2. `snapd` (`snapd.wasm`)
-3. `path-xdg-config` (`path_xdg_config.wasm`)
+`core/build.sh` emits `appattic_core.wasm` plus one `.wasm` per in-scope plugin except `path-overlay-shadow`. Linux Qt (`ui/linux-qt/corehost.cpp` `pluginWasmFiles`) and the host CLI take the same set. Tag `0` on any of them: coeffect missing, empty findings, plugin still loads. Missing file: host skips that argv (INACTIVE). `chocolatey`, `nuget`, `appstore`, `steam` are not arguments and must not be added.
 
 ```bash
 ./core/build.sh
 ./core/out/host ./core/out/appattic_core.wasm \
   ./core/out/container_runtime.wasm=2 \
   ./core/out/snapd.wasm=1 \
-  ./core/out/path_xdg_config.wasm=1
+  ./core/out/path_xdg_config.wasm=1 \
+  ./core/out/path_xdg_data.wasm=1 \
+  ./core/out/path_xdg_cache.wasm=1 \
+  ./core/out/path_xdg_state.wasm=1 \
+  ./core/out/path_xdg_lib.wasm=1 \
+  ./core/out/path_var_app.wasm=1 \
+  ./core/out/path_user_bin.wasm=1 \
+  ./core/out/path_home_dot.wasm=1 \
+  ./core/out/path_application_support.wasm=1 \
+  ./core/out/path_caches.wasm=1 \
+  ./core/out/path_preferences.wasm=1 \
+  ./core/out/path_saved_state.wasm=1 \
+  ./core/out/path_containers.wasm=1 \
+  ./core/out/path_group_containers.wasm=1 \
+  ./core/out/path_logs.wasm=1 \
+  ./core/out/path_webkit.wasm=1 \
+  ./core/out/path_httpstorages.wasm=1 \
+  ./core/out/path_launchagents.wasm=1 \
+  ./core/out/path_shadow.wasm=1 \
+  ./core/out/pacman.wasm=1 \
+  ./core/out/apt.wasm=1 \
+  ./core/out/dnf.wasm=1 \
+  ./core/out/zypper.wasm=1 \
+  ./core/out/flatpak.wasm=1 \
+  ./core/out/npm.wasm=1 \
+  ./core/out/pnpm.wasm=1 \
+  ./core/out/bun.wasm=1 \
+  ./core/out/pipx.wasm=1 \
+  ./core/out/uv.wasm=1 \
+  ./core/out/brew.wasm=1 \
+  ./core/out/gem.wasm=1 \
+  ./core/out/composer.wasm=1 \
+  ./core/out/pip.wasm=1
 ```
 
-Tag `0` on any of them: coeffect missing, empty findings, plugin still loads. Missing file: host skips that argv (INACTIVE). `chocolatey`, `nuget`, `appstore`, `steam` are not arguments and must not be added.
+## container-runtime
 
-## container-runtime (fixture parsers)
+User-global docker/podman leftovers. Both engines: tag findings with `engine`, do not merge IDs. Safety: never `system prune -af`, never unnamed bulk prune. `plugin_query` 0/1/2 = none/docker/podman.
 
-User-global docker/podman leftovers. Both engines: tag findings with `engine`, do not merge IDs. Safety: never `system prune -af`, never unnamed bulk prune. Spike: `plugin_query` 0/1/2 = none/docker/podman.
+Queries (named objects only): `images -f dangling=true`, `volume ls -f dangling=true`, `ps -a -f status=exited`. Idle-days skipped (CLI CREATED is relative text, not a timestamp). Abandoned compose/pods and unnamed build cache are not queried this turn. Confirm script may include named `rmi <id>`, `volume rm <name>`, `rm <id>`. Live `host.exec` denies `rmi`, `rm`, `system prune`, `volume prune`.
 
-Queries (named objects only): `images -f dangling=true`, `volume ls -f dangling=true`, `ps -a -f status=exited`. Idle-days skipped (CLI CREATED is relative text, not a timestamp). Unnamed build cache is review-only (`command` null). Abandoned compose/pods not queried this turn. Confirm script may include named `rmi <id>`, `volume rm <name>`, `rm <id>`. Live `host.exec` denies `rmi`, `rm`, `system prune`, `volume prune`.
+## snapd
 
-## snapd (canned)
+Ubuntu/Debian-family snap leftover *state*. Installed snap apps stay on Swift Stale Apps / Outdated (`snap remove <name>` / `snap refresh --list`) until the core port. This plugin queries `snap list --all` and `ls` of `~/snap`: disabled revisions, orphan `~/snap/<name>`, review-only cache if unnamed.
 
-Ubuntu/Debian-family snap leftover *state*. Installed snap apps stay on Swift Stale Apps / Outdated (`snap remove <name>` / `snap refresh --list`) until the core port. This plugin: disabled revisions, orphan `~/snap/<name>`, review-only cache if unnamed.
+## path leftover roots
 
-## path-xdg-config (canned)
-
-One leftover-root plugin so the host proves a path stub, not only managers.
+Each path plugin is a leftover-root guest (not a manager). Linux Qt and the host CLI load them with the manager plugins. Query is `ls` on `host.exec`. `path-user-bin` also uses `test` (`-h` / `-e`). `path-shadow` also uses `realpath` (one path, no flags) and `test -f`. Missing root: tag 0, empty findings.
 
 ## Shadowing
 
-Moves to plugin `path-overlay-shadow`, not a special case in core. Swift `listShadowingOverlays` and `ShadowTests` stay until that plugin is implemented for real. Core may still group extra paths.
+Overlay-vs-packaged findings are plugin `path-shadow` (`path_shadow.wasm`), not a special case in core. Spec id `path-overlay-shadow` stays a url-null stub so it does not duplicate that wasm. Swift `listShadowingOverlays` and `ShadowTests` remain in `AppAtticScan` until the Swift scan is ported. Core may still group extra paths.
 
 ## Errors
 
@@ -169,7 +200,9 @@ Moves to plugin `path-overlay-shadow`, not a special case in core. Swift `listSh
 
 ## What stays Swift until ported
 
-- `AppAtticScan` discover, usage, leftovers (including shadowing and `~/snap` as a leftover root), stale, outdated (`apt`/`pacman`/`dnf`/`zypper`/`brew`/`flatpak`/`snap`/`mas`), recommend, cache, cleanup
+Linux Qt already loads the WASM plugins. These remain in Swift for the macOS UI and the `appattic` CLI:
+
+- `AppAtticScan` discover, usage, leftovers (including shadowing and `~/snap` as a leftover root), stale, outdated (`apt`/`pacman`/`dnf`/`zypper`/`brew`/`flatpak`/`snap`/`mas`), packages, recommend, cache, cleanup
 - macOS App Store / `mas` (not the backlog `appstore` id)
 - Linux/macOS Steam and CrossOver helpers
 - CLI and SwiftCrossUI
@@ -178,7 +211,7 @@ Moves to plugin `path-overlay-shadow`, not a special case in core. Swift `listSh
 
 ## Tests
 
-Host exit 0 loading the three WASM plugins. JSON plugin ids match. No `system prune`, no `snap remove --purge '*'`, no `rm /usr/bin/snap`. Tag 0 yields empty findings.
+Host exit 0 loading the built plugin set (`core/build.sh`). JSON plugin ids match. No `system prune`, no `snap remove --purge '*'`, no `rm /usr/bin/snap`. Tag 0 yields empty findings. `path-overlay-shadow` has `url` null and is not a host argv.
 
 ## Open questions
 

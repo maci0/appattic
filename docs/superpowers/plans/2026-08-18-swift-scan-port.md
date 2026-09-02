@@ -1,6 +1,10 @@
 # Swift Scan Port Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+Date: 2026-08-18
+Updated: 2026-09-02
+Status: Implemented
+
+Historical task list for [`docs/superpowers/specs/2026-08-17-swift-scan-port-design.md`](../specs/2026-08-17-swift-scan-port-design.md). The port landed: Python scanner removed, `AppAtticScan` + `appattic` CLI + in-process UI. Product name is `AppAtticUI` (see `Package.swift`). Follow-on architecture: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](../specs/2026-08-26-zig-wasm-core-design.md).
 
 **Goal:** Replace the Python scanner with a Foundation `AppAtticScan` library, a Gtk-free `appattic` CLI, and an in-process UI scan, then delete the Python package.
 
@@ -12,14 +16,16 @@
 
 ## Global Constraints
 
+Original plan rules. Current requirements: the Implemented spec.
+
 - No `import AppKit` / `NSImage` / SF Symbols / materials / AppKit `List` in `AppAtticScan` or `AppAtticCLI`.
 - Linux UI is Qt (`ui/linux-qt`); macOS UI APIs stay behind `#if os(macOS)`.
-- Outdated is report-only. Never run upgrades.
+- Outdated is report-only in the scan result. Homebrew/Flatpak apply only through `update` / UI confirm.
 - Missing `brew`/`mas`/`apt`/`flatpak`/`snap` yields `[]`, scan continues.
 - No em dashes in user-visible copy.
 - Do not commit unless the user asks.
 - `swift test` and `swift build` need unrestricted permissions in this environment.
-- Python stays until Task 11 wires the UI; deleted in Task 12.
+- Python is deleted (Task 12).
 
 ## File map
 
@@ -40,7 +46,7 @@
 
 **Produces:** `public func norm(_:)`, `humanSize`, `humanDays`, `daysSince`, `parseMdlsDate`, `runCommand`, `fileSize`, `duSize`
 
-- [ ] **Step 1:** Update `Package.swift`:
+- [x] **Step 1:** Update `Package.swift`:
 
 ```swift
 // swift-tools-version: 5.10
@@ -77,11 +83,11 @@ let package = Package(
 
 Add stub `Sources/AppAtticCLI/main.swift` that prints `appattic 1.0.0` so the target links.
 
-- [ ] **Step 2:** Write `UtilTests.swift` covering `norm("Google Chrome") == "googlechrome"`, `humanSize(0) == "0 B"`, `humanSize(1024) == "1.0 KB"`, `humanDays(0.5)` contains `h`, `parseMdlsDate("(null)") == nil`, `daysSince` nil in → nil out.
+- [x] **Step 2:** Write `UtilTests.swift` covering `norm("Google Chrome") == "googlechrome"`, `humanSize(0) == "0 B"`, `humanSize(1024) == "1.0 KB"`, `humanDays(0.5)` contains `h`, `parseMdlsDate("(null)") == nil`, `daysSince` nil in → nil out.
 
-- [ ] **Step 3:** Implement `Util.swift` by translating `util.py` (`norm`, `human_size`, `human_days`, `run`, `file_size`, `du_size`, `parse_mdls_date`, `days_since`). `runCommand` never throws; return `(Int32, String, String)`.
+- [x] **Step 3:** Implement `Util.swift` by translating `util.py` (`norm`, `human_size`, `human_days`, `run`, `file_size`, `du_size`, `parse_mdls_date`, `days_since`). `runCommand` never throws; return `(Int32, String, String)`.
 
-- [ ] **Step 4:** `swift test --filter UtilTests` with unrestricted permissions. Expected: PASS.
+- [x] **Step 4:** `swift test --filter UtilTests` with unrestricted permissions. Expected: PASS.
 
 ---
 
@@ -94,9 +100,9 @@ Add stub `Sources/AppAtticCLI/main.swift` that prints `appattic 1.0.0` so the ta
 
 **Produces:** public `ScanTotals`, `LeftoverItem`, `SoftwareItem`, `OutdatedEntry`, `ScanData` with the same Codable keys as today.
 
-- [ ] **Step 1:** Test round-trip JSON for a leftover with `reason` and `summary`.
-- [ ] **Step 2:** Move structs into the library as `public`. UI `import AppAtticScan`. Keep `humanSize` in the library (Task 1) and `formatDate` in the UI file.
-- [ ] **Step 3:** `swift build -c debug` still builds `AppAttic`.
+- [x] **Step 1:** Test round-trip JSON for a leftover with `reason` and `summary`.
+- [x] **Step 2:** Move structs into the library as `public`. UI `import AppAtticScan`. Keep `humanSize` in the library (Task 1) and `formatDate` in the UI file.
+- [x] **Step 3:** `swift build -c debug` still builds `AppAttic`.
 
 ---
 
