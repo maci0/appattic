@@ -527,6 +527,19 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(appimage.contains("--strip"), appimage)
         XCTAssertTrue(appimage.contains("appattic-buildinfo/1"), appimage)
 
+        // The generated AppRun sources third-party linuxdeploy hooks that read
+        // unset vars such as XDG_CURRENT_DESKTOP. nounset there aborts startup
+        // on any session that leaves them unset.
+        let heredocStart = try XCTUnwrap(appimage.range(of: "cat > \"$apprun\" <<'EOF'\n"))
+        let afterStart = appimage[heredocStart.upperBound...]
+        let heredocEnd = try XCTUnwrap(afterStart.range(of: "\nEOF\n"))
+        let appRun = String(afterStart[..<heredocEnd.lowerBound])
+        XCTAssertTrue(appRun.contains("set -eo pipefail"), appRun)
+        XCTAssertFalse(appRun.contains("set -euo pipefail"), appRun)
+        XCTAssertTrue(appRun.contains("apprun-hooks"), appRun)
+        XCTAssertFalse(appRun.contains("&& source"), appRun)
+        XCTAssertTrue(appRun.contains("|| continue"), appRun)
+
         let swiftVersion = try String(contentsOf: root.appendingPathComponent(".swift-version"), encoding: .utf8)
         XCTAssertTrue(swiftVersion.contains("5.10.1"), swiftVersion)
         let zigVersion = try String(contentsOf: root.appendingPathComponent(".zig-version"), encoding: .utf8)
