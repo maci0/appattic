@@ -1,7 +1,10 @@
 import Foundation
 
+/// Last-used within this many days is KEEP (actively in use).
 public let activeDays = 30
+/// Last-used older than this many days can be REMOVE if reinstall is easy and data is small.
 public let staleDays = 180
+/// Owned user data at or above this size blocks REMOVE (REVIEW instead).
 public let dataKeepThreshold = 50 * 1024 * 1024
 
 public final class Software {
@@ -15,6 +18,7 @@ public final class Software {
     public var usageSource: String?
     public var installedAt: Date?
     public var dataBytes: Int
+    public var dataMeasured: Bool
     public var dataPaths: [String]
     public var dataMtime: Date?
     public var runningService: Bool
@@ -41,6 +45,7 @@ public final class Software {
         usageSource: String? = nil,
         installedAt: Date? = nil,
         dataBytes: Int = 0,
+        dataMeasured: Bool = true,
         dataPaths: [String] = [],
         dataMtime: Date? = nil,
         runningService: Bool = false,
@@ -66,6 +71,7 @@ public final class Software {
         self.usageSource = usageSource
         self.installedAt = installedAt
         self.dataBytes = dataBytes
+        self.dataMeasured = dataMeasured
         self.dataPaths = dataPaths
         self.dataMtime = dataMtime
         self.runningService = runningService
@@ -81,8 +87,6 @@ public final class Software {
         self.summary = summary
         self.extra = extra
     }
-
-    public var currentVersion: String? { version }
 }
 
 public struct Verdict {
@@ -96,14 +100,18 @@ public struct Verdict {
         self.reason = reason
         self.reclaimableBytes = reclaimableBytes
     }
+
+    public var softwareTier: SoftwareTier? { SoftwareTier(rawValue: tier) }
 }
 
+/// REVIEW and REMOVE rows, plus SYSTEM when `includeSystem` is on. KEEP is omitted.
 public func staleVerdicts(_ verdicts: [Verdict], includeSystem: Bool = false) -> [Verdict] {
     verdicts.filter {
         $0.tier == "remove" || $0.tier == "review" || (includeSystem && $0.tier == "system")
     }
 }
 
+/// Same filter as `staleVerdicts` for JSON `SoftwareItem` rows.
 public func visibleStaleSoftware(_ items: [SoftwareItem], includeSystem: Bool) -> [SoftwareItem] {
     items.filter {
         $0.tier == "remove" || $0.tier == "review" || (includeSystem && $0.tier == "system")
@@ -138,6 +146,14 @@ func matchDataItems(softwareName: String, bundleId: String?, items: [DataItem]) 
     return out
 }
 
+func attachOwnedData(_ sw: Software, name: String, bundleId: String?, items: [DataItem]) {
+    let matched = matchDataItems(softwareName: name, bundleId: bundleId, items: items)
+    sw.dataBytes = matched.reduce(0) { addBytes($0, $1.sizeBytes) }
+    sw.dataPaths = matched.map(\.path)
+    sw.dataMtime = newestActivity(matched)
+    sw.dataMeasured = matched.allSatisfy(\.sizeMeasured)
+}
+
 public func staleSizeText(sizeBytes: Int, sizeMeasured: Bool, dataBytes: Int) -> String {
     let app = sizeMeasured ? humanSize(sizeBytes) : "n/a"
     if dataBytes > 0 {
@@ -146,9 +162,10 @@ public func staleSizeText(sizeBytes: Int, sizeMeasured: Bool, dataBytes: Int) ->
     return app
 }
 
+/// Byte total for listed stale rows (REVIEW + REMOVE). Overview uses this as a size hint, not a promise that cleanup will delete them.
 public func staleReclaimableBytes(_ items: [SoftwareItem]) -> Int {
     items.filter { $0.tier == "remove" || $0.tier == "review" }
-        .reduce(0) { $0 + $1.totalBytes }
+        .reduce(0) { addBytes($0, $1.totalBytes) }
 }
 
 public func overviewStaleTotalLabel(count: Int, bytes: Int) -> String {
@@ -199,6 +216,16 @@ func appBlurb(_ extra: [String: String], appName: String) -> String? {
     return plistDescription(["NSHumanReadableDescription": raw], appName: appName)
 }
 
+func brewHistoryKeep(_ brew: BrewSnapshot) -> Set<String> {
+    var keep: Set<String> = []
+    for f in brew.formulas {
+        keep.insert(f.name)
+        keep.formUnion(f.aliases)
+        keep.formUnion(f.bins)
+    }
+    return keep
+}
+
 public func buildSoftware(
     apps: [AppRecord],
     brew: BrewSnapshot,
@@ -207,9 +234,12 @@ public func buildSoftware(
     history: HistoryIndex? = nil,
     includeDarwinNonApp: Bool? = nil,
     nonAppPaths: [String]? = nil,
-    du: ((String) -> (Int, Bool))? = nil
+    du: ((String) -> (Int, Bool))? = nil,
+    now: Date = Date()
 ) -> [Software] {
-    let history = history ?? loadHistory()
+    let history = history ?? (brew.available && !brew.formulas.isEmpty
+        ? loadHistory(keep: brewHistoryKeep(brew))
+        : HistoryIndex())
     var software: [Software] = []
     let caskDesc = Dictionary(brew.casks.compactMap { c in
         c.desc.map { (c.name, $0) }
@@ -249,10 +279,7 @@ public func buildSoftware(
             bundleId: a.bundleId,
             extra: a.extra
         )
-        let matched = matchDataItems(softwareName: a.displayName, bundleId: a.bundleId, items: dataItems)
-        sw.dataBytes = matched.reduce(0) { $0 + $1.sizeBytes }
-        sw.dataPaths = matched.map(\.path)
-        sw.dataMtime = newestActivity(matched)
+        attachOwnedData(sw, name: a.displayName, bundleId: a.bundleId, items: dataItems)
         if let cask { sw.caskName = cask.name }
         sw.summary = shortDesc(
             appBlurb(a.extra, appName: a.displayName)
@@ -265,7 +292,7 @@ public func buildSoftware(
 
     if brew.available {
         progress("  · checking shell history for \(brew.formulas.count) brew formulas…")
-        let span = historySpanDays(history)
+        let span = historySpanDays(history, now: now)
         for f in brew.formulas {
             let names = [f.name] + f.aliases + f.bins
             let (last, ever) = lastUsedFromHistory(names, index: history)
@@ -286,10 +313,7 @@ public func buildSoftware(
                 historySpanDays: span,
                 summary: shortDesc(f.desc)
             )
-            let matched = matchDataItems(softwareName: f.name, bundleId: nil, items: dataItems)
-            sw.dataBytes = matched.reduce(0) { $0 + $1.sizeBytes }
-            sw.dataPaths = matched.map(\.path)
-            sw.dataMtime = newestActivity(matched)
+            attachOwnedData(sw, name: f.name, bundleId: nil, items: dataItems)
             software.append(sw)
         }
     }
@@ -375,6 +399,9 @@ func isSteamClientSoftware(_ sw: Software) -> Bool {
         && sw.name.compare("Steam", options: .caseInsensitive) == .orderedSame
 }
 
+/// KEEP / REVIEW / REMOVE / SYSTEM from usage age, data size, and how easy reinstall is.
+/// System apps and the Steam client are never REMOVE. Missing last-used is REVIEW unless
+/// a brew formula has a long enough shell-history span.
 public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
     if sw.source == "system" {
         return Verdict(software: sw, tier: "system", reason: "System app: leave alone")
@@ -415,7 +442,7 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
                 software: sw,
                 tier: "remove",
                 reason: "\(spanNote(sw)); easy to reinstall via brew",
-                reclaimableBytes: sw.sizeBytes + sw.dataBytes
+                reclaimableBytes: addBytes(sw.sizeBytes, sw.dataBytes)
             )
         }
         if sw.source == "brew-cask", sw.kind == "other" {
@@ -445,7 +472,14 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
     if d <= Double(staleDays) {
         return Verdict(software: sw, tier: "review", reason: "Not used for \(humanDays(d))")
     }
-    if sw.dataBytes > dataKeepThreshold {
+    if !sw.dataMeasured {
+        return Verdict(
+            software: sw,
+            tier: "review",
+            reason: "Not used for \(humanDays(d)) but holds data that could not be measured: review before removing"
+        )
+    }
+    if sw.dataBytes >= dataKeepThreshold {
         return Verdict(
             software: sw,
             tier: "review",
@@ -457,7 +491,7 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
             software: sw,
             tier: "remove",
             reason: "Not used for \(humanDays(d)). \(reinstallHint(sw.source) ?? "Easy to reinstall.")",
-            reclaimableBytes: sw.sizeBytes + sw.dataBytes
+            reclaimableBytes: addBytes(sw.sizeBytes, sw.dataBytes)
         )
     }
     return Verdict(
@@ -482,14 +516,17 @@ public func reinstallHint(_ source: String) -> String? {
     }
 }
 
+/// Map cached reason strings from older scans onto current copy. New verdicts already use the new wording.
 public func displayStaleReason(_ reason: String) -> String {
-    if reason.contains("trivial to reinstall") {
-        let prefix = reason.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? reason
-        return prefix.trimmingCharacters(in: .whitespaces) + ". Easy to reinstall with brew."
-    }
-    if reason.contains("manual reinstall would be required") {
-        let prefix = reason.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? reason
-        return prefix.trimmingCharacters(in: .whitespaces) + ". Manual reinstall if you still want it."
+    let rules: [(String, String)] = [
+        ("trivial to reinstall", ". Easy to reinstall with brew."),
+        ("manual reinstall would be required", ". Manual reinstall if you still want it."),
+    ]
+    for (needle, suffix) in rules {
+        guard reason.contains(needle) else { continue }
+        let prefix = reason.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+            .first.map(String.init) ?? reason
+        return prefix.trimmingCharacters(in: .whitespaces) + suffix
     }
     return reason
 }

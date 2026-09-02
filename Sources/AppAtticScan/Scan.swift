@@ -12,6 +12,7 @@ public final class ScanResult {
     public var outdated: [OutdatedPkg]
     public var packages: [PackageEntry]
     public var appsInstalled: Int
+    public var incomplete: Bool
 
     public init(
         scannedAt: Date = Date(),
@@ -24,7 +25,8 @@ public final class ScanResult {
         brewAvailable: Bool = false,
         outdated: [OutdatedPkg] = [],
         packages: [PackageEntry] = [],
-        appsInstalled: Int = 0
+        appsInstalled: Int = 0,
+        incomplete: Bool = false
     ) {
         self.scannedAt = scannedAt
         self.durationS = durationS
@@ -37,6 +39,7 @@ public final class ScanResult {
         self.outdated = outdated
         self.packages = packages
         self.appsInstalled = appsInstalled
+        self.incomplete = incomplete
     }
 
     public var orphanedItems: [DataItem] {
@@ -44,17 +47,17 @@ public final class ScanResult {
     }
 
     public var orphanedBytes: Int {
-        orphanedItems.reduce(0) { $0 + $1.sizeBytes }
+        orphanedItems.reduce(0) { addBytes($0, $1.sizeBytes) }
     }
 
     public var systemLeftoverBytes: Int {
-        dataItems.filter { $0.status == "system" }.reduce(0) { $0 + $1.sizeBytes }
+        dataItems.filter { $0.status == "system" }.reduce(0) { addBytes($0, $1.sizeBytes) }
     }
 
     public var reclaimableBytes: Int {
         var total = orphanedBytes
         for v in verdicts where v.tier == "remove" {
-            total += v.software.sizeBytes + v.software.dataBytes
+            total = addBytes(total, addBytes(v.software.sizeBytes, v.software.dataBytes))
         }
         return total
     }
@@ -96,15 +99,18 @@ public final class ScanResult {
                     cask_name: sw.caskName,
                     is_leaf: sw.isLeaf,
                     outdated: sw.outdated,
-                    current_version: sw.currentVersion,
+                    current_version: sw.version,
                     latest_version: sw.latestVersion,
                     summary: softwareDisplaySummary(sw),
-                    steam_appid: sw.extra["steam_appid"]
+                    steam_appid: sw.extra["steam_appid"],
+                    pkg_id: sw.pkgId,
+                    bundle_id: sw.bundleId
                 )
             },
             outdated: outdated.map { $0.toEntry() },
             packages: packages,
-            from_cache: false
+            from_cache: false,
+            incomplete: incomplete ? true : nil
         )
     }
 }
@@ -129,9 +135,9 @@ public func applyPrefsFallback(_ apps: inout [AppRecord], items: [DataItem]) {
     }
 }
 
+/// Full scan. Optional collectors are for tests; omit them to hit the live system.
 public func performScan(
     includeSystem: Bool = false,
-    progress: @escaping (String) -> Void = { _ in },
     apps: [AppRecord]? = nil,
     brew: BrewSnapshot? = nil,
     leftoverItems: [DataItem]? = nil,
@@ -143,10 +149,12 @@ public func performScan(
     history: HistoryIndex? = nil,
     which: WhichFn = whichCommand,
     run: CommandRun = runCommand,
-    skipLiveUsage: Bool = false
+    skipLiveUsage: Bool = false,
+    now: Date = Date(),
+    progress: @escaping (String) -> Void = { _ in }
 ) -> ScanResult {
-    let t0 = Date()
-    let result = ScanResult()
+    let t0 = monotonicSeconds()
+    let result = ScanResult(scannedAt: now)
 
     progress("Scanning installed applications…")
     var found = apps ?? findApps(progress: progress)
@@ -158,11 +166,12 @@ public func performScan(
 
     progress("Checking usage metadata…")
     if !skipLiveUsage {
-        fillAppUsage(&result.apps, progress: progress, run: run)
+        fillAppUsage(&result.apps, progress: progress, run: run, now: now)
     }
 
     let brewInfo = brew ?? collectBrew(progress: progress, which: which, run: run)
     result.brewAvailable = brewInfo.available
+    result.incomplete = brewInfo.outdatedFailed
 
     progress("Checking for outdated packages…")
     let linuxPkgs = linuxOutdated ?? collectLinux(progress: progress, which: which, run: run)
@@ -178,7 +187,8 @@ public func performScan(
             apps: leftoverApps,
             brew: brewInfo,
             progress: progress,
-            roots: leftoverRoots
+            roots: leftoverRoots,
+            now: now
         )
         result.dataItems = items
         result.orphanAgents = agents
@@ -200,20 +210,23 @@ public func performScan(
         brew: brewInfo,
         dataItems: result.dataItems,
         progress: progress,
-        history: history
+        history: history,
+        now: now
     )
     applyOutdated(result.software, pkgs: result.outdated)
     attachSummariesFromSoftware(result.software, pkgs: result.outdated)
-    result.verdicts = evaluateAll(result.software)
+    result.verdicts = evaluateAll(result.software, now: now)
     progress("Listing unused distro packages and language globals…")
     result.packages = packages ?? collectPackages(progress: progress, which: which, run: run)
-    result.durationS = Date().timeIntervalSince(t0)
+    result.durationS = max(0, monotonicSeconds() - t0)
     return result
 }
 
+/// Live scan of leftovers, stale software, outdated packages, and unused distro/language packages.
 public func runFullScan(
     includeSystem: Bool = false,
+    now: Date = Date(),
     progress: @escaping (String) -> Void = { _ in }
 ) -> ScanData {
-    performScan(includeSystem: includeSystem, progress: progress).toScanData()
+    performScan(includeSystem: includeSystem, now: now, progress: progress).toScanData()
 }

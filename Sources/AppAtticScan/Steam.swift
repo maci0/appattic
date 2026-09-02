@@ -52,7 +52,7 @@ func parseSteamAppManifest(_ text: String) -> SteamAppManifest? {
         appId: appId,
         name: name,
         installDir: installDir,
-        lastPlayed: playedRaw > 0 ? Date(timeIntervalSince1970: TimeInterval(playedRaw)) : nil,
+        lastPlayed: playedRaw > 0 ? dateFromUnixEpoch(TimeInterval(playedRaw)) : nil,
         sizeOnDisk: size,
         isInstalled: true
     )
@@ -74,10 +74,14 @@ func parseSteamLibraryFolders(_ text: String) -> [String] {
     return paths
 }
 
-func defaultSteamLibraryRoots() -> [String] {
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
+func defaultSteamLibraryRoots(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> [String] {
     if PlatformOverride.isLinux {
+        let data = xdgDataHome(home: home, env: env)
         return [
+            (data as NSString).appendingPathComponent("Steam"),
             (home as NSString).appendingPathComponent(".local/share/Steam"),
             (home as NSString).appendingPathComponent(".steam/steam"),
             (home as NSString).appendingPathComponent(".steam/root"),
@@ -98,7 +102,7 @@ func visitSteamLibraries(libraryRoots: [String]?, body: (String) -> Void) {
         guard seenLibs.insert(real).inserted else { continue }
         for rel in ["steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"] {
             let path = (real as NSString).appendingPathComponent(rel)
-            if let text = try? String(contentsOfFile: path, encoding: .utf8) {
+            if let text = readUTF8File(path) {
                 pending.append(contentsOf: parseSteamLibraryFolders(text))
             }
         }
@@ -228,7 +232,7 @@ public func findSteamApps(libraryRoots: [String]? = nil) -> [AppRecord] {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: steamapps) else { return }
         for name in names where name.hasPrefix("appmanifest_") && name.hasSuffix(".acf") {
             let acf = (steamapps as NSString).appendingPathComponent(name)
-            guard let text = try? String(contentsOfFile: acf, encoding: .utf8),
+            guard let text = readUTF8File(acf),
                   let manifest = parseSteamAppManifest(text),
                   !isSteamSupportPackage(manifest.name),
                   seenIds.insert(manifest.appId).inserted,
@@ -248,7 +252,7 @@ func steamManifestStamp(libraryRoots: [String]? = nil) -> String {
         let acfs = ((try? FileManager.default.contentsOfDirectory(atPath: steamapps)) ?? [])
             .filter { $0.hasPrefix("appmanifest_") && $0.hasSuffix(".acf") }
             .sorted()
-        lines.append("steam:\(real):\(acfs.joined(separator: ","))")
+        lines.append("steam:\(stampEscape(real)):\(stampJoin(acfs))")
     }
     return lines.sorted().joined(separator: "\n")
 }

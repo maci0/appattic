@@ -22,7 +22,7 @@ let uiTargets: [Target] = [
     ),
 ]
 let uiDeps: [Package.Dependency] = [
-    .package(url: "https://github.com/moreSwift/swift-cross-ui", .upToNextMinor(from: "0.2.0")),
+    .package(url: "https://github.com/moreSwift/swift-cross-ui", .exact("0.2.1")),
 ]
 #endif
 

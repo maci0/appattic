@@ -1,5 +1,28 @@
 import Foundation
 
+/// Leftover classification stored as a string on JSON models so unknown values stay round-trippable.
+public enum LeftoverStatus: String, Codable, Sendable, Hashable, CaseIterable {
+    case orphaned
+    case shadow
+    case owned
+    case system
+    case active
+}
+
+/// Stale-software recommendation stored as a string on JSON models so unknown values stay round-trippable.
+public enum SoftwareTier: String, Codable, Sendable, Hashable, CaseIterable {
+    case keep
+    case review
+    case remove
+    case system
+}
+
+/// Distro orphan vs user-global language tool.
+public enum PackageKind: String, Codable, Sendable, Hashable, CaseIterable {
+    case orphan
+    case global
+}
+
 public struct ScanTotals: Codable, Sendable {
     public let apps_installed: Int
     public let orphaned_items: Int
@@ -43,6 +66,7 @@ public struct LeftoverItem: Codable, Identifiable, Hashable, Sendable {
     public let extra_paths: [String]?
     public let shadows: String?
     public var id: String { path }
+    public var leftoverStatus: LeftoverStatus? { LeftoverStatus(rawValue: status) }
 
     public init(
         name: String,
@@ -75,6 +99,30 @@ public struct LeftoverItem: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// Paths that hide this leftover when present in the ignore list: the item path plus extra_paths.
+public func leftoverIgnorePaths(_ item: LeftoverItem) -> [String] {
+    [item.path] + (item.extra_paths ?? [])
+}
+
+/// Leftovers shown in the list: orphaned data and PATH/desktop overlays (`shadow`). Owned, system, and active stay hidden.
+public func isListedLeftoverStatus(_ status: LeftoverStatus) -> Bool {
+    status == .orphaned || status == .shadow
+}
+
+public func isListedLeftoverStatus(_ status: String) -> Bool {
+    guard let parsed = LeftoverStatus(rawValue: status) else { return false }
+    return isListedLeftoverStatus(parsed)
+}
+
+/// Orphaned leftover dirs and shadow overlays, minus ignored paths (item path and extra_paths).
+public func visibleOrphanedLeftovers(_ leftovers: [LeftoverItem], ignoring: Set<String>) -> [LeftoverItem] {
+    let ignoredKeys = Set(ignoring.map(pathIdentityKey))
+    return leftovers.filter { item in
+        isListedLeftoverStatus(item.status)
+            && leftoverIgnorePaths(item).allSatisfy { !ignoredKeys.contains(pathIdentityKey($0)) }
+    }
+}
+
 public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
     public let name: String
     public let kind: String
@@ -98,8 +146,11 @@ public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
     public let latest_version: String?
     public let summary: String?
     public let steam_appid: String?
+    public let pkg_id: String?
+    public let bundle_id: String?
     public var id: String { path }
-    public var totalBytes: Int { (size_bytes ?? 0) + (data_bytes ?? 0) }
+    public var totalBytes: Int { addBytes(size_bytes ?? 0, data_bytes ?? 0) }
+    public var softwareTier: SoftwareTier? { tier.flatMap { SoftwareTier(rawValue: $0) } }
 
     public init(
         name: String,
@@ -123,7 +174,9 @@ public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
         current_version: String? = nil,
         latest_version: String? = nil,
         summary: String? = nil,
-        steam_appid: String? = nil
+        steam_appid: String? = nil,
+        pkg_id: String? = nil,
+        bundle_id: String? = nil
     ) {
         self.name = name
         self.kind = kind
@@ -147,6 +200,8 @@ public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
         self.latest_version = latest_version
         self.summary = summary
         self.steam_appid = steam_appid
+        self.pkg_id = pkg_id
+        self.bundle_id = bundle_id
     }
 }
 
@@ -159,18 +214,13 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
     public let summary: String?
     public let reason: String?
     public let kind: String?
+    public let bundle_id: String?
     public var id: String { manager + ":" + name }
     public var displayName: String {
         if let title, !title.isEmpty { return title }
         return name
     }
-    public var updatable: Bool {
-        if kind == "untrusted" { return false }
-        switch manager {
-        case "brew-formula", "brew-cask", "flatpak": return true
-        default: return false
-        }
-    }
+    public var updatable: Bool { outdatedIsUpdatable(manager: manager, kind: kind) }
 
     public init(
         name: String,
@@ -180,7 +230,8 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
         title: String? = nil,
         summary: String? = nil,
         reason: String? = nil,
-        kind: String? = nil
+        kind: String? = nil,
+        bundle_id: String? = nil
     ) {
         self.name = name
         self.manager = manager
@@ -190,6 +241,17 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
         self.summary = summary
         self.reason = reason
         self.kind = kind
+        self.bundle_id = bundle_id
+    }
+}
+
+public func outdatedIsUpdatable(manager: String, kind: String?) -> Bool {
+    if kind == "untrusted" { return false }
+    switch manager {
+    case "brew-formula", "brew-cask", "flatpak":
+        return true
+    default:
+        return false
     }
 }
 
@@ -204,6 +266,7 @@ public struct PackageEntry: Codable, Identifiable, Hashable, Sendable {
     public let reason: String?
     public let children: [String]?
     public var id: String { manager + ":" + name }
+    public var packageKind: PackageKind? { PackageKind(rawValue: kind) }
     public var canMarkManual: Bool {
         kind == "orphan" && ["apt", "pacman", "dnf", "zypper"].contains(manager)
     }
@@ -241,6 +304,7 @@ public struct ScanData: Codable, Sendable {
     public let outdated: [OutdatedEntry]?
     public let packages: [PackageEntry]?
     public var from_cache: Bool?
+    public var incomplete: Bool?
 
     public init(
         scanned_at: String,
@@ -251,7 +315,8 @@ public struct ScanData: Codable, Sendable {
         software: [SoftwareItem],
         outdated: [OutdatedEntry]? = nil,
         packages: [PackageEntry]? = nil,
-        from_cache: Bool? = nil
+        from_cache: Bool? = nil,
+        incomplete: Bool? = nil
     ) {
         self.scanned_at = scanned_at
         self.duration_s = duration_s
@@ -262,5 +327,6 @@ public struct ScanData: Codable, Sendable {
         self.outdated = outdated
         self.packages = packages
         self.from_cache = from_cache
+        self.incomplete = incomplete
     }
 }

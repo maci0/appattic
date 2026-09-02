@@ -68,7 +68,7 @@ func crossoverSteamLibraryRoots(bottlesDir: String? = nil) -> [String] {
 func crossoverBottleStamp(bottlesDir: String? = nil) -> String {
     let names = listCrossOverBottleDirs(bottlesDir: bottlesDir).map { URL(fileURLWithPath: $0).lastPathComponent }
     guard !names.isEmpty else { return "" }
-    return "cx:\(names.joined(separator: ","))"
+    return "cx:\(stampJoin(names))"
 }
 
 func appendCrossOverBottles(_ apps: inout [AppRecord], seen: inout Set<String>, bottlesDir: String? = nil) {

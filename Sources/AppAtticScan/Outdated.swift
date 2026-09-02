@@ -36,13 +36,7 @@ public final class OutdatedPkg {
         self.kind = kind
     }
 
-    public var updatable: Bool {
-        if kind == "untrusted" { return false }
-        switch manager {
-        case "brew-formula", "brew-cask", "flatpak": return true
-        default: return false
-        }
-    }
+    public var updatable: Bool { outdatedIsUpdatable(manager: manager, kind: kind) }
 
     public func toEntry() -> OutdatedEntry {
         OutdatedEntry(
@@ -53,7 +47,8 @@ public final class OutdatedPkg {
             title: title,
             summary: summary ?? outdatedSummaryFallback(self),
             reason: outdatedReason(self),
-            kind: kind ?? defaultOutdatedKind(manager)
+            kind: kind ?? defaultOutdatedKind(manager),
+            bundle_id: bundleId
         )
     }
 }
@@ -147,13 +142,14 @@ public func updateCommand(_ pkg: OutdatedPkg) -> String? {
     }
 }
 
+/// Live Homebrew/Flatpak upgrade script. CLI `update` with no `--dry-run` runs this; the UI confirms first.
 public func updateScript(_ pkgs: [OutdatedPkg]) -> String {
     let cmds = pkgs.compactMap(updateCommand)
     var lines = [
         "#!/bin/sh",
         "set -e",
         "# AppAttic package update",
-        "# Review every line before running. Nothing here is updated automatically.",
+        "# Review every line before running. `appattic update` (no --dry-run) runs this script.",
         "",
     ]
     if cmds.isEmpty {
@@ -189,9 +185,7 @@ public func outdatedSummaryFallback(_ pkg: OutdatedPkg) -> String {
 }
 
 public func parseBrewOutdatedJSON(_ text: String) -> [OutdatedPkg] {
-    guard let data = text.data(using: .utf8),
-          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else { return [] }
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return [] }
     var out: [OutdatedPkg] = []
     for (key, manager) in [("formulae", "brew-formula"), ("casks", "brew-cask")] {
         for item in obj[key] as? [[String: Any]] ?? [] {
@@ -213,16 +207,25 @@ public func parseBrewOutdatedJSON(_ text: String) -> [OutdatedPkg] {
     return out
 }
 
+func queryBrewStatus(
+    _ brew: String,
+    progress: ((String) -> Void)? = nil,
+    run: CommandRun = runCommand
+) -> (pkgs: [OutdatedPkg], failed: Bool) {
+    if brew.isEmpty { return ([], false) }
+    progress?("  · checking for outdated Homebrew packages…")
+    let (rc, out, _) = run([brew, "outdated", "--json=v2"], 90)
+    if rc != 0 { return ([], true) }
+    if out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return ([], false) }
+    return (parseBrewOutdatedJSON(out), false)
+}
+
 public func queryBrew(
     _ brew: String,
     progress: ((String) -> Void)? = nil,
     run: CommandRun = runCommand
 ) -> [OutdatedPkg] {
-    if brew.isEmpty { return [] }
-    progress?("  · checking for outdated Homebrew packages…")
-    let (rc, out, _) = run([brew, "outdated", "--json=v2"], 90)
-    if rc != 0 || out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
-    return parseBrewOutdatedJSON(out)
+    queryBrewStatus(brew, progress: progress, run: run).pkgs
 }
 
 public func brewPackageMeta(_ data: [String: Any]) -> ([String: String], [String: String]) {
@@ -393,10 +396,7 @@ public func parseDnfUpgrades(_ text: String) -> [OutdatedPkg] {
     for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
         let s = line.trimmingCharacters(in: .whitespaces)
         if s.isEmpty { continue }
-        let low = s.lowercased()
-        if low.hasPrefix("last metadata") || low.hasPrefix("available upgrade") || low.hasPrefix("obsoleting") {
-            continue
-        }
+        if isDnfListingNoise(s) { continue }
         let range = NSRange(s.startIndex..., in: s)
         guard let m = re.firstMatch(in: s, range: range), m.numberOfRanges >= 4,
               let n = Range(m.range(at: 1), in: s),
@@ -485,7 +485,7 @@ public func storeCountries(_ localeText: String? = nil) -> [String] {
     return countries
 }
 
-public func versionNewer(_ latest: String?, _ current: String?) -> Bool {
+public func versionNewer(latest: String?, current: String?) -> Bool {
     func parts(_ v: String?) -> [Int] {
         var nums: [Int] = []
         let re = try! NSRegularExpression(pattern: #"\d+"#)
@@ -506,13 +506,6 @@ public func versionNewer(_ latest: String?, _ current: String?) -> Bool {
         if a != b { return a > b }
     }
     return lp.count > cp.count
-}
-
-public func itunesRowForBundle(_ data: [String: Any], bundleId: String) -> [String: Any]? {
-    for row in data["results"] as? [[String: Any]] ?? [] {
-        if row["bundleId"] as? String == bundleId { return row }
-    }
-    return nil
 }
 
 public func indexItunesResults(_ data: [String: Any]) -> [String: [String: Any]] {
@@ -566,7 +559,7 @@ public func pkgFromItunes(
     if let bid = row["bundleId"] as? String, bid != bundleId { return nil }
     let latest = (row["version"] as? String)?.trimmingCharacters(in: .whitespaces)
     let latestVal = (latest?.isEmpty == false) ? latest : nil
-    guard versionNewer(latestVal, current) else { return nil }
+    guard versionNewer(latest: latestVal, current: current) else { return nil }
     var title = (displayName ?? (row["trackName"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
     if title.isEmpty { title = "" }
     var titleOut: String? = title.isEmpty ? nil : title
@@ -735,11 +728,11 @@ public func queryMas(
     progress: ((String) -> Void)? = nil,
     which: WhichFn = whichCommand,
     run: CommandRun = runCommand
-) -> [OutdatedPkg] {
-    guard let path = which("mas") else { return [] }
+) -> [OutdatedPkg]? {
+    guard let path = which("mas") else { return nil }
     progress?("  · checking App Store updates…")
     let (rc, out, _) = run([path, "outdated"], 90)
-    if rc != 0 { return [] }
+    if rc != 0 { return nil }
     return parseMasOutdated(out)
 }
 
@@ -750,14 +743,9 @@ public func queryAppstore(
     run: CommandRun = runCommand
 ) -> [OutdatedPkg] {
     if PlatformOverride.isLinux { return [] }
-    if let path = which("mas") {
-        progress?("  · checking App Store updates…")
-        let (rc, out, _) = run([path, "outdated"], 90)
-        if rc == 0 {
-            let pkgs = parseMasOutdated(out)
-            attachItunesMeta(pkgs)
-            return pkgs
-        }
+    if let pkgs = queryMas(progress: progress, which: which, run: run) {
+        attachItunesMeta(pkgs)
+        return pkgs
     }
     return collectAppstore(apps, progress: progress)
 }
@@ -866,25 +854,17 @@ public func collectLinux(
     pkgs.append(contentsOf: queryFlatpak(progress: progress, which: which, run: run))
     pkgs.append(contentsOf: querySnap(progress: progress, which: which, run: run))
     let family = linuxDistroFamily(osRelease: osRelease ?? linuxOsReleaseText())
-    switch family {
-    case "arch":
+    switch resolveDistroPackageManager(family: family, which: which) {
+    case .pacman:
         pkgs.append(contentsOf: queryPacman(progress: progress, which: which, run: run))
-    case "fedora":
+    case .dnf:
         pkgs.append(contentsOf: queryDnf(progress: progress, which: which, run: run))
-    case "suse":
+    case .zypper:
         pkgs.append(contentsOf: queryZypper(progress: progress, which: which, run: run))
-    case "debian":
+    case .apt:
         pkgs.append(contentsOf: queryApt(progress: progress, which: which, run: run))
-    default:
-        if which("pacman") != nil {
-            pkgs.append(contentsOf: queryPacman(progress: progress, which: which, run: run))
-        } else if which("dnf5") != nil || which("dnf") != nil || which("yum") != nil {
-            pkgs.append(contentsOf: queryDnf(progress: progress, which: which, run: run))
-        } else if which("zypper") != nil {
-            pkgs.append(contentsOf: queryZypper(progress: progress, which: which, run: run))
-        } else {
-            pkgs.append(contentsOf: queryApt(progress: progress, which: which, run: run))
-        }
+    case nil:
+        break
     }
     return pkgs
 }

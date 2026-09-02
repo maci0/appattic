@@ -34,6 +34,7 @@ let linuxSystemNames: Set<String> = [
     "containers", "Trash", "xorg", "session", "update-notifier",
     "dbus", "gvfs", "xdg-desktop-portal", "gnome-shell", "gnome-session",
     "snap", "fish", "zsh", "bash", "git", "nvim", "vim", "ssh", "gnupg",
+    "aws", "docker",
     "tmux", "direnv", "starship", "asdf", "nvm", "pyenv", "rbenv", "rustup",
     "cargo", "npm", "yarn", "pnpm", "pip", "conda", "htop", "curl",
     "thumbnails", "mesa_shader_cache", "mesa_shader_cache_db", "nvidia",
@@ -110,7 +111,6 @@ let skipDescend: Set<String> = [
 ]
 
 let skipNestedRoots: Set<String> = ["Containers", "Group Containers", "WebKit"]
-let skipSizeRoots: Set<String> = ["Containers", "Group Containers", "WebKit"]
 
 let bundleIdRE = try! NSRegularExpression(pattern: #"^[a-z0-9]+(\.[a-z0-9_\-]+)+$"#)
 let daemonRE = try! NSRegularExpression(pattern: #"^[a-z][a-z0-9]{8,}d$"#)
@@ -124,7 +124,7 @@ func fullMatch(_ re: NSRegularExpression, _ s: String) -> Bool {
 }
 
 func isGenericOwnerToken(_ token: String) -> Bool {
-    let t = token.trimmingCharacters(in: .whitespaces).lowercased()
+    let t = posixLowercased(token.trimmingCharacters(in: .whitespaces))
     if t.isEmpty { return true }
     if genericOwnerTokens.contains(t) || t.hasPrefix("python") { return true }
     return false
@@ -141,7 +141,7 @@ public func expandNameAliases(_ n: String) -> Set<String> {
 }
 
 public func classifyLinuxSystemName(_ name: String) -> (String, String?) {
-    let n = name.lowercased()
+    let n = posixLowercased(name)
     let nn = norm(name)
     if linuxSystemNames.contains(n) || linuxSystemNames.contains(nn) || n.hasPrefix("gtk-") || n.hasPrefix("xdg") {
         return ("system", nil)
@@ -167,12 +167,10 @@ public func xdgScanRoots(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     env: [String: String] = ProcessInfo.processInfo.environment
 ) -> [(String, String, String)] {
-    let cfg = env["XDG_CONFIG_HOME"] ?? (home as NSString).appendingPathComponent(".config")
-    let share = env["XDG_DATA_HOME"]
-        ?? ((home as NSString).appendingPathComponent(".local") as NSString).appendingPathComponent("share")
-    let cache = env["XDG_CACHE_HOME"] ?? (home as NSString).appendingPathComponent(".cache")
-    let state = env["XDG_STATE_HOME"]
-        ?? ((home as NSString).appendingPathComponent(".local") as NSString).appendingPathComponent("state")
+    let cfg = xdgConfigHome(home: home, env: env)
+    let share = xdgDataHome(home: home, env: env)
+    let cache = xdgCacheHome(home: home, env: env)
+    let state = xdgStateHome(home: home, env: env)
     let lib = ((home as NSString).appendingPathComponent(".local") as NSString).appendingPathComponent("lib")
     return [
         (".config", cfg, "dir"),
@@ -276,6 +274,8 @@ public final class DataItem {
         self.extraPaths = extraPaths
     }
 
+    public var leftoverStatus: LeftoverStatus? { LeftoverStatus(rawValue: status) }
+
     public func toLeftoverItem() -> LeftoverItem {
         LeftoverItem(
             name: name,
@@ -336,25 +336,18 @@ public func skipNestedProbe(_ item: DataItem) -> Bool {
     return false
 }
 
-public func skipSizeProbe(_ item: DataItem) -> Bool {
-    if item.status == "system" { return true }
-    if item.kind == "bundleid" || item.kind == "group" { return true }
-    if skipSizeRoots.contains(item.rootLabel) { return true }
-    return false
-}
-
 public func probeActivityMtime(
     _ path: String,
     maxEntries: Int = 80,
     maxDepth: Int = 2,
     timeout: TimeInterval = 0.2
 ) -> Date? {
-    let deadline = Date().addingTimeInterval(timeout)
+    let start = monotonicSeconds()
     var best: Date?
     var seen = 0
     var stack: [(String, Int)] = [(path, 0)]
     while !stack.isEmpty {
-        if Date() > deadline || seen >= maxEntries { break }
+        if monotonicSeconds() - start > timeout || seen >= maxEntries { break }
         let (current, depth) = stack.removeLast()
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: current),
               let mtime = attrs[.modificationDate] as? Date
@@ -365,8 +358,8 @@ public func probeActivityMtime(
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: current, isDirectory: &isDir), isDir.boolValue else { continue }
         guard let children = try? FileManager.default.contentsOfDirectory(atPath: current) else { continue }
-        for name in children {
-            if Date() > deadline || seen >= maxEntries { break }
+        for name in children.sorted() {
+            if monotonicSeconds() - start > timeout || seen >= maxEntries { break }
             if name.hasPrefix(".") { continue }
             let child = (current as NSString).appendingPathComponent(name)
             if skipDescend.contains(name) {
@@ -461,7 +454,7 @@ let leftoverNameSuffixes = [".savedstate", ".plist", ".binarycookies"]
 
 func stripLeftoverNameSuffix(_ name: String) -> String {
     let trimmed = name.trimmingCharacters(in: .whitespaces)
-    let low = trimmed.lowercased()
+    let low = posixLowercased(trimmed)
     for suffix in leftoverNameSuffixes {
         if low.hasSuffix(suffix) {
             return String(trimmed.dropLast(suffix.count))
@@ -476,10 +469,6 @@ func entryLabel(_ name: String) -> String {
 
 public func leftoverLocationLabel(rootLabel: String, extraCount: Int) -> String {
     extraCount <= 0 ? rootLabel : "\(rootLabel) +\(extraCount)"
-}
-
-public func leftoverAlsoLabel(extraPaths: [String]) -> String {
-    extraPaths.joined(separator: "\n")
 }
 
 let leftoverDisplaySkipTokens: Set<String> = [
@@ -541,21 +530,53 @@ func isUserBinLeftoverPath(_ path: String) -> Bool {
         || path.contains("/.linuxbrew/bin/")
 }
 
-public func leftoverMatchesCategory(_ item: DataItem, categories: [String]) -> Bool {
+private func leftoverMatchesCategory(
+    name: String,
+    path: String,
+    rootLabel: String,
+    status: String,
+    extraPaths: [String],
+    shadows: String?,
+    categories: [String]
+) -> Bool {
     guard !categories.isEmpty else { return true }
     let cats = categories.map { $0.lowercased() }
     let fields = [
-        item.name,
-        leftoverDisplayName(name: item.name, extraPaths: item.extraPaths),
-        item.path,
-        item.rootLabel,
-        item.status,
-        item.shadows ?? "",
-    ] + item.extraPaths
+        name,
+        leftoverDisplayName(name: name, extraPaths: extraPaths),
+        path,
+        rootLabel,
+        status,
+        shadows ?? "",
+    ] + extraPaths
     return fields.contains { field in
         let low = field.lowercased()
         return cats.contains { low.contains($0) }
     }
+}
+
+public func leftoverMatchesCategory(_ item: DataItem, categories: [String]) -> Bool {
+    leftoverMatchesCategory(
+        name: item.name,
+        path: item.path,
+        rootLabel: item.rootLabel,
+        status: item.status,
+        extraPaths: item.extraPaths,
+        shadows: item.shadows,
+        categories: categories
+    )
+}
+
+public func leftoverMatchesCategory(_ item: LeftoverItem, categories: [String]) -> Bool {
+    leftoverMatchesCategory(
+        name: item.name,
+        path: item.path,
+        rootLabel: item.root,
+        status: item.status,
+        extraPaths: item.extra_paths ?? [],
+        shadows: item.shadows,
+        categories: categories
+    )
 }
 
 func shadowSummary(name: String, kind: String, packaged: String) -> String {
@@ -602,6 +623,7 @@ public func leftoverSummary(
     return "\(label) is no longer installed. Leftover \(what)\(extra)."
 }
 
+/// Stored leftover "what" text is usable as-is (mentions leftover or a packaged overlay).
 public func leftoverWhatLooksCurrent(_ summary: String) -> Bool {
     summary.localizedCaseInsensitiveContains("leftover ")
         || summary.localizedCaseInsensitiveContains("hides the packaged")
@@ -627,8 +649,7 @@ public func leftoverWhatText(
     return leftoverSummary(rootLabel: rootLabel, kind: kind, name: name, extraPaths: extraPaths)
 }
 
-public func orphanReason(rootLabel: String, kind: String, name: String = "") -> String {
-    _ = name
+public func orphanReason(rootLabel: String, kind: String) -> String {
     if rootLabel == "LaunchAgents" {
         return "LaunchAgent whose target program is no longer installed."
     }
@@ -637,6 +658,7 @@ public func orphanReason(rootLabel: String, kind: String, name: String = "") -> 
     return "\(rootLabel) data that no installed app or brew package claims."
 }
 
+/// Stored leftover "why" text is usable as-is (overlay, broken PATH, leftover, LaunchAgent, or unclaimed).
 public func leftoverWhyLooksCurrent(_ reason: String) -> Bool {
     reason.localizedCaseInsensitiveContains("package-manager file")
         || reason.localizedCaseInsensitiveContains("Broken PATH")
@@ -765,7 +787,7 @@ public func leftoverLookupTokens(name: String, extraPaths: [String] = []) -> [St
         var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.hasPrefix(".") { t = String(t.dropFirst()) }
         t = stripLeftoverNameSuffix(t)
-        let low = t.lowercased()
+        let low = posixLowercased(t)
         if low.count < 2 { return }
         if leftoverLookupSkip.contains(low) { return }
         if leftoverLookupSkip.contains(norm(t)) { return }
@@ -873,7 +895,7 @@ func leftoverGroupKey(_ name: String) -> String {
     let n = norm(label)
     if let canon = leftoverProductAliases[n] { return canon }
     if leftoverProductAliases.values.contains(n) { return n }
-    for part in label.lowercased().split(separator: ".") {
+    for part in posixLowercased(label).split(separator: ".") {
         let p = norm(String(part))
         if let canon = leftoverProductAliases[p] { return canon }
         if leftoverProductAliases.values.contains(p) { return p }
@@ -894,7 +916,7 @@ func isBundleIdChild(_ childName: String, of parentName: String) -> Bool {
     let child = entryLabel(childName)
     let parent = entryLabel(parentName)
     guard parent.contains(".") else { return false }
-    return child.lowercased().hasPrefix(parent.lowercased() + ".")
+    return posixLowercased(child).hasPrefix(posixLowercased(parent) + ".")
 }
 
 func collapseBundleIdChildBuckets(_ buckets: inout [String: [DataItem]]) {
@@ -936,7 +958,8 @@ func collapseVendorPrefixBuckets(_ buckets: inout [String: [DataItem]]) {
     }
     for keys in byPrefix.values where keys.count > 1 {
         let primary = keys.max { a, b in
-            (buckets[a]?.map(\.sizeBytes).reduce(0, +) ?? 0) < (buckets[b]?.map(\.sizeBytes).reduce(0, +) ?? 0)
+            (buckets[a]?.reduce(0) { addBytes($0, $1.sizeBytes) } ?? 0)
+                < (buckets[b]?.reduce(0) { addBytes($0, $1.sizeBytes) } ?? 0)
         }!
         for key in keys where key != primary {
             if let moving = buckets.removeValue(forKey: key) {
@@ -967,7 +990,7 @@ func mergeOrphanGroup(_ group: [DataItem]) -> DataItem {
         }
     }
     primary.extraPaths = extras.sorted()
-    primary.sizeBytes = group.reduce(0) { $0 + $1.sizeBytes }
+    primary.sizeBytes = group.reduce(0) { addBytes($0, $1.sizeBytes) }
     primary.sizeMeasured = group.contains { $0.sizeMeasured }
     primary.mtime = group.compactMap(\.mtime).max() ?? primary.mtime
     primary.activityMtime = group.compactMap(\.activityMtime).max() ?? primary.activityMtime
@@ -1314,18 +1337,32 @@ public func listBrokenUserBinLinks(dirs: [String]? = nil) -> [DataItem] {
 }
 
 public func defaultOverlayShadowRoots(
-    home: String = FileManager.default.homeDirectoryForCurrentUser.path
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
 ) -> [(dir: String, label: String, kind: String)] {
     let ns = home as NSString
-    return [
+    let data = xdgDataHome(home: home, env: env)
+    let xdgDesktop = (data as NSString).appendingPathComponent("applications")
+    let legacyDesktop = ns.appendingPathComponent(".local/share/applications")
+    var roots: [(dir: String, label: String, kind: String)] = [
         (ns.appendingPathComponent(".local/bin"), ".local/bin", "file"),
         (ns.appendingPathComponent("bin"), "bin", "file"),
         (ns.appendingPathComponent(".cargo/bin"), ".cargo/bin", "file"),
-        (ns.appendingPathComponent(".local/share/applications"), ".local/share/applications", "desktop"),
+        (xdgDesktop, ".local/share/applications", "desktop"),
     ]
+    if URL(fileURLWithPath: legacyDesktop).standardizedFileURL.path
+        != URL(fileURLWithPath: xdgDesktop).standardizedFileURL.path
+    {
+        roots.append((legacyDesktop, ".local/share/applications", "desktop"))
+    }
+    return roots
 }
 
-public func defaultPackageShadowDirs(which: WhichFn = whichCommand) -> [String] {
+public func defaultPackageShadowDirs(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment,
+    which: WhichFn = whichCommand
+) -> [String] {
     var dirs = [
         "/usr/bin",
         "/usr/sbin",
@@ -1343,9 +1380,12 @@ public func defaultPackageShadowDirs(which: WhichFn = whichCommand) -> [String] 
     if let brew = which("brew") {
         dirs.append(URL(fileURLWithPath: brew).deletingLastPathComponent().path)
     }
-    let home = FileManager.default.homeDirectoryForCurrentUser.path as NSString
-    dirs.append(home.appendingPathComponent(".local/share/flatpak/exports/bin"))
-    dirs.append(home.appendingPathComponent(".local/share/flatpak/exports/share/applications"))
+    let data = xdgDataHome(home: home, env: env) as NSString
+    dirs.append(data.appendingPathComponent("flatpak/exports/bin"))
+    dirs.append(data.appendingPathComponent("flatpak/exports/share/applications"))
+    let legacy = home as NSString
+    dirs.append(legacy.appendingPathComponent(".local/share/flatpak/exports/bin"))
+    dirs.append(legacy.appendingPathComponent(".local/share/flatpak/exports/share/applications"))
     var seen = Set<String>()
     return dirs.filter { seen.insert(URL(fileURLWithPath: $0).standardizedFileURL.path).inserted }
 }
@@ -1523,7 +1563,8 @@ public func scanLeftovers(
     brew: BrewSnapshot,
     progress: (String) -> Void = { _ in },
     roots: [(String, String, String)]? = nil,
-    measureSizes: Bool = true
+    measureSizes: Bool = true,
+    now: Date = Date()
 ) -> ([DataItem], [OrphanAgent]) {
     let ident = Identity(apps: apps + appsFromPathBinaries(), brew: brew, toolNames: listUserToolNames())
     var allRoots = roots ?? scanRootsForPlatform()
@@ -1556,7 +1597,7 @@ public func scanLeftovers(
 
     let agents: [OrphanAgent]
     if roots == nil {
-        agents = scanLaunchAgents(apps: apps, brew: brew, progress: progress)
+        agents = scanLaunchAgents(progress: progress)
         for agent in agents {
             items.append(dataItem(from: agent, ident: ident))
         }
@@ -1567,16 +1608,12 @@ public func scanLeftovers(
     }
 
     if measureSizes {
-        let toMeasure = items.filter { isListedLeftoverStatus($0.status) && !skipSizeProbe($0) }
+        let toMeasure = items.filter { isListedLeftoverStatus($0.status) && !skipNestedProbe($0) }
         progress("  · measuring sizes for \(toMeasure.count) leftover folders…")
         let sizes = pmap(items, workers: 4) { item -> (Int, Bool) in
-            if skipSizeProbe(item) { return (0, false) }
+            if skipNestedProbe(item) { return (0, false) }
             if !isListedLeftoverStatus(item.status) { return (0, true) }
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: item.path, isDirectory: &isDir), isDir.boolValue {
-                return directoryByteSize(item.path, timeout: 6)
-            }
-            return (fileSize(item.path), true)
+            return duSize(item.path, timeout: 6)
         }
         for (item, pair) in zip(items, sizes) {
             item.sizeBytes = pair.0
@@ -1598,7 +1635,7 @@ public func scanLeftovers(
         for (item, act) in zip(items, acts) {
             item.activityMtime = act
         }
-        applyRecentActivity(items)
+        applyRecentActivity(items, now: now)
     }
     items = groupOrphanedLeftovers(items)
     applyOrphanReasons(items)
@@ -1606,12 +1643,9 @@ public func scanLeftovers(
 }
 
 public func scanLaunchAgents(
-    apps: [AppRecord],
-    brew: BrewSnapshot,
     progress: (String) -> Void = { _ in },
     roots: [String]? = nil
 ) -> [OrphanAgent] {
-    _ = (apps, brew)
     if PlatformOverride.isLinux { return [] }
     progress("  · checking LaunchAgents…")
     var orphans: [OrphanAgent] = []
