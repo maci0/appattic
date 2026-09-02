@@ -38,11 +38,11 @@ if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
     export SOURCE_DATE_EPOCH
 fi
 if [[ -z "${VERSION:-}" ]]; then
-    VERSION="$(git describe --tags --exact-match 2>/dev/null || printf '1.1.2')"
+    VERSION="$(git describe --tags --exact-match 2>/dev/null || printf '1.1.3')"
 fi
 VERSION="${VERSION#v}"
 if [[ -z "$VERSION" ]]; then
-    VERSION="1.1.2"
+    VERSION="1.1.3"
 fi
 export VERSION
 
@@ -274,6 +274,9 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 export LINUXDEPLOY_PLUGIN_QT="$PLUGIN_QT"
 # linuxdeploy bundles an old strip that chokes on .relr.dyn (newer toolchains)
 export NO_STRIP=1
+# The qt plugin deploys only libqxcb.so by default. --smoke runs headless, here
+# and for users, so the offscreen platform plugin has to ship too.
+export EXTRA_PLATFORM_PLUGINS=libqoffscreen.so
 
 echo "linuxdeploy: bundling Qt 6 into AppDir…"
 run_appimage_tool "$LINUXDEPLOY" --appdir "$APPDIR" \
@@ -281,6 +284,14 @@ run_appimage_tool "$LINUXDEPLOY" --appdir "$APPDIR" \
     --desktop-file "$DESKTOP" \
     --icon-file "$ICON" \
     --plugin qt
+
+offscreen="$APPDIR/usr/plugins/platforms/libqoffscreen.so"
+if [[ ! -f "$offscreen" ]]; then
+    echo "error: linuxdeploy did not deploy libqoffscreen.so" >&2
+    echo "       EXTRA_PLATFORM_PLUGINS was: ${EXTRA_PLATFORM_PLUGINS:-unset}" >&2
+    echo "       without it QT_QPA_PLATFORM=offscreen cannot start" >&2
+    exit 1
+fi
 
 patch_apprun() {
     local apprun="$APPDIR/AppRun"
