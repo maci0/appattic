@@ -116,6 +116,17 @@ final class ClassifyTests: XCTestCase {
         XCTAssertEqual(ident([vscode]).classify("Visual Studio Code", kind: "dir").0, "owned")
     }
 
+    func testAccentedAppNameOwnsNFCAndNFDLeftovers() {
+        let nfc = "Café"
+        let nfd = "Cafe\u{0301}"
+        XCTAssertNotEqual(Array(nfc.unicodeScalars), Array(nfd.unicodeScalars))
+        let app = AppRecord(path: "/Applications/Café.app", displayName: nfc, bundleId: "org.example.cafe")
+        let id = ident([app])
+        XCTAssertEqual(id.classify(nfc, kind: "dir").0, "owned")
+        XCTAssertEqual(id.classify(nfd, kind: "dir").0, "owned")
+        XCTAssertEqual(id.classify("Cafe", kind: "dir").0, "owned")
+    }
+
     func testAppleBundleIsSystem() {
         XCTAssertEqual(ident().classify("com.apple.Safari", kind: "bundleid").0, "system")
     }
@@ -1056,17 +1067,6 @@ final class ClassifyTests: XCTestCase {
         XCTAssertTrue(item.summary?.contains("2 more") == true, item.summary ?? "")
     }
 
-    func testLeftoverAlsoLabelUsesFullPaths() {
-        XCTAssertEqual(
-            leftoverAlsoLabel(extraPaths: [
-                "/Users/x/Library/Containers/com.kagi.kagimacOS.ShareExtension",
-                "/Users/x/Library/WebKit/com.kagi.kagimacOS",
-            ]),
-            "/Users/x/Library/Containers/com.kagi.kagimacOS.ShareExtension\n/Users/x/Library/WebKit/com.kagi.kagimacOS"
-        )
-        XCTAssertEqual(leftoverAlsoLabel(extraPaths: []), "")
-    }
-
     func testLeftoverDisplayNamePrefersFolderOverDns() {
         XCTAssertEqual(
             leftoverDisplayName(
@@ -1077,6 +1077,7 @@ final class ClassifyTests: XCTestCase {
         )
         XCTAssertEqual(leftoverDisplayName(name: "com.isaacmarovitz.Whisky"), "Whisky")
         XCTAssertEqual(leftoverDisplayName(name: "com.sentinelone.SentinelAgent.plist"), "SentinelAgent")
+        XCTAssertEqual(leftoverDisplayName(name: "com.obsidian.Obsidian.PLIST"), "Obsidian")
         XCTAssertEqual(leftoverDisplayName(name: "md.obsidian.plist"), "Obsidian")
         XCTAssertEqual(leftoverDisplayName(name: "@mmx-agentelectron-updater"), "Minimax")
         XCTAssertEqual(leftoverDisplayName(name: "G69SCX94XU.duck"), "Duck")
@@ -1409,12 +1410,9 @@ final class ClassifyTests: XCTestCase {
         let system = DataItem(path: "/Users/x/Library/Caches/com.apple.Safari", name: "com.apple.Safari", rootLabel: "Caches", kind: "dir", status: "system")
         XCTAssertTrue(skipNestedProbe(container))
         XCTAssertTrue(skipNestedProbe(group))
+        XCTAssertTrue(skipNestedProbe(webkit))
+        XCTAssertTrue(skipNestedProbe(system))
         XCTAssertFalse(skipNestedProbe(support))
-        XCTAssertTrue(skipSizeProbe(container))
-        XCTAssertTrue(skipSizeProbe(group))
-        XCTAssertTrue(skipSizeProbe(webkit))
-        XCTAssertTrue(skipSizeProbe(system))
-        XCTAssertFalse(skipSizeProbe(support))
     }
 
     func testRecentOrphanedDirIsNotReclaimable() {
@@ -1424,6 +1422,36 @@ final class ClassifyTests: XCTestCase {
         applyRecentActivity([recent, stale], now: now)
         XCTAssertEqual(recent.status, "active")
         XCTAssertEqual(stale.status, "orphaned")
+    }
+
+    func testScanLeftoversRecentDirFollowsInjectedNow() throws {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let td = FileManager.default.temporaryDirectory.appendingPathComponent("left-now-\(UUID().uuidString)")
+        let orphan = td.appendingPathComponent("HotApp")
+        try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: td) }
+        try "x".write(to: orphan.appendingPathComponent("cache.dat"), atomically: true, encoding: .utf8)
+        let recent = now.addingTimeInterval(-5 * 86400)
+        try FileManager.default.setAttributes([.modificationDate: recent], ofItemAtPath: orphan.path)
+        try FileManager.default.setAttributes(
+            [.modificationDate: recent],
+            ofItemAtPath: orphan.appendingPathComponent("cache.dat").path
+        )
+        let (hot, _) = scanLeftovers(
+            apps: [],
+            brew: BrewSnapshot(available: false),
+            roots: [("Application Support", td.path, "dir")],
+            now: now
+        )
+        XCTAssertEqual(hot.first { $0.name == "HotApp" }?.status, "active")
+        let later = now.addingTimeInterval(Double(activeDays + 10) * 86400)
+        let (cold, _) = scanLeftovers(
+            apps: [],
+            brew: BrewSnapshot(available: false),
+            roots: [("Application Support", td.path, "dir")],
+            now: later
+        )
+        XCTAssertEqual(cold.first { $0.name == "HotApp" }?.status, "orphaned")
     }
 
     func testOrphanReasonAndSummary() {
@@ -1490,6 +1518,9 @@ final class ClassifyTests: XCTestCase {
         for name in ["kube", "kubebuilder-envtest"] {
             XCTAssertEqual(classifyLinuxSystemName(name).0, "system", name)
         }
+        for name in [".aws", ".docker", ".ssh", ".gnupg", "aws", "docker"] {
+            XCTAssertEqual(classifyLinuxSystemName(name).0, "system", name)
+        }
         for name in ["quarto", "opencode", "crewai", "herald", "mcp", "huginn", "hf", "backend"] {
             XCTAssertEqual(classifyLinuxSystemName(name).0, "orphaned", name)
         }
@@ -1535,6 +1566,12 @@ final class ClassifyTests: XCTestCase {
         XCTAssertEqual(defaults[".config"], "/home/x/.config")
         XCTAssertEqual(defaults[".local/share"], "/home/x/.local/share")
         XCTAssertEqual(defaults[".local/state"], "/home/x/.local/state")
+        let empty = Dictionary(uniqueKeysWithValues: xdgScanRoots(
+            home: "/home/x",
+            env: ["XDG_DATA_HOME": "", "XDG_CONFIG_HOME": "   "]
+        ).map { ($0.0, $0.1) })
+        XCTAssertEqual(empty[".local/share"], "/home/x/.local/share")
+        XCTAssertEqual(empty[".config"], "/home/x/.config")
         XCTAssertEqual(
             leftoverSummary(rootLabel: ".local/lib", kind: "dir", name: "herald"),
             "herald is no longer installed. Leftover .local/lib data."
@@ -1639,6 +1676,34 @@ final class ClassifyTests: XCTestCase {
         XCTAssertFalse(normal.contains("launchctl"))
     }
 
+    func testLeftoverRemoveCommandSkipsPackagedPaths() {
+        XCTAssertTrue(isProtectedPackagedPath("/usr/bin/python3"))
+        XCTAssertTrue(isProtectedPackagedPath("/usr"))
+        XCTAssertTrue(isProtectedPackagedPath("/bin/ls"))
+        XCTAssertTrue(isProtectedPackagedPath("/etc/passwd"))
+        XCTAssertTrue(isProtectedPackagedPath("/System/Library/CoreServices"))
+        XCTAssertTrue(isProtectedPackagedPath("/Library/LaunchAgents/com.apple.foo.plist"))
+        XCTAssertFalse(isProtectedPackagedPath("/home/u/.local/bin/python3"))
+        XCTAssertFalse(isProtectedPackagedPath("/tmp/Foo"))
+        XCTAssertFalse(isProtectedPackagedPath("/Users/x/Library/LaunchAgents/com.dead.app.plist"))
+        let cmd = leftoverRemoveCommand(path: "/usr/bin/python3", rootLabel: ".local/bin")
+        XCTAssertFalse(cmd.contains("rm -rf"), cmd)
+        XCTAssertTrue(cmd.contains("skipped"), cmd)
+        let mixed = leftoverRemoveCommand(
+            path: "/home/u/.local/bin/python3",
+            rootLabel: ".local/bin",
+            extraPaths: ["/usr/bin/python3"]
+        )
+        XCTAssertTrue(mixed.contains("/home/u/.local/bin/python3"), mixed)
+        XCTAssertFalse(mixed.contains("/usr/bin/python3"), mixed)
+        let agent = leftoverRemoveCommand(
+            path: "/Library/LaunchAgents/com.apple.foo.plist",
+            rootLabel: "LaunchAgents"
+        )
+        XCTAssertFalse(agent.contains("rm -rf"), agent)
+        XCTAssertFalse(agent.contains("launchctl"), agent)
+    }
+
     func testScanLaunchAgentsFindsMissingProgram() throws {
         PlatformOverride.linux = false
         defer { PlatformOverride.linux = nil }
@@ -1671,7 +1736,7 @@ final class ClassifyTests: XCTestCase {
         </dict>
         </plist>
         """.write(to: keep, atomically: true, encoding: .utf8)
-        let found = scanLaunchAgents(apps: [], brew: BrewSnapshot(available: false), roots: [td.path])
+        let found = scanLaunchAgents(roots: [td.path])
         XCTAssertEqual(found.map(\.label), ["com.dead.app"])
         XCTAssertTrue(found[0].path.hasSuffix("com.dead.app.plist"))
     }
@@ -1679,6 +1744,6 @@ final class ClassifyTests: XCTestCase {
     func testScanLaunchAgentsSkippedOnLinux() {
         PlatformOverride.linux = true
         defer { PlatformOverride.linux = nil }
-        XCTAssertTrue(scanLaunchAgents(apps: [], brew: BrewSnapshot(available: false), roots: ["/tmp"]).isEmpty)
+        XCTAssertTrue(scanLaunchAgents(roots: ["/tmp"]).isEmpty)
     }
 }

@@ -31,6 +31,32 @@ final class UsageTests: XCTestCase {
         XCTAssertNil(effectiveLastUsed(added.addingTimeInterval(-30), added))
     }
 
+    func testParseHistoryFileKeepsUTF8CommandsWhenFileHasInvalidBytes() throws {
+        var data = Data("myéapp\n".utf8)
+        data.append(0xFF)
+        data.append(contentsOf: "\nfirefox\n".utf8)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".hist")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var index = HistoryIndex()
+        parseHistoryFile(url.path, index: &index)
+        XCTAssertTrue(index.everUsed.contains("firefox"), "\(index.everUsed)")
+        XCTAssertTrue(index.everUsed.contains("myéapp"), "latin-1 fallback would turn this into myÃ©app: \(index.everUsed)")
+    }
+
+    func testParseFishHistoryKeepsUTF8CommandsWhenFileHasInvalidBytes() throws {
+        var data = Data("- cmd: myéapp --help\n  when: 1717200000\n".utf8)
+        data.append(0xFF)
+        data.append(contentsOf: "\n- cmd: firefox\n  when: 1717200001\n".utf8)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".fish")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var index = HistoryIndex()
+        parseFishHistory(url.path, index: &index)
+        XCTAssertTrue(index.everUsed.contains("firefox"), "\(index.everUsed)")
+        XCTAssertTrue(index.everUsed.contains("myéapp"), "\(index.everUsed)")
+    }
+
     func testParsesApplicationBookmarks() throws {
         let xml = """
         <?xml version="1.0"?>
@@ -50,7 +76,7 @@ final class UsageTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: path) }
         let hits = parseRecentlyUsedXbel(path)
         XCTAssertNotNil(hits["firefox"])
-        XCTAssertEqual(Calendar.current.component(.year, from: hits["firefox"]!), 2026)
+        XCTAssertEqual(utcCalendar().component(.year, from: hits["firefox"]!), 2026)
     }
 
     func testUsesBookmarkVisitedWhenApplicationHasNoDate() throws {
@@ -71,7 +97,7 @@ final class UsageTests: XCTestCase {
         let path = try writeTemp(xml, suffix: ".xbel")
         defer { try? FileManager.default.removeItem(atPath: path) }
         let hits = parseRecentlyUsedXbel(path)
-        XCTAssertEqual(Calendar(identifier: .gregorian).component(.month, from: hits["firefox"]!), 5)
+        XCTAssertEqual(utcCalendar().component(.month, from: hits["firefox"]!), 5)
     }
 
     func testMatchesBundleExecutable() {
@@ -141,7 +167,7 @@ final class UsageTests: XCTestCase {
         """
         let (used, _) = mdlsDates("/fake/iTerm2") { _, _ in (0, out, "") }
         XCTAssertNotNil(used)
-        XCTAssertEqual(Calendar(identifier: .gregorian).component(.month, from: used!), 6)
+        XCTAssertEqual(utcCalendar().component(.month, from: used!), 6)
     }
 
     func testFillAppUsageCopiesSpotlightDescriptionArray() {
@@ -219,23 +245,135 @@ final class UsageTests: XCTestCase {
             """, "")
         }, runningComms: [])
         XCTAssertEqual(apps[0].lastUsedSource, "spotlight")
-        XCTAssertEqual(Calendar(identifier: .gregorian).component(.month, from: apps[0].lastUsed!), 6)
+        XCTAssertEqual(utcCalendar().component(.month, from: apps[0].lastUsed!), 6)
+    }
+
+    func testFillAppUsageMarksRunningAtInjectedNow() {
+        PlatformOverride.linux = false
+        defer { PlatformOverride.linux = nil }
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        var apps = [AppRecord(
+            path: "/Applications/Firefox.app",
+            displayName: "Firefox",
+            extra: ["executable": "firefox"]
+        )]
+        fillAppUsage(
+            &apps,
+            progress: { _ in },
+            run: { _, _ in (0, "", "") },
+            runningComms: ["firefox"],
+            now: now
+        )
+        XCTAssertEqual(apps[0].lastUsed, now)
+        XCTAssertEqual(apps[0].lastUsedSource, "running")
+    }
+
+    func testLinuxFillAppUsageMarksRunningAtInjectedNow() {
+        PlatformOverride.linux = true
+        defer { PlatformOverride.linux = nil }
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        var apps = [AppRecord(
+            path: "/usr/bin/firefox",
+            displayName: "Firefox Web Browser",
+            extra: ["executable": "firefox"]
+        )]
+        fillAppUsage(
+            &apps,
+            progress: { _ in },
+            run: { _, _ in (0, "", "") },
+            runningComms: ["firefox"],
+            xbelPath: "/nope",
+            gnomeStatePath: "/nope",
+            flatpakVarApp: "/nope",
+            now: now
+        )
+        XCTAssertEqual(apps[0].lastUsed, now)
+        XCTAssertEqual(apps[0].lastUsedSource, "running")
     }
 
     func testLinuxUsageDoesNotCallMdls() {
         PlatformOverride.linux = true
         defer { PlatformOverride.linux = nil }
+        var mdlsCalls = 0
         var apps = [AppRecord(path: "/usr/bin/firefox", displayName: "Firefox Web Browser", bundleId: "firefox", extra: ["executable": "firefox"])]
         fillAppUsage(&apps, progress: { _ in }, run: { cmd, _ in
-            XCTAssertFalse(cmd.contains("mdls"))
+            if cmd.contains("mdls") { mdlsCalls += 1 }
             return (0, "", "")
         }, runningComms: [], xbelPath: "/nope", gnomeStatePath: "/nope", flatpakVarApp: "/nope")
+        XCTAssertEqual(mdlsCalls, 0)
+        XCTAssertNil(apps[0].lastUsed)
+        XCTAssertNil(apps[0].lastUsedSource)
     }
 
     func testXbelPathFollowsXdgDataHome() {
-        setenv("XDG_DATA_HOME", "/tmp/xdg-data", 1)
-        defer { unsetenv("XDG_DATA_HOME") }
-        XCTAssertEqual(recentlyUsedXbelPath(), "/tmp/xdg-data/recently-used.xbel")
+        XCTAssertEqual(
+            recentlyUsedXbelPath(home: "/home/x", env: ["XDG_DATA_HOME": "/tmp/xdg-data"]),
+            "/tmp/xdg-data/recently-used.xbel"
+        )
+        XCTAssertEqual(
+            recentlyUsedXbelPath(home: "/home/x", env: [:]),
+            "/home/x/.local/share/recently-used.xbel"
+        )
+        XCTAssertEqual(
+            gnomeApplicationStatePath(home: "/home/x", env: ["XDG_DATA_HOME": "/tmp/xdg-data"]),
+            "/tmp/xdg-data/gnome-shell/application_state"
+        )
+    }
+
+    func testLoadHistoryReadsFishUnderXdgDataHome() throws {
+        let td = FileManager.default.temporaryDirectory.appendingPathComponent("fish-xdg-\(UUID().uuidString)")
+        let fishDir = td.appendingPathComponent("fish")
+        try FileManager.default.createDirectory(at: fishDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: td) }
+        try """
+        - cmd: mycli --help
+          when: 1717200000
+        """.write(to: fishDir.appendingPathComponent("fish_history"), atomically: true, encoding: .utf8)
+        let idx = loadHistory(home: "/nope-appattic-home", env: ["XDG_DATA_HOME": td.path])
+        XCTAssertTrue(idx.everUsed.contains("mycli"), "\(idx.everUsed)")
+        XCTAssertEqual(idx.lastSeen["mycli"], Date(timeIntervalSince1970: 1_717_200_000))
+    }
+
+    func testParseHistoryFileStripsCRLF() throws {
+        let path = try writeTemp(": 1717200000:0;crlftool --ok\r\n", suffix: ".hist")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        var idx = HistoryIndex()
+        parseHistoryFile(path, index: &idx)
+        XCTAssertTrue(idx.everUsed.contains("crlftool"), "\(idx.everUsed)")
+    }
+
+    func testParseHistoryFileKeepDropsOtherCommandsButKeepsOldestTimestamp() throws {
+        let path = try writeTemp(
+            ": 1000000000:0;ls /secret/docs\n: 1717200000:0;jq .\n",
+            suffix: ".hist"
+        )
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        var idx = HistoryIndex()
+        parseHistoryFile(path, index: &idx, keep: ["jq"])
+        XCTAssertEqual(idx.everUsed, Set(["jq"]))
+        XCTAssertEqual(idx.lastSeen["jq"], Date(timeIntervalSince1970: 1_717_200_000))
+        XCTAssertNil(idx.lastSeen["ls"])
+        XCTAssertEqual(idx.oldestSeen, Date(timeIntervalSince1970: 1_000_000_000))
+        let span = historySpanDays(idx, now: Date(timeIntervalSince1970: 1_000_000_000 + 400 * 86400))
+        XCTAssertEqual(span ?? -1, 400, accuracy: 0.001)
+    }
+
+    func testParseFishHistoryKeepDropsOtherCommands() throws {
+        let path = try writeTemp(
+            """
+            - cmd: cat /home/alice/secret.txt
+              when: 1000000000
+            - cmd: jq --version
+              when: 1717200000
+            """,
+            suffix: ".fish"
+        )
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        var idx = HistoryIndex()
+        parseFishHistory(path, index: &idx, keep: ["jq"])
+        XCTAssertEqual(idx.everUsed, Set(["jq"]))
+        XCTAssertNil(idx.lastSeen["cat"])
+        XCTAssertEqual(idx.oldestSeen, Date(timeIntervalSince1970: 1_000_000_000))
     }
 
     func testLinuxXbelMatchesMozillaAlias() throws {
@@ -261,7 +399,7 @@ final class UsageTests: XCTestCase {
         fillAppUsage(&apps, progress: { _ in }, runningComms: [], xbelPath: path, gnomeStatePath: "/nope", flatpakVarApp: "/nope")
         XCTAssertNotNil(apps[0].lastUsed)
         XCTAssertEqual(apps[0].lastUsedSource, "recently-used")
-        XCTAssertEqual(Calendar(identifier: .gregorian).component(.month, from: apps[0].lastUsed!), 4)
+        XCTAssertEqual(utcCalendar().component(.month, from: apps[0].lastUsed!), 4)
     }
 
     func testLinuxXbelNearInstallTimeIsNotLastUsed() throws {
@@ -305,7 +443,42 @@ final class UsageTests: XCTestCase {
         let hits = parseGnomeApplicationState(path)
         XCTAssertNotNil(hits["org.mozilla.firefox.desktop"])
         XCTAssertNotNil(hits["org.mozilla.firefox"])
-        XCTAssertEqual(Calendar(identifier: .gregorian).component(.year, from: hits["org.mozilla.firefox"]!), 2024)
+        XCTAssertEqual(utcCalendar().component(.year, from: hits["org.mozilla.firefox"]!), 2024)
+    }
+
+    func testGnomeApplicationStateLastSeenMicroseconds() throws {
+        let xml = """
+        <?xml version="1.0"?>
+        <application-state>
+          <application id="org.mozilla.firefox.desktop" score="12.0" last-seen="1717200000000000"/>
+        </application-state>
+        """
+        let path = try writeTemp(xml, suffix: ".xml")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let hits = parseGnomeApplicationState(path)
+        XCTAssertEqual(hits["org.mozilla.firefox"]?.timeIntervalSince1970, 1_717_200_000, accuracy: 0.5)
+    }
+
+    func testParsesXbelVisitedWithMicroseconds() throws {
+        let xml = """
+        <?xml version="1.0"?>
+        <xbel version="1.0" xmlns:bookmark="http://www.freedesktop.org/standards/desktop/bookmark">
+          <bookmark href="file:///tmp/doc.pdf" visited="2026-04-01T15:00:00.123456Z">
+            <info>
+              <metadata>
+                <bookmark:applications>
+                  <bookmark:application name="Firefox" exec="firefox %u" modified="2026-04-01T15:00:00.123456Z" count="3"/>
+                </bookmark:applications>
+              </metadata>
+            </info>
+          </bookmark>
+        </xbel>
+        """
+        let path = try writeTemp(xml, suffix: ".xbel")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let hits = parseRecentlyUsedXbel(path)
+        XCTAssertNotNil(hits["firefox"])
+        XCTAssertEqual(utcCalendar().component(.month, from: hits["firefox"]!), 4)
     }
 
     func testFlatpakVarAppMtime() throws {
@@ -316,6 +489,25 @@ final class UsageTests: XCTestCase {
         XCTAssertNotNil(hits["org.mozilla.firefox"])
         XCTAssertNotNil(hits["firefox"])
         try? FileManager.default.removeItem(at: td)
+    }
+
+    func testUsageKeysFoldCapitalIOutsideTurkishLocale() {
+        let app = AppRecord(path: "/Applications/IINA.app", displayName: "IINA", bundleId: "com.colliderli.iina")
+        let keys = appUsageKeys(app)
+        XCTAssertTrue(keys.contains("iina"), "\(keys)")
+        XCTAssertFalse(keys.contains("ıına"), "\(keys)")
+    }
+
+    func testHistoryIndexFoldsCommandCase() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".hist")
+        try "Wget -q https://example.com\n".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var index = HistoryIndex()
+        parseHistoryFile(url.path, index: &index)
+        XCTAssertTrue(index.everUsed.contains("wget"), "\(index.everUsed)")
+        let (last, ever) = lastUsedFromHistory(["wget", "Wget"], index: index)
+        XCTAssertTrue(ever)
+        XCTAssertNil(last)
     }
 
     func testFirefoxKeysIncludeMozillaAndFirstWord() {
@@ -421,7 +613,7 @@ final class UsageTests: XCTestCase {
             return (0, "", "")
         }, runningComms: [])
         XCTAssertEqual(apps[0].lastUsedSource, "spotlight")
-        XCTAssertEqual(Calendar(identifier: .gregorian).component(.month, from: apps[0].lastUsed!), 4)
+        XCTAssertEqual(utcCalendar().component(.month, from: apps[0].lastUsed!), 4)
     }
 
     func testPrefsMtimeNearInstallIsIgnored() {
@@ -463,11 +655,17 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(apps[0].lastUsedSource, "prefs-mtime")
     }
 
+    private func utcCalendar() -> Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        return cal
+    }
+
     private func date(_ y: Int, _ m: Int, _ d: Int, _ h: Int, _ min: Int, _ s: Int = 0) -> Date {
         var c = DateComponents()
         c.year = y; c.month = m; c.day = d; c.hour = h; c.minute = min; c.second = s
         c.timeZone = TimeZone(secondsFromGMT: 0)
-        return Calendar(identifier: .gregorian).date(from: c)!
+        return utcCalendar().date(from: c)!
     }
 
     private func writeTemp(_ text: String, suffix: String) throws -> String {

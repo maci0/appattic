@@ -148,6 +148,28 @@ final class RecommendTests: XCTestCase {
         try? FileManager.default.removeItem(at: td)
     }
 
+    func testFormulaHistorySpanUsesInjectedNow() {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let oldest = now.addingTimeInterval(-100 * 86400)
+        let history = HistoryIndex(lastSeen: ["wget": oldest], everUsed: ["wget"])
+        let brew = BrewSnapshot(
+            available: true,
+            prefix: "/opt/homebrew",
+            formulas: [Formula(name: "wget", isLeaf: true, bins: ["wget"])]
+        )
+        let software = buildSoftware(
+            apps: [],
+            brew: brew,
+            dataItems: [],
+            history: history,
+            includeDarwinNonApp: false,
+            now: now
+        )
+        let wget = software.first { $0.name == "wget" }
+        XCTAssertEqual(wget?.lastUsed, oldest)
+        XCTAssertEqual(wget?.historySpanDays ?? -1, 100, accuracy: 1e-6)
+    }
+
     func testFormulaCopiesBrewDesc() {
         let brew = BrewSnapshot(
             available: true,
@@ -346,6 +368,40 @@ final class RecommendTests: XCTestCase {
         XCTAssertEqual(v.reason, "Not used for 6mo. Easy to reinstall with brew.")
     }
 
+    func testLongIdleCaskWithSignificantDataIsReview() {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let sw = Software(
+            name: "The Unarchiver",
+            kind: "app",
+            path: "/Applications/The Unarchiver.app",
+            source: "brew-cask",
+            lastUsed: now.addingTimeInterval(-200 * 86400),
+            dataBytes: dataKeepThreshold,
+            caskName: "the-unarchiver"
+        )
+        let v = evaluate(sw, now: now)
+        XCTAssertEqual(v.tier, "review")
+        XCTAssertTrue(v.reason.contains("significant data"), v.reason)
+    }
+
+    func testLongIdleCaskWithUnmeasuredDataIsReview() {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let sw = Software(
+            name: "The Unarchiver",
+            kind: "app",
+            path: "/Applications/The Unarchiver.app",
+            source: "brew-cask",
+            lastUsed: now.addingTimeInterval(-200 * 86400),
+            dataBytes: 0,
+            dataMeasured: false,
+            dataPaths: ["/Users/x/Library/Containers/cx.c3.theunarchiver"],
+            caskName: "the-unarchiver"
+        )
+        let v = evaluate(sw, now: now)
+        XCTAssertEqual(v.tier, "review")
+        XCTAssertTrue(v.reason.contains("could not be measured"), v.reason)
+    }
+
     func testLongIdleManualAppWhyIsShort() {
         let now = Date(timeIntervalSince1970: 1_787_011_200)
         let sw = Software(
@@ -426,6 +482,42 @@ final class RecommendTests: XCTestCase {
         let sketch = software.first { $0.name == "Sketch" }!
         XCTAssertEqual(sketch.dataBytes, 12_000_000)
         XCTAssertEqual(sketch.dataPaths, [support.path])
+        XCTAssertTrue(sketch.dataMeasured)
+    }
+
+    func testBuildSoftwareMarksUnmeasuredOwnedData() {
+        let app = AppRecord(
+            path: "/Applications/Sketch.app",
+            displayName: "Sketch",
+            bundleId: "com.bohemiancoding.sketch3"
+        )
+        let support = DataItem(
+            path: "/tmp/Library/Application Support/Sketch",
+            name: "Sketch",
+            rootLabel: "Application Support",
+            kind: "dir",
+            status: "owned",
+            sizeBytes: 12_000_000
+        )
+        let container = DataItem(
+            path: "/tmp/Library/Containers/com.bohemiancoding.sketch3",
+            name: "com.bohemiancoding.sketch3",
+            rootLabel: "Containers",
+            kind: "bundleid",
+            status: "owned",
+            sizeBytes: 0,
+            sizeMeasured: false
+        )
+        let software = buildSoftware(
+            apps: [app],
+            brew: BrewSnapshot(available: false),
+            dataItems: [support, container],
+            history: HistoryIndex(),
+            includeDarwinNonApp: false
+        )
+        let sketch = software.first { $0.name == "Sketch" }!
+        XCTAssertEqual(sketch.dataBytes, 12_000_000)
+        XCTAssertFalse(sketch.dataMeasured)
     }
 
     func testStaleSizeTextAlwaysIncludesData() {

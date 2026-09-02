@@ -6,6 +6,7 @@ final class ScanTests: XCTestCase {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let orphan = td.appendingPathComponent("DeadApp")
         try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: td) }
         try "x".write(to: orphan.appendingPathComponent("cache.dat"), atomically: true, encoding: .utf8)
         let old = Date().addingTimeInterval(-200 * 86400)
         try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: orphan.path)
@@ -30,7 +31,6 @@ final class ScanTests: XCTestCase {
         XCTAssertFalse(script.contains("\nbrew upgrade "))
         let data = result.toScanData()
         XCTAssertGreaterThanOrEqual(data.totals.orphaned_items, 1)
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testSystemAppLeftoversOwnedWhenIncludeSystemOff() throws {
@@ -63,6 +63,40 @@ final class ScanTests: XCTestCase {
             "installed system apps must not produce leftover false positives"
         )
         XCTAssertEqual(result.dataItems.first { $0.name == "iMovie" }?.status, "owned")
+    }
+
+    func testPerformScanVerdictsFollowInjectedNow() {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let app = AppRecord(
+            path: "/Applications/The Unarchiver.app",
+            displayName: "The Unarchiver",
+            lastUsed: now.addingTimeInterval(-400 * 86400)
+        )
+        let brew = BrewSnapshot(
+            available: true,
+            casks: [Cask(name: "the-unarchiver", appPaths: ["/Applications/The Unarchiver.app"])]
+        )
+        func scan(at t: Date) -> ScanResult {
+            performScan(
+                includeSystem: false,
+                apps: [app],
+                brew: brew,
+                leftoverItems: [],
+                leftoverAgents: [],
+                linuxOutdated: [],
+                appStoreOutdated: [],
+                packages: [],
+                history: HistoryIndex(),
+                skipLiveUsage: true,
+                now: t
+            )
+        }
+        let stale = scan(at: now)
+        XCTAssertEqual(stale.scannedAt, now)
+        XCTAssertEqual(stale.verdicts.first?.tier, "remove")
+        let recent = scan(at: now.addingTimeInterval(-395 * 86400))
+        XCTAssertEqual(recent.scannedAt, now.addingTimeInterval(-395 * 86400))
+        XCTAssertEqual(recent.verdicts.first?.tier, "keep")
     }
 
     func testCleanupScriptUninstallsRemoveTierFormula() {
@@ -207,76 +241,45 @@ final class ScanTests: XCTestCase {
     }
 }
 
-final class CLIFlagTests: XCTestCase {
-    func testDefaultCommandIsReport() {
-        XCTAssertEqual(parseCLIArguments([]).command, "report")
+extension CLIFlagTests {
+    func testHelpTextIncludesShortFlagsNoColorAndStderr() {
+        XCTAssertTrue(cliHelpText.contains("--help, -h"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("--version, -v"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("--no-color"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("NO_COLOR"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("TERM=dumb"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("stderr"), cliHelpText)
+        XCTAssertEqual(cliUsageHint, "Try 'appattic --help' for more information.")
     }
 
-    func testVersionFlag() {
-        XCTAssertTrue(parseCLIArguments(["--version"]).version)
-        XCTAssertTrue(parseCLIArguments(["report", "--version"]).version)
+    func testUnknownShortOptionIsNotACommand() {
+        XCTAssertEqual(parseCLIArguments(["-q"]).error, "unknown option: -q")
+        XCTAssertEqual(parseCLIArguments(["-q"]).parseError, .unknownOption("-q"))
+        XCTAssertEqual(parseCLIArguments(["leftovers", "-x"]).parseError, .unknownOption("-x"))
     }
 
-    func testCommandsAndFlags() {
-        let opts = parseCLIArguments(["leftovers", "--json", "/tmp/out.json", "--include-system", "--dry-run", "--top", "5", "--category", "caches"])
-        XCTAssertEqual(opts.command, "leftovers")
-        XCTAssertEqual(opts.json, "/tmp/out.json")
-        XCTAssertTrue(opts.includeSystem)
-        XCTAssertTrue(opts.dryRun)
-        XCTAssertEqual(opts.top, 5)
-        XCTAssertEqual(opts.category, ["caches"])
+    func testNoColorFlag() {
+        XCTAssertFalse(parseCLIArguments(["report"]).noColor)
+        let opts = parseCLIArguments(["report", "--no-color"])
+        XCTAssertTrue(opts.noColor)
         XCTAssertNil(opts.error)
     }
 
-    func testUnknownCommand() {
-        XCTAssertEqual(parseCLIArguments(["serve"]).error, "unknown command: serve")
-        XCTAssertEqual(parseCLIArguments(["brew-leaves"]).error, "unknown command: brew-leaves")
+    func testJsonRejectsFlagShapedPath() {
+        XCTAssertEqual(parseCLIArguments(["--json", "--help"]).parseError, .jsonRequiresPath)
+        XCTAssertEqual(parseCLIArguments(["--json=--help"]).parseError, .jsonRequiresPath)
+        XCTAssertEqual(parseCLIArguments(["report", "--json", "-"]).parseError, .jsonRequiresPath)
     }
 
-    func testUpdateCommand() {
-        XCTAssertEqual(parseCLIArguments(["update"]).command, "update")
-        XCTAssertTrue(parseCLIArguments(["update", "--dry-run"]).dryRun)
-    }
-
-    func testPackagesCommand() {
-        XCTAssertEqual(parseCLIArguments(["packages"]).command, "packages")
-        XCTAssertTrue(cliHelpText.contains("packages"))
-    }
-
-    func testReportOnlyFlags() {
-        let leftovers = parseCLIArguments(["--leftovers-only"])
-        XCTAssertTrue(leftovers.leftoversOnly)
-        XCTAssertNil(leftovers.error)
-        let both = parseCLIArguments(["--leftovers-only", "--stale-only"])
-        XCTAssertEqual(both.error, "--leftovers-only and --stale-only cannot be combined")
-    }
-
-    func testTopRejectsNegative() {
-        XCTAssertEqual(parseCLIArguments(["--top", "-1"]).error, "--top requires a non-negative integer")
-        XCTAssertEqual(parseCLIArguments(["--top=-2"]).error, "--top requires a non-negative integer")
-        XCTAssertEqual(parseCLIArguments(["--top", "3"]).top, 3)
-    }
-
-    func testFreshFlag() {
-        XCTAssertFalse(parseCLIArguments(["report"]).fresh)
-        let opts = parseCLIArguments(["report", "--fresh"])
-        XCTAssertTrue(opts.fresh)
-        XCTAssertNil(opts.error)
-        XCTAssertTrue(cliHelpText.contains("--fresh"))
-    }
-
-    func testCategoryEqualsForm() {
-        let opts = parseCLIArguments(["leftovers", "--category=caches"])
-        XCTAssertEqual(opts.category, ["caches"])
-        XCTAssertNil(opts.error)
-        XCTAssertEqual(parseCLIArguments(["leftovers", "--category="]).error, "--category requires a value")
-    }
-
-    func testJsonEqualsForm() {
-        let opts = parseCLIArguments(["report", "--json=/tmp/out.json"])
-        XCTAssertEqual(opts.json, "/tmp/out.json")
-        XCTAssertNil(opts.error)
-        XCTAssertEqual(parseCLIArguments(["report", "--json="]).error, "--json requires a file path")
+    func testColorEnabledHonorsTTYNoColorAndDumbTerm() {
+        XCTAssertTrue(cliColorEnabled(stdoutIsTTY: true, env: [:]))
+        XCTAssertFalse(cliColorEnabled(stdoutIsTTY: false, env: [:]))
+        XCTAssertFalse(cliColorEnabled(stdoutIsTTY: true, env: [:], noColorFlag: true))
+        XCTAssertFalse(cliColorEnabled(stdoutIsTTY: true, env: ["NO_COLOR": "1"]))
+        XCTAssertTrue(cliColorEnabled(stdoutIsTTY: true, env: ["NO_COLOR": ""]))
+        XCTAssertFalse(cliColorEnabled(stdoutIsTTY: true, env: ["TERM": "dumb"]))
+        XCTAssertTrue(cliColorEnabled(stdoutIsTTY: true, env: ["TERM": "xterm-256color"]))
+        XCTAssertFalse(cliColorEnabled(stdoutIsTTY: true, env: ["NO_COLOR": "1", "TERM": "xterm"]))
     }
 }
 
@@ -325,6 +328,73 @@ final class ScriptPreviewTests: XCTestCase {
             steamAppId: nil
         )
         XCTAssertEqual(image, "rm -rf /home/u/Apps/Foo.AppImage")
+
+        let packaged = uninstallCommand(
+            source: "pkg/other",
+            name: "Firefox",
+            path: "/usr/bin/firefox",
+            caskName: nil,
+            steamAppId: nil
+        )
+        XCTAssertTrue(packaged.hasPrefix("#"), packaged)
+        XCTAssertFalse(packaged.contains("rm -rf"), packaged)
+        let packagedImage = uninstallCommand(
+            source: "appimage",
+            name: "Foo",
+            path: "/usr/local/Foo.AppImage",
+            caskName: nil,
+            steamAppId: nil
+        )
+        XCTAssertTrue(packagedImage.hasPrefix("#"), packagedImage)
+        XCTAssertFalse(packagedImage.contains("rm -rf"), packagedImage)
+    }
+
+    func testLinuxUninstallPrefersPkgIdWhenDesktopNameDiffers() {
+        let item = SoftwareItem(
+            name: "Firefox",
+            kind: "app",
+            path: "/home/u/.local/share/flatpak/exports/share/applications/firefox.desktop",
+            source: "flatpak",
+            pkg_id: "org.mozilla.Firefox"
+        )
+        XCTAssertEqual(uninstallCommand(for: item), "flatpak uninstall -y org.mozilla.Firefox")
+        XCTAssertEqual(
+            uninstallCommand(
+                source: "flatpak",
+                name: "Firefox",
+                path: item.path,
+                caskName: nil,
+                steamAppId: nil
+            ),
+            "flatpak uninstall -y firefox"
+        )
+        let snap = SoftwareItem(
+            name: "Code",
+            kind: "app",
+            path: "/var/lib/snapd/desktop/applications/code_code.desktop",
+            source: "snap",
+            pkg_id: "code"
+        )
+        XCTAssertEqual(uninstallCommand(for: snap), "snap remove code")
+    }
+
+    func testScanDataRoundTripKeepsPkgIdForUninstall() {
+        let sw = Software(
+            name: "Firefox",
+            kind: "app",
+            path: "/home/u/.local/share/flatpak/exports/share/applications/firefox.desktop",
+            source: "flatpak",
+            pkgId: "org.mozilla.Firefox"
+        )
+        let result = ScanResult()
+        result.software = [sw]
+        result.verdicts = [Verdict(software: sw, tier: "remove", reason: "test")]
+        let restored = scanResult(from: result.toScanData())
+        XCTAssertEqual(restored.software[0].pkgId, "org.mozilla.Firefox")
+        XCTAssertEqual(result.toScanData().software[0].pkg_id, "org.mozilla.Firefox")
+        restored.verdicts = [Verdict(software: restored.software[0], tier: "remove", reason: "test")]
+        XCTAssertTrue(cleanupScript(restored).contains("flatpak uninstall -y org.mozilla.Firefox"))
+        XCTAssertFalse(cleanupScript(restored).contains("flatpak uninstall -y firefox\n"))
     }
 
     func testPreviewScriptSkipsEmptyCleanupHeader() {

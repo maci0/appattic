@@ -249,15 +249,48 @@ final class ShadowTests: XCTestCase {
         XCTAssertEqual(decoded.status, "shadow")
     }
 
+    func testScanResultRoundTripKeepsShadows() {
+        let item = DataItem(
+            path: "/home/u/.local/bin/python3",
+            name: "python3",
+            rootLabel: ".local/bin",
+            kind: "file",
+            status: "shadow",
+            shadows: "/usr/bin/python3"
+        )
+        let result = ScanResult()
+        result.dataItems = [item]
+        let data = result.toScanData()
+        XCTAssertEqual(data.leftovers[0].shadows, "/usr/bin/python3")
+        let restored = scanResult(from: data)
+        XCTAssertEqual(restored.dataItems[0].shadows, "/usr/bin/python3")
+        XCTAssertEqual(restored.dataItems[0].status, "shadow")
+        XCTAssertTrue(leftoverMatchesCategory(restored.dataItems[0], categories: ["/usr/bin/python3"]))
+        let exported = exportedScanData(from: data)
+        XCTAssertEqual(exported.leftovers[0].shadows, "/usr/bin/python3")
+    }
+
     func testDefaultOverlayRootsIncludeLocalBinAndDesktop() {
-        let roots = defaultOverlayShadowRoots(home: "/home/u")
+        let roots = defaultOverlayShadowRoots(home: "/home/u", env: [:])
         XCTAssertTrue(roots.contains { $0.dir == "/home/u/.local/bin" && $0.kind == "file" })
         XCTAssertTrue(roots.contains { $0.dir == "/home/u/.local/share/applications" && $0.kind == "desktop" })
         XCTAssertTrue(roots.contains { $0.dir.hasSuffix("/.cargo/bin") && $0.kind == "file" })
-        let pkgs = defaultPackageShadowDirs(which: { _ in nil })
+        let pkgs = defaultPackageShadowDirs(home: "/home/u", env: [:], which: { _ in nil })
         XCTAssertTrue(pkgs.contains("/usr/bin"))
         XCTAssertTrue(pkgs.contains("/usr/share/applications"))
+        XCTAssertTrue(pkgs.contains("/home/u/.local/share/flatpak/exports/bin"))
         XCTAssertFalse(pkgs.contains("/home/u/.local/bin"))
+    }
+
+    func testOverlayAndPackageDirsHonorXdgDataHome() {
+        let env = ["XDG_DATA_HOME": "/tmp/myshare"]
+        let roots = defaultOverlayShadowRoots(home: "/home/u", env: env)
+        XCTAssertTrue(roots.contains { $0.dir == "/tmp/myshare/applications" && $0.kind == "desktop" })
+        XCTAssertTrue(roots.contains { $0.dir == "/home/u/.local/share/applications" && $0.kind == "desktop" })
+        let pkgs = defaultPackageShadowDirs(home: "/home/u", env: env, which: { _ in nil })
+        XCTAssertTrue(pkgs.contains("/tmp/myshare/flatpak/exports/bin"))
+        XCTAssertTrue(pkgs.contains("/tmp/myshare/flatpak/exports/share/applications"))
+        XCTAssertTrue(pkgs.contains("/home/u/.local/share/flatpak/exports/bin"))
     }
 
     func testLeftoverMatchesCategoryFindsPackagedPath() {
@@ -273,6 +306,10 @@ final class ShadowTests: XCTestCase {
         XCTAssertTrue(leftoverMatchesCategory(item, categories: ["python3"]))
         XCTAssertTrue(leftoverMatchesCategory(item, categories: ["/usr/bin/python3"]))
         XCTAssertFalse(leftoverMatchesCategory(item, categories: ["firefox"]))
+        let exported = item.toLeftoverItem()
+        XCTAssertTrue(leftoverMatchesCategory(exported, categories: ["/usr/bin/python3"]))
+        XCTAssertTrue(leftoverMatchesCategory(exported, categories: ["shadow"]))
+        XCTAssertFalse(leftoverMatchesCategory(exported, categories: ["firefox"]))
     }
 
     private func writeExec(_ url: URL, body: String) throws {

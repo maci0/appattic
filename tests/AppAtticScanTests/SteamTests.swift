@@ -43,6 +43,18 @@ final class SteamTests: XCTestCase {
         XCTAssertNil(parseSteamAppManifest(text))
     }
 
+    func testLinuxSteamRootsHonorXdgDataHome() {
+        PlatformOverride.linux = true
+        defer { PlatformOverride.linux = nil }
+        let roots = defaultSteamLibraryRoots(home: "/home/u", env: ["XDG_DATA_HOME": "/tmp/myshare"])
+        XCTAssertTrue(roots.contains("/tmp/myshare/Steam"), "\(roots)")
+        XCTAssertTrue(roots.contains("/home/u/.local/share/Steam"), "\(roots)")
+        XCTAssertTrue(roots.contains("/home/u/.steam/steam"), "\(roots)")
+        let defaults = defaultSteamLibraryRoots(home: "/home/u", env: [:])
+        XCTAssertTrue(defaults.contains("/home/u/.local/share/Steam"), "\(defaults)")
+        XCTAssertFalse(defaults.contains("/tmp/myshare/Steam"), "\(defaults)")
+    }
+
     func testParseLibraryFoldersReadsExtraPaths() {
         let text = """
         "libraryfolders"
