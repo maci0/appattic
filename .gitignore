@@ -13,3 +13,6 @@ AppAttic.app/
 dist/
 build-cache/
 .tmp-shots/
+
+# scratch work
+.scratch/
