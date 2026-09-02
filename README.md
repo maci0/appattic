@@ -139,7 +139,7 @@ bash scripts/linux-appimage.sh
 # dist/AppAttic-x86_64.AppImage  (or aarch64 on arm64 hosts)
 ```
 
-`VERSION` is the current git tag without a leading `v`, or `1.0.0` if untagged. The release workflow sets it from the `v*` tag. The script then runs `--smoke` on the AppImage and fails if that does not print `SMOKE=ok`.
+`VERSION` is the current git tag without a leading `v`, or `1.1.0` if untagged. The release workflow sets it from the `v*` tag. The script then runs `--smoke` on the AppImage and fails if that does not print `SMOKE=ok`.
 
 Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downloads pinned linuxdeploy, linuxdeploy-plugin-qt, and appimagetool into `dist/.appimage-tools/` and checks SHA-256. WASM modules ship under `usr/share/appattic/`; `libwasmtime.so` sits next to the binary.
 

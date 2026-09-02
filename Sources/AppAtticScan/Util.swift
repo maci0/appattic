@@ -5,7 +5,7 @@ import Darwin
 import Glibc
 #endif
 
-public let appAtticVersion = "1.0.0"
+public let appAtticVersion = "1.1.0"
 
 public enum PlatformOverride {
     nonisolated(unsafe) public static var linux: Bool?
