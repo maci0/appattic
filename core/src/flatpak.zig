@@ -4,7 +4,7 @@ const jsonbuf = @import("jsonbuf.zig");
 const host_exec = @import("host_exec.zig");
 
 const plugin_id = "flatpak";
-const query_cmd = "flatpak uninstall --unused";
+const query_cmd = "flatpak uninstall --unused --dry-run";
 
 var result_buf: [8192]u8 = undefined;
 var result_nbytes: u32 = 0;
@@ -39,6 +39,7 @@ fn skipUnusedNoise(line: []const u8) bool {
     if (std.ascii.startsWithIgnoreCase(line, "nothing unused")) return true;
     if (std.ascii.startsWithIgnoreCase(line, "info:")) return true;
     if (std.ascii.startsWithIgnoreCase(line, "uninstalling")) return true;
+    if (std.ascii.startsWithIgnoreCase(line, "would")) return true;
     return false;
 }
 
@@ -56,7 +57,7 @@ fn splitRef(tok: []const u8, name: *[]const u8, branch: *[]const u8) bool {
     return true;
 }
 
-/// Parse `flatpak uninstall --unused`. Numbered leftover runtimes only.
+/// Parse `flatpak uninstall --unused --dry-run`. Numbered leftover runtimes only.
 /// `flatpak list` / `remote-ls` dumps are not unused.
 pub fn parseFlatpakUnused(text: []const u8, out: []FlatpakUnused) usize {
     var n: usize = 0;

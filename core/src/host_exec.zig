@@ -1,7 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-pub const deny: i32 = -1;
 pub const fail: i32 = -2;
 pub const bad: i32 = -3;
 
@@ -291,7 +290,7 @@ fn fixtureFor(cmd: []const u8) ?[]const u8 {
     if (std.mem.indexOf(u8, cmd, " /usr/bin") != null and std.mem.startsWith(u8, cmd, "ls")) {
         return shadow_package_ls;
     }
-    if (std.mem.startsWith(u8, cmd, "readlink -f ")) {
+    if (std.mem.startsWith(u8, cmd, "readlink -f ") or std.mem.startsWith(u8, cmd, "realpath ")) {
         if (std.mem.indexOf(u8, cmd, "/.local/bin/python3") != null) {
             return "/home/user/.local/bin/python3";
         }
@@ -303,7 +302,8 @@ fn fixtureFor(cmd: []const u8) ?[]const u8 {
     if (std.mem.startsWith(u8, cmd, "test ")) {
         return if (testFixtureOk(cmd)) "" else null;
     }
-    if (std.mem.eql(u8, cmd, "ls -1A") or std.mem.startsWith(u8, cmd, "ls -A")) return ls_dot_fixture;
+    if (std.mem.eql(u8, cmd, "ls -1A") or std.mem.startsWith(u8, cmd, "ls -1A ") or
+        std.mem.startsWith(u8, cmd, "ls -A")) return ls_dot_fixture;
     if (std.mem.startsWith(u8, cmd, "ls")) return ls_fixture;
     return null;
 }
@@ -363,10 +363,32 @@ test "native fixture routes apt pacman snap ls dnf zypper flatpak npm pnpm bun p
     try std.testing.expect(l > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(l)], "gone-app") != null);
 
+    const lbin = run("ls -1 /home/user/.local/bin", &buf);
+    try std.testing.expect(lbin > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(lbin)], "gone-app") != null);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(lbin)], "herdr-link") != null);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(lbin)], "python3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(lbin)], "orphan-cfg") == null);
+
+    const lusr = run("ls -1 /usr/bin", &buf);
+    try std.testing.expect(lusr > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(lusr)], "python3") != null);
+
+    const rl_over = run("readlink -f /home/user/.local/bin/python3", &buf);
+    try std.testing.expect(rl_over > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(rl_over)], "/home/user/.local/bin/python3") != null);
+    const rl_pkg = run("readlink -f /usr/bin/python3", &buf);
+    try std.testing.expect(rl_pkg > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(rl_pkg)], "/usr/bin/python3") != null);
+
     const la = run("ls -1A", &buf);
     try std.testing.expect(la > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(la)], ".mozilla") != null);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(la)], ".wine") != null);
+    const la_root = run("ls -1A /home/user", &buf);
+    try std.testing.expect(la_root > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(la_root)], ".mozilla") != null);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(la_root)], "gone-app") == null);
 
     const d = run("dnf5 repoquery --unneeded --qf %{name}", &buf);
     try std.testing.expect(d > 0);
@@ -392,7 +414,7 @@ test "native fixture routes apt pacman snap ls dnf zypper flatpak npm pnpm bun p
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(zu)], "2.45.1-1.1") != null);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(zu)], "vim") != null);
 
-    const f = run("flatpak uninstall --unused", &buf);
+    const f = run("flatpak uninstall --unused --dry-run", &buf);
     try std.testing.expect(f > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(f)], "org.freedesktop.Platform.GL.default") != null);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(f)], "remote-ls") == null);
@@ -463,12 +485,24 @@ test "native fixture routes apt pacman snap ls dnf zypper flatpak npm pnpm bun p
     const pi = run("podman images -f dangling=true", &buf);
     try std.testing.expect(pi > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(pi)], "b9e8d7c6b5a4") != null);
+
+    const rp = run("realpath /home/user/.local/bin/python3", &buf);
+    try std.testing.expect(rp > 0);
+    try std.testing.expectEqualStrings("/home/user/.local/bin/python3", buf[0..@intCast(rp)]);
+    const rl = run("readlink -f /usr/bin/python3", &buf);
+    try std.testing.expect(rl > 0);
+    try std.testing.expectEqualStrings("/usr/bin/python3", buf[0..@intCast(rl)]);
 }
 
 test "native test -f fixtures" {
     var out: [8]u8 = undefined;
     try std.testing.expect(run("test -f /home/user/.local/bin/herdr", &out) == 0);
     try std.testing.expect(run("test -f /home/user/.local/bin/dconf", &out) == 0);
+    try std.testing.expect(run("test -f /home/user/.local/bin/python3", &out) == 0);
+    try std.testing.expect(run("test -f /usr/bin/python3", &out) == 0);
     try std.testing.expect(run("test -f /home/user/.local/bin/gone-app", &out) != 0);
     try std.testing.expect(run("test -f /home/user/.local/bin/herdr-link", &out) != 0);
+    try std.testing.expect(run("test -h /home/user/.local/bin/gone-app", &out) == 0);
+    try std.testing.expect(run("test -e /home/user/.local/bin/gone-app", &out) != 0);
+    try std.testing.expect(run("test -e /home/user/.local/bin/herdr-link", &out) == 0);
 }

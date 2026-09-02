@@ -114,7 +114,7 @@ fn listingNames(listing: []const u8, names: *[64][]const u8) usize {
 
 fn resolvePathExec(path: []const u8, buf: []u8) ?[]const u8 {
     var cmd_buf: [512]u8 = undefined;
-    const cmd = std.fmt.bufPrint(&cmd_buf, "readlink -f {s}", .{path}) catch return null;
+    const cmd = std.fmt.bufPrint(&cmd_buf, "realpath {s}", .{path}) catch return null;
     const n = host_exec.run(cmd, buf);
     if (n < 0) return null;
     const trimmed = std.mem.trim(u8, buf[0..@intCast(n)], " \t\r\n");

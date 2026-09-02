@@ -5,14 +5,21 @@
 #include <string.h>
 
 #ifndef _WIN32
+#include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <poll.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 
 #define MAX_CMD 512
 #define MAX_TOK 16
+#define HOST_EXEC_TIMEOUT_MS 60000
+#define HOST_EXEC_KILL_GRACE_MS 1000
 
 static int eq(const char *a, const char *b) {
     return a && b && strcmp(a, b) == 0;
@@ -37,6 +44,29 @@ static int destructive_token(const char *t) {
 
 /* docker/podman query shapes only: images -f dangling=true, volume ls -f dangling=true,
    ps -a -f status=exited. Never rmi, rm, prune, system. */
+/* ls: listing flags only (-1/-a/-A, glued). One optional path. No -R/-l/--*. */
+static int ls_listing_flag(const char *t) {
+    if (!t || t[0] != '-' || t[1] == '\0' || t[1] == '-') return 0;
+    for (const char *p = t + 1; *p; p++) {
+        if (*p != '1' && *p != 'a' && *p != 'A') return 0;
+    }
+    return 1;
+}
+
+static int ls_query_ok(char **tok, int n) {
+    int has_path = 0;
+    for (int i = 1; i < n; i++) {
+        const char *t = tok[i];
+        if (t[0] == '-') {
+            if (!ls_listing_flag(t)) return 0;
+            continue;
+        }
+        if (has_path) return 0;
+        has_path = 1;
+    }
+    return 1;
+}
+
 /* test -e / -f / -h / -L only. No -w/-x/-d or other predicates. */
 static int test_query_ok(char **tok, int n) {
     int has_flag = 0;
@@ -126,6 +156,7 @@ int appattic_host_exec_allowed(const char *cmdline) {
     const int is_apt = eq(base, "apt-get") || eq(base, "apt");
     const int is_ls = eq(base, "ls");
     const int is_readlink = eq(base, "readlink");
+    const int is_realpath = eq(base, "realpath");
     const int is_test = eq(base, "test");
     const int is_dnf = eq(base, "dnf") || eq(base, "dnf5") || eq(base, "yum");
     const int is_zypper = eq(base, "zypper");
@@ -140,13 +171,24 @@ int appattic_host_exec_allowed(const char *cmdline) {
     const int is_gem = eq(base, "gem");
     const int is_composer = eq(base, "composer");
     const int is_ctr = eq(base, "docker") || eq(base, "podman");
-    if (!is_snap && !is_pacman && !is_apt && !is_ls && !is_readlink && !is_test && !is_dnf &&
-        !is_zypper && !is_flatpak && !is_npm && !is_pnpm && !is_bun && !is_pipx && !is_pip &&
-        !is_uv && !is_brew && !is_gem && !is_composer && !is_ctr) {
+    if (!is_snap && !is_pacman && !is_apt && !is_ls && !is_readlink && !is_realpath && !is_test &&
+        !is_dnf && !is_zypper && !is_flatpak && !is_npm && !is_pnpm && !is_bun && !is_pipx &&
+        !is_pip && !is_uv && !is_brew && !is_gem && !is_composer && !is_ctr) {
         return 0;
     }
 
     if (is_test) return test_query_ok(tok, n);
+    if (is_ls) return ls_query_ok(tok, n);
+
+    if (is_realpath) {
+        int has_path = 0;
+        for (int i = 1; i < n; i++) {
+            if (tok[i][0] == '-') return 0;
+            if (has_path) return 0;
+            has_path = 1;
+        }
+        return has_path;
+    }
 
     if (is_readlink) {
         int has_path = 0;
@@ -216,7 +258,7 @@ int appattic_host_exec_allowed(const char *cmdline) {
         return (has_repoquery && has_unneeded) || (has_list && has_upgrades) || has_check_update;
     }
     if (is_zypper) return (has_packages && has_unneeded) || has_list_updates;
-    if (is_flatpak) return has_uninstall && has_unused;
+    if (is_flatpak) return has_uninstall && has_unused && has_s;
     if (is_npm || is_pnpm) return has_g && (has_list || has_outdated);
     if (is_bun) return has_pm && has_list && has_g;
     if (is_pipx) return has_list;
@@ -226,7 +268,7 @@ int appattic_host_exec_allowed(const char *cmdline) {
     if (is_gem) return has_outdated;
     if (is_composer) return has_g && has_outdated;
     if (is_ctr) return ctr_query_ok(tok, n);
-    return is_ls;
+    return 0;
 }
 
 static int env_truthy(const char *name) {
@@ -282,7 +324,11 @@ static const char FIXTURE_LS_USER_BIN[] =
     "gone-app\n"
     "dconf\n"
     "herdr\n"
-    "herdr-link\n";
+    "herdr-link\n"
+    "python3\n";
+
+static const char FIXTURE_LS_USR_BIN[] =
+    "python3\n";
 
 static const char FIXTURE_LS_USER_HOME_BIN[] = "";
 
@@ -298,6 +344,7 @@ static const char FIXTURE_LS_DOT[] =
     "dconf\n";
 
 static const char FIXTURE_DNF[] =
+    "Last metadata expiration check: 1:23:45 ago on Wed 26 Aug 2026.\n"
     "libfoo\n"
     "python3-bar\n";
 
@@ -409,7 +456,8 @@ static int test_fixture_ok(const char *cmdline) {
     const int is_link = strstr(path, "herdr-link") != NULL;
     const int is_regular =
         strstr(path, "dconf") != NULL ||
-        (strstr(path, "herdr") != NULL && strstr(path, "herdr-link") == NULL);
+        (strstr(path, "herdr") != NULL && strstr(path, "herdr-link") == NULL) ||
+        strstr(path, "python3") != NULL;
     if (want_symlink) {
         if (is_gone || is_link) return 1;
         return 0;
@@ -425,12 +473,20 @@ static int test_fixture_ok(const char *cmdline) {
     return 0;
 }
 
+static char canon_fixture[MAX_CMD];
+
 static const char *fixture_for(const char *cmdline) {
     char buf[MAX_CMD];
     char *tok[MAX_TOK];
     int n = parse_argv(cmdline, buf, sizeof buf, tok, MAX_TOK);
     if (n < 1) return NULL;
     const char *base = base_of(tok[0]);
+    if (eq(base, "realpath") || eq(base, "readlink")) {
+        const char *path = tok[n - 1];
+        if (!path || !path[0] || path[0] == '-') return NULL;
+        snprintf(canon_fixture, sizeof canon_fixture, "%s\n", path);
+        return canon_fixture;
+    }
     if (eq(base, "apt-get") || eq(base, "apt")) {
         for (int i = 1; i < n; i++) {
             if (eq(tok[i], "--upgradable")) return FIXTURE_APT_UPGRADABLE;
@@ -444,6 +500,15 @@ static const char *fixture_for(const char *cmdline) {
         return FIXTURE_PACMAN;
     }
     if (eq(base, "test")) return test_fixture_ok(cmdline) ? "" : NULL;
+    if (eq(base, "readlink")) {
+        for (int i = 1; i < n; i++) {
+            const char *t = tok[i];
+            if (t[0] == '-') continue;
+            if (strstr(t, "/.local/bin/python3") != NULL) return "/home/user/.local/bin/python3";
+            if (strstr(t, "/usr/bin/python3") != NULL) return "/usr/bin/python3";
+        }
+        return NULL;
+    }
     if (eq(base, "ls")) {
         for (int i = 1; i < n; i++) {
             const char *t = tok[i];
@@ -452,6 +517,7 @@ static const char *fixture_for(const char *cmdline) {
             if (eq(t, "/home/user/bin") || strstr(t, "/home/user/bin/") != NULL) {
                 return FIXTURE_LS_USER_HOME_BIN;
             }
+            if (strstr(t, "/usr/bin") != NULL) return FIXTURE_LS_USR_BIN;
             if (eq(t, "-A") || eq(t, "-a") || eq(t, "-1A") || eq(t, "-A1")) return FIXTURE_LS_DOT;
         }
         return FIXTURE_LS;
@@ -496,6 +562,34 @@ static const char *fixture_for(const char *cmdline) {
 }
 
 #ifndef _WIN32
+static long monotonic_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return -1;
+    if (ts.tv_sec > LONG_MAX / 1000L - 1L) return LONG_MAX;
+    return (long)ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+}
+
+static void reap_child(pid_t pid) {
+    if (kill(-pid, SIGTERM) != 0) {
+        (void)kill(pid, SIGTERM);
+    }
+    int waited = 0;
+    while (waited < HOST_EXEC_KILL_GRACE_MS) {
+        int st = 0;
+        if (waitpid(pid, &st, WNOHANG) == pid) return;
+        struct timespec sl;
+        sl.tv_sec = 0;
+        sl.tv_nsec = 50L * 1000L * 1000L;
+        (void)nanosleep(&sl, NULL);
+        waited += 50;
+    }
+    if (kill(-pid, SIGKILL) != 0) {
+        (void)kill(pid, SIGKILL);
+    }
+    int st = 0;
+    (void)waitpid(pid, &st, 0);
+}
+
 static int run_live(char **argv, char *out, size_t cap) {
     int fds[2];
     if (pipe(fds) != 0) return APPATTIC_HOST_EXEC_FAIL;
@@ -506,35 +600,98 @@ static int run_live(char **argv, char *out, size_t cap) {
         return APPATTIC_HOST_EXEC_FAIL;
     }
     if (pid == 0) {
+        (void)setpgid(0, 0);
         close(fds[0]);
         if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(127);
         close(fds[1]);
         int devnull = open("/dev/null", O_RDWR);
         if (devnull >= 0) {
-            dup2(devnull, STDIN_FILENO);
-            dup2(devnull, STDERR_FILENO);
+            (void)dup2(devnull, STDIN_FILENO);
+            (void)dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
         execvp(argv[0], argv);
         _exit(127);
     }
+    (void)setpgid(pid, pid);
     close(fds[1]);
+
+    long start = monotonic_ms();
+    int timed_out = 0;
     size_t n = 0;
     while (n < cap) {
+        int wait_ms = HOST_EXEC_TIMEOUT_MS;
+        if (start >= 0) {
+            long now = monotonic_ms();
+            if (now < 0 || now - start >= (long)HOST_EXEC_TIMEOUT_MS) {
+                timed_out = 1;
+                break;
+            }
+            long left = (long)HOST_EXEC_TIMEOUT_MS - (now - start);
+            if (left < 1L) left = 1L;
+            if (left > (long)HOST_EXEC_TIMEOUT_MS) left = (long)HOST_EXEC_TIMEOUT_MS;
+            wait_ms = (int)left;
+        }
+        struct pollfd pfd;
+        pfd.fd = fds[0];
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        int pr = poll(&pfd, 1, wait_ms);
+        if (pr < 0) {
+            if (errno == EINTR) continue;
+            close(fds[0]);
+            reap_child(pid);
+            return APPATTIC_HOST_EXEC_FAIL;
+        }
+        if (pr == 0) {
+            timed_out = 1;
+            break;
+        }
         ssize_t r = read(fds[0], out + n, cap - n);
         if (r < 0) {
+            if (errno == EINTR) continue;
             close(fds[0]);
-            int st;
-            waitpid(pid, &st, 0);
+            reap_child(pid);
             return APPATTIC_HOST_EXEC_FAIL;
         }
         if (r == 0) break;
         n += (size_t)r;
     }
     close(fds[0]);
+    if (timed_out || n == cap) {
+        reap_child(pid);
+        return timed_out ? APPATTIC_HOST_EXEC_FAIL : APPATTIC_HOST_EXEC_BAD;
+    }
     int st = 0;
-    waitpid(pid, &st, 0);
-    if (n == cap) return APPATTIC_HOST_EXEC_BAD;
+    int reaped = 0;
+    int waited = 0;
+    while (!reaped) {
+        pid_t wr = waitpid(pid, &st, WNOHANG);
+        if (wr == pid) {
+            reaped = 1;
+            break;
+        }
+        if (wr < 0) {
+            if (errno == EINTR) continue;
+            reap_child(pid);
+            return APPATTIC_HOST_EXEC_FAIL;
+        }
+        if (start >= 0) {
+            long now = monotonic_ms();
+            if (now < 0 || now - start >= (long)HOST_EXEC_TIMEOUT_MS) {
+                reap_child(pid);
+                return APPATTIC_HOST_EXEC_FAIL;
+            }
+        } else if (waited >= HOST_EXEC_TIMEOUT_MS) {
+            reap_child(pid);
+            return APPATTIC_HOST_EXEC_FAIL;
+        }
+        struct timespec sl;
+        sl.tv_sec = 0;
+        sl.tv_nsec = 50L * 1000L * 1000L;
+        (void)nanosleep(&sl, NULL);
+        waited += 50;
+    }
     if (WIFEXITED(st) && WEXITSTATUS(st) == 127) return APPATTIC_HOST_EXEC_FAIL;
     if (eq(base_of(argv[0]), "test") && WIFEXITED(st) && WEXITSTATUS(st) != 0) {
         return APPATTIC_HOST_EXEC_FAIL;
@@ -562,6 +719,20 @@ int appattic_host_exec(const char *cmdline, char *out, size_t cap) {
     int argc = parse_argv(cmdline, buf, sizeof buf, argv, MAX_TOK);
     if (argc < 1) return APPATTIC_HOST_EXEC_DENY;
     argv[argc] = NULL;
+    /* GNU `readlink -f` is POSIX realpath; BSD readlink has no -f. */
+    if (eq(base_of(argv[0]), "readlink")) {
+        int has_f = 0;
+        char *path = NULL;
+        for (int i = 1; i < argc; i++) {
+            if (eq(argv[i], "-f")) has_f = 1;
+            else if (argv[i][0] != '-') path = argv[i];
+        }
+        if (has_f && path) {
+            argv[0] = "realpath";
+            argv[1] = path;
+            argv[2] = NULL;
+        }
+    }
     return run_live(argv, out, cap);
 #else
     (void)cmdline;

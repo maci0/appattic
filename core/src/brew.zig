@@ -303,3 +303,69 @@ test "plugin_query missing is empty findings" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "brew missing") != null);
 }
+
+fn sliceInside(hay: []const u8, n: []const u8) bool {
+    if (n.len == 0) return true;
+    const h0 = @intFromPtr(hay.ptr);
+    const n0 = @intFromPtr(n.ptr);
+    return n0 >= h0 and n0 + n.len <= h0 + hay.len;
+}
+
+fn packFuzzSlice(comptime s: []const u8) [4 + s.len]u8 {
+    var out: [4 + s.len]u8 = undefined;
+    std.mem.writeInt(u32, out[0..4], @intCast(s.len), .little);
+    @memcpy(out[4..], s);
+    return out;
+}
+
+const fuzz_brew_both = packFuzzSlice(
+    \\{"formulae":[{"name":"wget","installed_versions":["1.21.4"],"current_version":"1.24.5","pinned":false,"pinned_version":null}],"casks":[{"name":"visual-studio-code","installed_versions":["1.90.0"],"current_version":"1.92.1","pinned":false,"pinned_version":null}]}
+);
+const fuzz_brew_string_ver = packFuzzSlice(
+    \\{"formulae":[{"name":"python@3.12","installed_versions":"3.12.4","current_version":"3.12.5"}],"casks":[]}
+);
+const fuzz_brew_empty = packFuzzSlice("{\"formulae\":[],\"casks\":[]}");
+const fuzz_brew_junk = packFuzzSlice("not json");
+const fuzz_brew_unsafe = packFuzzSlice(
+    \\{"formulae":[{"name":"wget;rm","installed_versions":["1"],"current_version":"2"}],"casks":[]}
+);
+const fuzz_brew_truncated = packFuzzSlice(
+    \\{"formulae":[{"name":"wget","installed_versions":["1.21.4"],"current_version":
+);
+const fuzz_brew_nested = packFuzzSlice(
+    \\{"formulae":[{"name":"foo","installed_versions":["1","2"],"current_version":"3","extra":{"a":[1,{"b":"c"}]}}],"casks":[{"name":"bar@2","installed_versions":[],"current_version":"9"}]}
+);
+const fuzz_brew_escapes = packFuzzSlice(
+    \\{"formulae":[{"name":"a\"b","installed_versions":["x\ny"],"current_version":"z"}],"casks":[]}
+);
+
+test "fuzz parseBrewOutdatedJSON" {
+    try std.testing.fuzz({}, fuzzBrewOutdated, .{ .corpus = &.{
+        &fuzz_brew_both,
+        &fuzz_brew_string_ver,
+        &fuzz_brew_empty,
+        &fuzz_brew_junk,
+        &fuzz_brew_unsafe,
+        &fuzz_brew_truncated,
+        &fuzz_brew_nested,
+        &fuzz_brew_escapes,
+    } });
+}
+
+fn fuzzBrewOutdated(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const n = smith.slice(&raw);
+    const text = raw[0..n];
+
+    var buf: [32]BrewOutdated = undefined;
+    const got = parseBrewOutdatedJSON(text, &buf);
+    try std.testing.expect(got <= buf.len);
+    for (buf[0..got]) |h| {
+        try std.testing.expect(sliceInside(text, h.name));
+        try std.testing.expect(h.current.len == 0 or sliceInside(text, h.current));
+        try std.testing.expect(h.latest.len == 0 or sliceInside(text, h.latest));
+        try std.testing.expect(h.name.len > 0);
+        try std.testing.expect(h.name.len <= 214);
+        try std.testing.expect(isSafeBrewName(h.name));
+    }
+}

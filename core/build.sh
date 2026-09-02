@@ -1,6 +1,36 @@
-#!/bin/sh
-set -e
-root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+#!/usr/bin/env bash
+# WASM core + plugins + host. Usage: ./core/build.sh [test <name.zig>]
+set -euo pipefail
+export LC_ALL=C
+export LANG=C
+export TZ=UTC
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    echo "Usage: $0 [test <name.zig>]"
+    echo "  (no args)          WASM + all zig tests + host (needs wasmtime C API)"
+    echo "  test brew.zig      one plugin (fast edit loop)"
+    exit 0
+fi
+
+if [ "${1:-}" = "test" ] && [ -z "${2:-}" ]; then
+    echo "error: missing plugin name" >&2
+    echo "Usage: $0 test <name.zig>" >&2
+    echo "example: $0 test brew.zig" >&2
+    exit 2
+fi
+
+if [ -n "${1:-}" ] && [ "${1:-}" != "test" ]; then
+    echo "error: unknown argument: $1" >&2
+    echo "Usage: $0 [test <name.zig>]" >&2
+    echo "       $0 --help" >&2
+    exit 2
+fi
+
+if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+    SOURCE_DATE_EPOCH="$(git -C "$(dirname -- "$0")" log -1 --pretty=%ct 2>/dev/null || printf '0')"
+    export SOURCE_DATE_EPOCH
+fi
+root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 out="$root/out"
 mkdir -p "$out"
 
@@ -18,10 +48,40 @@ if ! command -v zig >/dev/null 2>&1; then
     fi
 fi
 if ! command -v zig >/dev/null 2>&1; then
-    echo "zig missing. Install: brew install zig" >&2
+    echo "zig missing. macOS: brew install zig. Linux: scripts/linux-deps.sh --install" >&2
     echo "Then re-run $0" >&2
     exit 1
 fi
+zig_need="0.16.0"
+if [ -f "$root/../.zig-version" ]; then
+    zig_need="$(tr -d '[:space:]' < "$root/../.zig-version")"
+fi
+if [ -z "$zig_need" ]; then
+    zig_need="0.16.0"
+fi
+zig_mm="${zig_need%.*}"
+zig_ver="$(zig version)"
+case "$zig_ver" in
+    "$zig_mm".*) ;;
+    *)
+        echo "error: need zig ${zig_mm}.x from .zig-version (have $zig_ver). scripts/linux-deps.sh --install" >&2
+        exit 1
+        ;;
+esac
+
+if [ "${1:-}" = "test" ]; then
+    name="${2##*/}"
+    name="${name%.zig}.zig"
+    if [ ! -f "$root/src/$name" ]; then
+        echo "error: no $root/src/$name" >&2
+        exit 1
+    fi
+    zig fmt --check "$root/src/$name"
+    zig test "$root/src/$name"
+    exit 0
+fi
+
+zig fmt --check "$root/src"
 
 zig_wasm() {
     zig build-exe \
@@ -29,6 +89,7 @@ zig_wasm() {
         -fno-entry \
         -rdynamic \
         -OReleaseSmall \
+        -fstrip \
         -femit-bin="$out/$2" \
         "$root/src/$1"
 }
@@ -74,6 +135,7 @@ zig_test() {
     zig test "$root/src/$1"
 }
 zig_test host_exec.zig
+zig_test jsonbuf.zig
 zig_test jsonscan.zig
 zig_test apt.zig
 zig_test pacman.zig
@@ -118,6 +180,8 @@ wasmtime_libdir() {
         echo "$prefix/lib"
     elif [ -d "$prefix/lib64" ]; then
         echo "$prefix/lib64"
+    else
+        return 1
     fi
 }
 
@@ -125,12 +189,12 @@ wasmtime_from_prefix() {
     prefix=$1
     libdir=$(wasmtime_libdir "$prefix") || return 1
     [ -f "$prefix/include/wasmtime.h" ] || return 1
-    wasmtime_cflags="-I$prefix/include"
-    wasmtime_libs="-L$libdir -Wl,-rpath,$libdir -lwasmtime"
+    wasmtime_cflags=(-I"$prefix/include")
+    wasmtime_libs=(-L"$libdir" "-Wl,-rpath,$libdir" -lwasmtime)
 }
 
-wasmtime_cflags=""
-wasmtime_libs="-lwasmtime"
+wasmtime_cflags=()
+wasmtime_libs=(-lwasmtime)
 if [ -f /opt/homebrew/include/wasmtime.h ]; then
     wasmtime_from_prefix /opt/homebrew
 elif [ -n "${WASMTIME_DIR:-}" ] && wasmtime_from_prefix "$WASMTIME_DIR"; then
@@ -140,8 +204,10 @@ elif [ -f /opt/wasmtime-c-api/include/wasmtime.h ]; then
 elif [ -f "$root/../.deps/wasmtime-c-api/include/wasmtime.h" ]; then
     wasmtime_from_prefix "$root/../.deps/wasmtime-c-api"
 elif command -v pkg-config >/dev/null 2>&1 && pkg-config --exists wasmtime; then
-    wasmtime_cflags="$(pkg-config --cflags wasmtime)"
-    wasmtime_libs="$(pkg-config --libs wasmtime)"
+    # shellcheck disable=SC2206,SC2207
+    wasmtime_cflags=($(pkg-config --cflags wasmtime))
+    # shellcheck disable=SC2206,SC2207
+    wasmtime_libs=($(pkg-config --libs wasmtime))
 else
     echo "wasmtime C API missing. macOS: brew install wasmtime. Linux: scripts/linux-deps.sh --install-wasmtime" >&2
     echo "WASM modules are in $out. Host stub not linked." >&2
@@ -153,20 +219,47 @@ case "$(uname -s)" in
     Linux) export APPATTIC_HOST_EXEC_FIXTURE=1 ;;
 esac
 
-cc -O2 -Wall -Wextra \
+cc_cflags=(-O2 -Wall -Wextra -fstack-protector-strong -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fPIE
+    "-ffile-prefix-map=$root=." "-fdebug-prefix-map=$root=." "-fmacro-prefix-map=$root=.")
+cc_ldflags=()
+case "$(uname -s)" in
+    Linux)
+        cc_ldflags=(-pie "-Wl,-z,relro,-z,now" "-Wl,-z,noexecstack")
+        cc_cflags+=(-fstack-clash-protection)
+        case "$(uname -m)" in
+            x86_64)
+                cc_cflags+=(-fcf-protection=full)
+                cc_ldflags+=(-fcf-protection=full)
+                ;;
+            aarch64|arm64)
+                cc_cflags+=(-mbranch-protection=standard)
+                ;;
+        esac
+        ;;
+    Darwin)
+        cc_ldflags=("-Wl,-pie")
+        ;;
+    *)
+        cc_ldflags=(-pie)
+        ;;
+esac
+
+cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
+    -Werror -Wformat=2 -Wformat-security \
+    -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference \
     -I"$root/host" \
     "$root/host/hostexec.c" \
     "$root/host/hostexec_test.c" \
     -o "$out/hostexec_test"
 "$out/hostexec_test"
 
-cc -O2 -Wall -Wextra \
+cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
     -I"$root/host" \
-    $wasmtime_cflags \
+    "${wasmtime_cflags[@]}" \
     "$root/host/stub.c" \
     "$root/host/embed.c" \
     "$root/host/hostexec.c" \
-    $wasmtime_libs \
+    "${wasmtime_libs[@]}" \
     -o "$out/host"
 
 echo "built $out/appattic_core.wasm $out/container_runtime.wasm $out/snapd.wasm $out/path_xdg_config.wasm $out/path_xdg_data.wasm $out/path_xdg_cache.wasm $out/path_xdg_state.wasm $out/path_xdg_lib.wasm $out/path_var_app.wasm $out/path_user_bin.wasm $out/path_home_dot.wasm $out/path_application_support.wasm $out/path_caches.wasm $out/path_preferences.wasm $out/path_saved_state.wasm $out/path_containers.wasm $out/path_group_containers.wasm $out/path_logs.wasm $out/path_webkit.wasm $out/path_httpstorages.wasm $out/path_launchagents.wasm $out/path_shadow.wasm $out/pacman.wasm $out/apt.wasm $out/dnf.wasm $out/zypper.wasm $out/flatpak.wasm $out/npm.wasm $out/pnpm.wasm $out/bun.wasm $out/pipx.wasm $out/uv.wasm $out/brew.wasm $out/gem.wasm $out/composer.wasm $out/pip.wasm $out/host"
