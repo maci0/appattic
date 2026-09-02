@@ -171,6 +171,13 @@ static int call_i32_arg(
     return 0;
 }
 
+static void drop_externs(wasmtime_extern_t **xs, int n) {
+    int i;
+    for (i = 0; i < n; i++) {
+        wasmtime_extern_delete(xs[i]);
+    }
+}
+
 static int contains(const uint8_t *data, size_t len, const char *needle) {
     const size_t nlen = strlen(needle);
     if (len < nlen) return 0;
@@ -286,70 +293,67 @@ static int run_plugin(
     if (instantiate(ctx, linker, engine, path, &mod, &plug, e) != 0) return 1;
 
     wasmtime_extern_t plug_abi, id_ptr, id_len, query, res_ptr, res_len, memory;
-    if (must_export(ctx, &plug, "plugin_abi_version", &plug_abi, e) ||
-        must_export(ctx, &plug, "plugin_id_ptr", &id_ptr, e) ||
-        must_export(ctx, &plug, "plugin_id_len", &id_len, e) ||
-        must_export(ctx, &plug, "plugin_query", &query, e) ||
-        must_export(ctx, &plug, "result_ptr", &res_ptr, e) ||
-        must_export(ctx, &plug, "result_len", &res_len, e) ||
-        must_export(ctx, &plug, "memory", &memory, e)) {
-        wasmtime_module_delete(mod);
-        return 1;
+    wasmtime_extern_t *slots[7] = {
+        &plug_abi, &id_ptr, &id_len, &query, &res_ptr, &res_len, &memory
+    };
+    const char *names[7] = {
+        "plugin_abi_version",
+        "plugin_id_ptr",
+        "plugin_id_len",
+        "plugin_query",
+        "result_ptr",
+        "result_len",
+        "memory"
+    };
+    int ngot = 0;
+    int i;
+    int32_t abi = 0, ip = 0, il = 0, qrc = 0, rp = 0, rl = 0;
+    uint8_t *data = NULL;
+    size_t mem_len = 0;
+    const uint8_t *json = NULL;
+    char qerr[256];
+    for (i = 0; i < 7; i++) {
+        if (must_export(ctx, &plug, names[i], slots[i], e)) goto fail_plugin;
+        ngot++;
     }
     if (memory.kind != WASMTIME_EXTERN_MEMORY ||
         plug_abi.kind != WASMTIME_EXTERN_FUNC ||
         query.kind != WASMTIME_EXTERN_FUNC) {
         fail_msg(e, "bad plugin exports");
-        wasmtime_module_delete(mod);
-        return 1;
+        goto fail_plugin;
     }
-    int32_t abi = 0;
-    if (call_i32(ctx, &plug_abi.of.func, &abi, e) != 0) {
-        wasmtime_module_delete(mod);
-        return 1;
-    }
+    if (call_i32(ctx, &plug_abi.of.func, &abi, e) != 0) goto fail_plugin;
     if (abi != 1) {
         fail_msg(e, "plugin abi mismatch");
-        wasmtime_module_delete(mod);
-        return 1;
+        goto fail_plugin;
     }
 
-    uint8_t *data = wasmtime_memory_data(ctx, &memory.of.memory);
-    size_t mem_len = wasmtime_memory_data_size(ctx, &memory.of.memory);
-    int32_t ip = 0, il = 0;
+    data = wasmtime_memory_data(ctx, &memory.of.memory);
+    mem_len = wasmtime_memory_data_size(ctx, &memory.of.memory);
     if (call_i32(ctx, &id_ptr.of.func, &ip, e) != 0 ||
         call_i32(ctx, &id_len.of.func, &il, e) != 0) {
-        wasmtime_module_delete(mod);
-        return 1;
+        goto fail_plugin;
     }
     if (ip < 0 || il < 0 || (size_t)ip + (size_t)il > mem_len) {
         fail_msg(e, "plugin id out of memory");
-        wasmtime_module_delete(mod);
-        return 1;
+        goto fail_plugin;
     }
 
-    int32_t qrc = 0;
-    if (call_i32_arg(ctx, &query.of.func, tag, &qrc, e) != 0) {
-        wasmtime_module_delete(mod);
-        return 1;
-    }
+    if (call_i32_arg(ctx, &query.of.func, tag, &qrc, e) != 0) goto fail_plugin;
     if (qrc != 0) {
-        fail_msg(e, "plugin_query failed");
-        wasmtime_module_delete(mod);
-        return 1;
+        snprintf(qerr, sizeof qerr, "plugin_query failed: %s", path);
+        fail_msg(e, qerr);
+        goto fail_plugin;
     }
-    int32_t rp = 0, rl = 0;
     if (call_i32(ctx, &res_ptr.of.func, &rp, e) != 0 ||
         call_i32(ctx, &res_len.of.func, &rl, e) != 0) {
-        wasmtime_module_delete(mod);
-        return 1;
+        goto fail_plugin;
     }
     if (rp < 0 || rl < 0 || (size_t)rp + (size_t)rl > mem_len) {
         fail_msg(e, "result out of memory");
-        wasmtime_module_delete(mod);
-        return 1;
+        goto fail_plugin;
     }
-    const uint8_t *json = data + rp;
+    json = data + rp;
     if (contains(json, (size_t)rl, "system prune") ||
         contains(json, (size_t)rl, "rmi -f") ||
         contains(json, (size_t)rl, "volume prune") ||
@@ -358,21 +362,18 @@ static int run_plugin(
         contains(json, (size_t)rl, "rm -rf /usr/bin/snap") ||
         contains(json, (size_t)rl, "rm /usr/bin/flatpak")) {
         fail_msg(e, "host intercept: refusing bulk wipe");
-        wasmtime_module_delete(mod);
-        return 1;
+        goto fail_plugin;
     }
 
     if (on_json) on_json((const char *)json, (size_t)rl, user);
-
-    wasmtime_extern_delete(&plug_abi);
-    wasmtime_extern_delete(&id_ptr);
-    wasmtime_extern_delete(&id_len);
-    wasmtime_extern_delete(&query);
-    wasmtime_extern_delete(&res_ptr);
-    wasmtime_extern_delete(&res_len);
-    wasmtime_extern_delete(&memory);
+    drop_externs(slots, ngot);
     wasmtime_module_delete(mod);
     return 0;
+
+fail_plugin:
+    drop_externs(slots, ngot);
+    wasmtime_module_delete(mod);
+    return 1;
 }
 
 int appattic_wasm_run(

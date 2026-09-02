@@ -34,6 +34,7 @@ int main(void) {
     int rc = 0;
     rc |= expect_allow("apt-get -s autoremove");
     rc |= expect_allow("apt-get --simulate autoremove");
+    rc |= expect_allow("apt-get --dry-run autoremove");
     rc |= expect_allow("/usr/bin/apt-get -s autoremove");
     rc |= expect_allow("apt -s autoremove");
     rc |= expect_allow("apt list --upgradable");
@@ -44,13 +45,20 @@ int main(void) {
     rc |= expect_allow("snap list --all");
     rc |= expect_allow("ls -1");
     rc |= expect_allow("ls -1A");
+    rc |= expect_allow("ls -1A /home/user");
+    rc |= expect_allow("ls -1 /home/user/.config");
     rc |= expect_allow("/bin/ls -1A");
     rc |= expect_allow("ls /home/user/.config");
     rc |= expect_allow("ls -1 /home/user/snap");
+    rc |= expect_allow("ls -a");
+    rc |= expect_allow("ls -A");
+    rc |= expect_allow("ls -1 -A /home/user/.config");
     rc |= expect_allow("readlink -f /tmp/foo");
     rc |= expect_allow("readlink -n /tmp/foo");
     rc |= expect_allow("readlink /tmp/foo");
     rc |= expect_allow("/usr/bin/readlink -f /tmp/foo");
+    rc |= expect_allow("realpath /tmp/foo");
+    rc |= expect_allow("/usr/bin/realpath /tmp/foo");
     rc |= expect_allow("test -e /tmp/foo");
     rc |= expect_allow("test -f /tmp/foo");
     rc |= expect_allow("test -h /tmp/foo");
@@ -71,9 +79,10 @@ int main(void) {
     rc |= expect_allow("/usr/bin/zypper packages --unneeded");
     rc |= expect_allow("zypper --non-interactive list-updates");
     rc |= expect_allow("/usr/bin/zypper list-updates");
-    rc |= expect_allow("flatpak uninstall --unused");
-    rc |= expect_allow("flatpak remove --unused");
-    rc |= expect_allow("/usr/bin/flatpak uninstall --unused");
+    rc |= expect_allow("flatpak uninstall --unused --dry-run");
+    rc |= expect_allow("flatpak remove --unused --dry-run");
+    rc |= expect_allow("/usr/bin/flatpak uninstall --unused --dry-run");
+    rc |= expect_allow("flatpak uninstall --unused --simulate");
     rc |= expect_allow("npm ls -g --depth=0 --json");
     rc |= expect_allow("npm ls -g --depth=0");
     rc |= expect_allow("npm outdated -g --json");
@@ -120,6 +129,8 @@ int main(void) {
     rc |= expect_allow("/usr/bin/docker ps -a -f status=exited");
 
     rc |= expect_deny("apt-get autoremove");
+    rc |= expect_deny("apt-get -s autoremove -y");
+    rc |= expect_deny("apt-get -s autoremove --yes");
     rc |= expect_deny("apt-get purge -y libfoo0");
     rc |= expect_deny("apt-get upgrade");
     rc |= expect_deny("apt upgrade");
@@ -147,8 +158,15 @@ int main(void) {
     rc |= expect_deny("ls; rm -rf /");
     rc |= expect_deny("ls -rf");
     rc |= expect_deny("ls --force");
+    rc |= expect_deny("ls -R /");
+    rc |= expect_deny("ls -l");
+    rc |= expect_deny("ls --recursive /home/user");
+    rc |= expect_deny("ls -1 /tmp /home");
     rc |= expect_deny("readlink -m /tmp/foo");
     rc |= expect_deny("readlink -f /tmp/foo; rm -rf /");
+    rc |= expect_deny("realpath -m /tmp/foo");
+    rc |= expect_deny("realpath --relative-to=/ /tmp/foo");
+    rc |= expect_deny("realpath /tmp/foo /tmp/bar");
     rc |= expect_deny("test -w /tmp/foo");
     rc |= expect_deny("test -x /tmp/foo");
     rc |= expect_deny("test -d /tmp/foo");
@@ -173,6 +191,8 @@ int main(void) {
     rc |= expect_deny("zypper --non-interactive install -y libfoo");
     rc |= expect_deny("flatpak uninstall -y org.mozilla.firefox");
     rc |= expect_deny("flatpak uninstall --unused -y");
+    rc |= expect_deny("flatpak uninstall --unused");
+    rc |= expect_deny("flatpak remove --unused");
     rc |= expect_deny("flatpak update -y org.mozilla.firefox");
     rc |= expect_deny("flatpak remote-ls --updates --app");
     rc |= expect_deny("flatpak list --app");
@@ -234,6 +254,24 @@ int main(void) {
     rc |= expect_deny("pip list --user --format=json");
     rc |= expect_deny("pip freeze --user");
     rc |= expect_deny("pip list --user --outdated --format=json --path /tmp/venv");
+    rc |= expect_deny("pip list --user --outdated --format=json --target /tmp");
+    rc |= expect_deny("pip3 list --user --outdated --format=json --target=/tmp");
+    rc |= expect_deny("pip list --user --outdated --format=json -t /tmp");
+    rc |= expect_deny("brew outdated --json=v2 --greedy-latest");
+    rc |= expect_deny("brew outdated --json=v2 --greedy-auto-updates");
+    rc |= expect_deny("docker images -f dangling=false");
+    rc |= expect_deny("docker images --filter=dangling=false");
+    rc |= expect_deny("docker ps -a -f dangling=true");
+    rc |= expect_deny("docker volume ls -f status=exited");
+    rc |= expect_deny("docker images --filter=status=exited");
+    rc |= expect_deny("readlink");
+    rc |= expect_deny("readlink -f");
+    rc |= expect_deny("realpath");
+    rc |= expect_deny("test -e");
+    rc |= expect_deny("test -f");
+    rc |= expect_deny("apt-get -s autoremove --prefix /tmp");
+    rc |= expect_deny("npm ls -g --prefix=/tmp/proj");
+    rc |= expect_deny("composer global outdated --working-dir=/tmp/proj");
     rc |= expect_deny("");
 
     char out[4096];
@@ -271,9 +309,32 @@ int main(void) {
     n = appattic_host_exec("ls -1 /home/user/.local/bin", out, sizeof out);
     if (n <= 0) return fail("ls user-bin fixture missing");
     out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
-    if (!strstr(out, "gone-app") || !strstr(out, "herdr-link") || strstr(out, "orphan-cfg")) {
+    if (!strstr(out, "gone-app") || !strstr(out, "herdr-link") || !strstr(out, "python3") ||
+        strstr(out, "orphan-cfg")) {
         return fail("ls user-bin fixture text");
     }
+
+    n = appattic_host_exec("ls -1 /usr/bin", out, sizeof out);
+    if (n <= 0) return fail("ls usr-bin fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "python3") || strstr(out, "gone-app")) {
+        return fail("ls usr-bin fixture text");
+    }
+
+    n = appattic_host_exec("readlink -f /home/user/.local/bin/python3", out, sizeof out);
+    if (n <= 0) return fail("readlink overlay python3 fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "/home/user/.local/bin/python3")) return fail("readlink overlay python3 fixture text");
+
+    n = appattic_host_exec("readlink -f /usr/bin/python3", out, sizeof out);
+    if (n <= 0) return fail("readlink packaged python3 fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "/usr/bin/python3")) return fail("readlink packaged python3 fixture text");
+
+    n = appattic_host_exec("test -f /home/user/.local/bin/python3", out, sizeof out);
+    if (n != 0) return fail("test -f python3 fixture missing");
+    n = appattic_host_exec("test -f /usr/bin/python3", out, sizeof out);
+    if (n != 0) return fail("test -f /usr/bin/python3 fixture missing");
 
     n = appattic_host_exec("test -h /home/user/.local/bin/gone-app", out, sizeof out);
     if (n != 0) return fail("test -h gone-app fixture missing");
@@ -289,6 +350,16 @@ int main(void) {
     if (n >= 0) return fail("test -f gone-app should fail fixture");
     n = appattic_host_exec("test -f /home/user/.local/bin/herdr-link", out, sizeof out);
     if (n >= 0) return fail("test -f herdr-link should fail fixture");
+    n = appattic_host_exec("test -f /home/user/.local/bin/python3", out, sizeof out);
+    if (n != 0) return fail("test -f python3 fixture missing");
+    n = appattic_host_exec("realpath /home/user/.local/bin/python3", out, sizeof out);
+    if (n <= 0) return fail("realpath fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "/home/user/.local/bin/python3")) return fail("realpath fixture text");
+    n = appattic_host_exec("readlink -f /usr/bin/python3", out, sizeof out);
+    if (n <= 0) return fail("readlink -f fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "/usr/bin/python3")) return fail("readlink -f fixture text");
 
     n = appattic_host_exec("ls -1", out, sizeof out);
     if (n <= 0) return fail("ls fixture missing");
@@ -306,6 +377,20 @@ int main(void) {
     if (n <= 0) return fail("ls -1A fixture missing");
     out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
     if (!strstr(out, ".mozilla") || !strstr(out, ".wine")) return fail("ls -1A fixture text");
+
+    n = appattic_host_exec("ls -1A /home/user", out, sizeof out);
+    if (n <= 0) return fail("ls -1A home fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, ".mozilla") || !strstr(out, ".wine") || strstr(out, "gone-app")) {
+        return fail("ls -1A home fixture text");
+    }
+
+    n = appattic_host_exec("ls -1 /home/user/.config", out, sizeof out);
+    if (n <= 0) return fail("ls config fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "gone-app") || !strstr(out, "orphan-cfg")) {
+        return fail("ls config fixture text");
+    }
 
     n = appattic_host_exec("dnf repoquery --unneeded --qf %{name}", out, sizeof out);
     if (n <= 0) return fail("dnf fixture missing");
@@ -332,7 +417,7 @@ int main(void) {
     out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
     if (!strstr(out, "2.45.1-1.1") || !strstr(out, "vim")) return fail("zypper list-updates fixture text");
 
-    n = appattic_host_exec("flatpak uninstall --unused", out, sizeof out);
+    n = appattic_host_exec("flatpak uninstall --unused --dry-run", out, sizeof out);
     if (n <= 0) return fail("flatpak fixture missing");
     out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
     if (!strstr(out, "org.freedesktop.Platform.GL.default") || strstr(out, "remote-ls")) {
