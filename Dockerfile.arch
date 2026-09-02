@@ -1,13 +1,21 @@
-FROM archlinux:latest
+FROM archlinux:base-devel
+ARG SOURCE_DATE_EPOCH=0
+ENV LC_ALL=C
+ENV LANG=C
+ENV TZ=UTC
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 
 RUN pacman -Syu --noconfirm --needed \
         git qt6-base cmake ninja pkgconf gcc clang binutils curl tar xz \
         libxml2 ncurses python zig libglvnd xorg-server-xvfb \
     && pacman -Scc --noconfirm
 
-COPY scripts/linux-deps.sh /tmp/linux-deps.sh
-RUN bash /tmp/linux-deps.sh --install \
-    && bash /tmp/linux-deps.sh --install-wasmtime
+COPY scripts/linux-deps.sh \
+     scripts/verify-sha256.sh \
+     scripts/dep-checksums.sha256 \
+     /tmp/appattic/scripts/
+RUN bash /tmp/appattic/scripts/linux-deps.sh --install \
+    && bash /tmp/appattic/scripts/linux-deps.sh --install-wasmtime
 ENV WASMTIME_DIR=/opt/wasmtime-c-api
 
 WORKDIR /src

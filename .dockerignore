@@ -4,3 +4,13 @@ AppAttic.app
 .git
 .tmp-shots
 build-cache
+core/out
+ui/linux-qt/build
+ui/linux-qt/build-release
+.deps
+.zig-cache
+.zig-cache-local
+dist
+__pycache__
+*.pyc
+.DS_Store

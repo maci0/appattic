@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Swift CLI (appattic), or Swift UI with --ui.
+# Swift CLI (appattic). --ui launches AppAttic.app / AppAtticUI on macOS,
+# or appattic-qt (C++ Qt 6) on Linux.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APPATTIC_OS="$(uname -s)"
@@ -38,6 +39,7 @@ find_bin() {
 if [[ "${1:-}" == "--ui" ]]; then
     shift
     if [[ "$APPATTIC_OS" == Linux ]]; then
+        export APPATTIC_CORE_OUT="${APPATTIC_CORE_OUT:-$ROOT/core/out}"
         for qt in "$ROOT/ui/linux-qt/build/appattic-qt" "$ROOT/ui/linux-qt/build/Debug/appattic-qt"; do
             if [[ -x "$qt" ]]; then
                 exec "$qt" "$@"
@@ -68,6 +70,19 @@ if [[ "${1:-}" == "--ui" ]]; then
     fi
     echo "error: AppAttic UI binary not found. Build with ./build.sh first." >&2
     exit 1
+fi
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    if BIN="$(find_bin appattic)"; then
+        exec "$BIN" "$@"
+    fi
+    cat <<'EOF'
+Usage: ./run.sh [command] [options]
+       ./run.sh --ui [qt-args]
+
+Build with ./build.sh first. After a build, this is the appattic CLI.
+EOF
+    exit 0
 fi
 
 BIN="$(find_bin appattic)" || {

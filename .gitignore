@@ -1,6 +1,7 @@
 .build/
 core/out/
 ui/linux-qt/build/
+ui/linux-qt/build-release/
 .deps/
 .zig-cache/
 .zig-cache-local/
@@ -8,6 +9,7 @@ ui/linux-qt/build/
 __pycache__/
 *.pyc
 .DS_Store
-AppAttic.app/Contents/MacOS/AppAttic
+AppAttic.app/
+dist/
 build-cache/
 .tmp-shots/

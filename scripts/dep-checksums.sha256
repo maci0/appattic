@@ -1,0 +1,19 @@
+# SHA-256 of third-party install artifacts. Format: GNU sha256sum (hash, two spaces, name).
+# Swift 5.10.1 Ubuntu 22.04 tarballs (homebrew-core Formula/s/swift.rb bootstrap hashes)
+cab1bfffd33b79ebd49f4b7475bef6c7eb2d60cf3948cbc693d61afabd23c282  swift-5.10.1-RELEASE-ubuntu22.04.tar.gz
+871b00f0a7f96e0d28da53b232181c900a7540cb4be37fe4916c15ab411f83c9  swift-5.10.1-RELEASE-ubuntu22.04-aarch64.tar.gz
+# Zig 0.16.0: ziglang.org/download/index.json
+70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig-x86_64-linux-0.16.0.tar.xz
+ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17  zig-aarch64-linux-0.16.0.tar.xz
+# Wasmtime C API 28.0.0: GitHub release assets
+23f282f333f07ec82a838928cbc86355cc4978c3618080d1a2e5714fec8411bf  wasmtime-v28.0.0-x86_64-linux-c-api.tar.xz
+6eeeae50f71a92120cb53d92d5fe57dc56cfcc03a9239dcd2ae5a06811c2233f  wasmtime-v28.0.0-aarch64-linux-c-api.tar.xz
+# linuxdeploy 1-alpha-20251107-1
+c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  linuxdeploy-x86_64.AppImage
+620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff  linuxdeploy-aarch64.AppImage
+# linuxdeploy-plugin-qt 1-alpha-20250213-1
+15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724  linuxdeploy-plugin-qt-x86_64.AppImage
+bf1c24aff6d749b5cf423afad6f15abd4440f81dec1aab95706b25f6667cdcf1  linuxdeploy-plugin-qt-aarch64.AppImage
+# appimagetool 1.9.1 (AppImage/appimagetool, not the obsolete AppImageKit continuous tag)
+ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool-x86_64.AppImage
+f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158  appimagetool-aarch64.AppImage

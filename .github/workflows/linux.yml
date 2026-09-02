@@ -5,15 +5,48 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install shellcheck
+        run: sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends shellcheck
+      - name: Lint
+        run: bash scripts/lint.sh
+
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - name: Install Swift
-        uses: swift-actions/setup-swift@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          swift-version: "5.10"
+          persist-credentials: false
+      - name: Install Swift
+        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "5.10.1"
+      - name: Cache build
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .build
+            .swiftpm
+            .zig-cache
+            .zig-cache-local
+          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('Package.resolved', 'Package.swift', 'core/src/**/*.zig') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ github.job }}-
       - name: Install Qt 6
         run: sudo bash scripts/linux-deps.sh --install
       - name: Distro deps
@@ -27,14 +60,13 @@ jobs:
           echo /opt/zig >> "$GITHUB_PATH"
           echo /usr/local/bin >> "$GITHUB_PATH"
       - name: Test scan library
-        run: swift test --filter AppAtticScanTests
-        continue-on-error: true
+        run: swift test --filter AppAtticScanTests --disable-automatic-resolution
         id: swift_test
       - name: Build CLI
-        run: swift build -c debug --product appattic
+        run: swift build -c debug --product appattic --disable-automatic-resolution
         if: steps.swift_test.outcome == 'success'
       - name: Link Qt UI
-        if: always()
+        if: success() || failure()
         run: |
           set -euo pipefail
           bash scripts/linux-qt-link.sh
@@ -44,7 +76,8 @@ jobs:
           grep -Eq '^wasm: ok \([1-9][0-9]* plugins\)$' ui/linux-qt/build/LINUX_QT_LINK.txt
           grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[1-9][0-9]*' ui/linux-qt/build/LINUX_QT_LINK.txt
       - name: Upload Qt link proof
-        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-qt-link-${{ github.job }}
           path: ui/linux-qt/build/LINUX_QT_LINK.txt
@@ -52,14 +85,30 @@ jobs:
 
   jammy:
     runs-on: ubuntu-24.04
-    container: swift:5.10-jammy
+    timeout-minutes: 60
+    container: swift:5.10.1-jammy
     steps:
-      - uses: actions/checkout@v4
-      - name: Install Qt 6
+      - name: Install git
         run: |
+          export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates
-          bash scripts/linux-deps.sh --install
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Cache build
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .build
+            .swiftpm
+            .zig-cache
+            .zig-cache-local
+          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('Package.resolved', 'Package.swift', 'core/src/**/*.zig') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ github.job }}-
+      - name: Install Qt 6
+        run: bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API
         run: |
           bash scripts/linux-deps.sh --install-wasmtime
@@ -69,14 +118,13 @@ jobs:
           echo /opt/zig >> "$GITHUB_PATH"
           echo /usr/local/bin >> "$GITHUB_PATH"
       - name: Test scan library
-        run: swift test --filter AppAtticScanTests
-        continue-on-error: true
+        run: swift test --filter AppAtticScanTests --disable-automatic-resolution
         id: swift_test
       - name: Build CLI
-        run: swift build -c debug --product appattic
+        run: swift build -c debug --product appattic --disable-automatic-resolution
         if: steps.swift_test.outcome == 'success'
       - name: Link Qt UI
-        if: always()
+        if: success() || failure()
         shell: bash
         run: |
           set -euo pipefail
@@ -87,7 +135,8 @@ jobs:
           grep -Eq '^wasm: ok \([1-9][0-9]* plugins\)$' ui/linux-qt/build/LINUX_QT_LINK.txt
           grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[1-9][0-9]*' ui/linux-qt/build/LINUX_QT_LINK.txt
       - name: Upload Qt link proof
-        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-qt-link-${{ github.job }}
           path: ui/linux-qt/build/LINUX_QT_LINK.txt
@@ -95,17 +144,33 @@ jobs:
 
   archlinux:
     runs-on: ubuntu-24.04
-    container: archlinux:latest
+    timeout-minutes: 60
+    container: archlinux:base-devel
     steps:
       - name: Install Qt 6 and build tools
         run: pacman -Syu --noconfirm --needed git qt6-base cmake ninja pkgconf gcc clang binutils curl tar xz libxml2 ncurses python zig libglvnd xorg-server-xvfb
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Cache build
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .zig-cache
+            .zig-cache-local
+          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('core/src/**/*.zig') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ github.job }}-
       - name: Distro deps
-        run: bash scripts/linux-deps.sh
+        run: bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API
         run: |
           bash scripts/linux-deps.sh --install-wasmtime
           echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
+      - name: Put zig on PATH
+        run: |
+          echo /opt/zig >> "$GITHUB_PATH"
+          echo /usr/local/bin >> "$GITHUB_PATH"
       - name: Link Qt UI
         run: |
           set -euo pipefail
@@ -116,7 +181,7 @@ jobs:
           grep -Eq '^wasm: ok \([1-9][0-9]* plugins\)$' ui/linux-qt/build/LINUX_QT_LINK.txt
           grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[1-9][0-9]*' ui/linux-qt/build/LINUX_QT_LINK.txt
       - name: Upload Qt link proof
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-qt-link-${{ github.job }}
           path: ui/linux-qt/build/LINUX_QT_LINK.txt
