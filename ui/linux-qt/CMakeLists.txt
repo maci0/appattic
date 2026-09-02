@@ -1,10 +1,23 @@
 cmake_minimum_required(VERSION 3.16)
 project(appattic-qt LANGUAGES C CXX)
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+
+if(NOT DEFINED ENV{SOURCE_DATE_EPOCH} OR "$ENV{SOURCE_DATE_EPOCH}" STREQUAL "")
+    set(ENV{SOURCE_DATE_EPOCH} "0")
+endif()
+
+include(CheckPIESupported)
+check_pie_supported()
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
@@ -58,6 +71,10 @@ set_target_properties(wasmtime PROPERTIES
 
 add_executable(appattic-qt
     main.cpp
+    finding.cpp
+    settings.cpp
+    corehost.cpp
+    smoke.cpp
     "${APPATTIC_ROOT}/core/host/embed.c"
     "${APPATTIC_ROOT}/core/host/hostexec.c"
 )
@@ -65,10 +82,54 @@ target_include_directories(appattic-qt PRIVATE
     "${APPATTIC_ROOT}/core/host"
     "${WASMTIME_INCLUDE_DIR}"
 )
-target_compile_definitions(appattic-qt PRIVATE
-    APPATTIC_CORE_OUT="${APPATTIC_ROOT}/core/out"
-)
+# Do not bake the configure-time source path into the binary. Runtime uses
+# APPATTIC_CORE_OUT, then paths relative to the executable (see coreOutDir).
 target_link_libraries(appattic-qt PRIVATE Qt6::Widgets wasmtime)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(appattic-qt PRIVATE
+        -fstack-protector-strong
+        -Wformat
+        -Wformat-security
+        -Werror=format-security
+        "-ffile-prefix-map=${APPATTIC_ROOT}=."
+        "-fdebug-prefix-map=${APPATTIC_ROOT}=."
+        "-fmacro-prefix-map=${APPATTIC_ROOT}=."
+        "-ffile-prefix-map=${CMAKE_BINARY_DIR}=/build"
+        "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=/build"
+        "-fmacro-prefix-map=${CMAKE_BINARY_DIR}=/build"
+        $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
+        $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=2>
+        $<$<COMPILE_LANGUAGE:C>:-Wall>
+        $<$<COMPILE_LANGUAGE:C>:-Wextra>
+    )
+    if(UNIX AND NOT APPLE)
+        target_compile_options(appattic-qt PRIVATE -fstack-clash-protection)
+        target_link_options(appattic-qt PRIVATE
+            -pie
+            -Wl,-z,relro,-z,now
+            -Wl,-z,noexecstack
+        )
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+            target_compile_options(appattic-qt PRIVATE -fcf-protection=full)
+            target_link_options(appattic-qt PRIVATE -fcf-protection=full)
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
+            target_compile_options(appattic-qt PRIVATE -mbranch-protection=standard)
+        endif()
+    endif()
+    set_property(SOURCE "${APPATTIC_ROOT}/core/host/hostexec.c"
+        APPEND PROPERTY COMPILE_OPTIONS
+        -Werror -Wformat=2 -Wformat-security -Wshadow
+        -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference)
+endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(appattic-qt PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-D_GLIBCXX_ASSERTIONS>
+    )
+    # Source-level so a separate AUTOMOC TU does not inherit -Werror.
+    set_property(SOURCE main.cpp APPEND PROPERTY COMPILE_OPTIONS -Werror)
+endif()
 if(UNIX AND NOT APPLE)
     get_filename_component(_wasmtime_libdir "${WASMTIME_LIBRARY}" DIRECTORY)
     set_target_properties(appattic-qt PROPERTIES
@@ -76,10 +137,15 @@ if(UNIX AND NOT APPLE)
         INSTALL_RPATH "\$ORIGIN"
         BUILD_WITH_INSTALL_RPATH OFF
         INSTALL_RPATH_USE_LINK_PATH OFF
+        POSITION_INDEPENDENT_CODE ON
     )
 endif()
 
 install(TARGETS appattic-qt RUNTIME DESTINATION bin)
+install(DIRECTORY "${APPATTIC_ROOT}/core/out/"
+    DESTINATION share/appattic
+    FILES_MATCHING PATTERN "*.wasm"
+)
 
 if(EXISTS "${APPATTIC_ROOT}/packaging/appattic.desktop")
     install(FILES "${APPATTIC_ROOT}/packaging/appattic.desktop"

@@ -1,12 +1,18 @@
-#include "embed.h"
+#include "corehost.h"
+#include "finding.h"
+#include "settings.h"
+#include "smoke.h"
 
 #include <QAbstractItemView>
+#include <QAction>
 #include <QApplication>
 #include <QByteArray>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QColor>
 #include <QComboBox>
+#include <QCoreApplication>
+#include <QDate>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
@@ -21,10 +27,7 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonValue>
+#include <QIODevice>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -33,7 +36,6 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QMenuBar>
-#include <QAction>
 #include <QMessageBox>
 #include <QModelIndex>
 #include <QObject>
@@ -43,14 +45,13 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QRect>
+#include <QSaveFile>
 #include <QScrollArea>
 #include <QSet>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSize>
 #include <QSplitter>
 #include <QStackedWidget>
-#include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyle>
 #include <QStyleHints>
@@ -58,19 +59,19 @@
 #include <QStyledItemDelegate>
 #include <QTemporaryFile>
 #include <QThread>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QUrl>
+#include <QVariant>
 #include <QVBoxLayout>
 #include <QVector>
 #include <QWidget>
 
-#include <algorithm>
 #include <cstdio>
 #include <cstring>
-#include <initializer_list>
+#include <limits>
 #include <utility>
-#include <vector>
 
 static void resetWidgetPalette(QWidget *w) {
     if (!w) return;
@@ -78,248 +79,10 @@ static void resetWidgetPalette(QWidget *w) {
     w->setPalette(QApplication::palette());
 }
 
-enum class Page : int {
-    Overview = 0,
-    Leftovers,
-    Stale,
-    Outdated,
-    Packages,
-    Settings,
-};
-
-struct Finding {
-    QString plugin;
-    QString engine;
-    QString kind;
-    QString id;
-    QString name;
-    QString path;
-    QString status;
-    QString command;
-    QString reason;
-    QString summary;
-    QString rootLabel;
-    QString manager;
-    QString revision;
-    QString currentVersion;
-    QString latestVersion;
-    QString lastUsed;
-    QString mtime;
-    QString version;
-    QString dialogBody;
-    QString updateCommand;
-    QString packagedPath;
-    qint64 bytes = -1;
-    qint64 idleDays = -1;
-    bool updatable = false;
-    QStringList children;
-    QStringList extraPaths;
-
-    QString uid() const {
-        return plugin + QLatin1Char('\n') + id + QLatin1Char('\n') + path + QLatin1Char('\n')
-            + kind + QLatin1Char('\n') + name;
-    }
-};
-
-static int homePathTag(const char *xdgEnv, const QString &rel);
-static QStringList pluginWasmFiles(const QString &out);
-
-static void on_json(const char *json, size_t len, void *user) {
-    auto *out = static_cast<QByteArray *>(user);
-    out->append(json, int(len));
-    out->append('\n');
-}
-
-static QString coreOutDir() {
-    const QByteArray env = qgetenv("APPATTIC_CORE_OUT");
-    if (!env.isEmpty()) return QString::fromUtf8(env);
-    return QString::fromUtf8(APPATTIC_CORE_OUT);
-}
-
-static int pluginTag(const QString &wasmPath) {
-    const QFileInfo fi(wasmPath);
-    const QString stem = fi.completeBaseName();
-    if (stem.contains(QLatin1String("container_runtime"))) {
-        if (!QStandardPaths::findExecutable(QStringLiteral("podman")).isEmpty()) return 2;
-        if (!QStandardPaths::findExecutable(QStringLiteral("docker")).isEmpty()) return 1;
-        return 0;
-    }
-    if (stem.contains(QLatin1String("snapd"))) {
-        return QStandardPaths::findExecutable(QStringLiteral("snap")).isEmpty() ? 0 : 1;
-    }
-    if (stem.contains(QLatin1String("path_xdg_config"))) {
-        return homePathTag("XDG_CONFIG_HOME", QStringLiteral(".config"));
-    }
-    if (stem.contains(QLatin1String("path_xdg_data"))) {
-        return homePathTag("XDG_DATA_HOME", QStringLiteral(".local/share"));
-    }
-    if (stem.contains(QLatin1String("path_xdg_cache"))) {
-        return homePathTag("XDG_CACHE_HOME", QStringLiteral(".cache"));
-    }
-    if (stem.contains(QLatin1String("path_xdg_state"))) {
-        return homePathTag("XDG_STATE_HOME", QStringLiteral(".local/state"));
-    }
-    if (stem.contains(QLatin1String("path_xdg_lib"))) {
-        return QDir::home().exists(QStringLiteral(".local/lib")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_var_app"))) {
-        return QDir::home().exists(QStringLiteral(".var/app")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_shadow"))) {
-        const QDir home = QDir::home();
-        if (home.exists(QStringLiteral(".local/bin"))) return 1;
-        if (home.exists(QStringLiteral("bin"))) return 1;
-        if (home.exists(QStringLiteral(".cargo/bin"))) return 1;
-        if (home.exists(QStringLiteral(".local/share/applications"))) return 1;
-        return 0;
-    }
-    if (stem.contains(QLatin1String("path_user_bin"))) {
-        if (QDir::home().exists(QStringLiteral(".local/bin"))) return 1;
-        if (QDir::home().exists(QStringLiteral("bin"))) return 1;
-        return 0;
-    }
-    if (stem.contains(QLatin1String("path_home_dot"))) {
-        return QDir::home().exists() ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_application_support"))) {
-        return QDir::home().exists(QStringLiteral("Library/Application Support")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_caches"))) {
-        return QDir::home().exists(QStringLiteral("Library/Caches")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_preferences"))) {
-        return QDir::home().exists(QStringLiteral("Library/Preferences")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_saved_state"))) {
-        return QDir::home().exists(QStringLiteral("Library/Saved Application State")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_containers")) &&
-        !stem.contains(QLatin1String("path_group_containers"))) {
-        return QDir::home().exists(QStringLiteral("Library/Containers")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_group_containers"))) {
-        return QDir::home().exists(QStringLiteral("Library/Group Containers")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_logs"))) {
-        return QDir::home().exists(QStringLiteral("Library/Logs")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_webkit"))) {
-        return QDir::home().exists(QStringLiteral("Library/WebKit")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_httpstorages"))) {
-        return QDir::home().exists(QStringLiteral("Library/HTTPStorages")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("path_launchagents"))) {
-        return QDir::home().exists(QStringLiteral("Library/LaunchAgents")) ? 1 : 0;
-    }
-    if (stem.contains(QLatin1String("pacman"))) {
-        return QStandardPaths::findExecutable(QStringLiteral("pacman")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("apt")) {
-        if (!QStandardPaths::findExecutable(QStringLiteral("apt-get")).isEmpty()) return 1;
-        if (!QStandardPaths::findExecutable(QStringLiteral("apt")).isEmpty()) return 1;
-        return 0;
-    }
-    if (stem == QLatin1String("dnf")) {
-        if (!QStandardPaths::findExecutable(QStringLiteral("dnf5")).isEmpty()) return 1;
-        if (!QStandardPaths::findExecutable(QStringLiteral("dnf")).isEmpty()) return 1;
-        if (!QStandardPaths::findExecutable(QStringLiteral("yum")).isEmpty()) return 1;
-        return 0;
-    }
-    if (stem == QLatin1String("zypper")) {
-        return QStandardPaths::findExecutable(QStringLiteral("zypper")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("flatpak")) {
-        return QStandardPaths::findExecutable(QStringLiteral("flatpak")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("npm")) {
-        return QStandardPaths::findExecutable(QStringLiteral("npm")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("pnpm")) {
-        return QStandardPaths::findExecutable(QStringLiteral("pnpm")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("bun")) {
-        return QStandardPaths::findExecutable(QStringLiteral("bun")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("pipx")) {
-        return QStandardPaths::findExecutable(QStringLiteral("pipx")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("pip")) {
-        if (!QStandardPaths::findExecutable(QStringLiteral("pip")).isEmpty()) return 1;
-        if (!QStandardPaths::findExecutable(QStringLiteral("pip3")).isEmpty()) return 1;
-        return 0;
-    }
-    if (stem == QLatin1String("uv")) {
-        return QStandardPaths::findExecutable(QStringLiteral("uv")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("brew")) {
-        return QStandardPaths::findExecutable(QStringLiteral("brew")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("gem")) {
-        return QStandardPaths::findExecutable(QStringLiteral("gem")).isEmpty() ? 0 : 1;
-    }
-    if (stem == QLatin1String("composer")) {
-        return QStandardPaths::findExecutable(QStringLiteral("composer")).isEmpty() ? 0 : 1;
-    }
-    return 1;
-}
-
-static qint64 jsonInt(const QJsonObject &o, const char *key) {
-    const QJsonValue v = o.value(QLatin1String(key));
-    if (v.isDouble()) return qint64(v.toDouble());
-    if (v.isString()) return v.toString().toLongLong();
-    return -1;
-}
-
-static QString jsonStr(const QJsonObject &o, const char *key) {
-    const QJsonValue v = o.value(QLatin1String(key));
-    if (v.isString()) return v.toString();
-    if (v.isDouble()) return QString::number(v.toDouble(), 'f', 0);
-    return {};
-}
-
-static QString jsonStrAny(const QJsonObject &o, std::initializer_list<const char *> keys) {
-    for (const char *key : keys) {
-        const QString s = jsonStr(o, key);
-        if (!s.isEmpty()) return s;
-    }
-    return {};
-}
-
-static qint64 jsonIntAny(const QJsonObject &o, std::initializer_list<const char *> keys) {
-    for (const char *key : keys) {
-        const qint64 n = jsonInt(o, key);
-        if (n >= 0) return n;
-    }
-    return -1;
-}
-
-static bool jsonBool(const QJsonObject &o, const char *key) {
-    const QJsonValue v = o.value(QLatin1String(key));
-    if (v.isBool()) return v.toBool();
-    if (v.isDouble()) return v.toDouble() != 0;
-    if (v.isString()) {
-        const QString s = v.toString().toLower();
-        return s == QLatin1String("true") || s == QLatin1String("1") || s == QLatin1String("yes");
-    }
-    return false;
-}
-
-static QString shellQuote(const QString &s) {
-    QString q = s;
-    q.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
-    return QLatin1Char('\'') + q + QLatin1Char('\'');
-}
-
-static bool scriptHasCommands(const QString &script) {
-    const QStringList lines = script.split(QLatin1Char('\n'));
-    for (const QString &raw : lines) {
-        const QString t = raw.trimmed();
-        if (t.isEmpty() || t.startsWith(QLatin1Char('#'))) continue;
-        if (t == QLatin1String("#!/bin/sh") || t.startsWith(QLatin1String("set "))) continue;
-        return true;
-    }
-    return false;
+static qint64 addBytes(qint64 a, qint64 b) {
+    if (b <= 0) return a;
+    if (a > std::numeric_limits<qint64>::max() - b) return std::numeric_limits<qint64>::max();
+    return a + b;
 }
 
 static bool isDarkPalette(const QPalette &p) {
@@ -347,409 +110,135 @@ static int rowPx() {
     return QFontMetrics(bodyFont()).height() + 6;
 }
 
-static int homePathTag(const char *xdgEnv, const QString &rel) {
-    const QByteArray env = qgetenv(xdgEnv);
-    if (!env.isEmpty()) return QDir(QString::fromUtf8(env)).exists() ? 1 : 0;
-    return QDir::home().exists(rel) ? 1 : 0;
-}
-
-static QStringList pluginWasmFiles(const QString &out) {
-    const QStringList names = {
-        QStringLiteral("/container_runtime.wasm"),
-        QStringLiteral("/snapd.wasm"),
-        QStringLiteral("/path_xdg_config.wasm"),
-        QStringLiteral("/path_xdg_data.wasm"),
-        QStringLiteral("/path_xdg_cache.wasm"),
-        QStringLiteral("/path_xdg_state.wasm"),
-        QStringLiteral("/path_xdg_lib.wasm"),
-        QStringLiteral("/path_var_app.wasm"),
-        QStringLiteral("/path_shadow.wasm"),
-        QStringLiteral("/path_user_bin.wasm"),
-        QStringLiteral("/path_home_dot.wasm"),
-        QStringLiteral("/path_application_support.wasm"),
-        QStringLiteral("/path_caches.wasm"),
-        QStringLiteral("/path_preferences.wasm"),
-        QStringLiteral("/path_saved_state.wasm"),
-        QStringLiteral("/path_containers.wasm"),
-        QStringLiteral("/path_group_containers.wasm"),
-        QStringLiteral("/path_logs.wasm"),
-        QStringLiteral("/path_webkit.wasm"),
-        QStringLiteral("/path_httpstorages.wasm"),
-        QStringLiteral("/path_launchagents.wasm"),
-        QStringLiteral("/pacman.wasm"),
-        QStringLiteral("/apt.wasm"),
-        QStringLiteral("/dnf.wasm"),
-        QStringLiteral("/zypper.wasm"),
-        QStringLiteral("/flatpak.wasm"),
-        QStringLiteral("/npm.wasm"),
-        QStringLiteral("/pnpm.wasm"),
-        QStringLiteral("/bun.wasm"),
-        QStringLiteral("/pipx.wasm"),
-        QStringLiteral("/uv.wasm"),
-        QStringLiteral("/brew.wasm"),
-        QStringLiteral("/gem.wasm"),
-        QStringLiteral("/composer.wasm"),
-        QStringLiteral("/pip.wasm"),
-    };
-    QStringList paths;
-    paths.reserve(names.size());
-    for (const QString &n : names) paths << (out + n);
-    return paths;
-}
-
-static QString humanSize(qint64 bytes) {
-    if (bytes < 0) return QStringLiteral("unknown");
-    double n = double(bytes);
-    static const char *units[] = {"B", "KB", "MB", "GB", "TB"};
-    for (const char *unit : units) {
-        if (qAbs(n) < 1024.0) {
-            if (unit[0] == 'B' && unit[1] == '\0') return QString::number(int(n)) + QStringLiteral(" B");
-            return QString::number(n, 'f', 1) + QLatin1Char(' ') + QLatin1String(unit);
-        }
-        n /= 1024.0;
-    }
-    return QString::number(n, 'f', 1) + QStringLiteral(" PB");
-}
-
-static QString humanKind(const QString &kind) {
-    if (kind == QLatin1String("global")) return QStringLiteral("Global");
-    if (kind == QLatin1String("orphan") || kind.contains(QLatin1String("orphan"))) {
-        return QStringLiteral("Orphan");
-    }
-    QString s = kind;
-    s.replace(QLatin1Char('-'), QLatin1Char(' '));
-    if (!s.isEmpty()) s[0] = s[0].toUpper();
-    return s.isEmpty() ? QStringLiteral("-") : s;
-}
-
-static QString managerLabel(const Finding &f) {
-    QString m = f.manager;
-    if (m.isEmpty()) m = f.engine;
-    if (m.isEmpty()) m = f.plugin;
-    m.replace(QLatin1Char('-'), QLatin1Char(' '));
-    return m;
-}
-
-static QString locationLabel(const Finding &f) {
-    if (!f.rootLabel.isEmpty()) return f.rootLabel;
-    if (f.path.isEmpty()) return QStringLiteral("-");
-    const QFileInfo fi(f.path);
-    const QString parent = fi.dir().dirName();
-    return parent.isEmpty() ? f.path : parent;
-}
-
-static QString modifiedLabel(const Finding &f) {
-    if (f.idleDays >= 0) {
-        if (f.idleDays < 1) return QStringLiteral("Today");
-        if (f.idleDays == 1) return QStringLiteral("Yesterday");
-        return QString::number(f.idleDays) + QStringLiteral(" days ago");
-    }
-    if (!f.mtime.isEmpty()) return f.mtime.left(10);
-    if (!f.lastUsed.isEmpty()) return f.lastUsed.left(10);
-    return QStringLiteral("-");
-}
-
-static QString displayName(const Finding &f) {
-    if (!f.name.isEmpty()) return f.name;
-    if (!f.id.isEmpty()) return f.id;
-    if (!f.path.isEmpty()) return QFileInfo(f.path).fileName();
-    return QStringLiteral("-");
-}
-
-static QString statusLabel(const Finding &f) {
-    if (f.status == QLatin1String("review")) return QStringLiteral("Review");
-    if (f.status == QLatin1String("remove")) return QStringLiteral("Remove");
-    if (f.status.isEmpty()) return QStringLiteral("-");
-    QString s = f.status;
-    s[0] = s[0].toUpper();
-    return s;
-}
-
-static bool isProtectedPackagedPath(const QString &path) {
-    if (path.isEmpty()) return false;
-    return path.startsWith(QLatin1String("/usr/"))
-        || path.startsWith(QLatin1String("/bin/"))
-        || path.startsWith(QLatin1String("/sbin/"));
-}
-
-static bool isShadowFinding(const Finding &f) {
-    return f.status == QLatin1String("shadow")
-        || f.kind == QLatin1String("shadow")
-        || !f.packagedPath.isEmpty();
-}
-
-static QString overlayRootLabel(const QString &path) {
-    if (path.contains(QLatin1String("/.local/share/applications"))) {
-        return QStringLiteral(".local/share/applications");
-    }
-    if (path.contains(QLatin1String("/.local/bin"))) return QStringLiteral(".local/bin");
-    if (path.contains(QLatin1String("/.cargo/bin"))) return QStringLiteral(".cargo/bin");
-    const QString homeBin = QDir::home().filePath(QStringLiteral("bin")) + QLatin1Char('/');
-    if (path.startsWith(homeBin) || path == QDir::home().filePath(QStringLiteral("bin"))) {
-        return QStringLiteral("bin");
-    }
-    return {};
-}
-
-static QString leftoverCleanupCommand(const Finding &f) {
-    if (isShadowFinding(f)) {
-        if (f.path.isEmpty()) return {};
-        if (!f.packagedPath.isEmpty() && f.path == f.packagedPath) return {};
-        if (isProtectedPackagedPath(f.path)) return {};
-        return QStringLiteral("rm -f ") + shellQuote(f.path);
-    }
-    if (f.command.isEmpty()) return {};
-    const QString cmd = f.command;
-    if ((cmd.contains(QLatin1String("rm ")) || cmd.contains(QLatin1String("rm\t")))
-        && (cmd.contains(QLatin1String(" /usr/"))
-            || cmd.contains(QLatin1String(" '/usr/"))
-            || cmd.contains(QLatin1String(" \"/usr/")))) {
-        return {};
-    }
-    return cmd;
-}
-
-static bool isLeftover(const Finding &f) {
-    if (f.plugin.startsWith(QLatin1String("path-"))) return true;
-    if (f.kind.contains(QLatin1String("orphan-dir"))) return true;
-    if (f.kind.contains(QLatin1String("orphan-user-data"))) return true;
-    if (f.kind.contains(QLatin1String("overlay")) || isShadowFinding(f)) return true;
-    return false;
-}
-
-static bool isOutdated(const Finding &f) {
-    if (!f.currentVersion.isEmpty() || !f.latestVersion.isEmpty()) return true;
-    if (f.kind.contains(QLatin1String("outdated")) || f.kind.contains(QLatin1String("upgrade"))) return true;
-    if (f.status == QLatin1String("outdated") || f.updatable) return true;
-    if (!f.updateCommand.isEmpty()) return true;
-    return false;
-}
-
-static bool hasUsageTiming(const Finding &f) {
-    return f.idleDays >= 0 || !f.mtime.isEmpty() || !f.lastUsed.isEmpty();
-}
-
-static bool isStaleTierStatus(const QString &status) {
-    return status == QLatin1String("review") || status == QLatin1String("remove")
-        || status == QLatin1String("stale");
-}
-
-/// Linux stand-in until a stale WASM plugin ships: path leftovers with idle/mtime
-/// (Swift stale = installed apps with review/remove tier; same columns when JSON has timing).
-static bool isStaleFromLeftoverUsage(const Finding &f) {
-    return isLeftover(f) && !isShadowFinding(f) && hasUsageTiming(f);
-}
-
-static bool isStale(const Finding &f) {
-    if (f.kind.contains(QLatin1String("stale")) || f.kind.contains(QLatin1String("unused-app"))
-        || f.kind.contains(QLatin1String("stale-app"))) {
-        return true;
-    }
-    if (f.plugin.contains(QLatin1String("stale"))) return true;
-    if (f.status == QLatin1String("stale")) return true;
-    if (isStaleTierStatus(f.status) && hasUsageTiming(f) && !isLeftover(f) && !isOutdated(f)) {
-        return true;
-    }
-    return isStaleFromLeftoverUsage(f);
-}
-
-static void enrichLeftoverUsageTiming(Finding &f) {
-    if (!isLeftover(f) || isShadowFinding(f) || hasUsageTiming(f) || f.path.isEmpty()) return;
-    const QFileInfo fi(f.path);
-    if (!fi.exists()) return;
-    const QDateTime mt = fi.lastModified();
-    if (!mt.isValid()) return;
-    f.mtime = mt.toString(Qt::ISODate);
-    const qint64 days = mt.daysTo(QDateTime::currentDateTime());
-    f.idleDays = days < 0 ? 0 : days;
-}
-
-static void enrichFindingsUsageTiming(QVector<Finding> &findings) {
-    for (Finding &f : findings) enrichLeftoverUsageTiming(f);
-}
-
-static bool isPackage(const Finding &f) {
-    if (isLeftover(f) || isStale(f) || isOutdated(f)) return false;
-    if (f.plugin == QLatin1String("container-runtime") || f.plugin == QLatin1String("snapd")
-        || f.plugin == QLatin1String("flatpak")) {
-        return true;
-    }
-    if (f.kind.contains(QLatin1String("image")) || f.kind.contains(QLatin1String("volume"))
-        || f.kind.contains(QLatin1String("container")) || f.kind.contains(QLatin1String("revision"))
-        || f.kind.contains(QLatin1String("compose")) || f.kind.contains(QLatin1String("pod"))
-        || f.kind.contains(QLatin1String("cache"))) {
-        return true;
-    }
-    if (f.kind == QLatin1String("global") || f.kind == QLatin1String("orphan")) return true;
-    return false;
-}
-
-static bool matchPage(const Finding &f, Page page) {
+static QString pageSearchEmpty(Page page) {
     switch (page) {
-    case Page::Overview:
-        return true;
     case Page::Leftovers:
-        return isLeftover(f);
+        return QStringLiteral("No leftovers match this search.");
     case Page::Stale:
-        return isStale(f);
+        return QStringLiteral("No stale apps match this search.");
     case Page::Outdated:
-        return isOutdated(f);
+        return QStringLiteral("No outdated packages match this search.");
     case Page::Packages:
-        return isPackage(f);
-    case Page::Settings:
-        return false;
+        return QStringLiteral("No packages match this search.");
+    default:
+        return QStringLiteral("No items match this search.");
     }
-    return false;
 }
 
-static int countPageRows(const QVector<Finding> &findings, Page page) {
-    int n = 0;
-    for (const Finding &f : findings) {
-        if (matchPage(f, page)) ++n;
+static QString pageEmptyTitle(Page page, bool scanning, bool scanFailed) {
+    if (scanning) return QStringLiteral("Scanning");
+    if (scanFailed) return QStringLiteral("Scan failed");
+    switch (page) {
+    case Page::Leftovers:
+        return QStringLiteral("No leftover data");
+    case Page::Stale:
+        return QStringLiteral("No stale apps");
+    case Page::Outdated:
+        return QStringLiteral("No outdated packages");
+    case Page::Packages:
+        return QStringLiteral("No unused packages");
+    default:
+        return QStringLiteral("Nothing to review");
     }
-    return n;
 }
 
-static void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line) {
-    const QJsonDocument doc = QJsonDocument::fromJson(line);
-    if (!doc.isObject()) return;
-    const QJsonObject obj = doc.object();
-    const QString plugin = obj.value(QStringLiteral("plugin")).toString();
-    const QString engine = jsonStr(obj, "engine");
-    QString dialogBody;
-    const QJsonValue dialog = obj.value(QStringLiteral("dialog"));
-    if (dialog.isObject()) {
-        dialogBody = jsonStr(dialog.toObject(), "body");
+static QString pageEmptyDetail(
+    Page page,
+    bool scanning,
+    bool scanFailed,
+    const QString &search,
+    int ignoredCount,
+    const QString &packageFilter,
+    const QString &errorText
+) {
+    if (scanning) {
+        return QStringLiteral(
+            "Looking for leftover data, stale apps, outdated packages, and unused packages."
+        );
     }
-    const QString note = jsonStr(obj, "note");
-    const QJsonArray findings = obj.value(QStringLiteral("findings")).toArray();
-    for (const QJsonValue &v : findings) {
-        const QJsonObject f = v.toObject();
-        Finding row;
-        row.plugin = plugin;
-        row.engine = engine;
-        row.kind = jsonStr(f, "kind");
-        row.id = jsonStr(f, "id");
-        row.name = jsonStr(f, "name");
-        if (row.name.isEmpty()) row.name = row.id;
-        row.path = jsonStr(f, "path");
-        row.status = jsonStr(f, "status");
-        row.command = jsonStrAny(f, {"command", "remove_command", "uninstall"});
-        row.updateCommand = jsonStrAny(f, {"update_command", "upgrade_command", "upgrade"});
-        row.reason = jsonStr(f, "reason");
-        row.summary = jsonStr(f, "summary");
-        row.rootLabel = jsonStrAny(f, {"rootLabel", "root_label", "root"});
-        row.manager = jsonStrAny(f, {"manager", "package_manager"});
-        row.revision = jsonStr(f, "revision");
-        row.currentVersion = jsonStrAny(f, {"current_version", "currentVersion", "current"});
-        row.latestVersion = jsonStrAny(f, {"latest_version", "latestVersion", "latest"});
-        row.lastUsed = jsonStrAny(f, {"last_used", "lastUsed", "last-used"});
-        row.mtime = jsonStrAny(f, {"mtime", "modified", "modified_at"});
-        row.version = jsonStr(f, "version");
-        row.packagedPath = jsonStrAny(f, {"packaged_path", "packagedPath", "shadows"});
-        if (row.packagedPath.isEmpty()) {
-            const QJsonValue sh = f.value(QStringLiteral("shadows"));
-            if (sh.isArray()) {
-                QStringList parts;
-                for (const QJsonValue &p : sh.toArray()) {
-                    if (p.isString() && !p.toString().isEmpty()) parts << p.toString();
-                }
-                row.packagedPath = parts.join(QLatin1Char('\n'));
-            }
+    if (scanFailed) {
+        return errorText.isEmpty() ? QStringLiteral("Click Rescan to try again.") : errorText;
+    }
+    if (!search.trimmed().isEmpty()) return pageSearchEmpty(page);
+    switch (page) {
+    case Page::Leftovers: {
+        QString body = QStringLiteral(
+            "No leftover data from uninstalled apps, and no PATH or desktop overlays hiding package-manager files."
+        );
+        if (ignoredCount > 0) {
+            body += QLatin1Char(' ')
+                + (ignoredCount == 1
+                    ? QStringLiteral("1 leftover path hidden from the list.")
+                    : QString::number(ignoredCount) + QStringLiteral(" leftover paths hidden from the list."));
         }
-        if (row.rootLabel.isEmpty() && isShadowFinding(row)) {
-            row.rootLabel = overlayRootLabel(row.path);
+        return body;
+    }
+    case Page::Stale:
+        return QStringLiteral("No unused installed apps in this scan.");
+    case Page::Outdated:
+        return QStringLiteral(
+            "No outdated packages. Brew, Flatpak, Snap, apt, pacman, dnf, zypper, and the App Store reported nothing, or those tools are not installed."
+        );
+    case Page::Packages:
+        if (packageFilter == QLatin1String("globals")) {
+            return QStringLiteral("No user-global npm, pnpm, bun, pipx, or uv tools.");
         }
-        row.dialogBody = row.reason.isEmpty() ? dialogBody : row.reason;
-        if (row.dialogBody.isEmpty()) row.dialogBody = note;
-        row.bytes = jsonIntAny(f, {"bytes", "size_bytes", "size"});
-        row.idleDays = jsonIntAny(f, {"idleDays", "idle_days", "idle"});
-        row.updatable = jsonBool(f, "updatable") || jsonBool(f, "update")
-            || row.status == QLatin1String("outdated");
-        if (row.updateCommand.isEmpty() && row.updatable) row.updateCommand = row.command;
-        const QJsonValue kids = f.value(QStringLiteral("children"));
-        if (kids.isArray()) {
-            for (const QJsonValue &c : kids.toArray()) {
-                if (c.isObject()) {
-                    const QJsonObject co = c.toObject();
-                    const QString n = jsonStrAny(co, {"name", "id"});
-                    if (!n.isEmpty()) row.children << n;
-                } else if (c.isString()) {
-                    row.children << c.toString();
-                }
-            }
+        if (packageFilter == QLatin1String("leaves")) {
+            return QStringLiteral(
+                "No distro orphans. apt/pacman/dnf/zypper reported nothing, or those tools are not installed."
+            );
         }
-        const char *extraKeys[] = {"extra_paths", "extraPaths"};
-        for (const char *extraKey : extraKeys) {
-            const QJsonValue extra = f.value(QLatin1String(extraKey));
-            if (!extra.isArray()) continue;
-            for (const QJsonValue &p : extra.toArray()) {
-                if (p.isString() && !p.toString().isEmpty()) row.extraPaths << p.toString();
-            }
-        }
-        row.extraPaths.removeDuplicates();
-        out.push_back(row);
+        return QStringLiteral(
+            "No distro orphans or language globals. Missing package managers simply have nothing to list."
+        );
+    default:
+        return QStringLiteral("No leftover data, stale apps, or outdated packages in this scan.");
     }
 }
 
-static bool isGlobalKind(const Finding &f) {
-    return f.kind.contains(QLatin1String("global"))
-        || f.plugin == QLatin1String("npm") || f.plugin == QLatin1String("pnpm")
-        || f.plugin == QLatin1String("bun") || f.plugin == QLatin1String("pipx")
-        || f.plugin == QLatin1String("uv");
-}
-
-static QString distroManager(const Finding &f) {
-    QString m = f.manager;
-    if (m.isEmpty()) m = f.engine;
-    if (m.isEmpty()) m = f.plugin;
-    return m.toLower();
-}
-
-static bool canMarkManual(const Finding &f) {
-    if (isGlobalKind(f)) return false;
-    if (f.kind != QLatin1String("orphan") && !f.kind.contains(QLatin1String("orphan"))) return false;
-    const QString m = distroManager(f);
-    return m == QLatin1String("apt") || m == QLatin1String("pacman")
-        || m == QLatin1String("dnf") || m == QLatin1String("zypper");
-}
-
-static QString markManualCommand(const Finding &f) {
-    if (!canMarkManual(f)) return {};
-    const QString q = shellQuote(displayName(f));
-    const QString m = distroManager(f);
-    if (m == QLatin1String("apt")) return QStringLiteral("apt-mark manual ") + q;
-    if (m == QLatin1String("pacman")) return QStringLiteral("pacman -D --asexplicit ") + q;
-    if (m == QLatin1String("dnf")) return QStringLiteral("dnf mark install ") + q;
-    if (m == QLatin1String("zypper")) return QStringLiteral("zypper --non-interactive install ") + q;
-    return {};
-}
-
-static bool canMarkCleanup(const Finding &f, Page page) {
-    if (page == Page::Outdated) {
-        return f.updatable || !f.updateCommand.isEmpty() || !f.latestVersion.isEmpty()
-            || !f.command.isEmpty();
+static QString outdatedVersionLabel(const Finding &f) {
+    if (f.kind.contains(QLatin1String("untrusted")) || f.status == QLatin1String("untrusted")) {
+        return QStringLiteral("untrusted tap");
     }
-    if (f.status == QLatin1String("keep")) return false;
-    if (isLeftover(f)) return !leftoverCleanupCommand(f).isEmpty();
-    return !f.command.isEmpty() || f.status == QLatin1String("orphaned")
-        || f.status == QLatin1String("review") || isShadowFinding(f);
+    if (f.currentVersion.isEmpty() && f.latestVersion.isEmpty()) return QStringLiteral("-");
+    return (f.currentVersion.isEmpty() ? QStringLiteral("-") : f.currentVersion)
+        + QStringLiteral(" → ")
+        + (f.latestVersion.isEmpty() ? QStringLiteral("?") : f.latestVersion);
 }
 
-static QStringList leftoverIgnoreKeys(const Finding &f) {
-    QStringList keys;
-    if (!f.path.isEmpty()) keys << f.path;
-    keys << f.extraPaths;
-    if (keys.isEmpty()) keys << f.uid();
-    keys.removeDuplicates();
-    return keys;
+static QString scanSummaryMessage(int leftovers, int stale, int outdated, int packages, const QString &when) {
+    return QStringLiteral("Scanned %1 · %2 leftovers, %3 stale, %4 outdated, %5 packages")
+        .arg(when.isEmpty() ? QStringLiteral("now") : when)
+        .arg(leftovers)
+        .arg(stale)
+        .arg(outdated)
+        .arg(packages);
 }
 
-static bool leftoverIsIgnored(const Finding &f, const QSet<QString> &ignored) {
-    for (const QString &k : leftoverIgnoreKeys(f)) {
-        if (ignored.contains(k)) return true;
+static QString settingsUnreadableMessage(const QString &path) {
+    return QStringLiteral(
+        "Could not read settings at %1. AppAttic will not overwrite that file until you save settings."
+    ).arg(path);
+}
+
+static QString settingsInvalidMessage(const QString &path, const QString &err) {
+    return QStringLiteral(
+        "Settings at %1 are not valid (%2). AppAttic will not overwrite that file until you save settings."
+    ).arg(path, err);
+}
+
+static QString settingsUnwritableMessage(const QString &path) {
+    return QStringLiteral("Could not save settings to %1.").arg(path);
+}
+
+static QString ignoredPathLabel(const QString &path) {
+    const QFileInfo fi(path);
+    const QString name = fi.fileName();
+    const QString parent = fi.dir().dirName();
+    if (parent.isEmpty() || parent == QLatin1String(".")) {
+        return name.isEmpty() ? path : name;
     }
-    return false;
+    return parent + QLatin1Char('/') + name;
 }
 
 struct Tone {
@@ -788,25 +277,10 @@ class ScanWorker : public QObject {
     Q_OBJECT
 public slots:
     void run(const QString &core, const QStringList &pluginSpecs) {
-        std::vector<QByteArray> specs;
-        std::vector<char *> ptrs;
-        specs.reserve(size_t(pluginSpecs.size()));
-        ptrs.reserve(size_t(pluginSpecs.size()));
-        for (const QString &p : pluginSpecs) specs.push_back(p.toUtf8());
-        for (QByteArray &s : specs) ptrs.push_back(s.data());
         QByteArray blobs;
         char err[1024];
         err[0] = '\0';
-        const QByteArray coreUtf8 = core.toUtf8();
-        const int rc = appattic_wasm_run(
-            coreUtf8.constData(),
-            ptrs.empty() ? nullptr : ptrs.data(),
-            int(ptrs.size()),
-            on_json,
-            &blobs,
-            err,
-            sizeof err
-        );
+        const int rc = collectCoreWasm(core, pluginSpecs, &blobs, err, sizeof err);
         emit finished(blobs, QString::fromUtf8(err), rc);
     }
 signals:
@@ -891,6 +365,7 @@ public:
     explicit MainWindow() {
         setWindowTitle(QStringLiteral("AppAttic"));
         resize(1180, 720);
+        setMinimumSize(800, 520);
         QFont body = bodyFont();
         setFont(body);
 
@@ -947,14 +422,37 @@ public:
         m_count->setForegroundRole(QPalette::PlaceholderText);
         m_search = new QLineEdit;
         m_search->setPlaceholderText(QStringLiteral("Search"));
+        m_search->setClearButtonEnabled(true);
         m_search->setFixedWidth(200);
         m_search->setFont(body);
+        m_search->setToolTip(QStringLiteral("Filter the current list by name, path, or kind"));
         m_filter = new QComboBox;
         m_filter->addItem(QStringLiteral("All"), QStringLiteral("all"));
         m_filter->addItem(QStringLiteral("Leaves"), QStringLiteral("leaves"));
         m_filter->addItem(QStringLiteral("Globals"), QStringLiteral("globals"));
+        m_filter->setItemData(
+            0,
+            QStringLiteral("Distro orphans and user-global language tools"),
+            Qt::ToolTipRole
+        );
+        m_filter->setItemData(
+            1,
+            QStringLiteral("Distro packages nothing else still needs"),
+            Qt::ToolTipRole
+        );
+        m_filter->setItemData(
+            2,
+            QStringLiteral("User-global npm, pnpm, bun, pipx, or uv tools"),
+            Qt::ToolTipRole
+        );
+        m_filter->setToolTip(
+            QStringLiteral("Leaves are distro orphans. Globals are user-level language tools.")
+        );
         m_filter->setFont(small);
         m_selectAll = new QPushButton(QStringLiteral("Select All"));
+        m_selectAll->setToolTip(
+            QStringLiteral("Include every visible item in cleanup, update, or remove")
+        );
         m_rescan = new QPushButton(QStringLiteral("Rescan"));
         th->addWidget(m_count);
         th->addStretch();
@@ -967,10 +465,21 @@ public:
         toolsRule->setFrameShape(QFrame::HLine);
         toolsRule->setFrameShadow(QFrame::Plain);
 
+        m_errorBar = new QWidget;
+        auto *eh = new QHBoxLayout(m_errorBar);
+        eh->setContentsMargins(16, 8, 16, 8);
+        eh->setSpacing(8);
         m_error = new QLabel;
         m_error->setFont(body);
-        m_error->setContentsMargins(16, 8, 16, 8);
-        m_error->hide();
+        m_error->setWordWrap(true);
+        auto *errDismiss = new QPushButton(QStringLiteral("Dismiss"));
+        eh->addWidget(m_error, 1);
+        eh->addWidget(errDismiss, 0, Qt::AlignTop);
+        m_errorBar->hide();
+        connect(errDismiss, &QPushButton::clicked, this, [this] {
+            m_errorBar->hide();
+            m_error->clear();
+        });
 
         m_stack = new QStackedWidget;
 
@@ -1003,15 +512,41 @@ public:
         QFont head = small;
         head.setBold(true);
         m_table->header()->setFont(head);
-        m_empty = new QLabel;
-        m_empty->setAlignment(Qt::AlignCenter);
-        m_empty->setWordWrap(true);
-        m_empty->setFont(body);
-        m_empty->setForegroundRole(QPalette::PlaceholderText);
-        m_empty->setContentsMargins(16, 16, 16, 16);
-        m_empty->hide();
+        m_emptyPane = new QWidget;
+        auto *ev = new QVBoxLayout(m_emptyPane);
+        ev->setContentsMargins(16, 16, 16, 16);
+        ev->setSpacing(8);
+        ev->addStretch();
+        auto *emptyInner = new QWidget;
+        auto *eiv = new QVBoxLayout(emptyInner);
+        eiv->setContentsMargins(0, 0, 0, 0);
+        eiv->setSpacing(8);
+        eiv->setAlignment(Qt::AlignHCenter);
+        m_emptyTitle = new QLabel;
+        QFont emptyTitleFont = body;
+        emptyTitleFont.setBold(true);
+        m_emptyTitle->setFont(emptyTitleFont);
+        m_emptyTitle->setAlignment(Qt::AlignCenter);
+        m_emptyTitle->setWordWrap(true);
+        m_emptyDetail = new QLabel;
+        m_emptyDetail->setAlignment(Qt::AlignCenter);
+        m_emptyDetail->setWordWrap(true);
+        m_emptyDetail->setFont(body);
+        m_emptyDetail->setForegroundRole(QPalette::PlaceholderText);
+        m_emptyDetail->setMaximumWidth(400);
+        m_clearSearch = new QPushButton(QStringLiteral("Clear search"));
+        m_clearSearch->hide();
+        m_emptyRetry = new QPushButton(QStringLiteral("Try Again"));
+        m_emptyRetry->hide();
+        eiv->addWidget(m_emptyTitle);
+        eiv->addWidget(m_emptyDetail, 0, Qt::AlignHCenter);
+        eiv->addWidget(m_clearSearch, 0, Qt::AlignHCenter);
+        eiv->addWidget(m_emptyRetry, 0, Qt::AlignHCenter);
+        ev->addWidget(emptyInner, 0, Qt::AlignHCenter);
+        ev->addStretch();
+        m_emptyPane->hide();
         lpv->addWidget(m_table, 1);
-        lpv->addWidget(m_empty);
+        lpv->addWidget(m_emptyPane, 1);
 
         m_inspectorScroll = new QScrollArea;
         m_inspectorScroll->setWidgetResizable(true);
@@ -1046,16 +581,18 @@ public:
         m_actionCount->setFont(small);
         m_actionBytes = new QLabel;
         m_actionBytes->setFont(small);
-        auto *clearSel = new QPushButton(QStringLiteral("Clear"));
-        auto *preview = new QPushButton(QStringLiteral("Preview Script"));
+        m_clearSel = new QPushButton(QStringLiteral("Clear"));
+        m_clearSel->setToolTip(QStringLiteral("Clear the current selection"));
+        m_preview = new QPushButton(QStringLiteral("Preview Script"));
         m_markManualBtn = new QPushButton(QStringLiteral("Mark Manual"));
+        m_markManualBtn->setToolTip(QStringLiteral("Mark selected distro packages as manually installed"));
         m_updateBtn = new QPushButton(QStringLiteral("Update"));
         m_deleteBtn = new QPushButton(QStringLiteral("Delete"));
         ah->addWidget(m_actionCount);
         ah->addWidget(m_actionBytes);
         ah->addStretch();
-        ah->addWidget(clearSel);
-        ah->addWidget(preview);
+        ah->addWidget(m_clearSel);
+        ah->addWidget(m_preview);
         ah->addWidget(m_markManualBtn);
         ah->addWidget(m_updateBtn);
         ah->addWidget(m_deleteBtn);
@@ -1063,7 +600,7 @@ public:
 
         rv->addWidget(tools);
         rv->addWidget(toolsRule);
-        rv->addWidget(m_error);
+        rv->addWidget(m_errorBar);
         rv->addWidget(m_stack, 1);
         rv->addWidget(m_actionBar);
 
@@ -1092,6 +629,8 @@ public:
         connect(m_rescan, &QPushButton::clicked, this, &MainWindow::rescan);
         connect(m_search, &QLineEdit::textChanged, this, [this] { fillCurrent(); });
         connect(m_filter, &QComboBox::currentIndexChanged, this, [this] { fillCurrent(); });
+        connect(m_clearSearch, &QPushButton::clicked, this, [this] { m_search->clear(); });
+        connect(m_emptyRetry, &QPushButton::clicked, this, &MainWindow::rescan);
         connect(m_selectAll, &QPushButton::clicked, this, &MainWindow::toggleSelectAll);
         connect(m_table, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *cur, QTreeWidgetItem *) {
             m_selectedUid = cur ? cur->data(0, Qt::UserRole).toString() : QString();
@@ -1102,13 +641,24 @@ public:
             const QString uid = it->data(0, Qt::UserRole).toString();
             if (uid.isEmpty() || it->data(0, Qt::UserRole + 1).isValid()) return;
             const Finding *f = findingByUid(uid);
-            if (!f || !canMarkCleanup(*f, currentPage())) return;
-            if (m_marked.contains(uid)) m_marked.remove(uid);
-            else {
-                m_marked.insert(uid);
+            if (!f) return;
+            if (m_markedManual.contains(uid)) {
                 m_markedManual.remove(uid);
+            } else if (canMarkCleanup(*f, currentPage())) {
+                if (m_marked.contains(uid)) m_marked.remove(uid);
+                else {
+                    m_marked.insert(uid);
+                    m_markedManual.remove(uid);
+                }
+            } else {
+                return;
             }
-            it->setText(0, m_marked.contains(uid) ? QStringLiteral("in") : QString());
+            it->setText(
+                0,
+                (m_marked.contains(uid) || m_markedManual.contains(uid))
+                    ? QStringLiteral("in")
+                    : QString()
+            );
             m_selectAll->setText(
                 allMarked(currentPage(), visibleRows(currentPage()))
                     ? QStringLiteral("Deselect All")
@@ -1117,14 +667,14 @@ public:
             rebuildInspector();
             refreshActionBar();
         });
-        connect(clearSel, &QPushButton::clicked, this, [this] {
+        connect(m_clearSel, &QPushButton::clicked, this, [this] {
             m_marked.clear();
             m_markedManual.clear();
             fillCurrent();
             rebuildInspector();
             refreshActionBar();
         });
-        connect(preview, &QPushButton::clicked, this, &MainWindow::previewScript);
+        connect(m_preview, &QPushButton::clicked, this, &MainWindow::previewScript);
         connect(m_deleteBtn, &QPushButton::clicked, this, &MainWindow::confirmDelete);
         connect(m_updateBtn, &QPushButton::clicked, this, &MainWindow::confirmUpdate);
         connect(m_markManualBtn, &QPushButton::clicked, this, &MainWindow::confirmMarkManual);
@@ -1132,7 +682,7 @@ public:
         loadSettings();
         applySystemAppearance();
         applyInitialPage();
-        rescan();
+        if (!m_settingsError) rescan();
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
         connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this](Qt::ColorScheme) {
             applySystemAppearance();
@@ -1143,7 +693,7 @@ public:
 
     ~MainWindow() override {
         m_scanThread->quit();
-        m_scanThread->wait(3000);
+        m_scanThread->wait();
         delete m_worker;
     }
 
@@ -1162,24 +712,23 @@ private slots:
         if (!QFileInfo::exists(core)) {
             m_findings.clear();
             m_scanOk = false;
+            m_hasScanned = true;
             m_scanAt.clear();
-            showError(QStringLiteral("WASM core missing. Run ./core/build.sh then Rescan."));
+            showError(QStringLiteral("Scan engine is missing. Rebuild the app, then click Rescan."));
             fillCurrent();
             return;
         }
-        const QStringList plugins = pluginWasmFiles(out);
-        QStringList specs;
-        for (const QString &p : plugins) {
-            specs << (p + QLatin1Char('=') + QString::number(pluginTag(p)));
-        }
         m_scanning = true;
         m_rescan->setEnabled(false);
-        statusBar()->showMessage(QStringLiteral("Scanning"));
-        emit requestScan(core, specs);
+        m_selectAll->setEnabled(false);
+        statusBar()->showMessage(QStringLiteral("Scanning…"));
+        fillCurrent();
+        emit requestScan(core, taggedPluginSpecs(out));
     }
 
     void scanFinished(const QByteArray &blobs, const QString &err, int rc) {
         m_scanning = false;
+        m_hasScanned = true;
         m_rescan->setEnabled(true);
         m_findings.clear();
         for (const QByteArray &line : blobs.split('\n')) {
@@ -1190,9 +739,20 @@ private slots:
         m_scanOk = (rc == 0);
         m_scanAt = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"));
         if (rc != 0) {
-            showError(err.isEmpty() ? QStringLiteral("WASM query failed") : err);
+            showError(err.isEmpty() ? QStringLiteral("Scan failed. Click Rescan to try again.") : err);
+        } else if (!m_settingsError) {
+            m_errorBar->hide();
+            m_error->clear();
+            statusBar()->showMessage(
+                scanSummaryMessage(
+                    countPage(Page::Leftovers),
+                    countPage(Page::Stale),
+                    countPage(Page::Outdated),
+                    countPage(Page::Packages),
+                    m_scanAt
+                )
+            );
         } else {
-            m_error->hide();
             statusBar()->showMessage(
                 QStringLiteral("%1 plugin findings").arg(m_findings.size())
             );
@@ -1201,6 +761,7 @@ private slots:
     }
 
     void toggleSelectAll() {
+        if (m_scanning) return;
         const Page page = currentPage();
         const QVector<Finding> rows = visibleRows(page);
         QStringList ids;
@@ -1233,6 +794,7 @@ private slots:
     }
 
     void confirmDelete() {
+        if (m_scanning) return;
         const QString script = cleanupScript();
         if (!scriptHasCommands(script)) return;
         if (m_confirmDelete) {
@@ -1245,10 +807,11 @@ private slots:
             );
             return;
         }
-        runScript(script);
+        runScript(script, QStringLiteral("Removing selected items…"));
     }
 
     void confirmUpdate() {
+        if (m_scanning) return;
         const QString script = updateScript();
         if (!scriptHasCommands(script)) return;
         if (m_confirmDelete) {
@@ -1260,10 +823,11 @@ private slots:
             );
             return;
         }
-        runScript(script);
+        runScript(script, QStringLiteral("Updating selected packages…"));
     }
 
     void confirmMarkManual() {
+        if (m_scanning) return;
         const QString script = markManualScript();
         if (!scriptHasCommands(script)) return;
         if (m_confirmDelete) {
@@ -1275,7 +839,7 @@ private slots:
             );
             return;
         }
-        runScript(script);
+        runScript(script, QStringLiteral("Marking packages as manually installed…"));
     }
 
 private:
@@ -1313,8 +877,16 @@ private:
         edit->setPlainText(script);
         auto *box = new QDialogButtonBox;
         auto *copy = box->addButton(QStringLiteral("Copy"), QDialogButtonBox::ActionRole);
-        connect(copy, &QPushButton::clicked, this, [script] {
-            if (QClipboard *cb = QGuiApplication::clipboard()) cb->setText(script);
+        connect(copy, &QPushButton::clicked, this, [script, copy] {
+            if (QClipboard *cb = QGuiApplication::clipboard()) {
+                cb->setText(script);
+                copy->setText(QStringLiteral("Copied"));
+                copy->setEnabled(false);
+                QTimer::singleShot(1500, copy, [copy] {
+                    copy->setText(QStringLiteral("Copy"));
+                    copy->setEnabled(true);
+                });
+            }
         });
         if (runLabel.isEmpty()) {
             box->addButton(QDialogButtonBox::Close);
@@ -1332,7 +904,15 @@ private:
         v->addWidget(box);
         const int rc = dlg->exec();
         dlg->deleteLater();
-        if (rc == QDialog::Accepted && !runLabel.isEmpty()) runScript(script);
+        if (rc == QDialog::Accepted && !runLabel.isEmpty()) {
+            QString progress = QStringLiteral("Running selected actions…");
+            if (kind == ScriptKind::Delete) progress = QStringLiteral("Removing selected items…");
+            else if (kind == ScriptKind::Update) progress = QStringLiteral("Updating selected packages…");
+            else if (kind == ScriptKind::MarkManual) {
+                progress = QStringLiteral("Marking packages as manually installed…");
+            }
+            runScript(script, progress);
+        }
     }
     Page currentPage() const {
         const int row = m_sidebar->currentRow();
@@ -1358,7 +938,7 @@ private:
         p.setColor(QPalette::WindowText, t.red);
         m_error->setPalette(p);
         m_error->setText(msg);
-        m_error->show();
+        m_errorBar->show();
         statusBar()->showMessage(msg);
     }
 
@@ -1388,13 +968,16 @@ private:
 
         auto *cols = new QSplitter(Qt::Horizontal);
         cols->setChildrenCollapsible(false);
-        m_ovLeftovers = makeOverviewTree(QStringLiteral("Largest leftovers"));
-        m_ovStale = makeOverviewTree(QStringLiteral("Largest stale apps"));
+        m_ovLeftovers = makeOverviewTree(QStringLiteral("Size"));
+        m_ovStale = makeOverviewTree(QStringLiteral("Size"));
+        m_ovOutdated = makeOverviewTree(QStringLiteral("Version"));
         cols->addWidget(wrapOverviewCol(QStringLiteral("Largest leftovers"), m_ovLeftovers, &m_ovLeftEmpty));
         cols->addWidget(wrapOverviewCol(QStringLiteral("Largest stale apps"), m_ovStale, &m_ovStaleEmpty));
+        cols->addWidget(wrapOverviewCol(QStringLiteral("Outdated packages"), m_ovOutdated, &m_ovOutEmpty));
         cols->setStretchFactor(0, 1);
         cols->setStretchFactor(1, 1);
-        cols->setSizes({580, 580});
+        cols->setStretchFactor(2, 1);
+        cols->setSizes({380, 380, 380});
         v->addWidget(cols, 1);
         connect(m_ovLeftovers, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int) {
             m_selectedUid = it->data(0, Qt::UserRole).toString();
@@ -1403,6 +986,10 @@ private:
         connect(m_ovStale, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int) {
             m_selectedUid = it->data(0, Qt::UserRole).toString();
             m_sidebar->setCurrentRow(int(Page::Stale));
+        });
+        connect(m_ovOutdated, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int) {
+            m_selectedUid = it->data(0, Qt::UserRole).toString();
+            m_sidebar->setCurrentRow(int(Page::Outdated));
         });
         return w;
     }
@@ -1423,12 +1010,12 @@ private:
         return val;
     }
 
-    QTreeWidget *makeOverviewTree(const QString &) {
+    QTreeWidget *makeOverviewTree(const QString &trailing) {
         auto *t = new QTreeWidget;
         t->setRootIsDecorated(false);
         t->setUniformRowHeights(true);
         t->setIndentation(0);
-        t->setHeaderLabels({QStringLiteral("Name"), QStringLiteral("What"), QStringLiteral("Size")});
+        t->setHeaderLabels({QStringLiteral("Name"), QStringLiteral("What"), trailing});
         t->header()->setStretchLastSection(false);
         t->header()->setSectionResizeMode(0, QHeaderView::Stretch);
         t->header()->setSectionResizeMode(1, QHeaderView::Stretch);
@@ -1464,7 +1051,7 @@ private:
         empty->setForegroundRole(QPalette::PlaceholderText);
         v->addWidget(h);
         v->addWidget(tree, 1);
-        v->addWidget(empty);
+        v->addWidget(empty, 1);
         *emptyOut = empty;
         return w;
     }
@@ -1478,11 +1065,11 @@ private:
         row->setSpacing(32);
 
         auto scanCol = section(QStringLiteral("Scan"));
-        m_includeSystem = new QCheckBox(QStringLiteral("Include system apps in scan"));
         auto *scanHint = hintLabel(
-            QStringLiteral("Off by default. System apps are easy to misread as unused.")
+            QStringLiteral(
+                "This Linux scan lists leftover folders, unused packages, and outdated packages. Installed system apps are not part of this scan."
+            )
         );
-        scanCol.second->addWidget(m_includeSystem);
         scanCol.second->addWidget(scanHint);
 
         auto delCol = section(QStringLiteral("Deletion"));
@@ -1513,10 +1100,6 @@ private:
         ver->setForegroundRole(QPalette::PlaceholderText);
         v->addWidget(ver);
 
-        connect(m_includeSystem, &QCheckBox::toggled, this, [this](bool on) {
-            m_includeSystemOn = on;
-            persistSettings();
-        });
         connect(m_confirmBox, &QCheckBox::toggled, this, [this](bool on) {
             m_confirmDelete = on;
             persistSettings();
@@ -1633,30 +1216,48 @@ private:
         const int packages = countPage(Page::Packages);
         qint64 leftoverBytes = 0;
         for (const Finding &f : m_findings) {
-            if (isLeftover(f) && f.bytes > 0 && !leftoverIsIgnored(f, m_ignored)) leftoverBytes += f.bytes;
+            if (!isLeftover(f) || f.bytes <= 0 || leftoverIsIgnored(f, m_ignored)) continue;
+            leftoverBytes = addBytes(leftoverBytes, f.bytes);
         }
-        m_statInstalled->setText(QStringLiteral("unknown"));
-        m_statLeftovers->setText(QString::number(leftovers));
+        const bool scanningEmpty = isScanPending() && m_findings.isEmpty();
+        const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
+        const QString pending = QStringLiteral("…");
+        const QString blockedMark = QStringLiteral("-");
+        m_statInstalled->setText(QStringLiteral("Not scanned"));
+        m_statInstalled->setToolTip(
+            QStringLiteral("This Linux scan does not count installed apps.")
+        );
+        auto statCount = [&](int n) {
+            if (scanningEmpty) return pending;
+            if (settingsBlocked) return blockedMark;
+            return QString::number(n);
+        };
+        m_statLeftovers->setText(statCount(leftovers));
         {
             QPalette p = m_statLeftovers->palette();
-            p.setColor(QPalette::WindowText, leftovers ? t.red : t.text);
+            p.setColor(QPalette::WindowText, (!scanningEmpty && !settingsBlocked && leftovers) ? t.red : t.text);
             m_statLeftovers->setPalette(p);
         }
         m_statLeftoverData->setText(
-            leftoverBytes > 0 ? humanSize(leftoverBytes)
-                              : (leftovers > 0 ? QStringLiteral("unknown") : humanSize(0))
+            scanningEmpty ? pending
+                          : (settingsBlocked ? blockedMark
+                                             : (leftoverBytes > 0 ? humanSize(leftoverBytes)
+                                                                  : (leftovers > 0 ? QStringLiteral("unknown") : humanSize(0))))
         );
-        m_statStale->setText(QString::number(stale));
-        m_statOutdated->setText(QString::number(outdated));
-        m_statPackages->setText(QString::number(packages));
-        m_statScan->setText(m_scanAt.isEmpty() ? QStringLiteral("Never") : m_scanAt);
+        m_statStale->setText(statCount(stale));
+        m_statOutdated->setText(statCount(outdated));
+        m_statPackages->setText(statCount(packages));
+        m_statScan->setText(
+            m_scanning ? QStringLiteral("Scanning…")
+                       : (m_scanAt.isEmpty() ? QStringLiteral("Never") : m_scanAt)
+        );
 
         auto fillOv = [&](QTreeWidget *tree, QLabel *empty, Page page, const QString &emptyText) {
             tree->clear();
             QVector<Finding> rows;
             for (const Finding &f : m_findings) {
-            if (!matchPage(f, page)) continue;
-            if (page == Page::Leftovers && leftoverIsIgnored(f, m_ignored)) continue;
+                if (!matchPage(f, page)) continue;
+                if (page == Page::Leftovers && leftoverIsIgnored(f, m_ignored)) continue;
                 rows.push_back(f);
             }
             std::sort(rows.begin(), rows.end(), [](const Finding &a, const Finding &b) {
@@ -1668,8 +1269,15 @@ private:
                 auto *it = new QTreeWidgetItem(tree);
                 it->setText(0, displayName(f));
                 it->setText(1, whatText(f, page));
-                it->setText(2, f.bytes >= 0 ? humanSize(f.bytes) : QStringLiteral("unknown"));
+                if (page == Page::Outdated) {
+                    it->setText(2, outdatedVersionLabel(f));
+                } else {
+                    it->setText(2, f.bytes >= 0 ? humanSize(f.bytes) : QStringLiteral("unknown"));
+                }
                 it->setData(0, Qt::UserRole, f.uid());
+                it->setToolTip(0, displayName(f));
+                it->setToolTip(1, whatText(f, page));
+                if (!f.path.isEmpty()) it->setToolTip(2, f.path);
                 QFont body = bodyFont();
                 QFont small = smallFont();
                 it->setFont(0, body);
@@ -1678,8 +1286,12 @@ private:
                 it->setForeground(1, t.dim);
                 it->setForeground(2, t.dim);
             }
-            empty->setText(emptyText);
+            const QString text = settingsBlocked
+                ? QStringLiteral("Settings could not be loaded.")
+                : (scanningEmpty ? QStringLiteral("Scanning…") : emptyText);
+            empty->setText(text);
             empty->setVisible(n == 0);
+            tree->setVisible(n > 0);
         };
         fillOv(
             m_ovLeftovers,
@@ -1693,7 +1305,13 @@ private:
             Page::Stale,
             QStringLiteral("No unused installed apps in this scan.")
         );
-        m_count->setText(QString());
+        fillOv(
+            m_ovOutdated,
+            m_ovOutEmpty,
+            Page::Outdated,
+            QStringLiteral("No outdated packages in this scan.")
+        );
+        m_count->setText(m_scanning ? QStringLiteral("Scanning") : QString());
     }
 
     void setupColumns(Page page) {
@@ -1722,6 +1340,12 @@ private:
         }
         m_table->setColumnCount(headers.size());
         m_table->setHeaderLabels(headers);
+        if (QTreeWidgetItem *head = m_table->headerItem()) {
+            head->setToolTip(
+                0,
+                QStringLiteral("Click to include the item in cleanup, update, or remove")
+            );
+        }
         m_table->header()->setSectionResizeMode(0, QHeaderView::Fixed);
         m_table->setColumnWidth(0, 28);
         m_table->header()->setSectionResizeMode(1, QHeaderView::Stretch);
@@ -1755,11 +1379,30 @@ private:
             const QString uid = f.uid();
             it->setData(0, Qt::UserRole, uid);
             it->setFont(0, mark);
-            it->setText(0, m_marked.contains(uid) ? QStringLiteral("in") : QString());
+            const bool markedCleanup = m_marked.contains(uid);
+            const bool markedKeep = m_markedManual.contains(uid);
+            it->setText(0, (markedCleanup || markedKeep) ? QStringLiteral("in") : QString());
             it->setForeground(0, palette().color(QPalette::Highlight));
             it->setText(1, displayName(f));
             it->setFont(1, body);
             it->setSizeHint(0, QSize(28, rowPx()));
+            if (markedCleanup) {
+                it->setToolTip(0, QStringLiteral("Included. Click to remove from the selection."));
+            } else if (markedKeep) {
+                it->setToolTip(
+                    0,
+                    QStringLiteral("Marked as manually installed. Click to remove from the selection.")
+                );
+            } else if (canMarkCleanup(f, page)) {
+                it->setToolTip(
+                    0,
+                    QStringLiteral("Click to include in cleanup, update, or remove.")
+                );
+            } else {
+                it->setToolTip(0, QString());
+            }
+            it->setToolTip(1, displayName(f));
+            if (!f.path.isEmpty()) it->setToolTip(1, displayName(f) + QLatin1Char('\n') + f.path);
             switch (page) {
             case Page::Leftovers:
                 it->setText(2, locationLabel(f));
@@ -1833,15 +1476,60 @@ private:
         if (select) m_table->setCurrentItem(select);
         else m_selectedUid.clear();
 
-        m_empty->setText(emptyDetail(page));
-        m_empty->setVisible(rows.isEmpty());
+        const bool scanningEmpty = isScanPending() && m_findings.isEmpty();
+        const bool scanFailed = m_hasScanned && !m_scanning && !m_scanOk && m_findings.isEmpty();
+        const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
+        if (rows.isEmpty()) {
+            m_table->hide();
+            m_emptyPane->show();
+            if (settingsBlocked) {
+                m_emptyTitle->setText(QStringLiteral("Settings could not be loaded"));
+                m_emptyDetail->setText(
+                    m_error->text().isEmpty()
+                        ? QStringLiteral("Fix the settings file, then click Rescan.")
+                        : m_error->text()
+                );
+            } else {
+                m_emptyTitle->setText(pageEmptyTitle(page, scanningEmpty, scanFailed));
+                m_emptyDetail->setText(pageEmptyDetail(
+                    page,
+                    scanningEmpty,
+                    scanFailed,
+                    m_search->text(),
+                    m_ignored.size(),
+                    m_filter->currentData().toString(),
+                    m_error->text()
+                ));
+            }
+            m_clearSearch->setVisible(
+                !m_search->text().trimmed().isEmpty() && !scanningEmpty && !scanFailed && !settingsBlocked
+            );
+            m_emptyRetry->setVisible((scanFailed || settingsBlocked) && !scanningEmpty);
+        } else {
+            m_table->show();
+            m_emptyPane->hide();
+            m_clearSearch->hide();
+            m_emptyRetry->hide();
+        }
         QString count = countLabel(page, rows.size());
-        if (!m_scanAt.isEmpty() && !m_scanning) {
+        if (scanningEmpty) {
+            count = QStringLiteral("Scanning");
+        } else if (m_scanning) {
+            count += QStringLiteral(" · Scanning");
+        } else if (!m_scanAt.isEmpty()) {
             count += QStringLiteral(" · ") + m_scanAt;
         }
         m_count->setText(count);
+        bool anyMarkable = false;
+        for (const Finding &f : rows) {
+            if (canMarkCleanup(f, page)) {
+                anyMarkable = true;
+                break;
+            }
+        }
         m_selectAll->setText(allMarked(page, rows) ? QStringLiteral("Deselect All") : QStringLiteral("Select All"));
-        m_selectAll->setEnabled(!rows.isEmpty());
+        m_selectAll->setVisible(anyMarkable);
+        m_selectAll->setEnabled(anyMarkable && !m_scanning);
         rebuildInspector();
     }
 
@@ -1870,42 +1558,21 @@ private:
         }
     }
 
+    bool isScanPending() const {
+        const bool noError = !m_error || m_error->text().isEmpty();
+        return m_scanning || (!m_hasScanned && noError);
+    }
+
     QString emptyDetail(Page page) const {
-        if (!m_search->text().trimmed().isEmpty()) {
-            return QStringLiteral("No items match this search.");
-        }
-        switch (page) {
-        case Page::Leftovers: {
-            QString body = QStringLiteral(
-                "No leftover data from uninstalled apps, and no PATH or desktop overlays hiding package-manager files."
-            );
-            if (!m_ignored.isEmpty()) {
-                const int n = m_ignored.size();
-                body += QLatin1Char(' ')
-                    + (n == 1 ? QStringLiteral("1 leftover path hidden from the list.")
-                              : QString::number(n) + QStringLiteral(" leftover paths hidden from the list."));
-            }
-            return body;
-        }
-        case Page::Stale:
-            return QStringLiteral(
-                "No unused installed apps. Leftover dirs with last-used timing show here until the stale WASM plugin ships."
-            );
-        case Page::Outdated:
-            return QStringLiteral(
-                "No outdated packages. Brew, apt, pacman, dnf, and zypper stay empty when those tools are missing."
-            );
-        case Page::Packages:
-            if (m_filter->currentData().toString() == QLatin1String("globals")) {
-                return QStringLiteral("No user-global npm, pnpm, bun, pipx, or uv tools.");
-            }
-            if (m_filter->currentData().toString() == QLatin1String("leaves")) {
-                return QStringLiteral("No distro orphans. apt/pacman/dnf/zypper reported nothing, or those tools are not installed.");
-            }
-            return QStringLiteral("No distro orphans or language globals. Missing managers stay empty; this page stays.");
-        default:
-            return QStringLiteral("No findings.");
-        }
+        return pageEmptyDetail(
+            page,
+            isScanPending() && m_findings.isEmpty(),
+            m_hasScanned && !m_scanning && !m_scanOk && m_findings.isEmpty(),
+            m_search->text(),
+            m_ignored.size(),
+            m_filter->currentData().toString(),
+            m_error->text()
+        );
     }
 
     QString whatText(const Finding &f, Page page) const {
@@ -2003,6 +1670,17 @@ private:
         const Tone t = toneFrom(palette());
         const Finding *f = findingByUid(m_selectedUid);
         if (page == Page::Overview || page == Page::Settings) return;
+        if (isScanPending() && m_findings.isEmpty()) {
+            m_inspectorLay->addWidget(inspectorLabel(QStringLiteral("Scanning"), 13, true, t.text));
+            m_inspectorLay->addWidget(inspectorLabel(
+                QStringLiteral("Results appear here when the scan finishes."),
+                13,
+                false,
+                t.dim
+            ));
+            m_inspectorLay->addStretch();
+            return;
+        }
         if (!f || !matchPage(*f, page)) {
             QString title = QStringLiteral("Select an item");
             QString body = QStringLiteral("What it is, why it was flagged, plus path and size.");
@@ -2028,12 +1706,14 @@ private:
         m_inspectorLay->addWidget(inspectorLabel(displayName(*f), 13, true, t.text));
         addFact(QStringLiteral("What"), whatText(*f, page), t.text);
         addFact(QStringLiteral("Why"), whyText(*f), t.text);
-        addFact(QStringLiteral("Kind"), f->kind.isEmpty() ? QStringLiteral("-") : f->kind, t.text);
+        addFact(
+            QStringLiteral("Kind"),
+            f->kind.isEmpty() ? QStringLiteral("-") : humanKind(f->kind),
+            t.text
+        );
         addFact(
             QStringLiteral("Status"),
-            page == Page::Leftovers
-                ? (f->status.isEmpty() ? QStringLiteral("-") : f->status)
-                : statusLabel(*f),
+            statusLabel(*f),
             statusColor(*f, t, page)
         );
         if (!f->manager.isEmpty() || !f->engine.isEmpty()) {
@@ -2097,14 +1777,19 @@ private:
                 if (on) {
                     m_markedManual.insert(uid);
                     m_marked.remove(uid);
-                    for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
-                        QTreeWidgetItem *it = m_table->topLevelItem(i);
-                        if (it->data(0, Qt::UserRole).toString() != uid) continue;
-                        it->setText(0, QString());
-                        break;
-                    }
                 } else {
                     m_markedManual.remove(uid);
+                }
+                for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
+                    QTreeWidgetItem *it = m_table->topLevelItem(i);
+                    if (it->data(0, Qt::UserRole).toString() != uid) continue;
+                    it->setText(
+                        0,
+                        (m_marked.contains(uid) || m_markedManual.contains(uid))
+                            ? QStringLiteral("in")
+                            : QString()
+                    );
+                    break;
                 }
                 refreshActionBar();
             });
@@ -2124,7 +1809,7 @@ private:
             auto *ign = new QPushButton(QStringLiteral("Ignore leftover"));
             const Finding copy = *f;
             connect(ign, &QPushButton::clicked, this, [this, copy] {
-                for (const QString &k : leftoverIgnoreKeys(copy)) m_ignored.insert(k);
+                for (const QString &k : leftoverIgnoreKeys(copy)) m_ignored.insert(pathIdentityKey(k));
                 m_marked.remove(copy.uid());
                 persistSettings();
                 m_selectedUid.clear();
@@ -2135,18 +1820,11 @@ private:
     }
 
     QString emptyTitle(Page page) const {
-        switch (page) {
-        case Page::Leftovers:
-            return QStringLiteral("No leftover data");
-        case Page::Stale:
-            return QStringLiteral("No stale apps");
-        case Page::Outdated:
-            return QStringLiteral("No outdated packages");
-        case Page::Packages:
-            return QStringLiteral("No unused packages");
-        default:
-            return QStringLiteral("Nothing to review");
-        }
+        return pageEmptyTitle(
+            page,
+            isScanPending() && m_findings.isEmpty(),
+            m_hasScanned && !m_scanning && !m_scanOk && m_findings.isEmpty()
+        );
     }
 
     void refreshActionBar() {
@@ -2155,20 +1833,23 @@ private:
         for (const Finding &f : m_findings) {
             if (!m_marked.contains(f.uid()) && !m_markedManual.contains(f.uid())) continue;
             ++n;
-            if (f.bytes > 0) bytes += f.bytes;
+            if (f.bytes > 0) bytes = addBytes(bytes, f.bytes);
         }
         m_actionBar->setVisible(n > 0);
         m_actionCount->setText(QStringLiteral("%1 selected").arg(n));
         m_actionBytes->setText(bytes > 0 ? humanSize(bytes) : QString());
+        const bool busy = m_scanning;
         const bool canDelete = scriptHasCommands(cleanupScript());
         const bool canUpdate = scriptHasCommands(updateScript());
         const bool canKeep = scriptHasCommands(markManualScript());
+        if (m_clearSel) m_clearSel->setEnabled(!busy);
+        if (m_preview) m_preview->setEnabled(!busy);
         m_deleteBtn->setVisible(canDelete);
-        m_deleteBtn->setEnabled(canDelete);
+        m_deleteBtn->setEnabled(canDelete && !busy);
         m_updateBtn->setVisible(canUpdate);
-        m_updateBtn->setEnabled(canUpdate);
+        m_updateBtn->setEnabled(canUpdate && !busy);
         m_markManualBtn->setVisible(canKeep);
-        m_markManualBtn->setEnabled(canKeep);
+        m_markManualBtn->setEnabled(canKeep && !busy);
     }
 
     int cleanupMarkCount() const {
@@ -2184,7 +1865,7 @@ private:
     int updateMarkCount() const {
         int n = 0;
         for (const Finding &f : m_findings) {
-            if (!m_marked.contains(f.uid()) || !isOutdated(f)) continue;
+            if (!m_marked.contains(f.uid()) || !isOutdated(f) || !f.updatable) continue;
             ++n;
         }
         return n;
@@ -2210,6 +1891,7 @@ private:
               << QStringLiteral("# AppAttic. Review before running.");
         for (const Finding &f : m_findings) {
             if (!m_marked.contains(f.uid()) || !isOutdated(f)) continue;
+            if (!f.updatable) continue;
             const QString cmd = f.updateCommand.isEmpty() ? f.command : f.updateCommand;
             if (cmd.isEmpty()) continue;
             lines << cmd;
@@ -2231,55 +1913,80 @@ private:
         return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
     }
 
-    QString previewAllScript() const {
-        QString out = cleanupScript();
-        if (scriptHasCommands(updateScript())) {
-            out += QStringLiteral("\n# Update selected packages\n");
-            for (const QString &line : updateScript().split(QLatin1Char('\n'))) {
-                const QString t = line.trimmed();
-                if (t.isEmpty() || t.startsWith(QLatin1Char('#')) || t == QLatin1String("#!/bin/sh")
-                    || t.startsWith(QLatin1String("set "))) {
-                    continue;
-                }
-                out += line + QLatin1Char('\n');
+    static QString scriptBodyLines(const QString &script) {
+        QString out;
+        for (const QString &line : script.split(QLatin1Char('\n'))) {
+            const QString t = line.trimmed();
+            if (t.isEmpty() || t.startsWith(QLatin1Char('#')) || t == QLatin1String("#!/bin/sh")
+                || t.startsWith(QLatin1String("set "))) {
+                continue;
             }
-        }
-        if (scriptHasCommands(markManualScript())) {
-            out += QStringLiteral("\n# Mark as manually installed. Delete in the UI does not run these lines.\n");
-            for (const QString &line : markManualScript().split(QLatin1Char('\n'))) {
-                const QString t = line.trimmed();
-                if (t.isEmpty() || t.startsWith(QLatin1Char('#')) || t == QLatin1String("#!/bin/sh")
-                    || t.startsWith(QLatin1String("set "))) {
-                    continue;
-                }
-                out += line + QLatin1Char('\n');
-            }
+            out += line + QLatin1Char('\n');
         }
         return out;
     }
 
-    void runScript(const QString &script) {
+    QString previewAllScript() const {
+        QString out = cleanupScript();
+        if (scriptHasCommands(updateScript())) {
+            out += QStringLiteral("\n# Update selected packages\n");
+            out += scriptBodyLines(updateScript());
+        }
+        if (scriptHasCommands(markManualScript())) {
+            out += QStringLiteral("\n# Mark as manually installed. Delete in the UI does not run these lines.\n");
+            out += scriptBodyLines(markManualScript());
+        }
+        return out;
+    }
+
+    void runScript(const QString &script, const QString &progress) {
+        if (m_scanning) return;
         QTemporaryFile tmp(QDir::temp().filePath(QStringLiteral("appattic-XXXXXX.sh")));
         tmp.setAutoRemove(false);
         if (!tmp.open()) {
-            showError(QStringLiteral("Could not write preview script."));
+            showError(QStringLiteral("Could not write the script to run."));
             return;
         }
         tmp.write(script.toUtf8());
         tmp.close();
         QFile::setPermissions(tmp.fileName(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        m_scanning = true;
+        m_rescan->setEnabled(false);
+        statusBar()->showMessage(progress);
+        refreshActionBar();
         auto *proc = new QProcess(this);
         connect(proc, &QProcess::finished, this, [this, proc, path = tmp.fileName()](int code) {
             QFile::remove(path);
+            m_scanning = false;
+            m_rescan->setEnabled(true);
             if (code != 0) {
-                showError(QString::fromUtf8(proc->readAllStandardError()));
+                QString err = redactHomePaths(QString::fromUtf8(proc->readAllStandardError()).trimmed());
+                if (err.isEmpty()) {
+                    err = QStringLiteral("The script failed (exit %1). Selected items were kept.").arg(code);
+                } else if (err.size() > 400) {
+                    err = err.left(400);
+                }
+                showError(err);
+                refreshActionBar();
             } else {
-                m_error->hide();
-                statusBar()->showMessage(QStringLiteral("Cleanup script finished"));
+                if (!m_settingsError) {
+                    m_errorBar->hide();
+                    m_error->clear();
+                }
+                statusBar()->showMessage(QStringLiteral("Finished. Scanning again…"));
                 m_marked.clear();
                 m_markedManual.clear();
                 rescan();
             }
+            proc->deleteLater();
+        });
+        connect(proc, &QProcess::errorOccurred, this, [this, proc, path = tmp.fileName()](QProcess::ProcessError err) {
+            if (err != QProcess::FailedToStart) return;
+            QFile::remove(path);
+            m_scanning = false;
+            m_rescan->setEnabled(true);
+            showError(QStringLiteral("Could not run the script."));
+            refreshActionBar();
             proc->deleteLater();
         });
         proc->start(QStringLiteral("/bin/sh"), {tmp.fileName()});
@@ -2291,9 +1998,12 @@ private:
         resetWidgetPalette(m_table);
         resetWidgetPalette(m_inspectorHost);
         resetWidgetPalette(m_inspectorScroll);
-        resetWidgetPalette(m_empty);
+        resetWidgetPalette(m_emptyPane);
+        resetWidgetPalette(m_emptyTitle);
+        resetWidgetPalette(m_emptyDetail);
         resetWidgetPalette(m_ovLeftovers);
         resetWidgetPalette(m_ovStale);
+        resetWidgetPalette(m_ovOutdated);
         if (m_sidebar) m_sidebar->setAutoFillBackground(false);
         m_applyingAppearance = false;
     }
@@ -2308,22 +2018,77 @@ private:
         }
     }
 
-    void loadSettings() {
-        QSettings s(QStringLiteral("AppAttic"), QStringLiteral("AppAttic"));
-        m_confirmDelete = s.value(QStringLiteral("confirmDelete"), true).toBool();
-        m_includeSystemOn = s.value(QStringLiteral("includeSystem"), false).toBool();
-        const QStringList ign = s.value(QStringLiteral("ignoredLeftovers")).toStringList();
-        m_ignored = QSet<QString>(ign.begin(), ign.end());
-        m_confirmBox->setChecked(m_confirmDelete);
-        m_includeSystem->setChecked(m_includeSystemOn);
+    void applyLoadedSettings(const AppSettings &s) {
+        m_confirmDelete = s.confirmDelete;
+        m_includeSystemOn = s.includeSystem;
+        m_ignored.clear();
+        for (const QString &p : s.ignoredLeftoverPaths) {
+            if (!p.isEmpty()) m_ignored.insert(pathIdentityKey(p));
+        }
+        {
+            const QSignalBlocker b1(m_confirmBox);
+            m_confirmBox->setChecked(m_confirmDelete);
+        }
         refreshIgnoredLabel();
     }
 
+    void loadSettings() {
+        m_settingsError = false;
+        const QString path = settingsFilePath();
+        QFile f(path);
+        if (!f.exists()) {
+            bool hadLegacy = false;
+            const AppSettings s = migrateLegacyQSettings(&hadLegacy);
+            applyLoadedSettings(s);
+            if (hadLegacy) persistSettings();
+            return;
+        }
+        if (!f.open(QIODevice::ReadOnly)) {
+            m_settingsError = true;
+            showError(settingsUnreadableMessage(path));
+            return;
+        }
+        const QByteArray raw = f.readAll();
+        AppSettings s;
+        QString err;
+        if (!parseSettingsJson(raw, &s, &err)) {
+            m_settingsError = true;
+            showError(settingsInvalidMessage(path, err));
+            return;
+        }
+        applyLoadedSettings(s);
+    }
+
     void persistSettings() {
-        QSettings s(QStringLiteral("AppAttic"), QStringLiteral("AppAttic"));
-        s.setValue(QStringLiteral("confirmDelete"), m_confirmDelete);
-        s.setValue(QStringLiteral("includeSystem"), m_includeSystemOn);
-        s.setValue(QStringLiteral("ignoredLeftovers"), QStringList(m_ignored.begin(), m_ignored.end()));
+        if (m_settingsError) return;
+        AppSettings s;
+        s.confirmDelete = m_confirmDelete;
+        s.includeSystem = m_includeSystemOn;
+        s.ignoredLeftoverPaths = QStringList(m_ignored.begin(), m_ignored.end());
+        const QString path = settingsFilePath();
+        const QFileInfo fi(path);
+        if (!QDir().mkpath(fi.absolutePath())) {
+            showError(settingsUnwritableMessage(path));
+            return;
+        }
+        if (QFileInfo(fi.absolutePath()).fileName().compare(
+                QStringLiteral("appattic"), Qt::CaseInsensitive) == 0) {
+            restrictOwnerOnlyDir(fi.absolutePath());
+        }
+        QSaveFile f(path);
+        if (!f.open(QIODevice::WriteOnly)) {
+            showError(settingsUnwritableMessage(path));
+            return;
+        }
+        const QByteArray raw = encodeSettingsJson(s);
+        if (f.write(raw) != raw.size() || !f.commit()) {
+            showError(settingsUnwritableMessage(path));
+            return;
+        }
+        restrictPrivateDataFile(path);
+        m_settingsError = false;
+        m_errorBar->hide();
+        m_error->clear();
         refreshIgnoredLabel();
     }
 
@@ -2337,7 +2102,7 @@ private:
             return;
         }
         QStringList names;
-        for (const QString &p : m_ignored) names << QFileInfo(p).fileName();
+        for (const QString &p : m_ignored) names << ignoredPathLabel(p);
         names.sort();
         m_ignoredList->setText(
             QString::number(m_ignored.size()) + QStringLiteral(" leftover paths hidden from the list.\n")
@@ -2351,7 +2116,12 @@ private:
     QWidget *m_overview = nullptr;
     QWidget *m_settings = nullptr;
     QTreeWidget *m_table = nullptr;
-    QLabel *m_empty = nullptr;
+    QWidget *m_emptyPane = nullptr;
+    QLabel *m_emptyTitle = nullptr;
+    QLabel *m_emptyDetail = nullptr;
+    QPushButton *m_clearSearch = nullptr;
+    QPushButton *m_emptyRetry = nullptr;
+    QWidget *m_errorBar = nullptr;
     QScrollArea *m_inspectorScroll = nullptr;
     QWidget *m_inspectorHost = nullptr;
     QVBoxLayout *m_inspectorLay = nullptr;
@@ -2364,10 +2134,11 @@ private:
     QWidget *m_actionBar = nullptr;
     QLabel *m_actionCount = nullptr;
     QLabel *m_actionBytes = nullptr;
+    QPushButton *m_clearSel = nullptr;
+    QPushButton *m_preview = nullptr;
     QPushButton *m_deleteBtn = nullptr;
     QPushButton *m_updateBtn = nullptr;
     QPushButton *m_markManualBtn = nullptr;
-    QCheckBox *m_includeSystem = nullptr;
     QCheckBox *m_confirmBox = nullptr;
     QLabel *m_ignoredList = nullptr;
     QPushButton *m_clearIgnored = nullptr;
@@ -2380,8 +2151,10 @@ private:
     QLabel *m_statScan = nullptr;
     QTreeWidget *m_ovLeftovers = nullptr;
     QTreeWidget *m_ovStale = nullptr;
+    QTreeWidget *m_ovOutdated = nullptr;
     QLabel *m_ovLeftEmpty = nullptr;
     QLabel *m_ovStaleEmpty = nullptr;
+    QLabel *m_ovOutEmpty = nullptr;
     QThread *m_scanThread = nullptr;
     ScanWorker *m_worker = nullptr;
     QVector<Finding> m_findings;
@@ -2391,10 +2164,12 @@ private:
     QString m_selectedUid;
     QString m_scanAt;
     bool m_scanning = false;
+    bool m_hasScanned = false;
     bool m_scanOk = false;
     bool m_confirmDelete = true;
     bool m_includeSystemOn = false;
     bool m_applyingAppearance = false;
+    bool m_settingsError = false;
 };
 
 static bool argvHas(int argc, char **argv, const char *flag) {
@@ -2404,255 +2179,85 @@ static bool argvHas(int argc, char **argv, const char *flag) {
     return false;
 }
 
-struct SmokeState {
-    int plugins = 0;
-    bool path_shadow_plugin = false;
-    int path_shadow_findings = 0;
-    bool leftover_path_plugin = false;
-    bool path_home_dot_active = false;
-    bool flatpak_plugin = false;
-    int flatpak_unused_runtime = 0;
-    int raw_outdated_kind = 0;
-    QVector<Finding> findings;
-};
-
-static void smokeCollectJson(const char *json, size_t len, void *user) {
-    auto *st = static_cast<SmokeState *>(user);
-    st->plugins += 1;
-    const QByteArray line(json, int(len));
-    appendFindingsFromBlob(st->findings, line);
-
-    const QJsonDocument doc = QJsonDocument::fromJson(line);
-    if (!doc.isObject()) return;
-    const QJsonObject obj = doc.object();
-    const QString plugin = obj.value(QStringLiteral("plugin")).toString();
-    const QJsonArray arr = obj.value(QStringLiteral("findings")).toArray();
-    const int n = arr.size();
-
-    if (plugin == QLatin1String("path-shadow")) {
-        st->path_shadow_plugin = true;
-        st->path_shadow_findings = n;
-    }
-    if (plugin.startsWith(QLatin1String("path-"))) {
-        st->leftover_path_plugin = true;
-    }
-    if (plugin == QLatin1String("path-home-dot") && n > 0) {
-        st->path_home_dot_active = true;
-    }
-    if (plugin == QLatin1String("flatpak")) {
-        st->flatpak_plugin = true;
-        for (const QJsonValue &v : arr) {
-            const QJsonObject f = v.toObject();
-            if (jsonStr(f, "kind") == QLatin1String("unused-runtime")) {
-                st->flatpak_unused_runtime += 1;
-            }
-        }
-    }
-    for (const QJsonValue &v : arr) {
-        const QJsonObject f = v.toObject();
-        const QString kind = jsonStr(f, "kind");
-        if (kind.contains(QLatin1String("outdated")) || kind.contains(QLatin1String("upgrade"))) {
-            st->raw_outdated_kind += 1;
-        }
-    }
-}
-
-static int smokeVerifyTables(const SmokeState &st) {
-    const QVector<Finding> &findings = st.findings;
-    if (findings.isEmpty()) {
-        std::fprintf(stderr, "tables: no findings parsed from plugin JSON\n");
-        return 1;
-    }
-
-    const int leftovers = countPageRows(findings, Page::Leftovers);
-    const int stale = countPageRows(findings, Page::Stale);
-    const int outdated = countPageRows(findings, Page::Outdated);
-    const int packages = countPageRows(findings, Page::Packages);
-
-    int pathLeftovers = 0;
-    bool hasMozilla = false;
-    bool hasWine = false;
-    int shadowLeftovers = 0;
-    int flatpakUnusedAsPackage = 0;
-
-    for (const Finding &f : findings) {
-        if (f.plugin.startsWith(QLatin1String("path-")) && isLeftover(f)) {
-            ++pathLeftovers;
-            if (f.path.contains(QLatin1String(".mozilla"))) hasMozilla = true;
-            if (f.path.contains(QLatin1String(".wine"))) hasWine = true;
-        }
-        if (f.plugin == QLatin1String("path-shadow") && isLeftover(f)) {
-            ++shadowLeftovers;
-        }
-        if (f.plugin == QLatin1String("flatpak") && f.kind == QLatin1String("unused-runtime")) {
-            if (!isPackage(f)) {
-                std::fprintf(stderr,
-                    "tables: flatpak unused-runtime not classified as package (%s)\n",
-                    f.id.toUtf8().constData());
-                return 1;
-            }
-            ++flatpakUnusedAsPackage;
-        }
-        if (isLeftover(f) && !matchPage(f, Page::Leftovers)) {
-            std::fprintf(stderr, "tables: leftover finding not in Leftovers table\n");
-            return 1;
-        }
-        if (isOutdated(f) && !matchPage(f, Page::Outdated)) {
-            std::fprintf(stderr, "tables: outdated finding not in Outdated table\n");
-            return 1;
-        }
-        if (isPackage(f) && !matchPage(f, Page::Packages)) {
-            std::fprintf(stderr, "tables: package finding not in Packages table\n");
-            return 1;
-        }
-        if (isStale(f) && !matchPage(f, Page::Stale)) {
-            std::fprintf(stderr, "tables: stale finding not in Stale table\n");
-            return 1;
-        }
-    }
-
-    if (pathLeftovers < 1) {
-        std::fprintf(stderr, "tables: no path-* leftover findings (classifier/ingest broken)\n");
-        return 1;
-    }
-    if (st.path_home_dot_active) {
-        if (!hasMozilla || !hasWine) {
-            std::fprintf(stderr,
-                "tables: path-home-dot active but missing .mozilla/.wine fixture paths\n");
-            return 1;
-        }
-        if (stale < 1) {
-            std::fprintf(stderr,
-                "tables: path-home-dot leftovers with timing not classified as stale\n");
-            return 1;
-        }
-    }
-    // path-shadow: only assert when plugin returned findings (tag 1 / overlay dirs present).
-    if (st.path_shadow_findings > 0 && shadowLeftovers < 1) {
-        std::fprintf(stderr, "tables: path-shadow findings not classified as leftovers\n");
-        return 1;
-    }
-    // Outdated: only assert when fixtures emitted outdated-kind rows.
-    if (st.raw_outdated_kind > 0 && outdated < 1) {
-        std::fprintf(stderr, "tables: outdated fixture rows not classified as outdated\n");
-        return 1;
-    }
-    // flatpak unused-runtime: only assert when flatpak plugin returned them.
-    if (st.flatpak_unused_runtime > 0 && flatpakUnusedAsPackage < st.flatpak_unused_runtime) {
-        std::fprintf(stderr, "tables: flatpak unused-runtime not routed to Packages\n");
-        return 1;
-    }
-
-    std::fprintf(stdout, "tables: ok (leftovers=%d stale=%d outdated=%d packages=%d)\n",
-        leftovers, stale, outdated, packages);
+static int runHelp() {
+    std::fprintf(stdout, "usage: appattic-qt [--version] [--help] [--smoke]\n");
+    std::fprintf(stdout, "\n");
+    std::fprintf(stdout, "  --version   print version and exit\n");
+    std::fprintf(stdout, "  --help, -h  print this help and exit\n");
+    std::fprintf(stdout, "  --smoke     headless smoke test and exit\n");
     return 0;
 }
 
-static int runVersion(int argc, char **argv) {
-    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
-        && qEnvironmentVariableIsEmpty("DISPLAY")
-        && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
-        qputenv("QT_QPA_PLATFORM", "offscreen");
-    }
-    QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("AppAttic"));
-    QApplication::setOrganizationName(QStringLiteral("AppAttic"));
-    std::fprintf(stdout, "AppAttic 1.0.0\n");
-    std::fprintf(stdout, "Qt %s\n", qVersion());
-    const QString out = coreOutDir();
-    const QString core = out + QStringLiteral("/appattic_core.wasm");
-    if (!QFileInfo::exists(core)) {
-        std::fprintf(stdout, "wasm: core missing (%s)\n", core.toUtf8().constData());
-    } else {
-        std::fprintf(stdout, "wasm: core present\n");
-    }
-    return 0;
-}
-
-static int runSmoke(int argc, char **argv) {
-    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
-        && qEnvironmentVariableIsEmpty("DISPLAY")
-        && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
-        qputenv("QT_QPA_PLATFORM", "offscreen");
-    }
-    qputenv("APPATTIC_HOST_EXEC_FIXTURE", "1");
-    QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("AppAttic"));
-    QApplication::setOrganizationName(QStringLiteral("AppAttic"));
-    std::fprintf(stdout, "AppAttic 1.0.0\n");
-    std::fprintf(stdout, "Qt %s\n", qVersion());
-
-    const QString out = coreOutDir();
-    const QString core = out + QStringLiteral("/appattic_core.wasm");
-    if (!QFileInfo::exists(core)) {
-        std::fprintf(stderr, "wasm: core missing (%s)\n", core.toUtf8().constData());
-        std::fprintf(stderr, "build with: bash core/build.sh\n");
+static int smokeUiCopy() {
+    if (pageSearchEmpty(Page::Leftovers)
+        != QLatin1String("No leftovers match this search.")) {
+        std::fprintf(stderr, "ui-copy: leftovers search empty\n");
         return 1;
     }
-    const QStringList plugins = pluginWasmFiles(out);
-    int wasm_on_disk = 0;
-    for (const QString &p : plugins) {
-        if (QFileInfo::exists(p)) ++wasm_on_disk;
-    }
-    if (wasm_on_disk < 5) {
-        std::fprintf(stderr, "wasm: too few plugin modules on disk (%d/%d)\n",
-            wasm_on_disk, plugins.size());
+    if (pageEmptyTitle(Page::Leftovers, true, false) != QLatin1String("Scanning")) {
+        std::fprintf(stderr, "ui-copy: scanning title\n");
         return 1;
     }
-    QStringList specs;
-    for (const QString &p : plugins) {
-        specs << (p + QLatin1Char('=') + QString::number(pluginTag(p)));
+    if (pageEmptyTitle(Page::Stale, false, true) != QLatin1String("Scan failed")) {
+        std::fprintf(stderr, "ui-copy: scan failed title\n");
+        return 1;
     }
-    std::vector<QByteArray> specBytes;
-    std::vector<char *> ptrs;
-    specBytes.reserve(size_t(specs.size()));
-    ptrs.reserve(size_t(specs.size()));
-    for (const QString &s : specs) specBytes.push_back(s.toUtf8());
-    for (QByteArray &s : specBytes) ptrs.push_back(s.data());
-    SmokeState st;
-    char err[1024];
-    err[0] = '\0';
-    const QByteArray coreUtf8 = core.toUtf8();
-    const int rc = appattic_wasm_run(
-        coreUtf8.constData(),
-        ptrs.empty() ? nullptr : ptrs.data(),
-        int(ptrs.size()),
-        smokeCollectJson,
-        &st,
-        err,
-        sizeof err
+    const QString stale = pageEmptyDetail(
+        Page::Stale, false, false, QString(), 0, QString(), QString()
     );
-    if (rc != 0) {
-        std::fprintf(stderr, "wasm query failed: %s\n", err[0] ? err : "(no detail)");
+    if (stale.contains(QLatin1String("WASM")) || stale.contains(QLatin1String("plugin ships"))) {
+        std::fprintf(stderr, "ui-copy: stale empty still mentions internals\n");
         return 1;
     }
-    if (st.plugins < 1) {
-        std::fprintf(stderr, "wasm: no plugin JSON returned\n");
+    const QString scanning = pageEmptyDetail(
+        Page::Leftovers, true, false, QString(), 0, QString(), QString()
+    );
+    if (!scanning.contains(QLatin1String("Looking for leftover data"))) {
+        std::fprintf(stderr, "ui-copy: scanning detail\n");
         return 1;
     }
-    if (!st.path_shadow_plugin) {
-        std::fprintf(stderr, "wasm: path-shadow plugin missing from scan output\n");
+    const QString pkg = pageEmptyDetail(
+        Page::Packages, false, false, QString(), 0, QStringLiteral("all"), QString()
+    );
+    if (pkg.contains(QLatin1String("this page stays"))) {
+        std::fprintf(stderr, "ui-copy: packages empty still uses internal phrasing\n");
         return 1;
     }
-    if (!st.leftover_path_plugin) {
-        std::fprintf(stderr, "wasm: no path-* leftover plugin JSON returned\n");
+    const QString readMsg = settingsUnreadableMessage(QStringLiteral("/tmp/settings.json"));
+    if (readMsg.contains(QLatin1String("cannot read settings"))
+        || !readMsg.contains(QLatin1String("Could not read settings"))) {
+        std::fprintf(stderr, "ui-copy: settings read still uses developer phrasing\n");
         return 1;
     }
-    if (smokeVerifyTables(st) != 0) {
+    const QString badMsg = settingsInvalidMessage(
+        QStringLiteral("/tmp/settings.json"), QStringLiteral("not valid JSON")
+    );
+    if (badMsg.contains(QLatin1String("invalid settings /tmp"))
+        || !badMsg.contains(QLatin1String("not valid JSON"))) {
+        std::fprintf(stderr, "ui-copy: settings invalid still uses developer phrasing\n");
         return 1;
     }
-    std::fprintf(stdout, "plugin:path-shadow\n");
-    std::fprintf(stdout, "wasm: ok (%d plugins)\n", st.plugins);
-    std::fprintf(stdout, "SMOKE=ok\n");
+    if (ignoredPathLabel(QStringLiteral("/tmp/Caches/Foo")) != QLatin1String("Caches/Foo")) {
+        std::fprintf(stderr, "ui-copy: ignored path label\n");
+        return 1;
+    }
+    std::fprintf(stdout, "ui-copy: ok\n");
     return 0;
 }
 
 int main(int argc, char **argv) {
+    if (argvHas(argc, argv, "--help") || argvHas(argc, argv, "-h")) {
+        return runHelp();
+    }
     if (argvHas(argc, argv, "--version")) {
         return runVersion(argc, argv);
     }
     if (argvHas(argc, argv, "--smoke")) {
-        return runSmoke(argc, argv);
+        const int timing = smokeTiming();
+        if (timing != 0) return timing;
+        const int rc = runSmoke(argc, argv);
+        if (rc != 0) return rc;
+        return smokeUiCopy();
     }
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("AppAttic"));
