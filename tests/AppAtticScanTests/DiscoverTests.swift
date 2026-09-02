@@ -1,7 +1,4 @@
 import XCTest
-#if canImport(Darwin)
-import Darwin
-#endif
 @testable import AppAtticScan
 
 final class DiscoverTests: XCTestCase {
@@ -26,6 +23,59 @@ final class DiscoverTests: XCTestCase {
         XCTAssertEqual(app?.bundleId, "firefox")
         XCTAssertEqual(app?.extra["comment"], "Browse the Web")
         XCTAssertEqual(app?.isSystem, true)
+    }
+
+    func testParseDesktopFileStripsUTF8BOM() throws {
+        let body = """
+        [Desktop Entry]
+        Type=Application
+        Name=Firefox Web Browser
+        Exec=/usr/bin/firefox %u
+        """
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var data = Data([0xEF, 0xBB, 0xBF])
+        data.append(contentsOf: body.utf8)
+        let path = dir.appendingPathComponent("firefox.desktop")
+        try data.write(to: path)
+        let app = parseDesktopFile(path.path, sourceDir: "/usr/share/applications")
+        XCTAssertEqual(app?.displayName, "Firefox Web Browser")
+    }
+
+    func testDesktopNameUnescapesStringValue() throws {
+        let body = #"""
+        [Desktop Entry]
+        Type=Application
+        Name=Foo\sBar
+        Comment=Line\nBreak
+        Exec=/usr/bin/foo %u
+        """#
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("foo.desktop").path
+        try body.write(toFile: path, atomically: true, encoding: .utf8)
+        let app = parseDesktopFile(path, sourceDir: "/usr/share/applications")
+        XCTAssertEqual(app?.displayName, "Foo Bar")
+        XCTAssertEqual(app?.extra["comment"], "Line\nBreak")
+        XCTAssertEqual(app?.extra["exec"], "/usr/bin/foo %u")
+    }
+
+    func testDesktopNameStripsBidiAndZeroWidth() throws {
+        let body = """
+        [Desktop Entry]
+        Type=Application
+        Name=\u{202E}Firefox\u{200B} Web Browser
+        Exec=/usr/bin/firefox %u
+        """
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("firefox.desktop").path
+        try body.write(toFile: path, atomically: true, encoding: .utf8)
+        let app = parseDesktopFile(path, sourceDir: "/usr/share/applications")
+        XCTAssertEqual(app?.displayName, "Firefox Web Browser")
     }
 
     func testHiddenDesktopIsSkipped() throws {
@@ -222,18 +272,15 @@ final class DiscoverTests: XCTestCase {
     }
 
     func testXdgDataDirsAreSearchedForDesktops() {
-        let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
-        let extra = (td as NSString).appendingPathComponent("share")
-        let oldDirs = ProcessInfo.processInfo.environment["XDG_DATA_DIRS"]
-        let oldHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
-        setenv("XDG_DATA_DIRS", extra, 1)
-        setenv("XDG_DATA_HOME", (td as NSString).appendingPathComponent("user"), 1)
-        defer {
-            if let oldDirs { setenv("XDG_DATA_DIRS", oldDirs, 1) } else { unsetenv("XDG_DATA_DIRS") }
-            if let oldHome { setenv("XDG_DATA_HOME", oldHome, 1) } else { unsetenv("XDG_DATA_HOME") }
-        }
-        let dirs = linuxDesktopDirs()
-        XCTAssertTrue(dirs.contains((extra as NSString).appendingPathComponent("applications")))
+        let extra = "/tmp/appattic-xdg-share"
+        let user = "/tmp/appattic-xdg-user"
+        let dirs = linuxDesktopDirs(
+            home: "/home/x",
+            env: ["XDG_DATA_DIRS": extra, "XDG_DATA_HOME": user]
+        )
+        XCTAssertTrue(dirs.contains("\(extra)/applications"), "\(dirs)")
+        XCTAssertTrue(dirs.contains("\(user)/applications"), "\(dirs)")
+        XCTAssertTrue(dirs.contains("/home/x/.local/share/applications"), "\(dirs)")
         XCTAssertTrue(dirs.contains("/var/lib/snapd/desktop/applications"))
     }
 
@@ -241,6 +288,7 @@ final class DiscoverTests: XCTestCase {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let appsDir = td.appendingPathComponent("applications")
         try FileManager.default.createDirectory(at: appsDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: td) }
         let body = """
         [Desktop Entry]
         Type=Application
@@ -248,18 +296,7 @@ final class DiscoverTests: XCTestCase {
         Exec=/usr/bin/true
         """
         try body.write(to: appsDir.appendingPathComponent("tempscanapp.desktop"), atomically: true, encoding: .utf8)
-        let oldDirs = ProcessInfo.processInfo.environment["XDG_DATA_DIRS"]
-        let oldHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
-        setenv("XDG_DATA_DIRS", td.path, 1)
-        setenv("XDG_DATA_HOME", td.appendingPathComponent("user").path, 1)
-        PlatformOverride.linux = true
-        defer {
-            PlatformOverride.linux = nil
-            if let oldDirs { setenv("XDG_DATA_DIRS", oldDirs, 1) } else { unsetenv("XDG_DATA_DIRS") }
-            if let oldHome { setenv("XDG_DATA_HOME", oldHome, 1) } else { unsetenv("XDG_DATA_HOME") }
-            try? FileManager.default.removeItem(at: td)
-        }
-        let found = findApps()
+        let found = findLinuxApps(progress: { _ in }, desktopDirs: [appsDir.path])
         XCTAssertTrue(found.contains { $0.displayName == "TempScanApp" })
         XCTAssertFalse(found.contains { $0.path.hasPrefix("/Applications/") })
     }

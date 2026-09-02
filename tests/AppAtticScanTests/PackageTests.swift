@@ -38,6 +38,11 @@ final class PackageTests: XCTestCase {
 
     func testParseDnfUnneededNames() {
         let text = """
+        Last metadata expiration check: 1:23:45 ago on Wed 26 Aug 2026.
+        Packages
+        Finding unneeded
+        Available Upgrades
+        Obsoleting Packages
         libfoo
         python3-bar
         """
@@ -77,6 +82,14 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(pkgs[0].kind, "global")
         let byName = Dictionary(uniqueKeysWithValues: pkgs.map { ($0.name, $0) })
         XCTAssertEqual(byName["typescript"]?.version, "5.4.5")
+
+        let nested = """
+        {"dependencies":{"@vue/cli":{"version":"5.0.8","dependencies":{"evil":{"version":"1.0.0"}}}}}
+        """
+        let scoped = parseNpmGlobalList(nested)
+        XCTAssertEqual(scoped.map(\.name), ["@vue/cli"])
+        XCTAssertEqual(scoped[0].version, "5.0.8")
+        XCTAssertFalse(scoped.contains { $0.name == "evil" })
     }
 
     func testParsePnpmGlobalJSONObjectAndArray() {
@@ -102,6 +115,10 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(pkgs[0].manager, "bun")
         XCTAssertEqual(pkgs[0].kind, "global")
         XCTAssertEqual(pkgs[0].version, "5.4.5")
+
+        let scoped = parseBunGlobalList("└── @vue/cli@5.0.8\n")
+        XCTAssertEqual(scoped.map(\.name), ["@vue/cli"])
+        XCTAssertEqual(scoped[0].version, "5.0.8")
     }
 
     func testParsePipxListJSONAndText() {
@@ -153,10 +170,15 @@ final class PackageTests: XCTestCase {
     func testEmptyAndJunkParsersStayEmpty() {
         XCTAssertTrue(parsePacmanOrphans("").isEmpty)
         XCTAssertTrue(parseAptAutoremove("Reading package lists... Done\n0 upgraded, 0 newly installed, 0 to remove").isEmpty)
+        XCTAssertTrue(parseDnfUnneeded("Packages\nFinding unneeded\nAvailable Upgrades\n").isEmpty)
+        XCTAssertTrue(parseZypperUnneeded("S | Name | Type | Version | Arch\n--+---+---+---+-\n").isEmpty)
         XCTAssertTrue(parseNpmGlobalList("not json").isEmpty)
         XCTAssertTrue(parseNpmGlobalList(#"{}"#).isEmpty)
+        XCTAssertTrue(parsePnpmGlobalList(#"{}"#).isEmpty)
+        XCTAssertTrue(parseBunGlobalList("/home/user/.bun/install/global/node_modules\n").isEmpty)
         XCTAssertTrue(parsePipxList("nothing here").isEmpty)
         XCTAssertTrue(parseUvToolList("").isEmpty)
+        XCTAssertTrue(parseUvToolList("- ruff\n").isEmpty)
     }
 
     func testPackageRemoveCommandsAreNamedAndQuoted() {
@@ -258,9 +280,26 @@ final class PackageTests: XCTestCase {
         XCTAssertFalse(cmds.contains { $0.contains("mas") })
     }
 
+    func testCollectPackagesFedoraUsesRepoqueryNotLeaves() {
+        var cmds: [[String]] = []
+        let pkgs = collectPackages(
+            which: { name in ["dnf", "dnf5"].contains(name) ? "/usr/bin/\(name)" : nil },
+            run: { cmd, _ in
+                cmds.append(cmd)
+                if cmd.contains("leaves") { return (0, "should-not-run\n", "") }
+                if cmd.contains("repoquery") { return (0, "libfoo\n", "") }
+                return (1, "", "missing")
+            },
+            osRelease: "ID=fedora\n"
+        )
+        XCTAssertTrue(pkgs.contains { $0.name == "libfoo" && $0.manager == "dnf" })
+        XCTAssertTrue(cmds.contains { $0.contains("repoquery") }, "\(cmds)")
+        XCTAssertFalse(cmds.contains { $0.contains("leaves") }, "\(cmds)")
+    }
+
     func testCollectPackagesDebianUsesAptGetDryRun() {
         var cmds: [[String]] = []
-        _ = collectPackages(
+        let pkgs = collectPackages(
             which: { name in name == "apt-get" ? "/usr/bin/apt-get" : nil },
             run: { cmd, _ in
                 cmds.append(cmd)
@@ -268,8 +307,38 @@ final class PackageTests: XCTestCase {
             },
             osRelease: "ID=ubuntu\nID_LIKE=debian\n"
         )
-        XCTAssertTrue(cmds.contains { $0.contains("-s") || $0.joined(separator: " ").contains("autoremove") }, "\(cmds)")
+        XCTAssertEqual(pkgs.map(\.name), ["libfoo0"])
+        XCTAssertEqual(pkgs.first?.manager, "apt")
+        XCTAssertTrue(
+            cmds.contains { $0.contains("-s") && $0.contains("autoremove") },
+            "\(cmds)"
+        )
+        XCTAssertFalse(
+            cmds.contains { $0.contains("autoremove") && !$0.contains("-s") },
+            "live apt-get autoremove must not run: \(cmds)"
+        )
         XCTAssertFalse(cmds.contains { $0.joined(separator: " ").contains("apt upgrade") })
+    }
+
+    func testCollectPackagesUnknownPrefersPacmanOverApt() {
+        var cmds: [[String]] = []
+        let pkgs = collectPackages(
+            which: { name in
+                ["pacman", "apt", "apt-get"].contains(name) ? "/usr/bin/\(name)" : nil
+            },
+            run: { cmd, _ in
+                cmds.append(cmd)
+                let bin = cmd.first.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
+                if bin == "pacman" { return (0, "libfoo 1.0-1\n", "") }
+                if bin == "apt-get" || bin == "apt" { return (0, "Remv should-not-run [1]\n", "") }
+                return (1, "", "missing")
+            },
+            osRelease: "ID=somethingweird\n"
+        )
+        XCTAssertTrue(pkgs.contains { $0.name == "libfoo" && $0.manager == "pacman" })
+        XCTAssertFalse(pkgs.contains { $0.name == "should-not-run" })
+        XCTAssertTrue(cmds.contains { $0.contains("-Qdt") }, "\(cmds)")
+        XCTAssertFalse(cmds.contains { $0.contains("autoremove") }, "\(cmds)")
     }
 
     func testCollectPackagesSkipsMissingManagers() {
@@ -341,8 +410,27 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(result.toScanData().packages?.map(\.name), ["libfoo"])
     }
 
+    func testPerformScanMarksIncompleteWhenBrewOutdatedFailed() {
+        let result = performScan(
+            includeSystem: false,
+            apps: [],
+            brew: BrewSnapshot(available: true, outdatedFailed: true),
+            leftoverItems: [],
+            leftoverAgents: [],
+            linuxOutdated: [],
+            appStoreOutdated: [],
+            packages: [],
+            history: HistoryIndex(),
+            skipLiveUsage: true
+        )
+        XCTAssertTrue(result.incomplete)
+        XCTAssertEqual(result.toScanData().incomplete, true)
+        XCTAssertTrue(scanResult(from: result.toScanData()).incomplete)
+    }
+
     func testFingerprintMentionsPackagesEpoch() {
-        XCTAssertTrue(scanFingerprint().contains("packages:1"))
+        let fp = scanFingerprint(which: { _ in nil }, run: { _, _ in (1, "", "") })
+        XCTAssertTrue(fp.contains("packages:1"), fp)
     }
 }
 

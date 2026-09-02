@@ -43,12 +43,15 @@ final class OutdatedTests: XCTestCase {
 
     func testQueryBrewSkipsGreedyAndReturnsEmptyOnFailure() {
         XCTAssertTrue(queryBrew("").isEmpty)
+        XCTAssertFalse(queryBrewStatus("").failed)
         XCTAssertTrue(queryBrew("/opt/homebrew/bin/brew", run: { _, _ in (1, "", "failed to fetch") }).isEmpty)
+        XCTAssertTrue(queryBrewStatus("/opt/homebrew/bin/brew", run: { _, _ in (1, "", "failed to fetch") }).failed)
         var calls: [([String], TimeInterval)] = []
-        _ = queryBrew("/opt/homebrew/bin/brew", run: { cmd, timeout in
+        let empty = queryBrew("/opt/homebrew/bin/brew", run: { cmd, timeout in
             calls.append((cmd, timeout))
             return (0, #"{"formulae":[],"casks":[]}"#, "")
         })
+        XCTAssertTrue(empty.isEmpty)
         XCTAssertEqual(calls[0].0, ["/opt/homebrew/bin/brew", "outdated", "--json=v2"])
         XCTAssertFalse(calls[0].0.contains("--greedy"))
         XCTAssertGreaterThanOrEqual(calls[0].1, 60)
@@ -162,6 +165,7 @@ final class OutdatedTests: XCTestCase {
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=rhel\nID_LIKE=\"fedora\"\n"), "fedora")
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=opensuse-tumbleweed\nID_LIKE=\"suse opensuse\"\n"), "suse")
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=ubuntu\nID_LIKE=debian\n"), "debian")
+        XCTAssertEqual(linuxDistroFamily(osRelease: "ID=arch\r\nID_LIKE=archlinux\r\n"), "arch")
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=linuxmint\nID_LIKE=\"ubuntu debian\"\n"), "debian")
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=pop\nID_LIKE=\"ubuntu debian\"\n"), "debian")
         XCTAssertEqual(linuxDistroFamily(osRelease: ""), "unknown")
@@ -186,6 +190,9 @@ final class OutdatedTests: XCTestCase {
         let text = """
         Last metadata expiration check: 0:12:00 ago on Tue 25 Aug 2026.
         Available Upgrades
+        Packages
+        Finding unneeded
+        Obsoleting Packages
         git.x86_64                    2.45.1-1.fc40           updates
         firefox.x86_64                129.0-1.fc40            updates
         """
@@ -234,7 +241,7 @@ final class OutdatedTests: XCTestCase {
 
     func testCollectLinuxOnUbuntuQueriesAptNotPacman() {
         var cmds: [[String]] = []
-        _ = collectLinux(
+        let pkgs = collectLinux(
             which: { name in
                 switch name {
                 case "pacman", "apt": return "/usr/bin/\(name)"
@@ -243,10 +250,15 @@ final class OutdatedTests: XCTestCase {
             },
             run: { cmd, _ in
                 cmds.append(cmd)
+                if cmd.contains("--upgradable") {
+                    return (0, "git/stable 1:2.39.5-0+deb12u2 amd64 [upgradable from: 1:2.39.2-1.1]\n", "")
+                }
                 return (0, "", "")
             },
             osRelease: "ID=ubuntu\nID_LIKE=debian\n"
         )
+        XCTAssertEqual(pkgs.map(\.name), ["git"])
+        XCTAssertEqual(pkgs.first?.manager, "apt")
         XCTAssertTrue(cmds.contains { $0.contains("--upgradable") })
         XCTAssertFalse(cmds.contains { $0.contains("-Qu") })
     }
@@ -260,7 +272,7 @@ final class OutdatedTests: XCTestCase {
 
     func testCollectLinuxOnFedoraQueriesDnfNotApt() {
         var cmds: [[String]] = []
-        _ = collectLinux(
+        let pkgs = collectLinux(
             which: { name in
                 switch name {
                 case "dnf", "apt": return "/usr/bin/\(name)"
@@ -269,10 +281,15 @@ final class OutdatedTests: XCTestCase {
             },
             run: { cmd, _ in
                 cmds.append(cmd)
+                if cmd.contains("--upgrades") || cmd.contains("check-update") {
+                    return (0, "git.x86_64                    2.45.1-1.fc40           updates\n", "")
+                }
                 return (0, "", "")
             },
             osRelease: "ID=fedora\n"
         )
+        XCTAssertEqual(pkgs.map(\.name), ["git"])
+        XCTAssertEqual(pkgs.first?.manager, "dnf")
         XCTAssertTrue(cmds.contains { $0.contains("--upgrades") || $0.contains("check-update") })
         XCTAssertFalse(cmds.contains { $0.contains("--upgradable") })
         XCTAssertFalse(cmds.contains { $0.contains("-Qu") })
@@ -280,7 +297,7 @@ final class OutdatedTests: XCTestCase {
 
     func testCollectLinuxOnSuseQueriesZypperNotApt() {
         var cmds: [[String]] = []
-        _ = collectLinux(
+        let pkgs = collectLinux(
             which: { name in
                 switch name {
                 case "zypper", "apt": return "/usr/bin/\(name)"
@@ -289,17 +306,27 @@ final class OutdatedTests: XCTestCase {
             },
             run: { cmd, _ in
                 cmds.append(cmd)
+                if cmd.contains("list-updates") {
+                    return (
+                        0,
+                        "S | Repository | Name | Current Version | Available Version | Arch\nv | Update | git | 2.43.0-1.1 | 2.45.1-1.1 | x86_64\n",
+                        ""
+                    )
+                }
                 return (0, "", "")
             },
             osRelease: "ID=opensuse-leap\nID_LIKE=\"suse opensuse\"\n"
         )
+        XCTAssertEqual(pkgs.map(\.name), ["git"])
+        XCTAssertEqual(pkgs.first?.manager, "zypper")
+        XCTAssertEqual(pkgs.first?.latestVersion, "2.45.1-1.1")
         XCTAssertTrue(cmds.contains { $0.contains("list-updates") })
         XCTAssertFalse(cmds.contains { $0.contains("--upgradable") })
     }
 
     func testCollectLinuxUnknownPrefersPacmanOverApt() {
         var cmds: [[String]] = []
-        _ = collectLinux(
+        let pkgs = collectLinux(
             which: { name in
                 switch name {
                 case "pacman", "apt": return "/usr/bin/\(name)"
@@ -308,10 +335,13 @@ final class OutdatedTests: XCTestCase {
             },
             run: { cmd, _ in
                 cmds.append(cmd)
+                if cmd.contains("-Qu") { return (1, "firefox 129.0-1 -> 129.0.1-1\n", "") }
                 return (0, "", "")
             },
             osRelease: "ID=somethingweird\n"
         )
+        XCTAssertEqual(pkgs.map(\.name), ["firefox"])
+        XCTAssertEqual(pkgs.first?.manager, "pacman")
         XCTAssertTrue(cmds.contains { $0.contains("-Qu") })
         XCTAssertFalse(cmds.contains { $0.contains("--upgradable") })
     }
@@ -534,11 +564,11 @@ final class OutdatedTests: XCTestCase {
     }
 
     func testVersionNewerPadsAndStripsTrailingZeros() {
-        XCTAssertTrue(versionNewer("10.4.4", "10.4.3"))
-        XCTAssertFalse(versionNewer("14.5.0", "14.5"))
-        XCTAssertFalse(versionNewer("14.5", "14.5.0"))
-        XCTAssertFalse(versionNewer("26.6", "26.6"))
-        XCTAssertTrue(versionNewer("15.0", "14.5"))
+        XCTAssertTrue(versionNewer(latest: "10.4.4", current: "10.4.3"))
+        XCTAssertFalse(versionNewer(latest: "14.5.0", current: "14.5"))
+        XCTAssertFalse(versionNewer(latest: "14.5", current: "14.5.0"))
+        XCTAssertFalse(versionNewer(latest: "26.6", current: "26.6"))
+        XCTAssertTrue(versionNewer(latest: "15.0", current: "14.5"))
     }
 
     func testItunesRowRequiresExactBundleId() {
@@ -552,8 +582,9 @@ final class OutdatedTests: XCTestCase {
                 "description": "Make slides on iPhone.",
             ]],
         ]
-        XCTAssertNil(itunesRowForBundle(data, bundleId: "com.apple.iWork.Keynote"))
-        XCTAssertEqual(itunesRowForBundle(data, bundleId: "com.apple.Keynote")?["version"] as? String, "15.3")
+        let idx = indexItunesResults(data)
+        XCTAssertNil(idx["com.apple.iWork.Keynote"])
+        XCTAssertEqual(idx["com.apple.Keynote"]?["version"] as? String, "15.3")
     }
 
     func testPkgFromItunesRowWhenStoreIsNewer() {
@@ -663,8 +694,8 @@ final class OutdatedTests: XCTestCase {
         })
         XCTAssertEqual(Array(calls[0].prefix(2)), ["/opt/homebrew/bin/mas", "outdated"])
         XCTAssertFalse(calls[0].contains("--accurate"))
-        XCTAssertEqual(pkgs[0].title, "iMovie")
-        XCTAssertTrue(queryMas(which: { _ in nil }).isEmpty)
+        XCTAssertEqual(pkgs?[0].title, "iMovie")
+        XCTAssertNil(queryMas(which: { _ in nil }))
     }
 
     func testApplyMarksAppStoreByBundleId() {

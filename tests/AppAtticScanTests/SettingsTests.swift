@@ -2,12 +2,20 @@ import XCTest
 @testable import AppAtticScan
 
 final class SettingsTests: XCTestCase {
-    func testMissingSettingsFileReturnsDefaults() {
+    func testMissingSettingsFileReturnsDefaults() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-missing-\(UUID().uuidString).json")
-        let settings = loadSettings(from: url)
+        let settings = try loadSettings(from: url)
         XCTAssertFalse(settings.includeSystem)
         XCTAssertTrue(settings.confirmDelete)
         XCTAssertEqual(settings.ignoredLeftoverPaths, [])
+    }
+
+    func testSettingsURLSitsBesideScanCache() {
+        XCTAssertEqual(
+            defaultSettingsURL().deletingLastPathComponent(),
+            defaultScanCacheURL().deletingLastPathComponent()
+        )
+        XCTAssertEqual(defaultSettingsURL().lastPathComponent, "settings.json")
     }
 
     func testSettingsRoundTrip() throws {
@@ -19,21 +27,142 @@ final class SettingsTests: XCTestCase {
         settings = addIgnoredLeftover("/tmp/Foo", to: settings)
         settings = addIgnoredLeftover("/tmp/Foo", to: settings)
         settings = addIgnoredLeftover("/tmp/Bar", to: settings)
-        saveSettings(settings, to: url)
-        let loaded = loadSettings(from: url)
+        try writeSettings(settings, to: url)
+        let viaRead = try readSettings(from: url)
+        XCTAssertTrue(viaRead.includeSystem)
+        XCTAssertFalse(viaRead.confirmDelete)
+        XCTAssertEqual(viaRead.ignoredLeftoverPaths, ["/tmp/Foo", "/tmp/Bar"])
+        try saveSettings(settings, to: url)
+        let loaded = try loadSettings(from: url)
         XCTAssertTrue(loaded.includeSystem)
         XCTAssertFalse(loaded.confirmDelete)
         XCTAssertEqual(loaded.ignoredLeftoverPaths, ["/tmp/Foo", "/tmp/Bar"])
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("\n"), text)
+        XCTAssertTrue(text.contains("/tmp/Foo"), text)
+        XCTAssertFalse(text.contains("\\/"), text)
+        let mode = posixMode(url.path)
+        XCTAssertNotEqual(mode, -1)
+        XCTAssertEqual(mode & 0o077, 0)
+    }
+
+    func testReadSettingsMissingFileIsIOError() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-read-missing-\(UUID().uuidString).json")
+        XCTAssertThrowsError(try readSettings(from: url)) { error in
+            guard case AppAtticIOError.readFailed = error else {
+                return XCTFail("expected readFailed, got \(error)")
+            }
+        }
     }
 
     func testPartialSettingsJSONUsesDefaults() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-partial-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
         try Data("{\"includeSystem\":true}".utf8).write(to: url)
-        let loaded = loadSettings(from: url)
+        let loaded = try loadSettings(from: url)
         XCTAssertTrue(loaded.includeSystem)
         XCTAssertTrue(loaded.confirmDelete)
         XCTAssertEqual(loaded.ignoredLeftoverPaths, [])
+    }
+
+    func testSettingsErrorUserMessageIsWrittenForPeople() {
+        let path = "/tmp/appattic-settings.json"
+        let unread = settingsErrorUserMessage(SettingsError.unreadable(path: path, reason: "permission denied"))
+        XCTAssertTrue(unread.contains("Could not read settings"), unread)
+        XCTAssertTrue(unread.contains(path), unread)
+        XCTAssertFalse(unread.hasPrefix("cannot read settings"), unread)
+        let invalid = settingsErrorUserMessage(SettingsError.invalid(path: path, reason: "not valid JSON"))
+        XCTAssertTrue(invalid.contains("not valid JSON"), invalid)
+        XCTAssertTrue(invalid.contains("will not overwrite"), invalid)
+        XCTAssertFalse(invalid.hasPrefix("invalid settings"), invalid)
+        let unwritable = settingsErrorUserMessage(SettingsError.unwritable(path: path, reason: "disk full"))
+        XCTAssertTrue(unwritable.contains("Could not save settings"), unwritable)
+        XCTAssertFalse(unwritable.hasPrefix("cannot write settings"), unwritable)
+        XCTAssertEqual(SettingsError.invalid(path: path, reason: "not valid JSON").description, "invalid settings \(path): not valid JSON")
+    }
+
+    func testMalformedSettingsJSONThrows() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-bad-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("{".utf8).write(to: url)
+        XCTAssertThrowsError(try loadSettings(from: url)) { error in
+            guard case SettingsError.invalid(let path, let reason) = error else {
+                return XCTFail("expected invalid, got \(error)")
+            }
+            XCTAssertEqual(path, url.path)
+            XCTAssertEqual(reason, "not valid JSON")
+        }
+    }
+
+    func testEmptySettingsFileThrows() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-empty-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data().write(to: url)
+        XCTAssertThrowsError(try loadSettings(from: url)) { error in
+            guard case SettingsError.invalid(_, let reason) = error else {
+                return XCTFail("expected invalid, got \(error)")
+            }
+            XCTAssertEqual(reason, "file is empty")
+        }
+    }
+
+    func testUnknownSettingsKeyThrows() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-unknown-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("{\"include_system\":true}".utf8).write(to: url)
+        XCTAssertThrowsError(try loadSettings(from: url)) { error in
+            guard case SettingsError.invalid(_, let reason) = error else {
+                return XCTFail("expected invalid, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("include_system"), reason)
+        }
+    }
+
+    func testSettingsWrongTypeThrows() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-type-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("{\"confirmDelete\":\"yes\"}".utf8).write(to: url)
+        XCTAssertThrowsError(try loadSettings(from: url)) { error in
+            guard case SettingsError.invalid(_, let reason) = error else {
+                return XCTFail("expected invalid, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("wrong type"), reason)
+        }
+        try Data("{\"includeSystem\":1}".utf8).write(to: url)
+        XCTAssertThrowsError(try loadSettings(from: url)) { error in
+            guard case SettingsError.invalid = error else {
+                return XCTFail("expected invalid for numeric bool, got \(error)")
+            }
+        }
+    }
+
+    func testSettingsNormalizesEmptyAndDuplicateIgnoredPaths() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-norm-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("{\"ignoredLeftoverPaths\":[\"/tmp/A\",\"\",\"/tmp/A\",\"/tmp/B\"]}".utf8).write(to: url)
+        let loaded = try loadSettings(from: url)
+        XCTAssertEqual(loaded.ignoredLeftoverPaths, ["/tmp/A", "/tmp/B"])
+    }
+
+    func testEffectiveIncludeSystemPrefersCLIFlag() {
+        XCTAssertFalse(effectiveIncludeSystem(cliFlag: false, settings: .default))
+        XCTAssertTrue(effectiveIncludeSystem(cliFlag: true, settings: .default))
+        var on = AppAtticSettings.default
+        on.includeSystem = true
+        XCTAssertTrue(effectiveIncludeSystem(cliFlag: false, settings: on))
+        XCTAssertTrue(effectiveIncludeSystem(cliFlag: true, settings: on))
+    }
+
+    func testSaveSettingsThrowsWhenParentIsAFile() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-notdir-\(UUID().uuidString)")
+        try Data("x".utf8).write(to: parent)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let url = parent.appendingPathComponent("settings.json")
+        XCTAssertThrowsError(try saveSettings(.default, to: url)) { error in
+            guard case SettingsError.unwritable = error else {
+                return XCTFail("expected unwritable, got \(error)")
+            }
+        }
     }
 
     func testVisibleOrphanedLeftoversHidesIgnoredPaths() {
@@ -46,7 +175,20 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(visible.map(\.path), ["/tmp/Bar"])
     }
 
-    func testAddIgnoredLeftoversRecordsEveryPathInGroup() {
+    func testIgnoredLeftoverPathsMatchAcrossNFCAndNFD() {
+        let nfc = "/tmp/Café"
+        let nfd = "/tmp/Cafe\u{0301}"
+        let leftovers = [
+            LeftoverItem(name: "Café", path: nfd, root: "Caches", kind: "dir", status: "orphaned", size_bytes: 10),
+        ]
+        XCTAssertTrue(visibleOrphanedLeftovers(leftovers, ignoring: [nfc]).isEmpty)
+        let settings = addIgnoredLeftover(nfd, to: .default)
+        XCTAssertEqual(settings.ignoredLeftoverPaths, [nfc.precomposedStringWithCanonicalMapping])
+        let loaded = AppAtticSettings(ignoredLeftoverPaths: [nfc, nfd, nfc]).normalized()
+        XCTAssertEqual(loaded.ignoredLeftoverPaths, [nfc.precomposedStringWithCanonicalMapping])
+    }
+
+    func testLeftoverIgnorePathsIncludesEveryPathInGroup() {
         let item = LeftoverItem(
             name: "Whisky",
             path: "/tmp/Whisky",
@@ -55,9 +197,8 @@ final class SettingsTests: XCTestCase {
             status: "orphaned",
             extra_paths: ["/tmp/Whisky.plist", "/tmp/Containers/Whisky"]
         )
-        let settings = addIgnoredLeftovers(leftoverIgnorePaths(item), to: .default)
         XCTAssertEqual(
-            Set(settings.ignoredLeftoverPaths),
+            Set(leftoverIgnorePaths(item)),
             ["/tmp/Whisky", "/tmp/Whisky.plist", "/tmp/Containers/Whisky"]
         )
     }
@@ -81,11 +222,15 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(script.contains("/tmp/Whisky"))
     }
 
-    func testClearIgnoredLeftovers() {
-        var settings = AppAtticSettings.default
-        settings = addIgnoredLeftover("/tmp/Foo", to: settings)
-        settings = clearIgnoredLeftovers(settings)
-        XCTAssertEqual(settings.ignoredLeftoverPaths, [])
+    func testClearIgnoredLeftovers() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-clear-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/Foo"]), to: url)
+        var settings = try loadSettings(from: url)
+        XCTAssertEqual(settings.ignoredLeftoverPaths, ["/tmp/Foo"])
+        settings.ignoredLeftoverPaths = []
+        try saveSettings(settings, to: url)
+        XCTAssertEqual(try loadSettings(from: url).ignoredLeftoverPaths, [])
     }
 
     func testPruneSelectionDropsGoneAndIgnored() {
@@ -157,6 +302,33 @@ final class SettingsTests: XCTestCase {
             commandFailureMessage(status: 2, stderr: "  brew: no such keg  "),
             "Command failed (exit 2). brew: no such keg"
         )
+    }
+
+    func testCommandFailureMessageRedactsHomePath() {
+        XCTAssertEqual(
+            commandFailureMessage(
+                status: 1,
+                stderr: "Error: Permission denied @ unlink_internal - /home/alice/Library/Caches/Homebrew/foo",
+                home: "/home/alice"
+            ),
+            "Command failed (exit 1). Error: Permission denied @ unlink_internal - ~/Library/Caches/Homebrew/foo"
+        )
+        XCTAssertTrue(
+            commandFailureMessage(status: 1, stderr: "/home/alice2/secret", home: "/home/alice")
+                .contains("/home/alice2")
+        )
+    }
+
+    func testSaveSettingsRestrictsPermissions() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("settings-perm-\(UUID().uuidString)")
+        let dir = root.appendingPathComponent("appattic")
+        let url = dir.appendingPathComponent("settings.json")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/home/alice/Caches/Foo"]), to: url)
+        let fileMode = (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as! NSNumber).intValue
+        let dirMode = (try FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as! NSNumber).intValue
+        XCTAssertEqual(fileMode & 0o777, 0o600)
+        XCTAssertEqual(dirMode & 0o777, 0o700)
     }
 
     func testCleanupScriptSkipsIgnoredLeftovers() {
@@ -243,10 +415,10 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(visibleStaleSoftware(items, includeSystem: true).map(\.name), ["Idle", "Safari"])
     }
 
-    func testRemainingCommentOnlyAppPathsKeepsSteamGuidance() {
+    func testRemainingPendingAppPathsKeepsSteamWithoutAppId() {
         let leftover = SoftwareItem(name: "Foo", kind: "app", path: "/Apps/Foo.app", source: "app", tier: "remove")
         let steam = SoftwareItem(name: "EmuDevz", kind: "app", path: "/tmp/steamapps/common/EmuDevz", source: "steam", tier: "remove")
-        let kept = remainingCommentOnlyAppPaths(
+        let kept = remainingPendingAppPaths(
             selected: [leftover.path, steam.path],
             software: [leftover, steam]
         )
@@ -375,6 +547,69 @@ final class ResolveScanTests: XCTestCase {
         let saved = try XCTUnwrap(loadScanCache(from: cacheURL))
         XCTAssertEqual(saved.fingerprint, "new")
         XCTAssertEqual(saved.data.scanned_at, "2026-08-17T13:00:00Z")
+    }
+
+    func testDoesNotOverwriteCacheWhenFingerprintMovesDuringScan() throws {
+        let cacheURL = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-resolve-move-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: cacheURL) }
+        saveScanCache(
+            ScanCacheFile(fingerprint: "old", includeSystem: false, data: sampleScanData(scannedAt: "2026-08-17T12:00:00Z")),
+            to: cacheURL
+        )
+        var n = 0
+        let resolved = resolveScan(
+            includeSystem: false,
+            fresh: false,
+            forceLive: false,
+            cacheURL: cacheURL,
+            now: parseISODate("2026-08-17T12:30:00Z")!,
+            fingerprintFn: {
+                n += 1
+                return n == 1 ? "before" : "after"
+            },
+            liveScan: { _ in sampleScanData(scannedAt: "2026-08-17T13:00:00Z") }
+        )
+        XCTAssertFalse(resolved.fromCache)
+        XCTAssertEqual(resolved.data.scanned_at, "2026-08-17T13:00:00Z")
+        let saved = try XCTUnwrap(loadScanCache(from: cacheURL))
+        XCTAssertEqual(saved.fingerprint, "old")
+        XCTAssertEqual(saved.data.scanned_at, "2026-08-17T12:00:00Z")
+    }
+
+    func testDoesNotCreateCacheWhenFingerprintMovesDuringScan() {
+        let cacheURL = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-resolve-nocreate-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: cacheURL) }
+        var n = 0
+        _ = resolveScan(
+            includeSystem: false,
+            fresh: true,
+            forceLive: false,
+            cacheURL: cacheURL,
+            now: parseISODate("2026-08-17T12:30:00Z")!,
+            fingerprintFn: {
+                n += 1
+                return n == 1 ? "before" : "after"
+            },
+            liveScan: { _ in sampleScanData(scannedAt: "2026-08-17T13:00:00Z") }
+        )
+        XCTAssertNil(loadScanCache(from: cacheURL))
+    }
+
+    func testDoesNotSaveIncompleteLiveScan() {
+        let cacheURL = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-resolve-incomplete-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: cacheURL) }
+        var live = sampleScanData(scannedAt: "2026-08-17T13:00:00Z")
+        live.incomplete = true
+        _ = resolveScan(
+            includeSystem: false,
+            fresh: true,
+            forceLive: false,
+            cacheURL: cacheURL,
+            now: parseISODate("2026-08-17T12:30:00Z")!,
+            fingerprintFn: { "fp" },
+            liveScan: { _ in live }
+        )
+        XCTAssertNil(loadScanCache(from: cacheURL))
     }
 }
 

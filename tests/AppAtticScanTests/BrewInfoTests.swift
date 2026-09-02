@@ -77,18 +77,51 @@ final class BrewInfoTests: XCTestCase {
         XCTAssertEqual(hits[0].tap, "dail8859/notepadnext")
     }
 
+    func testCollectBrewMarksOutdatedFailedOnError() {
+        let snap = collectBrew(which: { $0 == "brew" ? "/opt/homebrew/bin/brew" : nil }) { cmd, _ in
+            if cmd.contains("outdated") { return (1, "", "failed to fetch") }
+            if cmd.contains("list") && cmd.contains("--formula") { return (0, "", "") }
+            if cmd.contains("list") && cmd.contains("--cask") { return (0, "", "") }
+            if cmd.contains("leaves") { return (0, "", "") }
+            if cmd.contains("info") { return (0, #"{"formulae":[],"casks":[]}"#, "") }
+            if cmd.contains("services") { return (0, "Name State\n", "") }
+            return (0, "", "")
+        }
+        XCTAssertTrue(snap.outdatedFailed)
+        XCTAssertTrue(snap.outdated.isEmpty)
+    }
+
+    func testCollectBrewOutdatedSuccessIsComplete() {
+        let snap = collectBrew(which: { $0 == "brew" ? "/opt/homebrew/bin/brew" : nil }) { cmd, _ in
+            if cmd.contains("outdated") { return (0, #"{"formulae":[],"casks":[]}"#, "") }
+            if cmd.contains("list") && cmd.contains("--formula") { return (0, "", "") }
+            if cmd.contains("list") && cmd.contains("--cask") { return (0, "", "") }
+            if cmd.contains("leaves") { return (0, "", "") }
+            if cmd.contains("info") { return (0, #"{"formulae":[],"casks":[]}"#, "") }
+            if cmd.contains("services") { return (0, "Name State\n", "") }
+            return (0, "", "")
+        }
+        XCTAssertFalse(snap.outdatedFailed)
+        XCTAssertTrue(snap.outdated.isEmpty)
+    }
+
     func testCollectBrewDoesNotListEachFormula() {
         var calls: [[String]] = []
-        _ = collectBrew(which: { $0 == "brew" ? "/opt/homebrew/bin/brew" : nil }) { cmd, _ in
+        let snap = collectBrew(which: { $0 == "brew" ? "/opt/homebrew/bin/brew" : nil }) { cmd, _ in
             calls.append(cmd)
             if cmd.contains("list") && cmd.contains("--formula") { return (0, "jq\n", "") }
             if cmd.contains("list") && cmd.contains("--cask") { return (0, "", "") }
             if cmd.contains("leaves") { return (0, "jq\n", "") }
+            if cmd.contains("info") && cmd.contains("--formula") {
+                return (0, #"{"formulae":[{"name":"jq","desc":"JSON processor"}],"casks":[]}"#, "")
+            }
             if cmd.contains("info") { return (0, #"{"formulae":[],"casks":[]}"#, "") }
             if cmd.contains("services") { return (0, "Name State\n", "") }
             if cmd.contains("outdated") { return (0, #"{"formulae":[],"casks":[]}"#, "") }
             return (0, "", "")
         }
+        XCTAssertTrue(snap.available)
+        XCTAssertEqual(snap.formulas.map(\.name), ["jq"])
         XCTAssertFalse(
             calls.contains { cmd in
                 guard let i = cmd.firstIndex(of: "list") else { return false }
