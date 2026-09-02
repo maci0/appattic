@@ -299,14 +299,15 @@ patch_apprun() {
     rm -f "$apprun"
     cat > "$apprun" <<'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 APPDIR="$(cd "$(dirname "$0")" && pwd)"
 export APPATTIC_CORE_OUT="${APPDIR}/usr/share/appattic"
-if [[ -d "${APPDIR}/apprun-hooks" ]]; then
-    for hook in "${APPDIR}/apprun-hooks"/*.sh; do
-        [[ -e "$hook" ]] && source "$hook"
-    done
-fi
+# linuxdeploy hooks are third-party and read unset vars such as
+# XDG_CURRENT_DESKTOP; nounset stays off so they cannot abort startup.
+for hook in "${APPDIR}"/apprun-hooks/*.sh; do
+    [[ -e "$hook" ]] || continue
+    source "$hook"
+done
 exec "${APPDIR}/usr/bin/appattic-qt" "$@"
 EOF
     chmod +x "$apprun"
