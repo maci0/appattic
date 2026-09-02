@@ -1,5 +1,34 @@
 import Foundation
 
+public enum CLIParseError: Equatable, Sendable, CustomStringConvertible {
+    case jsonRequiresPath
+    case topRequiresNonNegativeInteger
+    case categoryRequiresValue
+    case unknownOption(String)
+    case unknownCommand(String)
+    case unexpectedArgument(String)
+    case conflictingFilters
+
+    public var description: String {
+        switch self {
+        case .jsonRequiresPath:
+            return "--json requires a file path"
+        case .topRequiresNonNegativeInteger:
+            return "--top requires a non-negative integer"
+        case .categoryRequiresValue:
+            return "--category requires a value"
+        case .unknownOption(let option):
+            return "unknown option: \(option)"
+        case .unknownCommand(let command):
+            return "unknown command: \(command)"
+        case .unexpectedArgument(let argument):
+            return "unexpected argument: \(argument)"
+        case .conflictingFilters:
+            return "--leftovers-only and --stale-only cannot be combined"
+        }
+    }
+}
+
 public struct CLIOptions {
     public var command: String
     public var json: String?
@@ -10,9 +39,11 @@ public struct CLIOptions {
     public var leftoversOnly: Bool
     public var staleOnly: Bool
     public var fresh: Bool
+    public var noColor: Bool
     public var version: Bool
     public var help: Bool
-    public var error: String?
+    public var parseError: CLIParseError?
+    public var error: String? { parseError?.description }
 
     public init(
         command: String = "report",
@@ -24,9 +55,10 @@ public struct CLIOptions {
         leftoversOnly: Bool = false,
         staleOnly: Bool = false,
         fresh: Bool = false,
+        noColor: Bool = false,
         version: Bool = false,
         help: Bool = false,
-        error: String? = nil
+        parseError: CLIParseError? = nil
     ) {
         self.command = command
         self.json = json
@@ -37,9 +69,10 @@ public struct CLIOptions {
         self.leftoversOnly = leftoversOnly
         self.staleOnly = staleOnly
         self.fresh = fresh
+        self.noColor = noColor
         self.version = version
         self.help = help
-        self.error = error
+        self.parseError = parseError
     }
 }
 
@@ -48,15 +81,15 @@ let cliCommands: Set<String> = ["report", "leftovers", "stale", "outdated", "pac
 public let cliHelpText = """
 usage: appattic [--version] [--help] [command] [options]
 
-Find leftover data from uninstalled apps, unused installed software, and outdated packages.
+Find leftover data from uninstalled apps, unused installed software, unused distro/language packages, and outdated packages.
 
 commands:
-  report      full report: leftovers + stale + outdated (default)
-  leftovers   only orphaned data from uninstalled apps
+  report      full report: leftovers + stale + outdated + packages (default)
+  leftovers   only orphaned data and PATH overlays from uninstalled apps
   stale       unused installed software (review and remove)
   outdated    installed packages with a newer version available
   packages    distro orphans and language globals
-  update      upgrade outdated Homebrew formulas/casks and Flatpak apps
+  update      run Homebrew/Flatpak upgrades (prompts on a TTY; --dry-run prints the script)
 
 options:
   --json FILE         also write full results as JSON to FILE
@@ -65,10 +98,35 @@ options:
   --dry-run           print a shell script for this command without running it
   --top N             show only the N largest leftovers
   --category CAT      filter leftovers by category (substring match)
-  --leftovers-only    on report, skip stale and outdated
-  --stale-only        on report, skip leftovers and outdated
-  --version           print version and exit
+  --leftovers-only    on report, skip stale, outdated, and packages
+  --stale-only        on report, skip leftovers, outdated, and packages
+  --no-color          disable ANSI color (also NO_COLOR or TERM=dumb)
+  --version, -v       print version and exit
+  --help, -h          print this help and exit
+
+Progress and status go to stderr. Reports and --dry-run scripts go to stdout.
+
+settings.json (includeSystem, confirmDelete, ignored leftover paths):
+  Linux: $XDG_DATA_HOME/appattic/settings.json
+  macOS: ~/Library/Application Support/AppAttic/settings.json
+  Missing file uses defaults (includeSystem false, confirmDelete true).
+  A malformed file is an error. --include-system turns includeSystem on for this run.
+  It cannot turn includeSystem off when the file already has true.
 """
+
+public let cliUsageHint = "Try 'appattic --help' for more information."
+
+/// Color on a tty unless `--no-color`, a non-empty `NO_COLOR`, or `TERM=dumb`.
+public func cliColorEnabled(
+    stdoutIsTTY: Bool,
+    env: [String: String],
+    noColorFlag: Bool = false
+) -> Bool {
+    if noColorFlag { return false }
+    if let noColor = env["NO_COLOR"], !noColor.isEmpty { return false }
+    if env["TERM"] == "dumb" { return false }
+    return stdoutIsTTY
+}
 
 public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     var opts = CLIOptions()
@@ -96,6 +154,11 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
             i += 1
             continue
         }
+        if a == "--no-color" {
+            opts.noColor = true
+            i += 1
+            continue
+        }
         if a == "--dry-run" {
             opts.dryRun = true
             i += 1
@@ -113,8 +176,8 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         }
         if a == "--json" {
             i += 1
-            guard i < args.count else {
-                opts.error = "--json requires a file path"
+            guard i < args.count, !args[i].hasPrefix("-") else {
+                opts.parseError = .jsonRequiresPath
                 return opts
             }
             opts.json = args[i]
@@ -123,8 +186,8 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         }
         if a.hasPrefix("--json=") {
             let value = String(a.dropFirst("--json=".count))
-            if value.isEmpty {
-                opts.error = "--json requires a file path"
+            if value.isEmpty || value.hasPrefix("-") {
+                opts.parseError = .jsonRequiresPath
                 return opts
             }
             opts.json = value
@@ -134,7 +197,7 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         if a == "--top" {
             i += 1
             guard i < args.count, let n = Int(args[i]), n >= 0 else {
-                opts.error = "--top requires a non-negative integer"
+                opts.parseError = .topRequiresNonNegativeInteger
                 return opts
             }
             opts.top = n
@@ -143,7 +206,7 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         }
         if a.hasPrefix("--top=") {
             guard let n = Int(a.dropFirst("--top=".count)), n >= 0 else {
-                opts.error = "--top requires a non-negative integer"
+                opts.parseError = .topRequiresNonNegativeInteger
                 return opts
             }
             opts.top = n
@@ -158,7 +221,7 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
                 i += 1
             }
             if cats.isEmpty {
-                opts.error = "--category requires a value"
+                opts.parseError = .categoryRequiresValue
                 return opts
             }
             opts.category.append(contentsOf: cats)
@@ -167,15 +230,15 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         if a.hasPrefix("--category=") {
             let value = String(a.dropFirst("--category=".count))
             if value.isEmpty {
-                opts.error = "--category requires a value"
+                opts.parseError = .categoryRequiresValue
                 return opts
             }
             opts.category.append(value)
             i += 1
             continue
         }
-        if a.hasPrefix("--") {
-            opts.error = "unknown option: \(a)"
+        if a.hasPrefix("-") {
+            opts.parseError = .unknownOption(a)
             return opts
         }
         positional.append(a)
@@ -185,14 +248,14 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         if cliCommands.contains(first) {
             opts.command = first
             if positional.count > 1 {
-                opts.error = "unexpected argument: \(positional[1])"
+                opts.parseError = .unexpectedArgument(positional[1])
             }
         } else {
-            opts.error = "unknown command: \(first)"
+            opts.parseError = .unknownCommand(first)
         }
     }
-    if opts.leftoversOnly && opts.staleOnly && opts.error == nil {
-        opts.error = "--leftovers-only and --stale-only cannot be combined"
+    if opts.leftoversOnly && opts.staleOnly && opts.parseError == nil {
+        opts.parseError = .conflictingFilters
     }
     return opts
 }

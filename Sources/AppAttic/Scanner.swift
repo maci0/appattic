@@ -7,6 +7,8 @@ final class ScannerViewModel {
     var scanData: ScanData?
     var isScanning = false
     var errorMessage: String?
+    /// Settings load/save failures stay visible across scans until dismissed or saved.
+    var holdsSettingsError = false
     var selectedLeftovers: Set<String> = []
     var selectedApps: Set<String> = []
     var selectedOutdated: Set<String> = []
@@ -18,7 +20,6 @@ final class ScannerViewModel {
     var progressMessage = "Starting scan…"
 
     var includeSystem = false
-    var selectableAppTiers: Set<String> { selectableCleanupTiers }
 
     @ObservationIgnored private var rowCacheKey = ""
     @ObservationIgnored private var cachedLeftovers: [LeftoverItem] = []
@@ -77,8 +78,11 @@ final class ScannerViewModel {
     }
 
     private func refreshRowCacheIfNeeded() {
-        let ignoredKey = ignoredLeftovers.sorted().joined(separator: ",")
-        let key = "\(scanData?.scanned_at ?? "")\u{1e}\(searchText)\u{1e}\(ignoredKey)\u{1e}\(includeSystem)"
+        let ignoredKey = ignoredLeftovers.sorted().map { "\($0.utf8.count):\($0)" }.joined(separator: "\u{1f}")
+        let counts = scanData.map {
+            "\($0.leftovers.count)\u{1f}\($0.software.count)\u{1f}\($0.totals.orphaned_items)\u{1f}\($0.totals.outdated_apps)"
+        } ?? "0"
+        let key = "\(scanData?.scanned_at ?? "")\u{1e}\(searchText)\u{1e}\(ignoredKey)\u{1e}\(includeSystem)\u{1e}\(counts)"
         guard key != rowCacheKey else { return }
         rowCacheKey = key
         guard let data = scanData else {
@@ -138,13 +142,13 @@ final class ScannerViewModel {
         var total = 0
         guard let data = scanData else { return 0 }
         for item in data.leftovers where selectedLeftovers.contains(item.path) {
-            total += item.size_bytes ?? 0
+            total = addBytes(total, item.size_bytes ?? 0)
         }
         for item in data.software where selectedApps.contains(item.path) {
-            total += item.totalBytes
+            total = addBytes(total, item.totalBytes)
         }
         for item in data.packages ?? [] where selectedPackages.contains(item.id) {
-            total += item.size_bytes ?? 0
+            total = addBytes(total, item.size_bytes ?? 0)
         }
         return total
     }
@@ -153,7 +157,7 @@ final class ScannerViewModel {
         self.includeSystem = includeSystem
         invalidateRowCache()
         if let cache = loadScanCache() {
-            if cache.includeSystem != includeSystem {
+            if cache.includeSystem != includeSystem || cache.data.incomplete == true {
                 scan(includeSystem: includeSystem)
                 return
             }
@@ -177,7 +181,9 @@ final class ScannerViewModel {
     private func refreshIfStale(includeSystem: Bool, cache: ScanCacheFile) {
         guard !isScanning else { return }
         isScanning = true
-        errorMessage = nil
+        if !holdsSettingsError {
+            errorMessage = nil
+        }
         progressMessage = "Checking last scan…"
         let vm = self
         DispatchQueue.global(qos: .utility).async {
@@ -195,20 +201,31 @@ final class ScannerViewModel {
 
     private func runScan(includeSystem: Bool) {
         isScanning = true
-        errorMessage = nil
+        if !holdsSettingsError {
+            errorMessage = nil
+        }
         progressMessage = scanData == nil ? "Starting scan…" : "Refreshing scan…"
         let vm = self
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = runFullScan(includeSystem: includeSystem) { msg in
+            let before = scanFingerprint()
+            let now = Date()
+            let result = runFullScan(includeSystem: includeSystem, now: now) { msg in
                 DispatchQueue.main.async {
                     vm.progressMessage = msg
                 }
             }
-            DispatchQueue.main.async {
-                vm.progressMessage = "Saving scan cache…"
+            let after = scanFingerprint()
+            if before == after, result.incomplete != true {
+                DispatchQueue.main.async {
+                    vm.progressMessage = "Saving scan cache…"
+                }
             }
-            let fingerprint = scanFingerprint()
-            saveScanCache(ScanCacheFile(fingerprint: fingerprint, includeSystem: includeSystem, data: result))
+            _ = commitScanCache(
+                includeSystem: includeSystem,
+                data: result,
+                before: before,
+                after: after
+            )
             DispatchQueue.main.async {
                 vm.scanData = result
                 vm.pruneSelection()
@@ -229,7 +246,7 @@ final class ScannerViewModel {
         ]
         let leftItems = visibleOrphanedLeftovers(data.leftovers, ignoring: ignoredLeftovers)
             .filter { selectedLeftovers.contains($0.path) }
-        let appItems = data.software.filter { selectedApps.contains($0.path) && selectableAppTiers.contains($0.tier ?? "") }
+        let appItems = data.software.filter { selectedApps.contains($0.path) && selectableCleanupTiers.contains($0.tier ?? "") }
         if !leftItems.isEmpty {
             lines.append("# Leftover data and PATH overlays")
             for item in leftItems {
@@ -349,7 +366,7 @@ final class ScannerViewModel {
         var next = selectedApps
         if on {
             guard let item = scanData?.software.first(where: { $0.path == path }),
-                  selectableAppTiers.contains(item.tier ?? "") else { return }
+                  selectableCleanupTiers.contains(item.tier ?? "") else { return }
             next.insert(path)
         } else {
             next.remove(path)
@@ -437,7 +454,9 @@ final class ScannerViewModel {
         then completion: @escaping (Bool) -> Void
     ) {
         isScanning = true
-        errorMessage = nil
+        if !holdsSettingsError {
+            errorMessage = nil
+        }
         progressMessage = message
         let vm = self
         DispatchQueue.global(qos: .userInitiated).async {
@@ -446,13 +465,13 @@ final class ScannerViewModel {
                     .appendingPathComponent("appattic-run-\(UUID().uuidString).sh")
                 let errURL = FileManager.default.temporaryDirectory
                     .appendingPathComponent("appattic-run-\(UUID().uuidString).err")
-                try script.write(to: url, atomically: true, encoding: .utf8)
+                try writeOwnerOnlyFile(Data(script.utf8), to: url)
+                defer { try? FileManager.default.removeItem(at: url) }
                 FileManager.default.createFile(atPath: errURL.path, contents: nil)
-                defer {
-                    try? FileManager.default.removeItem(at: url)
-                    try? FileManager.default.removeItem(at: errURL)
-                }
+                try restrictOwnerOnlyFile(at: errURL)
+                defer { try? FileManager.default.removeItem(at: errURL) }
                 let errHandle = try FileHandle(forWritingTo: errURL)
+                defer { try? errHandle.close() }
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/sh")
                 process.arguments = [url.path]

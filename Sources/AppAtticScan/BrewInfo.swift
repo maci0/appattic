@@ -64,6 +64,7 @@ public struct BrewSnapshot {
     public var services: Set<String>
     public var outdated: [OutdatedPkg]
     public var untrustedCasks: [UntrustedCask]
+    public var outdatedFailed: Bool
 
     public init(
         available: Bool,
@@ -72,7 +73,8 @@ public struct BrewSnapshot {
         casks: [Cask] = [],
         services: Set<String> = [],
         outdated: [OutdatedPkg] = [],
-        untrustedCasks: [UntrustedCask] = []
+        untrustedCasks: [UntrustedCask] = [],
+        outdatedFailed: Bool = false
     ) {
         self.available = available
         self.prefix = prefix
@@ -81,6 +83,7 @@ public struct BrewSnapshot {
         self.services = services
         self.outdated = outdated
         self.untrustedCasks = untrustedCasks
+        self.outdatedFailed = outdatedFailed
     }
 
     public var allNames: [String] {
@@ -147,9 +150,7 @@ public func untrustedCaskReason(_ cask: UntrustedCask) -> String {
 }
 
 func parseInfoJSON(_ out: String) -> [String: Any] {
-    guard let data = out.data(using: .utf8),
-          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else { return [:] }
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any] else { return [:] }
     return obj
 }
 
@@ -387,7 +388,9 @@ public func collectBrew(
         }
     }
 
-    info.outdated = queryBrew(brew, progress: progress, run: tracking)
+    let brewOutdated = queryBrewStatus(brew, progress: progress, run: tracking)
+    info.outdated = brewOutdated.pkgs
+    info.outdatedFailed = brewOutdated.failed
     attachSummaries(info.outdated, summaries: descMap, titles: titleMap)
     var unique: [UntrustedCask] = []
     var seen = Set<String>()

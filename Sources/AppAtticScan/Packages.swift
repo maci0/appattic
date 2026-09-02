@@ -1,5 +1,6 @@
 import Foundation
 
+/// Packages page filter. `leaves` is distro orphans (`kind == "orphan"`), not Homebrew leaves.
 public enum PackageListFilter: String, CaseIterable, Sendable {
     case all
     case leaves
@@ -191,10 +192,7 @@ public func parseDnfUnneeded(_ text: String) -> [PackageEntry] {
     for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
         let s = raw.trimmingCharacters(in: .whitespaces)
         if s.isEmpty { continue }
-        let low = s.lowercased()
-        if low.hasPrefix("last metadata") || low.hasPrefix("packages") || low.hasPrefix("finding") {
-            continue
-        }
+        if isDnfListingNoise(s) { continue }
         let name = s.split(whereSeparator: \.isWhitespace).map(String.init).first ?? ""
         if name.isEmpty { continue }
         out.append(makePackage(name: name, manager: "dnf", kind: "orphan"))
@@ -213,7 +211,7 @@ public func parseZypperUnneeded(_ text: String) -> [PackageEntry] {
         guard cols.count >= 4 else { continue }
         let name = cols[1]
         if name.isEmpty || name.caseInsensitiveCompare("Name") == .orderedSame { continue }
-        let version = cols.count >= 4 && !cols[3].isEmpty ? cols[3] : nil
+        let version = cols[3].isEmpty ? nil : cols[3]
         out.append(makePackage(name: name, manager: "zypper", kind: "orphan", version: version))
     }
     return out
@@ -243,9 +241,7 @@ func jsonDependencyEntries(_ value: Any) -> [(String, String?)] {
 }
 
 func parseGlobalJSON(_ text: String, manager: String) -> [PackageEntry] {
-    guard let data = text.data(using: .utf8),
-          let obj = try? JSONSerialization.jsonObject(with: data)
-    else { return [] }
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) else { return [] }
     return jsonDependencyEntries(obj).map { name, version in
         makePackage(name: name, manager: manager, kind: "global", version: version)
     }
@@ -275,8 +271,7 @@ public func parseBunGlobalList(_ text: String) -> [PackageEntry] {
 }
 
 public func parsePipxList(_ text: String) -> [PackageEntry] {
-    if let data = text.data(using: .utf8),
-       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+    if let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
        let venvs = obj["venvs"] as? [String: Any]
     {
         var out: [PackageEntry] = []
@@ -348,76 +343,42 @@ public func collectPackages(
 ) -> [PackageEntry] {
     var out: [PackageEntry] = []
     let family = linuxDistroFamily(osRelease: osRelease ?? linuxOsReleaseText())
-    func addOrphans() {
-        switch family {
-        case "arch":
-            progress?("  · listing pacman orphans…")
-            if let text = runPackageQuery(
-                which: which, run: run, names: ["pacman"], args: ["-Qdt"],
-                ok: { $0 == 0 || $0 == 1 }
-            ) {
-                out.append(contentsOf: parsePacmanOrphans(text))
-            }
-        case "debian":
-            progress?("  · listing apt autoremove candidates…")
-            if let text = runPackageQuery(
-                which: which, run: run, names: ["apt-get", "apt"],
-                args: ["-s", "autoremove"]
-            ) {
-                out.append(contentsOf: parseAptAutoremove(text))
-            }
-        case "fedora":
-            progress?("  · listing dnf unneeded packages…")
-            if let text = runPackageQuery(
-                which: which, run: run, names: ["dnf5", "dnf"],
-                args: ["repoquery", "--unneeded", "--qf", "%{name}"]
-            ) {
-                out.append(contentsOf: parseDnfUnneeded(text))
-            } else if let text = runPackageQuery(
-                which: which, run: run, names: ["dnf5", "dnf"],
-                args: ["leaves"]
-            ) {
-                out.append(contentsOf: parseDnfUnneeded(text))
-            }
-        case "suse":
-            progress?("  · listing zypper unneeded packages…")
-            if let text = runPackageQuery(
-                which: which, run: run, names: ["zypper"],
-                args: ["--non-interactive", "packages", "--unneeded"]
-            ) {
-                out.append(contentsOf: parseZypperUnneeded(text))
-            }
-        default:
-            if which("pacman") != nil {
-                if let text = runPackageQuery(
-                    which: which, run: run, names: ["pacman"], args: ["-Qdt"],
-                    ok: { $0 == 0 || $0 == 1 }
-                ) {
-                    out.append(contentsOf: parsePacmanOrphans(text))
-                }
-            } else if which("dnf5") != nil || which("dnf") != nil {
-                if let text = runPackageQuery(
-                    which: which, run: run, names: ["dnf5", "dnf"],
-                    args: ["repoquery", "--unneeded", "--qf", "%{name}"]
-                ) {
-                    out.append(contentsOf: parseDnfUnneeded(text))
-                }
-            } else if which("zypper") != nil {
-                if let text = runPackageQuery(
-                    which: which, run: run, names: ["zypper"],
-                    args: ["--non-interactive", "packages", "--unneeded"]
-                ) {
-                    out.append(contentsOf: parseZypperUnneeded(text))
-                }
-            } else if let text = runPackageQuery(
-                which: which, run: run, names: ["apt-get", "apt"],
-                args: ["-s", "autoremove"]
-            ) {
-                out.append(contentsOf: parseAptAutoremove(text))
-            }
+    switch resolveDistroPackageManager(family: family, which: which) {
+    case .pacman:
+        progress?("  · listing pacman orphans…")
+        if let text = runPackageQuery(
+            which: which, run: run, names: ["pacman"], args: ["-Qdt"],
+            ok: { $0 == 0 || $0 == 1 }
+        ) {
+            out.append(contentsOf: parsePacmanOrphans(text))
         }
+    case .apt:
+        progress?("  · listing apt autoremove candidates…")
+        if let text = runPackageQuery(
+            which: which, run: run, names: ["apt-get", "apt"],
+            args: ["-s", "autoremove"]
+        ) {
+            out.append(contentsOf: parseAptAutoremove(text))
+        }
+    case .dnf:
+        progress?("  · listing dnf unneeded packages…")
+        if let text = runPackageQuery(
+            which: which, run: run, names: ["dnf5", "dnf", "yum"],
+            args: ["repoquery", "--unneeded", "--qf", "%{name}"]
+        ) {
+            out.append(contentsOf: parseDnfUnneeded(text))
+        }
+    case .zypper:
+        progress?("  · listing zypper unneeded packages…")
+        if let text = runPackageQuery(
+            which: which, run: run, names: ["zypper"],
+            args: ["--non-interactive", "packages", "--unneeded"]
+        ) {
+            out.append(contentsOf: parseZypperUnneeded(text))
+        }
+    case nil:
+        break
     }
-    addOrphans()
     progress?("  · listing language globals…")
     if let text = runPackageQuery(
         which: which, run: run, names: ["npm"],

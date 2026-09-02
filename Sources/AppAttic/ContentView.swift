@@ -52,6 +52,9 @@ struct ContentView: View {
     @State private var confirmMode = "delete"
     @State private var includeSystem = false
     @State private var confirmDelete = true
+    @State private var settingsLoadFailed = false
+    @State private var settingsLoadError = ""
+    @State private var scriptCopied = false
 
     private static func initialSidebar() -> SidebarItem {
         switch ProcessInfo.processInfo.environment["APPATTIC_PAGE"] {
@@ -80,18 +83,25 @@ struct ContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .background(Color.appChrome)
                 HRule()
-                if let error = vm.errorMessage, vm.scanData != nil {
-                    Text(error)
-                        .font(.system(size: 13))
-                        .foregroundColor(Color.appRed)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
+                if let error = vm.errorMessage, vm.scanData != nil || vm.isScanning {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(error)
+                            .font(.system(size: 13))
+                            .foregroundColor(Color.appRed)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Dismiss") {
+                            vm.errorMessage = nil
+                            vm.holdsSettingsError = false
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                     HRule()
                 }
-                if let error = vm.errorMessage, vm.scanData == nil {
-                    errorState(error)
-                } else if vm.isScanning && vm.scanData == nil {
+                if vm.isScanning && vm.scanData == nil {
                     scanningState
+                } else if let error = vm.errorMessage, vm.scanData == nil {
+                    errorState(error)
                 } else {
                     detailBody
                 }
@@ -104,11 +114,18 @@ struct ContentView: View {
             .background(Color.appBg)
         }
         .onAppear {
-            let settings = loadSettings()
-            includeSystem = settings.includeSystem
-            confirmDelete = settings.confirmDelete
-            vm.ignoredLeftovers = Set(settings.ignoredLeftoverPaths)
-            vm.start(includeSystem: includeSystem)
+            do {
+                let settings = try loadSettings()
+                includeSystem = settings.includeSystem
+                confirmDelete = settings.confirmDelete
+                vm.ignoredLeftovers = Set(settings.ignoredLeftoverPaths)
+                vm.start(includeSystem: includeSystem)
+            } catch {
+                settingsLoadFailed = true
+                settingsLoadError = error.localizedDescription
+                vm.errorMessage = settingsErrorUserMessage(error)
+                vm.holdsSettingsError = true
+            }
         }
         .alert(confirmTitle, isPresented: $showConfirm) {
             Button("Cancel") { showConfirm = false }
@@ -270,7 +287,7 @@ struct ContentView: View {
     func errorState(_ error: String) -> some View {
         VStack(spacing: 8) {
             Spacer()
-            Text("Scan failed")
+            Text(vm.holdsSettingsError ? "Settings could not be loaded" : "Scan failed")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color.appRed)
             Text(error)
@@ -278,8 +295,16 @@ struct ContentView: View {
                 .foregroundColor(Color.appDim)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
-            Button("Try Again") { vm.scan(includeSystem: includeSystem) }
-                .padding(.top, 4)
+            if vm.holdsSettingsError {
+                Text("Fix the file, or change a setting to write a new one.")
+                    .font(.system(size: 13))
+                    .foregroundColor(Color.appDim)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+            } else {
+                Button("Try Again") { vm.scan(includeSystem: includeSystem) }
+                    .padding(.top, 4)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -320,6 +345,7 @@ struct ContentView: View {
                         Color.appYellow
                     )
                     overviewStat("Outdated", "\(totals.outdated_apps ?? 0)", Color.appYellow)
+                    overviewStat("Packages", "\(vm.allPackages.count)")
                     overviewStat("Last scan", lastScanLabel, Color.appDim)
                     Spacer(minLength: 0)
                 }
@@ -328,7 +354,23 @@ struct ContentView: View {
             }
             if leftoverRows.isEmpty && staleRows.isEmpty && outdatedRows.isEmpty {
                 if vm.scanData != nil {
-                    emptyState("Nothing to review", "No leftover data, stale apps, or outdated packages in this scan.")
+                    let packageCount = vm.allPackages.count
+                    if packageCount > 0 {
+                        emptyState(
+                            "Open Packages to review",
+                            packageCount == 1
+                                ? "1 unused package is listed on the Packages page."
+                                : "\(packageCount) unused packages are listed on the Packages page.",
+                            actionTitle: "Open Packages"
+                        ) {
+                            selected = .packages
+                        }
+                    } else {
+                        emptyState(
+                            "Nothing to review",
+                            "No leftover data, stale apps, outdated packages, or unused packages in this scan."
+                        )
+                    }
                 }
             } else {
                 HRule()
@@ -638,7 +680,7 @@ struct ContentView: View {
         case .globals:
             return "No user-global npm, pnpm, bun, pipx, or uv tools."
         case .all:
-            return "No distro orphans or language globals. Missing managers stay empty; this page stays."
+            return "No distro orphans or language globals. Missing package managers simply have nothing to list."
         }
     }
 
@@ -651,7 +693,13 @@ struct ContentView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if isEmpty {
-                emptyState(emptyTitle, emptyDetail)
+                if !vm.searchText.isEmpty {
+                    emptyState(emptyTitle, emptyDetail, actionTitle: "Clear search") {
+                        vm.searchText = ""
+                    }
+                } else {
+                    emptyState(emptyTitle, emptyDetail)
+                }
             } else {
                 header()
                 HRule()
@@ -973,13 +1021,13 @@ struct ContentView: View {
             infoBlock("Why", leftoverWhy(item))
             inspectorFacts {
                 infoRow("Kind", item.kind)
-                infoRow("Status", item.status, color: leftoverStatusColor(item))
+                infoRow("Status", displayTier(item.status), color: leftoverStatusColor(item))
                 infoRow("Size", leftoverSizeLabel(item), mono: true)
                 infoRow("Modified", formatDate(item.mtime))
                 infoRow("Location", leftoverLocationLabel(rootLabel: item.root, extraCount: item.extra_paths?.count ?? 0))
                 infoBlock("Path", item.path, mono: true)
                 if let extra = item.extra_paths, !extra.isEmpty {
-                    infoBlock("Also", leftoverAlsoLabel(extraPaths: extra), mono: true)
+                    infoBlock("Also", extra.joined(separator: "\n"), mono: true)
                 }
                 if let shadows = item.shadows, !shadows.isEmpty {
                     infoBlock("Shadows", shadows, mono: true)
@@ -1184,7 +1232,12 @@ struct ContentView: View {
         }
     }
 
-    func emptyState(_ title: String, _ detail: String) -> some View {
+    func emptyState(
+        _ title: String,
+        _ detail: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) -> some View {
         VStack(spacing: 8) {
             Spacer()
             Text(title)
@@ -1194,6 +1247,10 @@ struct ContentView: View {
                 .foregroundColor(Color.appDim)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .padding(.top, 4)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1238,7 +1295,7 @@ struct ContentView: View {
                             .font(.system(size: 11))
                             .foregroundColor(Color.appDim)
                         ForEach(Array(vm.ignoredLeftovers.sorted().prefix(12)), id: \.self) { path in
-                            Text(URL(fileURLWithPath: path).lastPathComponent)
+                            Text(ignoredPathLabel(path))
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(Color.appText)
                         }
@@ -1287,7 +1344,10 @@ struct ContentView: View {
             Spacer()
             Button("Clear") { vm.clearSelection() }
                 .disabled(vm.isScanning)
-            Button("Preview Script") { showScript = true }
+            Button("Preview Script") {
+                scriptCopied = false
+                showScript = true
+            }
                 .disabled(vm.isScanning)
             if !vm.selectedOutdated.isEmpty {
                 Button("Update") {
@@ -1354,6 +1414,9 @@ struct ContentView: View {
                     .textSelectionEnabled()
             }
             HStack {
+                Button(scriptCopied ? "Copied" : "Copy") {
+                    copyScriptToClipboard(vm.generateScript())
+                }
                 Spacer()
                 Button("Close") { showScript = false }
             }
@@ -1366,10 +1429,9 @@ struct ContentView: View {
         if !vm.searchText.isEmpty {
             return "No leftovers match this search."
         }
-        if vm.ignoredLeftovers.isEmpty {
-            return "No leftover data from uninstalled apps, and no PATH or desktop overlays hiding package-manager files."
-        }
-        return "No leftover data from uninstalled apps, and no PATH or desktop overlays hiding package-manager files. \(ignoredCountLabel)"
+        let base = "No leftover data from uninstalled apps, and no PATH or desktop overlays hiding package-manager files."
+        if vm.ignoredLeftovers.isEmpty { return base }
+        return "\(base) \(ignoredCountLabel)"
     }
 
     private var ignoredCountLabel: String {
@@ -1406,7 +1468,7 @@ struct ContentView: View {
 
     private var visibleOrphanedBytes: Int {
         visibleOrphanedLeftovers(vm.scanData?.leftovers ?? [], ignoring: vm.ignoredLeftovers)
-            .reduce(0) { $0 + ($1.size_bytes ?? 0) }
+            .reduce(0) { addBytes($0, $1.size_bytes ?? 0) }
     }
 
     private var includeSystemBinding: Binding<Bool> {
@@ -1431,13 +1493,58 @@ struct ContentView: View {
     }
 
     func persistSettings() {
-        saveSettings(
-            AppAtticSettings(
-                includeSystem: includeSystem,
-                confirmDelete: confirmDelete,
-                ignoredLeftoverPaths: vm.ignoredLeftovers.sorted()
+        if settingsLoadFailed {
+            vm.errorMessage = settingsLoadError
+            return
+        }
+        do {
+            try saveSettings(
+                AppAtticSettings(
+                    includeSystem: includeSystem,
+                    confirmDelete: confirmDelete,
+                    ignoredLeftoverPaths: vm.ignoredLeftovers.sorted()
+                )
             )
-        )
+            if vm.holdsSettingsError {
+                vm.holdsSettingsError = false
+                vm.errorMessage = nil
+            }
+        } catch {
+            vm.errorMessage = settingsErrorUserMessage(error)
+            vm.holdsSettingsError = true
+        }
+    }
+
+    func ignoredPathLabel(_ path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        let name = url.lastPathComponent
+        let parent = url.deletingLastPathComponent().lastPathComponent
+        if parent.isEmpty || parent == "/" {
+            return name.isEmpty ? path : name
+        }
+        return parent + "/" + name
+    }
+
+    func copyScriptToClipboard(_ text: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pbcopy")
+        let pipe = Pipe()
+        process.standardInput = pipe
+        do {
+            try process.run()
+            pipe.fileHandleForWriting.write(Data(text.utf8))
+            try pipe.fileHandleForWriting.close()
+            process.waitUntilExit()
+            if process.terminationStatus != 0 {
+                vm.errorMessage = "Could not copy the script."
+                scriptCopied = false
+            } else {
+                scriptCopied = true
+            }
+        } catch {
+            vm.errorMessage = "Could not copy the script."
+            scriptCopied = false
+        }
     }
 
     func leftoverToggle(_ path: String) -> Binding<Bool> {

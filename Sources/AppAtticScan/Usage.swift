@@ -24,9 +24,12 @@ let genericProc: Set<String> = [
 public struct HistoryIndex {
     public var lastSeen: [String: Date]
     public var everUsed: Set<String>
-    public init(lastSeen: [String: Date] = [:], everUsed: Set<String> = []) {
+    /// Oldest timestamp in the history file, including commands that were not kept.
+    public var oldestSeen: Date?
+    public init(lastSeen: [String: Date] = [:], everUsed: Set<String> = [], oldestSeen: Date? = nil) {
         self.lastSeen = lastSeen
         self.everUsed = everUsed
+        self.oldestSeen = oldestSeen
     }
 }
 
@@ -41,16 +44,19 @@ public func effectiveLastUsed(
     return lastUsed
 }
 
-public func recentlyUsedXbelPath() -> String {
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
-    let data = ProcessInfo.processInfo.environment["XDG_DATA_HOME"] ?? (home as NSString).appendingPathComponent(".local/share")
-    return (data as NSString).appendingPathComponent("recently-used.xbel")
+public func recentlyUsedXbelPath(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    (xdgDataHome(home: home, env: env) as NSString).appendingPathComponent("recently-used.xbel")
 }
 
-public func gnomeApplicationStatePath() -> String {
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
-    let data = ProcessInfo.processInfo.environment["XDG_DATA_HOME"] ?? (home as NSString).appendingPathComponent(".local/share")
-    return ((data as NSString).appendingPathComponent("gnome-shell") as NSString).appendingPathComponent("application_state")
+public func gnomeApplicationStatePath(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    ((xdgDataHome(home: home, env: env) as NSString).appendingPathComponent("gnome-shell") as NSString)
+        .appendingPathComponent("application_state")
 }
 
 public func flatpakVarAppPath() -> String {
@@ -63,7 +69,7 @@ final class XbelSink: NSObject, XMLParserDelegate {
 
     func record(_ key: String?, _ dt: Date?) {
         guard let key, let dt else { return }
-        let k = key.trimmingCharacters(in: .whitespaces).lowercased()
+        let k = posixLowercased(key.trimmingCharacters(in: .whitespaces))
         if k.isEmpty { return }
         if let prev = hits[k], prev >= dt { return }
         hits[k] = dt
@@ -91,6 +97,7 @@ public func parseRecentlyUsedXbel(_ path: String) -> [String: Date] {
     let sink = XbelSink()
     parser.delegate = sink
     parser.shouldProcessNamespaces = true
+    parser.shouldResolveExternalEntities = false
     _ = parser.parse()
     return sink.hits
 }
@@ -99,7 +106,7 @@ final class GnomeStateSink: NSObject, XMLParserDelegate {
     var hits: [String: Date] = [:]
 
     func record(_ key: String, _ dt: Date) {
-        let k = key.trimmingCharacters(in: .whitespaces).lowercased()
+        let k = posixLowercased(key.trimmingCharacters(in: .whitespaces))
         if k.isEmpty { return }
         if let prev = hits[k], prev >= dt { return }
         hits[k] = dt
@@ -112,14 +119,14 @@ final class GnomeStateSink: NSObject, XMLParserDelegate {
         let raw = attributes["last-seen"] ?? ""
         if appId.isEmpty || raw.isEmpty { return }
         guard let epoch = Double(raw) else { return }
-        let dt = Date(timeIntervalSince1970: epoch)
+        let dt = dateFromUnixEpoch(epoch)
         record(appId, dt)
-        let stem = appId.lowercased().hasSuffix(".desktop") ? String(appId.dropLast(8)) : appId
+        let stem = posixLowercased(appId).hasSuffix(".desktop") ? String(appId.dropLast(8)) : appId
         record(stem, dt)
         record(URL(fileURLWithPath: stem).lastPathComponent, dt)
         if stem.contains(".") {
             let last = stem.split(separator: ".").last.map(String.init) ?? ""
-            if last.count >= 4, !genericProc.contains(last.lowercased()) {
+            if last.count >= 4, !genericProc.contains(posixLowercased(last)) {
                 record(last, dt)
             }
         }
@@ -130,6 +137,7 @@ public func parseGnomeApplicationState(_ path: String) -> [String: Date] {
     guard let parser = XMLParser(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
     let sink = GnomeStateSink()
     parser.delegate = sink
+    parser.shouldResolveExternalEntities = false
     _ = parser.parse()
     return sink.hits
 }
@@ -144,7 +152,7 @@ public func parseFlatpakVarAppMtimes(_ root: String) -> [String: Date] {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
               let dt = attrs[.modificationDate] as? Date
         else { continue }
-        let key = name.lowercased()
+        let key = posixLowercased(name)
         if hits[key] == nil || dt > hits[key]! { hits[key] = dt }
         if key.contains(".") {
             let last = key.split(separator: ".").last.map(String.init) ?? ""
@@ -164,13 +172,23 @@ func firstCommandToken(_ cmd: String) -> String? {
     return nil
 }
 
-public func parseHistoryFile(_ path: String, index: inout HistoryIndex) {
-    guard let handle = FileHandle(forReadingAtPath: path) else { return }
-    defer { try? handle.close() }
-    guard let data = try? handle.readToEnd(), let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { return }
+func noteHistoryTime(_ ts: Date?, index: inout HistoryIndex) {
+    guard let ts else { return }
+    if let prev = index.oldestSeen, prev <= ts { return }
+    index.oldestSeen = ts
+}
+
+func retainHistoryToken(_ token: String, keep: Set<String>?) -> Bool {
+    guard let keep else { return true }
+    return keep.contains(token)
+}
+
+public func parseHistoryFile(_ path: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
+    guard let text = readUTF8File(path) else { return }
     for (n, raw) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
         if n >= maxHistoryLines { break }
-        let line = String(raw)
+        var line = String(raw)
+        if line.hasSuffix("\r") { line.removeLast() }
         if line.trimmingCharacters(in: .whitespaces).isEmpty || line.hasPrefix("#") { continue }
         let ns = line as NSString
         let range = NSRange(location: 0, length: ns.length)
@@ -180,30 +198,32 @@ public func parseHistoryFile(_ path: String, index: inout HistoryIndex) {
            let tR = Range(m.range(at: 1), in: line),
            let cR = Range(m.range(at: 2), in: line) {
             if let epoch = TimeInterval(line[tR]) {
-                ts = Date(timeIntervalSince1970: epoch)
+                ts = dateFromUnixEpoch(epoch)
             }
             cmd = String(line[cR]).trimmingCharacters(in: .whitespaces)
         } else {
             cmd = line.trimmingCharacters(in: .whitespaces)
         }
+        noteHistoryTime(ts, index: &index)
         if cmd.isEmpty { continue }
         guard let first = firstCommandToken(cmd), fullMatch(cmdTokenRE, first) else { continue }
-        index.everUsed.insert(first)
+        guard retainHistoryToken(first, keep: keep) else { continue }
+        let token = posixLowercased(first)
+        index.everUsed.insert(token)
         if let ts {
-            if let prev = index.lastSeen[first], prev >= ts { continue }
-            index.lastSeen[first] = ts
+            if let prev = index.lastSeen[token], prev >= ts { continue }
+            index.lastSeen[token] = ts
         }
     }
 }
 
-public func parseFishHistory(_ path: String, index: inout HistoryIndex) {
-    guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-          let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
-    else { return }
+public func parseFishHistory(_ path: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
+    guard let text = readUTF8File(path) else { return }
     var pending: String?
     for (n, raw) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
         if n >= maxHistoryLines { break }
-        let line = String(raw)
+        var line = String(raw)
+        if line.hasSuffix("\r") { line.removeLast() }
         let ns = line as NSString
         let range = NSRange(location: 0, length: ns.length)
         if let m = fishCmdRE.firstMatch(in: line, range: range), m.numberOfRanges >= 2,
@@ -213,13 +233,17 @@ public func parseFishHistory(_ path: String, index: inout HistoryIndex) {
         }
         if let m = fishWhenRE.firstMatch(in: line, range: range), m.numberOfRanges >= 2,
            let r = Range(m.range(at: 1), in: line), let pendingCmd = pending {
+            if let epoch = TimeInterval(line[r]) {
+                noteHistoryTime(dateFromUnixEpoch(epoch), index: &index)
+            }
             let first = pendingCmd.split(whereSeparator: \.isWhitespace).first.map { $0.split(separator: "/").last.map(String.init) ?? "" } ?? ""
-            if !first.isEmpty, fullMatch(cmdTokenRE, first) {
-                index.everUsed.insert(first)
+            if !first.isEmpty, fullMatch(cmdTokenRE, first), retainHistoryToken(first, keep: keep) {
+                let token = posixLowercased(first)
+                index.everUsed.insert(token)
                 if let epoch = TimeInterval(line[r]) {
-                    let ts = Date(timeIntervalSince1970: epoch)
-                    if index.lastSeen[first] == nil || ts > index.lastSeen[first]! {
-                        index.lastSeen[first] = ts
+                    let ts = dateFromUnixEpoch(epoch)
+                    if index.lastSeen[token] == nil || ts > index.lastSeen[token]! {
+                        index.lastSeen[token] = ts
                     }
                 }
             }
@@ -228,14 +252,30 @@ public func parseFishHistory(_ path: String, index: inout HistoryIndex) {
     }
 }
 
-public func loadHistory() -> HistoryIndex {
+public func loadHistory(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment,
+    keep: Set<String>? = nil
+) -> HistoryIndex {
     var idx = HistoryIndex()
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    let ns = home as NSString
     for name in [".zsh_history", ".bash_history", ".histfile"] {
-        parseHistoryFile((home as NSString).appendingPathComponent(name), index: &idx)
+        parseHistoryFile(ns.appendingPathComponent(name), index: &idx, keep: keep)
     }
-    parseFishHistory(((home as NSString).appendingPathComponent(".local/share/fish") as NSString).appendingPathComponent("fish_history"), index: &idx)
-    parseFishHistory(((home as NSString).appendingPathComponent(".config/fish") as NSString).appendingPathComponent("fish_history"), index: &idx)
+    let data = xdgDataHome(home: home, env: env) as NSString
+    let config = xdgConfigHome(home: home, env: env) as NSString
+    var seen = Set<String>()
+    for path in [
+        (data.appendingPathComponent("fish") as NSString).appendingPathComponent("fish_history"),
+        (ns.appendingPathComponent(".local/share/fish") as NSString).appendingPathComponent("fish_history"),
+        (config.appendingPathComponent("fish") as NSString).appendingPathComponent("fish_history"),
+        (ns.appendingPathComponent(".config/fish") as NSString).appendingPathComponent("fish_history"),
+    ] {
+        let abs = URL(fileURLWithPath: path).standardizedFileURL.path
+        if seen.insert(abs).inserted {
+            parseFishHistory(path, index: &idx, keep: keep)
+        }
+    }
     return idx
 }
 
@@ -256,7 +296,7 @@ public func innerExecutablePath(_ appPath: String, executable: String?) -> Strin
 public func appUsageKeys(_ app: AppRecord) -> Set<String> {
     var keys: Set<String> = []
     func addRaw(_ value: String) {
-        let v = value.trimmingCharacters(in: .whitespaces).lowercased()
+        let v = posixLowercased(value.trimmingCharacters(in: .whitespaces))
         if v.isEmpty { return }
         keys.insert(v)
         let base = URL(fileURLWithPath: v).lastPathComponent
@@ -270,7 +310,7 @@ public func appUsageKeys(_ app: AppRecord) -> Set<String> {
     addRaw(app.extra["wmclass"] ?? "")
     let desktopId = app.extra["desktop_id"] ?? ""
     addRaw(desktopId)
-    if !desktopId.isEmpty, !desktopId.lowercased().hasSuffix(".desktop") {
+    if !desktopId.isEmpty, !posixLowercased(desktopId).hasSuffix(".desktop") {
         addRaw(desktopId + ".desktop")
     }
     let desktop = app.extra["desktop"] ?? ""
@@ -297,15 +337,15 @@ public func processBasenames(_ psOutput: String) -> Set<String> {
         let ns = line as NSString
         let range = NSRange(location: 0, length: ns.length)
         for m in appExeRE.matches(in: line, range: range) where m.numberOfRanges >= 2 {
-            names.insert(ns.substring(with: m.range(at: 1)).lowercased())
+            names.insert(posixLowercased(ns.substring(with: m.range(at: 1))))
         }
         for m in appBundleRE.matches(in: line, range: range) where m.numberOfRanges >= 2 {
-            names.insert(ns.substring(with: m.range(at: 1)).lowercased())
+            names.insert(posixLowercased(ns.substring(with: m.range(at: 1))))
         }
         let token = line.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
         let baseName = URL(fileURLWithPath: token).lastPathComponent
         if !baseName.contains(" ") {
-            let base = baseName.lowercased()
+            let base = posixLowercased(baseName)
             if !base.isEmpty {
                 names.insert(base)
                 names.insert(URL(fileURLWithPath: base).deletingPathExtension().lastPathComponent)
@@ -319,16 +359,16 @@ public func appMatchesRunning(_ app: AppRecord, comms: Set<String>) -> Bool {
     var keys: Set<String> = []
     let exe = app.extra["executable"] ?? app.extra["wmclass"]
     if let exe, !exe.isEmpty {
-        keys.insert(URL(fileURLWithPath: exe).lastPathComponent.lowercased())
+        keys.insert(posixLowercased(URL(fileURLWithPath: exe).lastPathComponent))
     }
-    var base = URL(fileURLWithPath: app.path).deletingPathExtension().lastPathComponent.lowercased()
+    var base = posixLowercased(URL(fileURLWithPath: app.path).deletingPathExtension().lastPathComponent)
     if base.hasSuffix(".app") { base = String(base.dropLast(4)) }
     if base.count >= 4 { keys.insert(base) }
-    let display = app.displayName.lowercased()
+    let display = posixLowercased(app.displayName)
     if !display.isEmpty, !display.contains(" "), display.count >= 4 {
         keys.insert(display)
     }
-    let last = (app.bundleId ?? "").lowercased().split(separator: ".").last.map(String.init) ?? ""
+    let last = posixLowercased(app.bundleId ?? "").split(separator: ".").last.map(String.init) ?? ""
     if last.count >= 5 { keys.insert(last) }
     keys.subtract(genericProc)
     keys.remove("")
@@ -441,7 +481,8 @@ public func fillAppUsage(
     runningComms: Set<String>? = nil,
     xbelPath: String? = nil,
     gnomeStatePath: String? = nil,
-    flatpakVarApp: String? = nil
+    flatpakVarApp: String? = nil,
+    now: Date = Date()
 ) {
     if PlatformOverride.isLinux {
         let hits = linuxLaunchHits(xbelPath: xbelPath, gnomePath: gnomeStatePath, varApp: flatpakVarApp)
@@ -463,7 +504,7 @@ public func fillAppUsage(
                 apps[i].lastUsedSource = "recently-used"
             }
         }
-        markRunning(&apps, runningComms: runningComms, run: run)
+        markRunning(&apps, runningComms: runningComms, run: run, now: now)
         return
     }
 
@@ -507,17 +548,16 @@ public func fillAppUsage(
             }
         }
     }
-    markRunning(&apps, runningComms: runningComms, run: run)
+    markRunning(&apps, runningComms: runningComms, run: run, now: now)
 }
 
 func hasAuthoritativeUsage(_ app: AppRecord) -> Bool {
     app.lastUsed != nil && app.lastUsedSource == "steam"
 }
 
-func markRunning(_ apps: inout [AppRecord], runningComms: Set<String>?, run: CommandRun) {
+func markRunning(_ apps: inout [AppRecord], runningComms: Set<String>?, run: CommandRun, now: Date = Date()) {
     let comms = runningComms ?? runningCommBasenames(run: run)
     if comms.isEmpty { return }
-    let now = Date()
     for i in apps.indices where appMatchesRunning(apps[i], comms: comms) {
         apps[i].lastUsed = now
         apps[i].lastUsedSource = "running"
@@ -528,8 +568,9 @@ public func lastUsedFromHistory(_ names: [String], index: HistoryIndex) -> (Date
     var best: Date?
     var ever = false
     for n in names {
-        if index.everUsed.contains(n) { ever = true }
-        if let ts = index.lastSeen[n], best == nil || ts > best! {
+        let key = posixLowercased(n)
+        if index.everUsed.contains(key) { ever = true }
+        if let ts = index.lastSeen[key], best == nil || ts > best! {
             best = ts
         }
     }
@@ -537,6 +578,6 @@ public func lastUsedFromHistory(_ names: [String], index: HistoryIndex) -> (Date
 }
 
 public func historySpanDays(_ index: HistoryIndex, now: Date = Date()) -> Double? {
-    guard let oldest = index.lastSeen.values.min() else { return nil }
+    guard let oldest = index.oldestSeen ?? index.lastSeen.values.min() else { return nil }
     return daysSince(oldest, now: now)
 }

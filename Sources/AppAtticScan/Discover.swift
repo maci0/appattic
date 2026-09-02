@@ -118,7 +118,10 @@ public func appBundleBases(_ appPath: String) -> [String] {
     return out
 }
 
-public func linuxDesktopDirs() -> [String] {
+public func linuxDesktopDirs(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> [String] {
     var out: [String] = []
     var seen = Set<String>()
     func add(_ path: String) {
@@ -126,12 +129,12 @@ public func linuxDesktopDirs() -> [String] {
         let abs = URL(fileURLWithPath: expanded).standardizedFileURL.path
         if seen.insert(abs).inserted { out.append(abs) }
     }
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
-    let xdgHome = ProcessInfo.processInfo.environment["XDG_DATA_HOME"] ?? (home as NSString).appendingPathComponent(".local/share")
+    let xdgHome = xdgDataHome(home: home, env: env)
     add((xdgHome as NSString).appendingPathComponent("applications"))
-    let dataDirs = ProcessInfo.processInfo.environment["XDG_DATA_DIRS"] ?? "/usr/local/share:/usr/share"
+    add(((xdgHome as NSString).appendingPathComponent("flatpak/exports/share") as NSString).appendingPathComponent("applications"))
+    let dataDirs = env["XDG_DATA_DIRS"] ?? "/usr/local/share:/usr/share"
     for d in dataDirs.split(separator: ":") {
-        let trimmed = d.trimmingCharacters(in: .whitespaces)
+        let trimmed = d.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             add((trimmed as NSString).appendingPathComponent("applications"))
         }
@@ -139,9 +142,9 @@ public func linuxDesktopDirs() -> [String] {
     for d in [
         "/usr/share/applications",
         "/usr/local/share/applications",
-        "~/.local/share/applications",
+        (home as NSString).appendingPathComponent(".local/share/applications"),
         "/var/lib/flatpak/exports/share/applications",
-        "~/.local/share/flatpak/exports/share/applications",
+        (home as NSString).appendingPathComponent(".local/share/flatpak/exports/share/applications"),
         "/var/lib/snapd/desktop/applications",
     ] {
         add(d)
@@ -186,11 +189,8 @@ public func plistDescription(_ info: [String: Any], appName: String) -> String? 
     if text.lowercased().contains("project group") { return nil }
     let parts = text.split(whereSeparator: \.isWhitespace).map(String.init)
     if let last = parts.last, fullMatch(last) { return nil }
-    func compact(_ s: String) -> String {
-        s.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-    }
-    let nameC = compact(appName)
-    let textC = compact(text)
+    let nameC = norm(appName)
+    let textC = norm(text)
     if textC == nameC || textC == nameC + "formac" { return nil }
     if parts.count < 3 { return nil }
     return text
@@ -263,8 +263,10 @@ public func hasMasReceipt(_ appPath: String) -> Bool {
 func stripBidiControls(_ s: String) -> String {
     String(s.unicodeScalars.filter { scalar in
         switch scalar.value {
-        case 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
-             0x2066, 0x2067, 0x2068, 0x2069:
+        case 0x00AD, 0x034F, 0x061C, 0x180E,
+             0x200B...0x200F, 0x202A...0x202E, 0x2060...0x2064, 0x2066...0x206F,
+             0xFE00...0xFE0F, 0xFEFF,
+             0xE0100...0xE01EF:
             return false
         default:
             return true
@@ -312,8 +314,37 @@ public func makeApp(from appPath: String) -> AppRecord? {
     return AppRecord(path: real, displayName: name, bundleId: bid, sourceDir: sourceDir, isSystem: isSystem, extra: extra)
 }
 
+/// Desktop Entry string escapes (`\s` `\n` `\t` `\r` `\\`). Not used on Exec.
+func unescapeDesktopValue(_ raw: String) -> String {
+    var out = ""
+    out.reserveCapacity(raw.count)
+    var i = raw.startIndex
+    while i < raw.endIndex {
+        if raw[i] == "\\" {
+            let next = raw.index(after: i)
+            if next < raw.endIndex {
+                switch raw[next] {
+                case "s": out.append(" ")
+                case "n": out.append("\n")
+                case "t": out.append("\t")
+                case "r": out.append("\r")
+                case "\\": out.append("\\")
+                default:
+                    out.append(raw[i])
+                    out.append(raw[next])
+                }
+                i = raw.index(after: next)
+                continue
+            }
+        }
+        out.append(raw[i])
+        i = raw.index(after: i)
+    }
+    return out
+}
+
 func readDesktop(_ path: String) -> [String: String] {
-    guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [:] }
+    guard let text = readUTF8File(path) else { return [:] }
     var data: [String: String] = [:]
     var inEntry = false
     for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -326,7 +357,11 @@ func readDesktop(_ path: String) -> [String: String] {
         guard inEntry, let eq = line.firstIndex(of: "=") else { continue }
         let key = String(line[..<eq]).trimmingCharacters(in: .whitespaces)
         if data[key] != nil { continue }
-        data[key] = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+        var val = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+        if key != "Exec", key != "TryExec", key != "URL" {
+            val = unescapeDesktopValue(val)
+        }
+        data[key] = val
     }
     return data
 }
@@ -344,14 +379,14 @@ func execTokens(_ exec: String) -> [String] {
 }
 
 func linuxDesktopSource(sourceDir: String, exec: String) -> String? {
-    let dir = sourceDir.lowercased()
-    let ex = exec.lowercased()
+    let dir = posixLowercased(sourceDir)
+    let ex = posixLowercased(exec)
     if ex.contains(".appimage") { return "appimage" }
     if dir.contains("flatpak") || ex.contains("flatpak") { return "flatpak" }
     if dir.contains("snapd") { return "snap" }
     if dir.contains("/snap/") || dir.hasSuffix("/snap") { return "snap" }
     if let first = execTokens(exec).first {
-        let base = URL(fileURLWithPath: first).lastPathComponent.lowercased()
+        let base = posixLowercased(URL(fileURLWithPath: first).lastPathComponent)
         if base == "snap" { return "snap" }
     }
     return nil
@@ -383,7 +418,7 @@ func linuxPkgId(source: String, desktopId: String, exec: String) -> String {
 
 func linuxDesktopAppPath(source: String?, desktopPath: String, exec: String, firstExe: String) -> String {
     if source == "appimage" {
-        if let image = execTokens(exec).first(where: { $0.lowercased().contains(".appimage") }),
+        if let image = execTokens(exec).first(where: { posixLowercased($0).contains(".appimage") }),
            FileManager.default.fileExists(atPath: image) {
             return image
         }
@@ -391,7 +426,7 @@ func linuxDesktopAppPath(source: String?, desktopPath: String, exec: String, fir
     if source == "flatpak" || source == "snap" {
         return desktopPath
     }
-    let base = URL(fileURLWithPath: firstExe).lastPathComponent.lowercased()
+    let base = posixLowercased(URL(fileURLWithPath: firstExe).lastPathComponent)
     if linuxWrapperNames.contains(base) {
         return desktopPath
     }
@@ -405,10 +440,11 @@ public func parseDesktopFile(_ path: String, sourceDir: String = "") -> AppRecor
     let info = readDesktop(path)
     if info.isEmpty { return nil }
     if (info["Type"] ?? "Application") != "Application" { return nil }
-    if (info["NoDisplay"] ?? "").lowercased() == "true" || (info["Hidden"] ?? "").lowercased() == "true" {
+    if posixLowercased(info["NoDisplay"] ?? "") == "true" || posixLowercased(info["Hidden"] ?? "") == "true" {
         return nil
     }
-    guard let name = info["Name"], !name.isEmpty else { return nil }
+    let name = stripBidiControls(info["Name"] ?? "")
+    guard !name.isEmpty else { return nil }
     var exe = ""
     let execLine = (info["Exec"] ?? "").trimmingCharacters(in: .whitespaces)
     if !execLine.isEmpty {
@@ -417,7 +453,7 @@ public func parseDesktopFile(_ path: String, sourceDir: String = "") -> AppRecor
     let wmclass = (info["StartupWMClass"] ?? "").trimmingCharacters(in: .whitespaces)
     let desktopId = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
     let exeBase = URL(fileURLWithPath: exe).deletingPathExtension().lastPathComponent
-    var bundleId = (wmclass.isEmpty ? (exeBase.isEmpty ? desktopId : exeBase) : wmclass).lowercased()
+    var bundleId = posixLowercased(wmclass.isEmpty ? (exeBase.isEmpty ? desktopId : exeBase) : wmclass)
     let linuxSource = linuxDesktopSource(sourceDir: sourceDir, exec: execLine)
     let appPath = linuxDesktopAppPath(source: linuxSource, desktopPath: path, exec: execLine, firstExe: exe)
     let isSystem = linuxSource == nil && sourceDir.hasPrefix("/usr/")
@@ -438,7 +474,7 @@ public func parseDesktopFile(_ path: String, sourceDir: String = "") -> AppRecor
     let resolved = FileManager.default.fileExists(atPath: appPath)
         ? URL(fileURLWithPath: appPath).resolvingSymlinksInPath().path
         : appPath
-    if bundleId.isEmpty { bundleId = desktopId.lowercased() }
+    if bundleId.isEmpty { bundleId = posixLowercased(desktopId) }
     return AppRecord(
         path: resolved,
         displayName: name,
@@ -456,15 +492,15 @@ public func findApps(progress: (String) -> Void = { _ in }) -> [AppRecord] {
     return findMacApps(progress: progress)
 }
 
-func findLinuxApps(progress: (String) -> Void) -> [AppRecord] {
+func findLinuxApps(progress: (String) -> Void, desktopDirs: [String]? = nil) -> [AppRecord] {
     progress("  · discovering .desktop applications…")
     var apps: [AppRecord] = []
     var seen = Set<String>()
-    for root in linuxDesktopDirs() {
+    for root in desktopDirs ?? linuxDesktopDirs() {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: root, isDirectory: &isDir), isDir.boolValue else { continue }
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { continue }
-        for name in names where name.hasSuffix(".desktop") {
+        for name in names.sorted() where name.hasSuffix(".desktop") {
             if name.hasPrefix("steam_app_") { continue }
             let path = (root as NSString).appendingPathComponent(name)
             guard let app = parseDesktopFile(path, sourceDir: root) else { continue }

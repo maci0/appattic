@@ -11,6 +11,7 @@ enum AppAtticCLI {
     static func main() {
         let args = Array(CommandLine.arguments.dropFirst())
         let opts = parseCLIArguments(args)
+        C.noColorFlag = opts.noColor
         if opts.version {
             print("appattic \(appAtticVersion)")
             return
@@ -21,14 +22,25 @@ enum AppAtticCLI {
         }
         if let err = opts.error {
             fputs("error: \(err)\n", stderr)
+            fputs("\(cliUsageHint)\n", stderr)
             Foundation.exit(2)
         }
+        let settings: AppAtticSettings
+        do {
+            settings = try loadSettings()
+        } catch {
+            fputs("error: \(error.localizedDescription)\n", stderr)
+            Foundation.exit(2)
+        }
+        let includeSystem = effectiveIncludeSystem(cliFlag: opts.includeSystem, settings: settings)
+        let now = Date()
         let resolved = resolveScan(
-            includeSystem: opts.includeSystem,
+            includeSystem: includeSystem,
             fresh: opts.fresh,
             forceLive: opts.command == "update",
+            now: now,
             liveScan: { includeSystem in
-                runFullScan(includeSystem: includeSystem) { msg in
+                runFullScan(includeSystem: includeSystem, now: now) { msg in
                     fputs(msg + "\n", stderr)
                     fflush(stderr)
                 }
@@ -37,24 +49,21 @@ enum AppAtticCLI {
         if resolved.fromCache {
             fputs("using cached scan from \(resolved.data.scanned_at) (pass --fresh to scan now)\n", stderr)
         }
-        let ignored = Set(loadSettings().ignoredLeftoverPaths)
-        let result = scanResult(from: resolved.data, ignoringLeftovers: ignored)
+        let ignored = Set(settings.ignoredLeftoverPaths)
+        let result = scanResult(from: resolved.data, ignoringLeftovers: ignored, now: now)
         if let jsonPath = opts.json {
             do {
                 let payload = exportedScanData(
                     from: resolved.data,
                     ignoringLeftovers: ignored,
-                    fromCache: resolved.fromCache
+                    fromCache: resolved.fromCache,
+                    now: now
                 )
-                let encoded = try JSONEncoder().encode(payload)
-                var obj = try JSONSerialization.jsonObject(with: encoded)
-                if var dict = obj as? [String: Any] {
-                    dict["from_cache"] = resolved.fromCache
-                    obj = dict
-                }
-                let pretty = try JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys])
-                try pretty.write(to: URL(fileURLWithPath: jsonPath))
-                print("JSON written to \(jsonPath)")
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let pretty = try encoder.encode(payload)
+                try writeOwnerOnlyFile(pretty, to: URL(fileURLWithPath: jsonPath))
+                fputs("JSON written to \(jsonPath)\n", stderr)
             } catch {
                 fputs("error writing JSON: \(error.localizedDescription)\n", stderr)
                 Foundation.exit(1)
@@ -81,19 +90,24 @@ enum AppAtticCLI {
                 print("Nothing to update. \(outdatedSkippedManagersNote)")
                 return
             }
+            if !confirmLiveUpdate(count: n) {
+                fputs("Update cancelled.\n", stderr)
+                return
+            }
             fputs("Updating \(n) Homebrew/Flatpak package(s)…\n", stderr)
             let rc = runShellScript(script)
             if rc != 0 {
                 fputs("error: update failed (exit \(rc))\n", stderr)
                 Foundation.exit(1)
             }
+            clearScanCache()
             return
         }
         switch opts.command {
         case "leftovers":
             printLeftovers(result, limit: opts.top, category: opts.category)
         case "stale":
-            printStale(result, includeSystem: opts.includeSystem)
+            printStale(result, includeSystem: includeSystem)
         case "outdated":
             printOutdated(result)
         case "packages":
@@ -103,7 +117,7 @@ enum AppAtticCLI {
                 printLeftovers(result, limit: opts.top, category: opts.category)
             }
             if !opts.leftoversOnly {
-                printStale(result, includeSystem: opts.includeSystem)
+                printStale(result, includeSystem: includeSystem)
             }
             if !opts.staleOnly && !opts.leftoversOnly {
                 printOutdated(result)
@@ -114,8 +128,13 @@ enum AppAtticCLI {
 }
 
 enum C {
+    static var noColorFlag = false
     static var enabled: Bool {
-        isatty(STDOUT_FILENO) != 0 && ProcessInfo.processInfo.environment["NO_COLOR"] == nil
+        cliColorEnabled(
+            stdoutIsTTY: isatty(STDOUT_FILENO) != 0,
+            env: ProcessInfo.processInfo.environment,
+            noColorFlag: noColorFlag
+        )
     }
     static func paint(_ s: String, _ codes: String...) -> String {
         if !enabled || codes.isEmpty { return s }
@@ -157,10 +176,13 @@ func renderTable(headers: [String], rows: [[String]]) -> String {
 
 func fmtDt(_ dt: Date?) -> String {
     guard let dt else { return "-" }
-    let days = Date().timeIntervalSince(dt) / 86400
-    if days < 1 { return "today" }
-    if days < 45 { return "\(humanDays(days)) ago" }
+    guard let days = calendarDaysSince(dt) else { return "-" }
+    if days <= 0 { return "today" }
+    if days < 45 { return "\(humanDays(Double(days))) ago" }
     let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.calendar = Calendar(identifier: .gregorian)
+    f.timeZone = TimeZone.current
     f.dateFormat = "yyyy-MM-dd"
     return f.string(from: dt)
 }
@@ -171,7 +193,7 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
         orphans = orphans.filter { leftoverMatchesCategory($0, categories: category) }
     }
     let system = result.dataItems.filter { $0.status == "system" }
-    let bytes = orphans.reduce(0) { $0 + $1.sizeBytes }
+    let bytes = orphans.reduce(0) { addBytes($0, $1.sizeBytes) }
     print()
     print(C.bold("LEFTOVERS: leftover data and PATH overlays (\(orphans.count) items, \(humanSize(bytes)))"))
     if orphans.isEmpty {
@@ -227,7 +249,8 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
         let a = order[$0.tier] ?? 3
         let b = order[$1.tier] ?? 3
         if a != b { return a < b }
-        return ($0.software.sizeBytes + $0.software.dataBytes) > ($1.software.sizeBytes + $1.software.dataBytes)
+        return addBytes($0.software.sizeBytes, $0.software.dataBytes)
+            > addBytes($1.software.sizeBytes, $1.software.dataBytes)
     }
     let nRemove = verdicts.filter { $0.tier == "remove" }.count
     let nReview = verdicts.filter { $0.tier == "review" }.count
@@ -259,7 +282,9 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
         ])
     }
     print(renderTable(headers: ["Verdict", "Name", "What", "Source", "Last used", "Size", "Why"], rows: rows))
-    let reclaim = verdicts.filter { $0.tier == "remove" }.reduce(0) { $0 + $1.software.sizeBytes + $1.software.dataBytes }
+    let reclaim = verdicts.filter { $0.tier == "remove" }.reduce(0) {
+        addBytes($0, addBytes($1.software.sizeBytes, $1.software.dataBytes))
+    }
     if reclaim > 0 {
         print()
         print(C.dim("Reclaimable by acting on REMOVE candidates: \(C.green(humanSize(reclaim)))"))
@@ -328,10 +353,19 @@ func printPackages(_ result: ScanResult) {
     print(C.dim("  Remove and mark-manual are confirm + script only. Distro upgrades are never included."))
 }
 
+func confirmLiveUpdate(count: Int) -> Bool {
+    if isatty(STDIN_FILENO) == 0 { return true }
+    fputs("Update \(count) Homebrew/Flatpak package(s)? [y/N] ", stderr)
+    fflush(stderr)
+    guard let line = readLine() else { return false }
+    let answer = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return answer == "y" || answer == "yes"
+}
+
 func runShellScript(_ script: String) -> Int32 {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-update-\(UUID().uuidString).sh")
     do {
-        try script.write(to: url, atomically: true, encoding: .utf8)
+        try writeOwnerOnlyFile(Data(script.utf8), to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")

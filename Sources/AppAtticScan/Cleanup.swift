@@ -1,5 +1,68 @@
 import Foundation
 
+public struct CleanupSelection: Equatable, Sendable {
+    public var leftovers: Set<String>
+    public var apps: Set<String>
+    public var outdated: Set<String>
+    public var packages: Set<String>
+    public var markManual: Set<String>
+
+    public init(
+        leftovers: Set<String> = [],
+        apps: Set<String> = [],
+        outdated: Set<String> = [],
+        packages: Set<String> = [],
+        markManual: Set<String> = []
+    ) {
+        self.leftovers = leftovers
+        self.apps = apps
+        self.outdated = outdated
+        self.packages = packages
+        self.markManual = markManual
+    }
+}
+
+/// UI can opt REVIEW and REMOVE into cleanup. CLI `--dry-run` for report/stale only emits REMOVE.
+public let selectableCleanupTiers: Set<String> = ["remove", "review"]
+
+public func pruneCleanupSelection(
+    leftovers: Set<String>,
+    apps: Set<String>,
+    outdated: Set<String>,
+    packages: Set<String> = [],
+    markManual: Set<String> = [],
+    data: ScanData,
+    ignoring: Set<String>
+) -> CleanupSelection {
+    let leftoverPaths = Set(visibleOrphanedLeftovers(data.leftovers, ignoring: ignoring).map(\.path))
+    let appPaths = Set(
+        data.software.filter { selectableCleanupTiers.contains($0.tier ?? "") }.map(\.path)
+    )
+    let outdatedIds = Set((data.outdated ?? []).filter(\.updatable).map(\.id))
+    let listed = data.packages ?? []
+    let packageIds = Set(listed.map(\.id))
+    let markIds = Set(listed.filter(\.canMarkManual).map(\.id))
+    return CleanupSelection(
+        leftovers: leftovers.intersection(leftoverPaths),
+        apps: apps.intersection(appPaths),
+        outdated: outdated.intersection(outdatedIds),
+        packages: packages.intersection(packageIds),
+        markManual: markManual.intersection(markIds)
+    )
+}
+
+public func resolvedSelection(_ selected: String?, visibleIds: [String]) -> String? {
+    if let selected, visibleIds.contains(selected) { return selected }
+    return visibleIds.first
+}
+
+public func toggleListedSelection(selected: Set<String>, visible: [String]) -> Set<String> {
+    let vis = Set(visible)
+    if vis.isEmpty { return selected }
+    if vis.isSubset(of: selected) { return [] }
+    return selected.union(vis)
+}
+
 public func isSteamManagedPath(_ path: String) -> Bool {
     let p = path.lowercased()
     return p.contains("/steamapps/") || p.contains("/steam.appbundle/")
@@ -34,6 +97,9 @@ public func uninstallCommand(
         return "snap remove \(shellQuote(linuxUninstallId(source: source, path: path, pkgId: pkgId)))"
     }
     if source == "appimage" {
+        if isProtectedPackagedPath(path) {
+            return "# skipped packaged path \(shellQuote(path))"
+        }
         return "rm -rf \(shellQuote(path))"
     }
     if source == "steam", let id = steamAppId, !id.isEmpty, !isCrossOverPath(path) {
@@ -48,11 +114,21 @@ public func uninstallCommand(
     if source == "steam" || isSteamManagedPath(path) {
         return "# \(name): uninstall from Steam. Do not delete \(path)"
     }
+    if isProtectedPackagedPath(path) {
+        return "# skipped packaged path \(shellQuote(path))"
+    }
     return "rm -rf \(shellQuote(path))"
 }
 
-public func commandFailureMessage(status: Int32, stderr: String) -> String {
-    let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+public func commandFailureMessage(
+    status: Int32,
+    stderr: String,
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path
+) -> String {
+    let trimmed = redactHomePaths(
+        stderr.trimmingCharacters(in: .whitespacesAndNewlines),
+        home: home
+    )
     if trimmed.isEmpty {
         return "Command failed (exit \(status)). Selection kept."
     }
@@ -179,12 +255,29 @@ func linuxUninstallId(source: String, path: String, pkgId: String?) -> String {
     return linuxPkgId(source: source, desktopId: base, exec: "")
 }
 
+/// Packaged OS prefixes that leftover/uninstall scripts must not `rm`.
+/// Matches Qt `isProtectedPackagedPath`, plus `/etc` `/System` `/Library` and kernel roots.
+public func isProtectedPackagedPath(_ path: String) -> Bool {
+    if path.isEmpty { return false }
+    let roots = [
+        "/usr", "/bin", "/sbin", "/etc", "/System", "/lib", "/lib64",
+        "/boot", "/dev", "/proc", "/sys", "/private", "/Library",
+    ]
+    return roots.contains { path == $0 || path.hasPrefix($0 + "/") }
+}
+
 public func leftoverRemoveCommand(path: String, rootLabel: String, extraPaths: [String] = []) -> String {
-    var seen = Set<String>()
-    let paths = ([path] + extraPaths).filter { seen.insert($0).inserted }
     if rootLabel == "LaunchAgents" {
+        if isProtectedPackagedPath(path) {
+            return "# skipped packaged path \(shellQuote(path))"
+        }
         let q = shellQuote(path)
         return "launchctl bootout gui/$(id -u) \(q) 2>/dev/null || true\nrm -rf \(q)"
+    }
+    var seen = Set<String>()
+    let paths = ([path] + extraPaths).filter { seen.insert($0).inserted && !isProtectedPackagedPath($0) }
+    if paths.isEmpty {
+        return "# skipped packaged path \(shellQuote(path))"
     }
     return "rm -rf " + paths.map(shellQuote).joined(separator: " ")
 }
@@ -199,7 +292,8 @@ public func uninstallCommand(for item: SoftwareItem) -> String {
         name: item.name,
         path: item.path,
         caskName: item.cask_name,
-        steamAppId: item.steam_appid
+        steamAppId: item.steam_appid,
+        pkgId: item.pkg_id
     )
 }
 
@@ -282,6 +376,8 @@ func staleCleanupScript(_ result: ScanResult) -> String {
     return lines.joined(separator: "\n") + "\n"
 }
 
+/// Printable `/bin/sh` for this CLI command. `outdated` is commented report-only; `update` is live Homebrew/Flatpak.
+/// `report` / `leftovers` / `stale` emit leftovers and REMOVE-tier uninstalls, not packages.
 public func dryRunScript(
     command: String,
     result: ScanResult,
@@ -335,14 +431,16 @@ public func cleanupScript(_ result: ScanResult, category: [String] = [], top: In
     return lines.joined(separator: "\n") + "\n"
 }
 
-public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = []) -> ScanResult {
+public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [], now: Date = Date()) -> ScanResult {
     let result = ScanResult()
-    result.scannedAt = parseISODate(data.scanned_at) ?? Date()
+    result.scannedAt = parseISODate(data.scanned_at) ?? now
     result.durationS = data.duration_s
     result.brewAvailable = data.brew_available
+    result.incomplete = data.incomplete == true
     result.appsInstalled = data.totals.apps_installed
+    let ignoredKeys = Set(ignoringLeftovers.map(pathIdentityKey))
     result.dataItems = data.leftovers.compactMap { item in
-        if leftoverIgnorePaths(item).contains(where: ignoringLeftovers.contains) { return nil }
+        if leftoverIgnorePaths(item).contains(where: { ignoredKeys.contains(pathIdentityKey($0)) }) { return nil }
         return DataItem(
             path: item.path,
             name: item.name,
@@ -350,6 +448,7 @@ public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [])
             kind: item.kind,
             status: item.status,
             owner: item.owner,
+            shadows: item.shadows,
             sizeBytes: item.size_bytes ?? 0,
             sizeMeasured: item.size_measured,
             mtime: parseISODate(item.mtime),
@@ -386,6 +485,8 @@ public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [])
             isLeaf: item.is_leaf ?? true,
             outdated: item.outdated ?? false,
             latestVersion: item.latest_version,
+            pkgId: item.pkg_id,
+            bundleId: item.bundle_id,
             summary: item.summary,
             extra: extra
         )
@@ -402,7 +503,8 @@ public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [])
             title: $0.title,
             summary: $0.summary,
             reason: $0.reason,
-            kind: $0.kind
+            kind: $0.kind,
+            bundleId: $0.bundle_id
         )
     }
     result.packages = data.packages ?? []
@@ -416,33 +518,24 @@ public func isHandoffUninstallCommand(_ command: String) -> Bool {
 public func remainingPendingAppPaths(selected: Set<String>, software: [SoftwareItem]) -> Set<String> {
     Set(software.compactMap { item in
         guard selected.contains(item.path) else { return nil }
-        let cmd = uninstallCommand(
-            source: item.source,
-            name: item.name,
-            path: item.path,
-            caskName: item.cask_name,
-            steamAppId: item.steam_appid
-        )
+        let cmd = uninstallCommand(for: item)
         if isHandoffUninstallCommand(cmd) { return item.path }
         if scriptHasActionableCommands("#!/bin/sh\nset -e\n\(cmd)\n") { return nil }
         return item.path
     })
 }
 
-public func remainingCommentOnlyAppPaths(selected: Set<String>, software: [SoftwareItem]) -> Set<String> {
-    remainingPendingAppPaths(selected: selected, software: software)
-}
-
-public func cleanupScript(from data: ScanData, ignoringLeftovers: Set<String> = []) -> String {
-    cleanupScript(scanResult(from: data, ignoringLeftovers: ignoringLeftovers))
+public func cleanupScript(from data: ScanData, ignoringLeftovers: Set<String> = [], now: Date = Date()) -> String {
+    cleanupScript(scanResult(from: data, ignoringLeftovers: ignoringLeftovers, now: now))
 }
 
 public func exportedScanData(
     from data: ScanData,
     ignoringLeftovers: Set<String> = [],
-    fromCache: Bool = false
+    fromCache: Bool = false,
+    now: Date = Date()
 ) -> ScanData {
-    var payload = scanResult(from: data, ignoringLeftovers: ignoringLeftovers).toScanData()
+    var payload = scanResult(from: data, ignoringLeftovers: ignoringLeftovers, now: now).toScanData()
     payload.from_cache = fromCache
     return payload
 }
