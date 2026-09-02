@@ -540,6 +540,11 @@ final class PackagingTests: XCTestCase {
         XCTAssertFalse(appRun.contains("&& source"), appRun)
         XCTAssertTrue(appRun.contains("|| continue"), appRun)
 
+        // linuxdeploy's qt plugin ships only libqxcb.so by default; --smoke is
+        // headless and needs the offscreen platform plugin in the AppImage.
+        XCTAssertTrue(appimage.contains("EXTRA_PLATFORM_PLUGINS=libqoffscreen.so"), appimage)
+        XCTAssertTrue(appimage.contains("usr/plugins/platforms/libqoffscreen.so"), appimage)
+
         let swiftVersion = try String(contentsOf: root.appendingPathComponent(".swift-version"), encoding: .utf8)
         XCTAssertTrue(swiftVersion.contains("5.10.1"), swiftVersion)
         let zigVersion = try String(contentsOf: root.appendingPathComponent(".zig-version"), encoding: .utf8)
