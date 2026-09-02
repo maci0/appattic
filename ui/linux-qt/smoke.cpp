@@ -125,9 +125,16 @@ static int smokeVerifyHelpers() {
         std::fprintf(stderr, "outdatedIsUpdatable: report-only manager or untrusted cask\n");
         return 1;
     }
+    if (outdatedIsUpdatable(QStringLiteral("flatpak"), QStringLiteral("unused-runtime"))
+        || outdatedIsUpdatable(QStringLiteral("flatpak"), QStringLiteral("orphan"))) {
+        std::fprintf(stderr,
+            "outdatedIsUpdatable: non-outdated kind must not inherit an update action\n");
+        return 1;
+    }
     if (!outdatedIsUpdatable(QStringLiteral("brew-formula"), QString())
         || !outdatedIsUpdatable(QStringLiteral("brew-cask"), QString())
-        || !outdatedIsUpdatable(QStringLiteral("flatpak"), QString())) {
+        || !outdatedIsUpdatable(QStringLiteral("flatpak"), QString())
+        || !outdatedIsUpdatable(QStringLiteral("flatpak"), QStringLiteral("outdated"))) {
         std::fprintf(stderr, "outdatedIsUpdatable: brew/flatpak must be updatable\n");
         return 1;
     }

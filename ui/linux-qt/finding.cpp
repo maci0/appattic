@@ -89,7 +89,12 @@ static bool jsonBool(const QJsonObject &o, const char *key) {
 }
 
 bool outdatedIsUpdatable(const QString &manager, const QString &kind) {
-    if (kind == QLatin1String("untrusted") || kind.contains(QLatin1String("untrusted"))) {
+    if (kind.contains(QLatin1String("untrusted"))) return false;
+    // Manager alone does not imply an upgrade path. The flatpak plugin also
+    // reports unused-runtime rows whose command is "flatpak uninstall -y",
+    // which must never be promoted to an update action.
+    if (!kind.isEmpty() && !kind.contains(QLatin1String("outdated"))
+        && !kind.contains(QLatin1String("upgrade"))) {
         return false;
     }
     return manager == QLatin1String("brew-formula")
