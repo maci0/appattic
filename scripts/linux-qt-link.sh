@@ -5,22 +5,38 @@
 # Usage: scripts/linux-qt-link.sh [--smoke]
 #   (default)  build core/out WASM, link Qt binary, ldd gate, --smoke gate
 #   --smoke    skip cmake rebuild; re-run ldd + binary --smoke on existing build
-# Binary flags: --smoke / --version (strict WASM load on --smoke only).
+# Binary flags: --smoke / --version / --help (strict WASM load on --smoke only).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+export LC_ALL=C
+export LANG=C
+export TZ=UTC
+if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+    SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct 2>/dev/null || printf '0')"
+    export SOURCE_DATE_EPOCH
+fi
 
 SMOKE_ONLY=0
 for arg in "$@"; do
     case "$arg" in
         --smoke) SMOKE_ONLY=1 ;;
         -h|--help)
-            sed -n '2,8p' "$0"
+            cat <<'EOF'
+Usage: scripts/linux-qt-link.sh [--smoke]
+
+  (default)  build core/out WASM, link Qt binary, ldd gate, --smoke gate
+  --smoke    skip cmake rebuild; re-run ldd + binary --smoke on existing build
+
+Binary flags: --smoke / --version / --help (strict WASM load on --smoke only).
+Exit 3 on non-Linux. Homebrew Qt on macOS is not a Linux Qt link.
+EOF
             exit 0
             ;;
         *)
             echo "error: unknown argument: $arg" >&2
+            echo "Usage: scripts/linux-qt-link.sh [--smoke]" >&2
             exit 2
             ;;
     esac
@@ -29,8 +45,8 @@ done
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 if [[ "$OS" != Linux ]]; then
-    echo "blocked: not Linux ($OS $ARCH). Homebrew Qt on macOS is not a Linux Qt link."
-    echo "Use CI (.github/workflows/linux.yml) or a Linux host."
+    echo "blocked: not Linux ($OS $ARCH). Homebrew Qt on macOS is not a Linux Qt link." >&2
+    echo "Use CI (.github/workflows/linux.yml) or a Linux host." >&2
     exit 3
 fi
 
@@ -197,7 +213,7 @@ require_wasm_artifacts() {
     echo "Run: bash core/build.sh" >&2
     exit 1
   fi
-  echo "wasm: core/out ready ($(find "$CORE_OUT" -maxdepth 1 -name '*.wasm' | wc -l | tr -d ' ') modules)"
+  echo "wasm: core/out ready ($(find "$CORE_OUT" -maxdepth 1 -name '*.wasm' | LC_ALL=C sort | wc -l | tr -d ' ') modules)"
 }
 
 for p in /usr/lib/x86_64-linux-gnu/cmake /usr/lib/aarch64-linux-gnu/cmake /usr/lib/cmake; do
@@ -232,7 +248,7 @@ if [[ "$SMOKE_ONLY" -eq 0 ]]; then
   ensure_wasm_core
   require_wasm_artifacts
   echo "building appattic-qt (Qt 6 Widgets + Wasmtime)…"
-  WASMTIME_DIR="$WASMTIME_DIR" cmake -S "$ROOT/ui/linux-qt" -B "$ROOT/ui/linux-qt/build" \
+  cmake -S "$ROOT/ui/linux-qt" -B "$ROOT/ui/linux-qt/build" \
       "${gen[@]}" \
       -DCMAKE_BUILD_TYPE=Debug \
       -DWASMTIME_ROOT="$WASMTIME_DIR"

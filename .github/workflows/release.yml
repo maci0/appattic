@@ -12,8 +12,21 @@ permissions:
 jobs:
   linux-appimage:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Cache build
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .zig-cache
+            .zig-cache-local
+            dist/.appimage-tools
+          key: ${{ runner.os }}-appimage-${{ hashFiles('scripts/dep-checksums.sha256', 'core/src/**/*.zig') }}
+          restore-keys: |
+            ${{ runner.os }}-appimage-
       - name: Install Qt 6 and build tools
         run: sudo bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API
@@ -23,32 +36,39 @@ jobs:
           echo /opt/zig >> "$GITHUB_PATH"
           echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
       - name: Build AppImage
+        env:
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '1.0.0' }}
         run: bash scripts/linux-appimage.sh
       - name: Publish AppImage
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          files: dist/AppAttic-x86_64.AppImage
+          files: |
+            dist/AppAttic-x86_64.AppImage
+            dist/AppAttic-x86_64.AppImage.buildinfo
           generate_release_notes: true
 
   macos-ui:
     if: false  # optional; re-enable when AppAtticUI CI build is stable
     runs-on: macos-14
+    timeout-minutes: 60
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          swift-version: "5.10"
+          persist-credentials: false
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "5.10.1"
       - name: Build AppAtticUI
-        run: swift build -c release --product AppAtticUI
+        run: swift build -c release --product AppAtticUI --disable-automatic-resolution
       - name: Package macOS zip
         run: |
           mkdir -p dist
           cp .build/release/AppAtticUI dist/
-          (cd dist && zip -r AppAttic-macos-arm64.zip AppAtticUI)
+          (cd dist && TZ=UTC zip -X -r AppAttic-macos-arm64.zip AppAtticUI)
       - name: Publish macOS zip
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist/AppAttic-macos-arm64.zip

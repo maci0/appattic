@@ -6,16 +6,44 @@ set -euo pipefail
 # Linux: CLI always. UI is C++ Qt 6 (ui/linux-qt) if Qt6Widgets is present.
 # Usage: ./build.sh [release|debug]
 
-cd "$(dirname "$0")"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+export LC_ALL=C
+export LANG=C
+export TZ=UTC
+if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+    SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct 2>/dev/null || printf '0')"
+    export SOURCE_DATE_EPOCH
+fi
 
 CONFIG="${1:-release}"
 case "$CONFIG" in
+    -h|--help|help)
+        cat <<'EOF'
+Usage: ./build.sh [release|debug]
+
+  ./build.sh [release|debug]   CLI (+ UI if Qt 6 / macOS)
+  ./run.sh report              CLI after a build
+  bash scripts/check.sh        lint + AppAtticScanTests + CLI (CI parity)
+  bash scripts/check.sh --qt   also Linux Qt UI link proof
+  bash scripts/lint.sh
+  swift test --filter UtilTests --disable-automatic-resolution
+  ./core/build.sh test brew.zig
+EOF
+        exit 0
+        ;;
     release|debug) ;;
     *)
+        echo "error: unknown argument: $CONFIG" >&2
         echo "Usage: $0 [release|debug]" >&2
-        exit 1
+        echo "       $0 --help" >&2
+        exit 2
         ;;
 esac
+
+# shellcheck source=scripts/find-swift.sh
+. "$ROOT/scripts/find-swift.sh"
+appattic_require_swift
 
 OS="$(uname -s)"
 HAVE_QT=0
@@ -42,11 +70,11 @@ resolve_bin() {
 if [[ "$OS" == Darwin ]]; then
     echo "Building AppAttic (CLI + UI, ${CONFIG})…"
     # Product-by-product: a full-package build also compiles Gtk/WinSDK extras from swift-cross-ui.
-    swift build -c "$CONFIG" --product appattic
-    swift build -c "$CONFIG" --product AppAtticUI
+    swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
+    swift build -c "$CONFIG" --product AppAtticUI --disable-automatic-resolution
 elif [[ "$OS" == Linux ]]; then
     echo "Building AppAttic CLI (${CONFIG})…"
-    swift build -c "$CONFIG" --product appattic
+    swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
     if [[ "$HAVE_QT" -eq 1 ]]; then
         echo "Building Linux Qt 6 UI…"
         bash scripts/linux-qt-link.sh
@@ -61,7 +89,7 @@ elif [[ "$OS" == Linux ]]; then
     fi
 else
     echo "Building AppAttic CLI (${CONFIG})…"
-    swift build -c "$CONFIG" --product appattic
+    swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
 fi
 
 CLI="$(resolve_bin appattic)" || {

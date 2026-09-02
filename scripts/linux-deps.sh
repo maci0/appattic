@@ -4,9 +4,27 @@
 # Build on the distro you will run.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+_script_dir="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$_script_dir/.." && pwd)"
+export LC_ALL=C
+export LANG=C
+export TZ=UTC
+export DEBIAN_FRONTEND=noninteractive
+# Checksums live next to this script so a Docker COPY of scripts/*.sh still verifies.
+# shellcheck source=verify-sha256.sh
+. "$_script_dir/verify-sha256.sh"
 WASMTIME_VER="${WASMTIME_C_API_VERSION:-28.0.0}"
-ZIG_VER="${ZIG_VERSION:-0.16.0}"
+if [[ -n "${ZIG_VERSION:-}" ]]; then
+    ZIG_VER="$ZIG_VERSION"
+elif [[ -f "$ROOT/.zig-version" ]]; then
+    ZIG_VER="$(tr -d '[:space:]' < "$ROOT/.zig-version")"
+else
+    ZIG_VER="0.16.0"
+fi
+if [[ -z "$ZIG_VER" ]]; then
+    echo "error: empty zig version (.zig-version or ZIG_VERSION)" >&2
+    exit 1
+fi
 
 usage() {
     cat <<'EOF'
@@ -14,14 +32,15 @@ Usage: scripts/linux-deps.sh [--install] [--install-swift] [--install-wasmtime]
 
   (no flags)           Print Qt 6, Wasmtime, and Swift notes for this distro.
   --install            Install Qt 6 Widgets headers, cmake, ninja, pkg-config, clang (needs root).
-  --install-swift      Install Swift 5.10.1 (official Ubuntu 22.04 tarball) to /opt/swift.
+  --install-swift      Install Swift 5.10.1 (official Ubuntu 22.04 tarball)
+                       to /opt/swift, or .deps/swift without root.
   --install-wasmtime   Install Wasmtime C API headers/libs (needed to embed appattic_core.wasm).
 
 Then run: bash scripts/linux-qt-link.sh
 
 Arch Swift is not in extra. AUR package is swift-bin, or use --install-swift / swiftly.
 The Ubuntu 22.04 Swift tarball needs that ABI (libpython3.10, older ICU). Prefer
-Dockerfile (swift:5.10-jammy) or AUR swift-bin on Arch. Homebrew Qt on macOS is not Linux.
+Dockerfile (swift:5.10.1-jammy) or AUR swift-bin on Arch. Homebrew Qt on macOS is not Linux.
 EOF
 }
 
@@ -42,18 +61,12 @@ for arg in "$@"; do
     esac
 done
 
-OS_RELEASE=""
-if [[ -r /etc/os-release ]]; then
-    OS_RELEASE=/etc/os-release
-elif [[ -r /usr/lib/os-release ]]; then
-    OS_RELEASE=/usr/lib/os-release
-fi
-
 ID=""
 ID_LIKE=""
-if [[ -n "$OS_RELEASE" ]]; then
-    # shellcheck disable=SC1090
-    . "$OS_RELEASE"
+if [[ -r /etc/os-release ]]; then
+    . /etc/os-release
+elif [[ -r /usr/lib/os-release ]]; then
+    . /usr/lib/os-release
 fi
 
 id_lc="$(printf '%s' "${ID:-}" | tr '[:upper:]' '[:lower:]')"
@@ -230,7 +243,7 @@ echo "Swift 5.10: needed to compile the CLI and tests. Not shipped as a universa
 case "$family" in
     arch)
         echo "  Arch extra has no Swift compiler. AUR: swift-bin (or swiftly-bin)."
-        echo "  Or: $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift)"
+        echo "  Or: $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
         ;;
     debian)
         echo "  swiftly: https://www.swift.org/install/linux/"
@@ -238,7 +251,7 @@ case "$family" in
         ;;
     fedora|suse)
         echo "  swiftly: https://www.swift.org/install/linux/"
-        echo "  Or: $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift)"
+        echo "  Or: $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
         ;;
     *)
         echo "  swiftly: https://www.swift.org/install/linux/"
@@ -292,14 +305,23 @@ install_zig_tarball() {
             exit 1
             ;;
     esac
-    local url="https://ziglang.org/download/${ZIG_VER}/zig-${triple}-linux-${ZIG_VER}.tar.xz"
+    local archive="zig-${triple}-linux-${ZIG_VER}.tar.xz"
+    local url="https://ziglang.org/download/${ZIG_VER}/${archive}"
+    local expected
+    expected="$(checksum_for "$archive")" || {
+        echo "error: no pinned SHA-256 for $archive (ZIG_VERSION=$ZIG_VER)" >&2
+        exit 1
+    }
     echo "Downloading Zig ${ZIG_VER} ($triple)…"
     local tmp
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
-    curl -fsSL "$url" | tar -xJ -C "$tmp"
+    curl_fetch "$url" "$tmp/$archive"
+    verify_sha256 "$tmp/$archive" "$expected"
+    tar -xJ -C "$tmp" -f "$tmp/$archive"
+    rm -f "$tmp/$archive"
     local unpacked
-    unpacked="$(printf '%s\n' "$tmp"/zig-* | head -n 1)"
+    unpacked="$(printf '%s\n' "$tmp"/zig-* | LC_ALL=C sort | head -n 1)"
     if [[ ! -x "$unpacked/zig" ]]; then
         echo "error: Zig tarball layout unexpected" >&2
         exit 1
@@ -409,14 +431,23 @@ install_wasmtime_c_api() {
             exit 1
             ;;
     esac
-    local url="https://github.com/bytecodealliance/wasmtime/releases/download/v${WASMTIME_VER}/wasmtime-v${WASMTIME_VER}-${triple}-c-api.tar.xz"
+    local archive="wasmtime-v${WASMTIME_VER}-${triple}-c-api.tar.xz"
+    local url="https://github.com/bytecodealliance/wasmtime/releases/download/v${WASMTIME_VER}/${archive}"
+    local expected
+    expected="$(checksum_for "$archive")" || {
+        echo "error: no pinned SHA-256 for $archive (WASMTIME_C_API_VERSION=$WASMTIME_VER)" >&2
+        exit 1
+    }
     echo "Downloading Wasmtime C API ${WASMTIME_VER} ($triple)…"
     local tmp
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
-    curl -fsSL "$url" | tar -xJ -C "$tmp"
+    curl_fetch "$url" "$tmp/$archive"
+    verify_sha256 "$tmp/$archive" "$expected"
+    tar -xJ -C "$tmp" -f "$tmp/$archive"
+    rm -f "$tmp/$archive"
     local unpacked
-    unpacked="$(printf '%s\n' "$tmp"/wasmtime-* | head -n 1)"
+    unpacked="$(printf '%s\n' "$tmp"/wasmtime-* | LC_ALL=C sort | head -n 1)"
     if [[ ! -d "$unpacked" ]]; then
         echo "error: Wasmtime tarball layout unexpected" >&2
         exit 1
@@ -441,15 +472,22 @@ fi
 
 install_swift_tarball() {
     local ver="5.10.1"
-    local dest="/opt/swift"
+    if [[ -f "$ROOT/.swift-version" ]]; then
+        ver="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
+        if [[ -z "$ver" ]]; then
+            ver="5.10.1"
+        fi
+    fi
+    local dest=""
+    if [[ -w /opt ]] || [[ "$(id -u)" -eq 0 ]]; then
+        dest="/opt/swift"
+    else
+        dest="$ROOT/.deps/swift"
+    fi
     if [[ -x "$dest/usr/bin/swift" ]]; then
         echo "Swift already at $dest/usr/bin/swift"
-        "$dest/usr/bin/swift" --version | head -n 1
+        "$dest/usr/bin/swift" --version | awk 'NR==1 {print; exit}'
         return 0
-    fi
-    if [[ "$(id -u)" -ne 0 && ! -w /opt ]]; then
-        echo "error: --install-swift writes /opt/swift (root, AUR swift-bin, or swiftly)" >&2
-        exit 1
     fi
     if ! command -v curl >/dev/null 2>&1; then
         debian_bootstrap_curl
@@ -460,13 +498,16 @@ install_swift_tarball() {
     fi
     local arch
     arch="$(uname -m)"
+    local archive=""
     local url
     case "$arch" in
         x86_64)
-            url="https://download.swift.org/swift-${ver}-release/ubuntu2204/swift-${ver}-RELEASE/swift-${ver}-RELEASE-ubuntu22.04.tar.gz"
+            archive="swift-${ver}-RELEASE-ubuntu22.04.tar.gz"
+            url="https://download.swift.org/swift-${ver}-release/ubuntu2204/swift-${ver}-RELEASE/${archive}"
             ;;
         aarch64|arm64)
-            url="https://download.swift.org/swift-${ver}-release/ubuntu2204-aarch64/swift-${ver}-RELEASE/swift-${ver}-RELEASE-ubuntu22.04-aarch64.tar.gz"
+            archive="swift-${ver}-RELEASE-ubuntu22.04-aarch64.tar.gz"
+            url="https://download.swift.org/swift-${ver}-release/ubuntu2204-aarch64/swift-${ver}-RELEASE/${archive}"
             ;;
         *)
             echo "error: no Swift ${ver} Linux tarball for $arch" >&2
@@ -475,34 +516,41 @@ install_swift_tarball() {
             ;;
     esac
     echo "Downloading Swift ${ver} for $arch…"
+    local expected
+    expected="$(checksum_for "$archive")" || {
+        echo "error: no pinned SHA-256 for $archive" >&2
+        exit 1
+    }
     local tmp
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
-    curl -fsSL "$url" | tar -xz -C "$tmp"
+    curl_fetch "$url" "$tmp/$archive"
+    verify_sha256 "$tmp/$archive" "$expected"
+    tar -xz -C "$tmp" -f "$tmp/$archive"
+    rm -f "$tmp/$archive"
     local unpacked
-    unpacked="$(printf '%s\n' "$tmp"/swift-* | head -n 1)"
+    unpacked="$(printf '%s\n' "$tmp"/swift-* | LC_ALL=C sort | head -n 1)"
     if [[ ! -d "$unpacked" ]]; then
         echo "error: Swift tarball layout unexpected" >&2
         exit 1
     fi
-    mkdir -p /opt
+    mkdir -p "$(dirname "$dest")"
     rm -rf "$dest"
     mv "$unpacked" "$dest"
     echo "Installed Swift ${ver} to $dest/usr/bin"
     echo "export PATH=\"$dest/usr/bin:\$PATH\""
     if ! "$dest/usr/bin/swift" --version >/dev/null 2>&1; then
         echo "error: $dest/usr/bin/swift did not start. Ubuntu 22.04 tarball needs that ABI." >&2
-        echo "Arch: AUR swift-bin. Ubuntu 24.04: swiftly or Dockerfile (swift:5.10-jammy)." >&2
+        echo "Arch: AUR swift-bin. Ubuntu 24.04: swiftly or Dockerfile (swift:5.10.1-jammy)." >&2
         if command -v ldd >/dev/null 2>&1; then
             ldd "$dest/usr/bin/swift" >&2 || true
         fi
         exit 1
     fi
-    "$dest/usr/bin/swift" --version | head -n 1
+    "$dest/usr/bin/swift" --version | awk 'NR==1 {print; exit}'
 }
 
 if [[ "$INSTALL_SWIFT" -eq 1 ]]; then
     install_swift_tarball
-    echo "Next: export PATH=\"/opt/swift/usr/bin:\$PATH\""
-    echo "      bash scripts/linux-qt-link.sh"
+    echo "Then: bash scripts/linux-qt-link.sh"
 fi
