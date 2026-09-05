@@ -345,6 +345,37 @@ final class CacheTests: XCTestCase {
         XCTAssertEqual(saved.fingerprint, "a")
     }
 
+    func testCommitScanCacheReportsWriteFailure() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-commit-directory-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let data = ScanData(
+            scanned_at: "2026-08-17T12:00:00Z",
+            duration_s: 1,
+            brew_available: false,
+            totals: ScanTotals(
+                apps_installed: 0,
+                orphaned_items: 0,
+                orphaned_bytes: 0,
+                system_leftover_bytes: 0,
+                reclaimable_bytes: 0,
+                stale_apps: 0,
+                outdated_apps: 0
+            ),
+            leftovers: [],
+            software: []
+        )
+
+        XCTAssertFalse(commitScanCache(
+            includeSystem: false,
+            data: data,
+            before: "a",
+            after: "a",
+            to: directory
+        ))
+    }
+
     func testClearScanCacheRemovesFile() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-clear-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
