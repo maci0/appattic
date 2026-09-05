@@ -128,7 +128,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-D_GLIBCXX_ASSERTIONS>
     )
     # Source-level so a separate AUTOMOC TU does not inherit -Werror.
-    set_property(SOURCE main.cpp APPEND PROPERTY COMPILE_OPTIONS -Werror)
+    set_property(SOURCE main.cpp finding.cpp settings.cpp smoke.cpp
+        APPEND PROPERTY COMPILE_OPTIONS -Werror)
 endif()
 if(UNIX AND NOT APPLE)
     get_filename_component(_wasmtime_libdir "${WASMTIME_LIBRARY}" DIRECTORY)
