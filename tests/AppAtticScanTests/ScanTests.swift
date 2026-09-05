@@ -3,6 +3,22 @@ import XCTest
 @testable import AppAtticCLIKit
 
 final class ScanTests: XCTestCase {
+    func testScanDataMatchesVerdictsBySoftwareIdentity() {
+        let first = Software(name: "First", kind: "app", path: "/First.app", source: "test")
+        let second = Software(name: "Second", kind: "app", path: "/Second.app", source: "test")
+        let result = ScanResult(
+            software: [first, second],
+            verdicts: [
+                Verdict(software: second, tier: "remove", reason: "second"),
+                Verdict(software: first, tier: "review", reason: "first"),
+            ]
+        )
+
+        let rows = result.toScanData().software
+        XCTAssertEqual(rows.map(\.tier), ["review", "remove"])
+        XCTAssertEqual(rows.map(\.reason), ["first", "second"])
+    }
+
     func testTempTreeOrphanWithEmptyBrew() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let orphan = td.appendingPathComponent("DeadApp")

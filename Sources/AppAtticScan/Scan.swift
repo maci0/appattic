@@ -63,14 +63,39 @@ public final class ScanResult {
     }
 
     public func toScanData() -> ScanData {
-        let stale = verdicts.filter { $0.tier == "review" || $0.tier == "remove" }.count
+        var orphanedCount = 0
+        var orphanedBytes = 0
+        var systemLeftoverBytes = 0
+        for item in dataItems {
+            if isListedLeftoverStatus(item.status) {
+                orphanedCount += 1
+                orphanedBytes = addBytes(orphanedBytes, item.sizeBytes)
+            } else if item.status == "system" {
+                systemLeftoverBytes = addBytes(systemLeftoverBytes, item.sizeBytes)
+            }
+        }
+        var stale = 0
+        var reclaimableBytes = orphanedBytes
+        var verdictBySoftware: [ObjectIdentifier: Verdict] = [:]
+        verdictBySoftware.reserveCapacity(verdicts.count)
+        for verdict in verdicts {
+            let id = ObjectIdentifier(verdict.software)
+            if verdictBySoftware[id] == nil { verdictBySoftware[id] = verdict }
+            if verdict.tier == "review" || verdict.tier == "remove" { stale += 1 }
+            if verdict.tier == "remove" {
+                reclaimableBytes = addBytes(
+                    reclaimableBytes,
+                    addBytes(verdict.software.sizeBytes, verdict.software.dataBytes)
+                )
+            }
+        }
         return ScanData(
             scanned_at: isoString(scannedAt) ?? "",
             duration_s: (durationS * 10).rounded() / 10,
             brew_available: brewAvailable,
             totals: ScanTotals(
                 apps_installed: apps.isEmpty ? appsInstalled : apps.count,
-                orphaned_items: orphanedItems.count,
+                orphaned_items: orphanedCount,
                 orphaned_bytes: orphanedBytes,
                 system_leftover_bytes: systemLeftoverBytes,
                 reclaimable_bytes: reclaimableBytes,
@@ -79,7 +104,7 @@ public final class ScanResult {
             ),
             leftovers: dataItems.map { $0.toLeftoverItem() },
             software: software.map { sw in
-                let v = verdicts.first { $0.software === sw }
+                let v = verdictBySoftware[ObjectIdentifier(sw)]
                 return SoftwareItem(
                     name: sw.name,
                     kind: sw.kind,
