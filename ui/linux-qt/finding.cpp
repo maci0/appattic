@@ -17,8 +17,12 @@
 
 static qint64 jsonInt(const QJsonObject &o, const char *key) {
     const QJsonValue v = o.value(QLatin1String(key));
-    if (v.isDouble()) return qint64(v.toDouble());
-    if (v.isString()) return v.toString().toLongLong();
+    if (v.isDouble()) return v.toInteger(-1);
+    if (v.isString()) {
+        bool ok = false;
+        const qint64 n = v.toString().toLongLong(&ok);
+        return ok ? n : -1;
+    }
     return -1;
 }
 

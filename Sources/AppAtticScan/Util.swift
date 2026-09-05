@@ -565,15 +565,15 @@ private final class CommandPipes: @unchecked Sendable {
 
 func intFromSizeAttribute(_ raw: Any?) -> Int {
     let v: Int64
-    if let n = raw as? NSNumber {
+    if let u = raw as? UInt64 {
+        if u > UInt64(Int64.max) { return Int.max }
+        v = Int64(u)
+    } else if let n = raw as? NSNumber {
         v = n.int64Value
     } else if let i = raw as? Int {
         v = Int64(i)
     } else if let i = raw as? Int64 {
         v = i
-    } else if let u = raw as? UInt64 {
-        if u > UInt64(Int64.max) { return Int.max }
-        v = Int64(u)
     } else {
         return 0
     }

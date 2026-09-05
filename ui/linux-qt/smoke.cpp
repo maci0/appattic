@@ -98,6 +98,20 @@ static int smokeVerifyHelpers() {
         std::fprintf(stderr, "humanSize(1023 KiB) mismatch\n");
         return 1;
     }
+    QVector<Finding> largeSize;
+    appendFindingsFromBlob(largeSize, QByteArrayLiteral(
+        "{\"findings\":[{\"name\":\"large\",\"size_bytes\":9007199254740993}]}"));
+    if (largeSize.size() != 1 || largeSize[0].bytes != Q_INT64_C(9007199254740993)) {
+        std::fprintf(stderr, "64-bit JSON integer lost precision\n");
+        return 1;
+    }
+    QVector<Finding> invalidSize;
+    appendFindingsFromBlob(invalidSize, QByteArrayLiteral(
+        "{\"findings\":[{\"name\":\"invalid\",\"size_bytes\":\"not-a-number\"}]}"));
+    if (invalidSize.size() != 1 || invalidSize[0].bytes != -1) {
+        std::fprintf(stderr, "invalid JSON integer treated as zero\n");
+        return 1;
+    }
     Finding f;
     f.path = QString::fromUtf8("/tmp/Cafe\xCC\x81");
     QSet<QString> ignored;
