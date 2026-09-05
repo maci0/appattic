@@ -85,10 +85,12 @@ public func uninstallCommand(
     pkgId: String? = nil
 ) -> String {
     if source == "brew-formula" {
-        return "brew uninstall \(shellQuote(name))"
+        let q = shellQuote(name)
+        return "if brew list --formula \(q) >/dev/null 2>&1; then brew uninstall \(q); fi"
     }
     if source == "brew-cask" {
-        return "brew uninstall --cask \(shellQuote(caskName ?? name))"
+        let q = shellQuote(caskName ?? name)
+        return "if brew list --cask \(q) >/dev/null 2>&1; then brew uninstall --cask \(q); fi"
     }
     if source == "flatpak" {
         return "flatpak uninstall -y \(shellQuote(linuxUninstallId(source: source, path: path, pkgId: pkgId)))"
