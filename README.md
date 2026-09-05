@@ -89,8 +89,9 @@ Tests (same flags as `.github/workflows/linux.yml`):
 
 ```bash
 bash scripts/check.sh
-# lint + AppAtticScanTests + CLI debug build
-# Linux Qt UI proof: bash scripts/check.sh --qt
+# fast: lint + AppAtticScanTests + CLI debug build
+bash scripts/check.sh --qt
+# full Linux CI parity, including Qt/WASM proof
 
 swift build --target AppAtticScan -c debug --disable-automatic-resolution
 swift test --filter AppAtticScanTests --disable-automatic-resolution
@@ -101,7 +102,7 @@ bash scripts/lint.sh
 
 `swift test` and `swift build` need unrestricted permissions in sandboxed environments.
 
-`scripts/lint.sh` runs shellcheck on the build scripts, compiles `hostexec` with warnings as errors, and runs `zig fmt --check` when `zig` is on PATH. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the local command that matches the CI lint + test + CLI steps.
+`scripts/lint.sh` runs shellcheck on the build scripts, compiles `hostexec` with warnings as errors, and runs `zig fmt --check` when `zig` is on PATH. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the fast lint + test + CLI loop; `scripts/check.sh --qt` reproduces the full Linux CI verification.
 
 ## Native UI
 
