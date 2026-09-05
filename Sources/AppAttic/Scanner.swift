@@ -253,20 +253,7 @@ final class ScannerViewModel {
                 lines.append(leftoverRemoveCommand(for: item))
             }
         }
-        let formulas = appItems.filter { $0.source == "brew-formula" }
-        let casks = appItems.filter { $0.source == "brew-cask" }
-        let rest = appItems.filter { $0.source != "brew-formula" && $0.source != "brew-cask" }
-        if !formulas.isEmpty {
-            lines.append("")
-            lines.append("# Brew formulas")
-            lines.append("brew uninstall " + formulas.map { shellQuote($0.name) }.joined(separator: " "))
-        }
-        if !casks.isEmpty {
-            lines.append("")
-            lines.append("# Brew casks")
-            lines.append("brew uninstall --cask " + casks.map { shellQuote($0.cask_name ?? $0.name) }.joined(separator: " "))
-        }
-        for app in rest {
+        for app in appItems {
             lines.append("")
             lines.append("# \(app.name)")
             lines.append(uninstallCommand(for: app))

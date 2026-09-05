@@ -301,6 +301,17 @@ extension CLIFlagTests {
 }
 
 final class ScriptPreviewTests: XCTestCase {
+    func testBrewUninstallCommandsSkipAlreadyRemovedPackages() {
+        XCTAssertEqual(
+            uninstallCommand(source: "brew-formula", name: "jq", path: "/opt/homebrew/bin/jq", caskName: nil, steamAppId: nil),
+            "if brew list --formula jq >/dev/null 2>&1; then brew uninstall jq; fi"
+        )
+        XCTAssertEqual(
+            uninstallCommand(source: "brew-cask", name: "Firefox", path: "/Applications/Firefox.app", caskName: "firefox", steamAppId: nil),
+            "if brew list --cask firefox >/dev/null 2>&1; then brew uninstall --cask firefox; fi"
+        )
+    }
+
     func testCommentOnlyCleanupIsNotActionable() {
         let steam = uninstallCommand(
             source: "steam",
