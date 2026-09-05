@@ -118,7 +118,7 @@ final class GnomeStateSink: NSObject, XMLParserDelegate {
         let appId = attributes["id"] ?? ""
         let raw = attributes["last-seen"] ?? ""
         if appId.isEmpty || raw.isEmpty { return }
-        guard let epoch = Double(raw) else { return }
+        guard let epoch = Double(raw), epoch.isFinite else { return }
         let dt = dateFromUnixEpoch(epoch)
         record(appId, dt)
         let stem = posixLowercased(appId).hasSuffix(".desktop") ? String(appId.dropLast(8)) : appId
