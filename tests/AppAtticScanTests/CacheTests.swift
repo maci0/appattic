@@ -73,6 +73,8 @@ final class CacheTests: XCTestCase {
         XCTAssertTrue(isScanCacheStale(cache, includeSystem: true, fingerprint: "a", now: now, maxAge: 3600))
         let later = parseISODate("2026-08-18T12:30:00Z")!
         XCTAssertTrue(isScanCacheStale(cache, includeSystem: false, fingerprint: "a", now: later, maxAge: 3600))
+        let clockMovedBack = parseISODate("2026-08-17T11:30:00Z")!
+        XCTAssertTrue(isScanCacheStale(cache, includeSystem: false, fingerprint: "a", now: clockMovedBack, maxAge: 3600))
     }
 
     func testMissingCacheFileReturnsNil() {
