@@ -2262,6 +2262,9 @@ int main(int argc, char **argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("AppAttic"));
     QApplication::setOrganizationName(QStringLiteral("AppAttic"));
+    QFont appFont = app.font();
+    appFont.setPointSize(13);
+    app.setFont(appFont);
     MainWindow w;
     w.show();
     return app.exec();
