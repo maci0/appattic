@@ -133,15 +133,15 @@ public func linuxOsReleaseText(
     readFile("/etc/os-release") ?? readFile("/usr/lib/os-release") ?? ""
 }
 
-/// XDG Base Directory: empty or unset variable uses `home/fallback`.
+/// XDG Base Directory: unset, empty, or non-absolute values use `home/fallback`.
 public func xdgUserDir(
     _ variable: String,
     fallback: String,
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     env: [String: String] = ProcessInfo.processInfo.environment
 ) -> String {
-    if let raw = env[variable]?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
-        return (raw as NSString).expandingTildeInPath
+    if let raw = env[variable]?.trimmingCharacters(in: .whitespacesAndNewlines), raw.hasPrefix("/") {
+        return raw
     }
     return (home as NSString).appendingPathComponent(fallback)
 }

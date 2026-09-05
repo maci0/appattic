@@ -157,8 +157,8 @@ static int pluginTag(const QString &wasmPath) {
 }
 
 static int homePathTag(const char *xdgEnv, const QString &rel) {
-    const QByteArray env = qgetenv(xdgEnv);
-    if (!env.isEmpty()) return QDir(QString::fromUtf8(env)).exists() ? 1 : 0;
+    const QString env = QString::fromUtf8(qgetenv(xdgEnv)).trimmed();
+    if (QDir::isAbsolutePath(env)) return QDir(env).exists() ? 1 : 0;
     return QDir::home().exists(rel) ? 1 : 0;
 }
 
