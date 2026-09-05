@@ -1,6 +1,6 @@
 import Foundation
 
-public enum CLIParseError: Equatable, Sendable, CustomStringConvertible {
+public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStringConvertible {
     case jsonRequiresPath
     case topRequiresNonNegativeInteger
     case categoryRequiresValue
@@ -27,6 +27,8 @@ public enum CLIParseError: Equatable, Sendable, CustomStringConvertible {
             return "--leftovers-only and --stale-only cannot be combined"
         }
     }
+
+    public var errorDescription: String? { description }
 }
 
 public struct CLIOptions {

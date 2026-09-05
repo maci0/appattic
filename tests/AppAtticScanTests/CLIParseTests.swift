@@ -3,6 +3,11 @@ import XCTest
 @testable import AppAtticCLIKit
 
 final class CLIFlagTests: XCTestCase {
+    func testParseErrorsUseSwiftErrorHandling() {
+        let error: Error = CLIParseError.unknownOption("--wat")
+        XCTAssertEqual(error.localizedDescription, "unknown option: --wat")
+    }
+
     func testDefaultCommandIsReport() {
         XCTAssertEqual(parseCLIArguments([]).command, "report")
     }
