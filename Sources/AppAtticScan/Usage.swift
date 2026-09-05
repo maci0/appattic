@@ -233,18 +233,13 @@ public func parseFishHistory(_ path: String, index: inout HistoryIndex, keep: Se
         }
         if let m = fishWhenRE.firstMatch(in: line, range: range), m.numberOfRanges >= 2,
            let r = Range(m.range(at: 1), in: line), let pendingCmd = pending {
-            if let epoch = TimeInterval(line[r]) {
-                noteHistoryTime(dateFromUnixEpoch(epoch), index: &index)
-            }
-            let first = pendingCmd.split(whereSeparator: \.isWhitespace).first.map { $0.split(separator: "/").last.map(String.init) ?? "" } ?? ""
-            if !first.isEmpty, fullMatch(cmdTokenRE, first), retainHistoryToken(first, keep: keep) {
+            let ts = TimeInterval(line[r]).map(dateFromUnixEpoch)
+            noteHistoryTime(ts, index: &index)
+            if let first = firstCommandToken(pendingCmd), fullMatch(cmdTokenRE, first), retainHistoryToken(first, keep: keep) {
                 let token = posixLowercased(first)
                 index.everUsed.insert(token)
-                if let epoch = TimeInterval(line[r]) {
-                    let ts = dateFromUnixEpoch(epoch)
-                    if index.lastSeen[token] == nil || ts > index.lastSeen[token]! {
-                        index.lastSeen[token] = ts
-                    }
+                if let ts, index.lastSeen[token].map({ ts > $0 }) ?? true {
+                    index.lastSeen[token] = ts
                 }
             }
             pending = nil
