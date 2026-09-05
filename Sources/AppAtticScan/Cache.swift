@@ -93,7 +93,8 @@ public func isScanCacheStale(
     if cache.includeSystem != includeSystem { return true }
     if cache.fingerprint != fingerprint { return true }
     guard let when = parseISODate(cache.data.scanned_at) else { return true }
-    return now.timeIntervalSince(when) > maxAge
+    let age = now.timeIntervalSince(when)
+    return age < 0 || age > maxAge
 }
 
 public func clearScanCache(at url: URL = defaultScanCacheURL()) {
