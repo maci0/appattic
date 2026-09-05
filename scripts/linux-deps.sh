@@ -268,7 +268,7 @@ if [[ "$family" == debian ]]; then
 fi
 
 zig_ok() {
-    command -v zig >/dev/null 2>&1 && zig version 2>/dev/null | grep -qE "^${ZIG_VER%.*}\."
+    command -v zig >/dev/null 2>&1 && [[ "$(zig version 2>/dev/null)" == "$ZIG_VER" ]]
 }
 
 install_zig_tarball() {
@@ -278,7 +278,7 @@ install_zig_tarball() {
     else
         dest="$ROOT/.deps/zig"
     fi
-    if [[ -x "$dest/zig" ]] && "$dest/zig" version 2>/dev/null | grep -qE "^${ZIG_VER%.*}\."; then
+    if [[ -x "$dest/zig" ]] && [[ "$("$dest/zig" version 2>/dev/null)" == "$ZIG_VER" ]]; then
         echo "Zig already at $dest/zig"
         "$dest/zig" version | head -n 1
         export PATH="$dest:${PATH:-}"

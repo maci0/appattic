@@ -30,14 +30,14 @@ appattic_require_swift() {
         echo "macOS: Xcode 15.4 or https://www.swift.org/install/" >&2
         exit 1
     fi
-    local ver mm
+    local ver
     ver="$(swift --version 2>/dev/null || true)"
     ver="${ver%%$'\n'*}"
-    mm="${want%.*}"
     case "$ver" in
-        *"$mm"*) ;;
+        *"Swift version $want "*|*"Apple Swift version $want "*) ;;
         *)
-            echo "warning: Swift $want expected (.swift-version); this is: $ver" >&2
+            echo "error: need Swift $want from .swift-version (have: $ver)" >&2
+            exit 1
             ;;
     esac
 }

@@ -59,15 +59,11 @@ fi
 if [ -z "$zig_need" ]; then
     zig_need="0.16.0"
 fi
-zig_mm="${zig_need%.*}"
 zig_ver="$(zig version)"
-case "$zig_ver" in
-    "$zig_mm".*) ;;
-    *)
-        echo "error: need zig ${zig_mm}.x from .zig-version (have $zig_ver). scripts/linux-deps.sh --install" >&2
-        exit 1
-        ;;
-esac
+if [ "$zig_ver" != "$zig_need" ]; then
+    echo "error: need zig $zig_need from .zig-version (have $zig_ver). scripts/linux-deps.sh --install" >&2
+    exit 1
+fi
 
 if [ "${1:-}" = "test" ]; then
     name="${2##*/}"
