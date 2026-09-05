@@ -11,7 +11,7 @@ AppAttic is a local CLI and desktop UI. It does not listen on a network port, au
 ## What the code actually does
 
 - **Leftovers, stale, outdated (report), and packages CLI** print a report. They do not delete. `--dry-run` prints a script for the operator to review and run themselves (`Sources/AppAtticCLI/main.swift`, `Sources/AppAtticScan/Cleanup.swift`).
-- **CLI `update` without `--dry-run`** writes a temp script and runs `/bin/sh` on it immediately. There is no confirm prompt on that path. It upgrades Homebrew formulas/casks and Flatpak apps only (`updateScript` in `Sources/AppAtticScan/Outdated.swift`).
+- **CLI `update` without `--dry-run`** prompts before writing and running a temp `/bin/sh` script when stdin is a TTY. Non-interactive invocations proceed without a prompt. It upgrades Homebrew formulas/casks and Flatpak apps only (`confirmLiveUpdate` in `Sources/AppAtticCLI/main.swift`; `updateScript` in `Sources/AppAtticScan/Outdated.swift`).
 - **macOS and Linux UIs** run delete, update, and mark-manual scripts after a confirm dialog when `confirmDelete` is true (the default). The operator can turn that setting off in the UI or in `settings.json`.
 - **Untrusted Homebrew casks** stay listed and are not updated (`Sources/AppAtticScan/BrewInfo.swift`, `Outdated.swift`). App Store, apt, pacman, dnf, zypper, and Snap upgrades are report-only.
 - **WASM `host.exec`** (Linux Qt core) allowlists read-only package-manager queries and denies destructive argv (`core/host/hostexec.c`). Cleanup still happens in a host `/bin/sh` script the UI runs, not through `host.exec`.

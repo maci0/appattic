@@ -1,6 +1,6 @@
 # Threat model: AppAttic
 
-Last reviewed: 2026-09-02.
+Last reviewed: 2026-09-05.
 
 No owner or review cadence is published. This file is the living model of the attack surface. Point fixes belong in application code reviews, not here.
 
@@ -10,7 +10,7 @@ AppAttic is a local cleanup utility (CLI `appattic`, macOS AppKit UI, Linux Qt 6
 
 | Rank | Risk | Boundary | Impact | Existing control | Gap |
 |---|---|---|---|---|---|
-| 1 | A generated `/bin/sh` script runs `rm -rf`, `brew uninstall`, `flatpak uninstall -y`, `snap remove`, or distro `purge`/`-Rns` against scan results | User → app (script execution) | Permanent loss of apps, leftover data, or packages | UI confirm dialog when `confirmDelete` is true; `shellQuote`; KEEP/system leftovers excluded from default CLI dry-run | CLI `update` runs with no prompt. UI confirm can be turned off. Scripts are the only gate between a bad finding and a destructive argv. |
+| 1 | A generated `/bin/sh` script runs `rm -rf`, `brew uninstall`, `flatpak uninstall -y`, `snap remove`, or distro `purge`/`-Rns` against scan results | User → app (script execution) | Permanent loss of apps, leftover data, or packages | UI confirm dialog when `confirmDelete` is true; interactive CLI `update` prompt; `shellQuote`; KEEP/system leftovers excluded from default CLI dry-run | Non-interactive CLI `update` deliberately proceeds without a prompt. UI confirm can be turned off. Scripts are the only gate between a bad finding and a destructive argv. |
 | 2 | Scan cache or WASM plugin JSON is treated as a trusted finding list and becomes cleanup commands | Build/runtime plugins; cache file → app | Attacker-chosen paths or package names in the script the user is asked to run | Cache fingerprint + 24h age (`Cache.swift`). WASM `host.exec` query allowlist (`hostexec.c`). Qt drops some `rm` of `/usr/` (`finding.cpp`) | Cache has no MAC. Plugin `.wasm` is unsigned. Qt uses plugin-supplied `command` almost verbatim. Swift leftover `rm` has no `/usr` deny. |
 | 3 | Leftover classifier lists a credential or config tree as orphaned (`rm -rf ~/.aws` and similar) | Filesystem → leftover model | Secret loss (cloud keys, Docker config) | `linuxSystemNames` / `appleServiceNames` mark `.ssh`, `.gnupg`, and many OS dirs `system` (`Leftovers.swift`) | `.aws` is scanned as a home leaf and is not in the system-name set. Misclassification is a recurring class. |
 | 4 | `host.exec` is the only host import; a bug there is WASM breakout to process spawn | WASM guest → host | Arbitrary subprocess if allowlist fails | Allowlist + metacharacter reject + destructive-token deny (`hostexec.c`). No WASI filesystem. | No Wasmtime fuel/epoch. `APPATTIC_CORE_OUT` loads whatever `.wasm` files are there. Live `execvp` on Linux unless `APPATTIC_HOST_EXEC_FIXTURE`. |
@@ -132,7 +132,7 @@ Impact is local and user-scoped, not a multi-tenant data breach. The concrete wo
 - **Repudiation:** no audit log of scripts that ran. Temp `.sh` is deleted after use (`Scanner.swift`, Qt `QFile::remove`).
 - **Disclosure:** `--json FILE` writes the full scan (paths, versions) to an operator-chosen path (`main.swift`). Cache holds the same.
 - **DoS:** `--top` is bounded; leftover measurement uses `pmap` workers and `duSize` timeouts (`Leftovers.swift`). Unbounded: size of cache JSON, number of leftover rows, history file up to 500k lines (`Usage.swift`).
-- **Elevation:** CLI `update` without `--dry-run` immediately `runShellScript`s Homebrew/Flatpak upgrades (`AppAtticCLI/main.swift`). README says “Confirm first”; the CLI does not prompt. Distro remove scripts may ask for root via the package manager, not via AppAttic.
+- **Elevation:** CLI `update` without `--dry-run` prompts only when stdin is a TTY; redirected or automated invocations proceed directly to `runShellScript` (`AppAtticCLI/main.swift` `confirmLiveUpdate`). Distro remove scripts may ask for root via the package manager, not via AppAttic.
 
 ### App → filesystem / leftover model
 
@@ -163,7 +163,7 @@ Impact is local and user-scoped, not a multi-tenant data breach. The concrete wo
 | Control | File | Covers | Does not cover |
 |---|---|---|---|
 | No network listener | CLI parse + absence of bind/listen | Remote unauthn | Local user and local files |
-| UI `confirmDelete` default true | `Settings.swift`, `ContentView.swift`, `ui/linux-qt/main.cpp` | Accidental click | Disabled setting; CLI `update` |
+| UI `confirmDelete` default true; CLI `confirmLiveUpdate` on a TTY | `Settings.swift`, `ContentView.swift`, `ui/linux-qt/main.cpp`, `AppAtticCLI/main.swift` | Accidental click or interactive CLI update | Disabled UI setting; non-interactive CLI `update` |
 | `--dry-run` prints, does not run (except it short-circuits before `update` run) | `CLIParse.swift`, `main.swift` | Review of leftover/stale/package scripts | Operator pasting the script into a root shell |
 | `shellQuote` | `Util.swift` | Metacharacters in paths/names inside generated `sh` | A finding that should not have been listed at all |
 | KEEP / `system` / untrusted-cask / report-only distro upgrades | `Recommend.swift`, `Leftovers.swift`, `Outdated.swift`, `Packages.swift` | Default CLI script omits KEEP and system leftovers; no `apt upgrade` live | REVIEW-tier if the UI user opts in; `.aws`-class misses; plugin `command` |
@@ -180,13 +180,13 @@ Impact is local and user-scoped, not a multi-tenant data breach. The concrete wo
 
 ### Claim vs code
 
-`README.md` says of `./run.sh update`: “Confirm first.” The CLI path (`AppAtticCLI/main.swift`) writes a temp script and runs `/bin/sh` with no prompt when `--dry-run` is absent. The UIs do confirm when `confirmDelete` is true. Treat “confirm first” as UI-only.
+`README.md` says CLI updates run immediately, while `AppAtticCLI/main.swift` `confirmLiveUpdate` prompts when stdin is a TTY and deliberately proceeds without a prompt otherwise. The CLI help accurately states “prompts on a TTY.”
 
-`README.md` “Nothing is deleted until you review a script or confirm in the UI” matches leftover/stale/packages CLI (print only unless the user runs a dry-run script). It does not describe `update`.
+`README.md` “Nothing is deleted until you review a script or confirm in the UI” matches leftover/stale/packages CLI. `update` upgrades packages rather than deleting scan findings and has the TTY-dependent behavior above.
 
 ### Single points of failure
 
-1. **Operator confirmation** (or its absence on CLI `update`) is the control in front of every high-impact delete/upgrade.
+1. **Operator confirmation** (or its absence for non-interactive CLI `update`) is the control in front of every high-impact delete/upgrade.
 2. **`appattic_host_exec_allowed`** is the control in front of every WASM-spawned process.
 3. **Leftover `system` name lists** are the control in front of deleting home-dot credential trees.
 
@@ -195,7 +195,7 @@ Impact is local and user-scoped, not a multi-tenant data breach. The concrete wo
 These are hostile-but-local scenarios. Evidence is the code path, not an exploit.
 
 1. **Skip the confirm dialog.** Settings → `confirmDelete` false (`ContentView.swift` `confirmDeleteBinding`, Qt `m_confirmBox`). Delete/Update/Mark Manual run `runTempScript` / `runScript` on the first click.
-2. **CLI upgrade without review.** `appattic update` → `updateScript` → `runShellScript` (`main.swift`). Equivalent to running the dry-run script blindly.
+2. **Non-interactive CLI upgrade without review.** With stdin redirected, `appattic update` → `confirmLiveUpdate` returns true → `updateScript` → `runShellScript` (`main.swift`). This supports automation but bypasses the interactive review gate.
 3. **Poison `last-scan.json`.** Write a cache with the current fingerprint, `includeSystem` matching the next run, `scanned_at` within 24h, and an extra leftover path. `resolveScan` will use it (`Cache.swift`). The UI/CLI then offers that path in cleanup.
 4. **Swap WASM under `APPATTIC_CORE_OUT`.** Qt loads `appattic_core.wasm` and a fixed plugin filename list (`corehost.cpp`). A replaced plugin can return findings whose `command` is copied into the script (`finding.cpp`). `host.exec` still cannot `rm`, but the *script the user confirms* can.
 5. **PATH hijack.** Put a fake `brew` on `PATH`. Scan and `update` invoke it (`whichCommand`, `updateCommand`).
