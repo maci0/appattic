@@ -35,23 +35,21 @@ fn isArch(t: []const u8) bool {
 }
 
 fn skipUnusedNoise(line: []const u8) bool {
-    if (std.ascii.startsWithIgnoreCase(line, "looking")) return true;
-    if (std.ascii.startsWithIgnoreCase(line, "nothing unused")) return true;
-    if (std.ascii.startsWithIgnoreCase(line, "info:")) return true;
-    if (std.ascii.startsWithIgnoreCase(line, "uninstalling")) return true;
-    if (std.ascii.startsWithIgnoreCase(line, "would")) return true;
-    return false;
+    return std.ascii.startsWithIgnoreCase(line, "looking") or
+        std.ascii.startsWithIgnoreCase(line, "nothing unused") or
+        std.ascii.startsWithIgnoreCase(line, "info:") or
+        std.ascii.startsWithIgnoreCase(line, "uninstalling") or
+        std.ascii.startsWithIgnoreCase(line, "would");
 }
 
 fn splitRef(tok: []const u8, name: *[]const u8, branch: *[]const u8) bool {
     var it = std.mem.splitScalar(u8, tok, '/');
     const id = it.next() orelse return false;
-    const mid = it.next();
+    _ = it.next();
     const last = it.next();
     if (!jsonbuf.isSafeIdent(id)) return false;
     name.* = id;
     if (last) |b| {
-        _ = mid;
         if (jsonbuf.isSafeIdent(b)) branch.* = b;
     }
     return true;
