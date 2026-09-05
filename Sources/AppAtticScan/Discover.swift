@@ -80,6 +80,8 @@ private let appCategories: [String: String] = [
     "public.app-category.weather": "Weather app",
 ]
 
+private let versionRE = try! NSRegularExpression(pattern: "^[\\d.]+$")
+
 public func isRealAppPath(_ path: String) -> Bool {
     let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     if real.isEmpty { return false }
@@ -180,7 +182,6 @@ public func plistDescription(_ info: [String: Any], appName: String) -> String? 
         }
     }
     if text.isEmpty || isJunkAppBlurb(text) { return nil }
-    let versionRE = try! NSRegularExpression(pattern: "^[\\d.]+$")
     func fullMatch(_ s: String) -> Bool {
         versionRE.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
             && versionRE.rangeOfFirstMatch(in: s, range: NSRange(s.startIndex..., in: s)).length == (s as NSString).length
@@ -220,7 +221,8 @@ private func lprojCandidates() -> [String] {
 
 func readInfoPlist(_ appPath: String) -> [String: Any] {
     var data: [String: Any] = [:]
-    for base in appBundleBases(appPath) {
+    let bases = appBundleBases(appPath)
+    for base in bases {
         for rel in ["Contents/Info.plist", "Info.plist"] {
             let loaded = loadPlist((base as NSString).appendingPathComponent(rel))
             if !loaded.isEmpty {
@@ -230,7 +232,7 @@ func readInfoPlist(_ appPath: String) -> [String: Any] {
         }
         if !data.isEmpty { break }
     }
-    for base in appBundleBases(appPath) {
+    for base in bases {
         for resName in ["Contents/Resources", "Resources"] {
             let res = (base as NSString).appendingPathComponent(resName)
             for loc in lprojCandidates() {
