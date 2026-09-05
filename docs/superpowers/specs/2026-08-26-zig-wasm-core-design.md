@@ -1,10 +1,14 @@
 # AppAttic Zig WASM core
 
 Date: 2026-08-26
-Updated: 2026-09-02
+Updated: 2026-09-05
 Status: Accepted
 
+## Context
+
 Follow-on to [`2026-08-17-swift-scan-port-design.md`](2026-08-17-swift-scan-port-design.md) (that port is implemented; `AppAtticScan` remains until a later Zig copy of its tests). This record is the decision that has been made, not a proposal.
+
+## Decision
 
 Replace in-process Swift scan logic with a Zig core compiled to WebAssembly. **Every package manager and every leftover scan path is a WASM plugin.** Native SwiftCrossUI stays on macOS (AppKit). Linux UI is C++ Qt 6 Widgets (`ui/linux-qt`), matching TMOG Linux. Do not silent-delete. Distro upgrades stay report-only. `scripts/linux-qt-link.sh` is the Linux link step; CI and the Dockerfiles require `LINUX_QT_LINK=ok`. Build on the distro you run.
 
@@ -14,7 +18,7 @@ Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability
 
 The Zig WASM core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. Core has no switch on `apt` vs `pacman` vs `npm`. Core does not own filesystem roots. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; Darwin and CI may inject fixtures via `APPATTIC_HOST_EXEC_FIXTURE`). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
 
-`AppAtticScan` keeps building until a later port copies its tests into Zig. This spike does not delete it. The Swift CLI (`appattic`) still parses in `AppAtticScan`; it is not a WASM guest. Linux Qt loads `appattic_core.wasm` through `core/host/embed.c`.
+`AppAtticScan` keeps building until a later port copies its tests into Zig. This spike does not delete it. The Swift CLI (`appattic`) parses in `AppAtticCLIKit`; it is not a WASM guest. Linux Qt loads `appattic_core.wasm` through `core/host/embed.c`.
 
 ## Paper principles that bind AppAttic
 
@@ -198,7 +202,7 @@ Overlay-vs-packaged findings are plugin `path-shadow` (`path_shadow.wasm`), not 
 - ABI mismatch: do not run `plugin_query`.
 - No object ids: no script lines.
 
-## What stays Swift until ported
+## Consequences: what stays Swift until ported
 
 Linux Qt already loads the WASM plugins. These remain in Swift for the macOS UI and the `appattic` CLI:
 

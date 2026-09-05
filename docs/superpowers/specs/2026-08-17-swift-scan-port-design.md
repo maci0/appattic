@@ -1,7 +1,7 @@
 # AppAttic Swift scan port
 
 Date: 2026-08-17
-Updated: 2026-09-02
+Updated: 2026-09-05
 Status: Implemented
 
 Port the Python scanner into Swift so the Mac UI and Linux CLI/UI run with no Python. Product behavior stays the same: leftovers, stale software, outdated version signal. Nothing auto-deletes. Outdated is report-only except Homebrew formulas/casks and Flatpak, which apply only through the explicit `update` command or UI confirm. Distro managers, Snap, and the App Store stay report-only.
@@ -31,9 +31,10 @@ The Python package is gone. `generate_icon.py` remains as a one-off asset script
 | Target | Kind | Depends on |
 |--------|------|------------|
 | `AppAtticScan` | library | Foundation only |
-| `appattic` | executable | `AppAtticScan` |
+| `AppAtticCLIKit` | library | none |
+| `appattic` | executable | `AppAtticScan`, `AppAtticCLIKit` |
 | `AppAtticUI` | executable (macOS only; target name `AppAttic`) | `AppAtticScan`, SwiftCrossUI, DefaultBackend |
-| `AppAtticScanTests` | test (`tests/AppAtticScanTests`) | `AppAtticScan` |
+| `AppAtticScanTests` | test (`tests/AppAtticScanTests`) | `AppAtticScan`, `AppAtticCLIKit` |
 
 On Linux, `Package.swift` omits the SwiftCrossUI product and dependency. Platform floor: macOS 13. Linux is a first-class scan and CLI host. Linux UI needs Qt 6 Widgets at build and run (`scripts/linux-qt-link.sh`).
 
@@ -50,12 +51,13 @@ On Linux, `Package.swift` omits the SwiftCrossUI product and dependency. Platfor
 | `Recommend.swift` | software list, KEEP / REVIEW / REMOVE |
 | `Scan.swift` | `runFullScan(includeSystem:progress:)` |
 | `Cleanup.swift` | reviewable `/bin/sh` script |
-| `CLIParse.swift` | CLI flags and commands |
 | `Cache.swift` | last-scan cache (`--fresh` bypasses it) |
 | `Settings.swift` | include-system, confirm, ignore list, cleanup selection |
 | `Packages.swift` | distro orphans and language globals |
 | `Steam.swift` | Steam leftovers / uninstall helpers |
 | `CrossOver.swift` | CrossOver bottle helpers |
+
+`Sources/AppAtticCLIKit/CLIParse.swift` owns CLI flags and commands so argument parsing can be tested without depending on the scan library.
 
 Scan types the UI already decodes (`ScanData`, `LeftoverItem`, `SoftwareItem`, `OutdatedEntry`, `ScanTotals`, `PackageEntry`) live in the library. The UI target imports `AppAtticScan`. `Sources/AppAttic/Models.swift` keeps only UI helpers (`formatDate`) that are not scan types.
 
@@ -146,7 +148,7 @@ Command: `swift test` (needs unrestricted permissions in this environment, same 
 
 ## Cutover
 
-Completed. `ScannerViewModel` calls `AppAtticScan.runFullScan`. The CLI links `AppAtticScan`. The runtime Python package, `tests/*.py`, `APPATTIC_PYTHON`, and `copy_python` / `link_python` are gone. `generate_icon.py` remains as a one-off asset script.
+Completed. `ScannerViewModel` calls `AppAtticScan.runFullScan`. The CLI links `AppAtticScan` and `AppAtticCLIKit`. The runtime Python package, `tests/*.py`, `APPATTIC_PYTHON`, and `copy_python` / `link_python` are gone. `generate_icon.py` remains as a one-off asset script.
 
 No dual-run of Python and Swift in production.
 

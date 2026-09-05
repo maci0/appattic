@@ -1,14 +1,14 @@
 # Swift Scan Port Implementation Plan
 
 Date: 2026-08-18
-Updated: 2026-09-02
+Updated: 2026-09-05
 Status: Implemented
 
-Historical task list for [`docs/superpowers/specs/2026-08-17-swift-scan-port-design.md`](../specs/2026-08-17-swift-scan-port-design.md). The port landed: Python scanner removed, `AppAtticScan` + `appattic` CLI + in-process UI. Product name is `AppAtticUI` (see `Package.swift`). Follow-on architecture: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](../specs/2026-08-26-zig-wasm-core-design.md).
+Historical task list for [`docs/superpowers/specs/2026-08-17-swift-scan-port-design.md`](../specs/2026-08-17-swift-scan-port-design.md). The port landed: Python scanner removed, `AppAtticScan` + `AppAtticCLIKit` + `appattic` CLI + in-process UI. Product name is `AppAtticUI` (see `Package.swift`). Follow-on architecture: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](../specs/2026-08-26-zig-wasm-core-design.md).
 
 **Goal:** Replace the Python scanner with a Foundation `AppAtticScan` library, a Gtk-free `appattic` CLI, and an in-process UI scan, then delete the Python package.
 
-**Architecture:** One library owns discover → usage → brew → outdated → leftovers → recommend. The CLI links only that library. The existing SwiftCrossUI app calls `runFullScan` on a background queue. Mac/Linux splits use `#if os`, never AppKit in the library.
+**Architecture:** `AppAtticScan` owns discover → usage → brew → outdated → leftovers → recommend; `AppAtticCLIKit` owns argument parsing. The CLI links both libraries. The existing SwiftCrossUI app calls `runFullScan` on a background queue. Mac/Linux splits use `#if os`, never AppKit in the scan library.
 
 **Tech Stack:** Swift 5.10, SwiftPM, Foundation, XCTest, SwiftCrossUI DefaultBackend (UI only).
 
