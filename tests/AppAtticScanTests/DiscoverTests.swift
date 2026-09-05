@@ -284,6 +284,16 @@ final class DiscoverTests: XCTestCase {
         XCTAssertTrue(dirs.contains("/var/lib/snapd/desktop/applications"))
     }
 
+    func testXdgDataDirsIgnoreRelativeEntries() {
+        let dirs = linuxDesktopDirs(
+            home: "/home/x",
+            env: ["XDG_DATA_DIRS": "relative/share:/opt/share", "XDG_DATA_HOME": "relative/user"]
+        )
+        XCTAssertFalse(dirs.contains { $0.contains("relative") }, "\(dirs)")
+        XCTAssertTrue(dirs.contains("/opt/share/applications"), "\(dirs)")
+        XCTAssertTrue(dirs.contains("/home/x/.local/share/applications"), "\(dirs)")
+    }
+
     func testFindAppsLinuxOverrideUsesDesktopFiles() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let appsDir = td.appendingPathComponent("applications")

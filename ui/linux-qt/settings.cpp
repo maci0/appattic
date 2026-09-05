@@ -14,8 +14,9 @@
 
 QString settingsFilePath() {
     const QByteArray xdg = qgetenv("XDG_DATA_HOME");
-    const QString base = !xdg.isEmpty()
-        ? QString::fromUtf8(xdg)
+    const QString configured = QString::fromUtf8(xdg).trimmed();
+    const QString base = QDir::isAbsolutePath(configured)
+        ? configured
         : (QDir::homePath() + QStringLiteral("/.local/share"));
     return QDir(base).filePath(QStringLiteral("appattic/settings.json"));
 }

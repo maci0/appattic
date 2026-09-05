@@ -59,7 +59,13 @@ Environment:
 | `APPATTIC_CORE_OUT` | Linux Qt | Directory of `appattic_core.wasm` and plugins. AppImage sets this. |
 | `APPATTIC_PAGE` | UI | Initial sidebar: `overview` (default), `leftovers`, `stale`, `outdated`, `packages`, `settings`. |
 | `NO_COLOR` | CLI | Disable ANSI color when set to a non-empty value. Also `--no-color` or `TERM=dumb`. |
-| `XDG_DATA_HOME` | Linux | Parent of `appattic/settings.json` and `last-scan.json`. |
+| `XDG_DATA_HOME` | Linux | Absolute data root; parent of `appattic/settings.json`, `last-scan.json`, and user desktop entries. |
+| `XDG_CONFIG_HOME` | Linux | Absolute configuration root scanned for leftovers and usage history. |
+| `XDG_CACHE_HOME` | Linux | Absolute cache root scanned for leftovers. |
+| `XDG_STATE_HOME` | Linux | Absolute state root scanned for leftovers. |
+| `XDG_DATA_DIRS` | Linux | Colon-separated absolute data roots searched for desktop entries (default `/usr/local/share:/usr/share`). |
+
+Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used.
 
 `report`, `leftovers`, `stale`, `outdated`, and `packages` reuse the last scan when it is still current. Pass `--fresh` to scan now. `update` always scans live and drops the last-scan cache after a successful upgrade.
 

@@ -150,7 +150,11 @@ final class UtilTests: XCTestCase {
         )
         XCTAssertEqual(
             xdgCacheHome(home: home, env: ["XDG_CACHE_HOME": "~/mycache"]),
-            ("~/mycache" as NSString).expandingTildeInPath
+            "/home/x/.cache"
+        )
+        XCTAssertEqual(
+            xdgStateHome(home: home, env: ["XDG_STATE_HOME": "relative/state"]),
+            "/home/x/.local/state"
         )
     }
 

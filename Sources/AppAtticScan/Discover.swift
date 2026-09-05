@@ -137,7 +137,7 @@ public func linuxDesktopDirs(
     let dataDirs = env["XDG_DATA_DIRS"] ?? "/usr/local/share:/usr/share"
     for d in dataDirs.split(separator: ":") {
         let trimmed = d.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
+        if trimmed.hasPrefix("/") {
             add((trimmed as NSString).appendingPathComponent("applications"))
         }
     }
