@@ -1,5 +1,6 @@
 import XCTest
 @testable import AppAtticScan
+@testable import AppAtticCLIKit
 
 final class CLIFlagTests: XCTestCase {
     func testDefaultCommandIsReport() {
