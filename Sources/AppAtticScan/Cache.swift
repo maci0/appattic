@@ -113,11 +113,15 @@ public func commitScanCache(
 ) -> Bool {
     if data.incomplete == true { return false }
     guard before == after else { return false }
-    saveScanCache(
-        ScanCacheFile(fingerprint: after, includeSystem: includeSystem, data: data),
-        to: url
-    )
-    return true
+    do {
+        try writeScanCache(
+            ScanCacheFile(fingerprint: after, includeSystem: includeSystem, data: data),
+            to: url
+        )
+        return true
+    } catch {
+        return false
+    }
 }
 
 /// Inventory stamp for cache invalidation: apps, brew lists, leftover roots, and package-manager state.
