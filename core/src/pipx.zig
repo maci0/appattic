@@ -211,6 +211,44 @@ test "parsePipxList empty junk" {
     try std.testing.expectEqual(@as(usize, 0), parsePipxList("nothing here", &buf));
 }
 
+fn packFuzzSlice(comptime s: []const u8) [4 + s.len]u8 {
+    var out: [4 + s.len]u8 = undefined;
+    std.mem.writeInt(u32, out[0..4], @intCast(s.len), .little);
+    @memcpy(out[4..], s);
+    return out;
+}
+
+const fuzz_pipx_json = packFuzzSlice(
+    \\{"venvs":{"httpie":{"metadata":{"main_package":{"package":"httpie","package_version":"3.2.2"}}}}}
+);
+const fuzz_pipx_text = packFuzzSlice(
+    "package httpie 3.2.2, installed using Python 3.12.3\n",
+);
+const fuzz_pipx_truncated = packFuzzSlice(
+    \\{"venvs":{"httpie":{"metadata":{"main_package":{"package":"http
+);
+
+test "fuzz parsePipxList" {
+    try std.testing.fuzz({}, fuzzPipxList, .{ .corpus = &.{
+        &fuzz_pipx_json,
+        &fuzz_pipx_text,
+        &fuzz_pipx_truncated,
+    } });
+}
+
+fn fuzzPipxList(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+    var tools: [32]PipxTool = undefined;
+    const n = parsePipxList(text, &tools);
+    try std.testing.expect(n <= tools.len);
+    for (tools[0..n]) |tool| {
+        try std.testing.expect(jsonbuf.isSafePkgName(tool.name));
+        try std.testing.expect(std.mem.indexOf(u8, text, tool.name) != null);
+        try std.testing.expect(tool.version.len == 0 or std.mem.indexOf(u8, text, tool.version) != null);
+    }
+}
+
 test "plugin_query present JSON comes from pipx list fixture" {
     try std.testing.expectEqual(@as(i32, 0), plugin_query(1));
     const json = result_buf[0..result_nbytes];
