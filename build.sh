@@ -24,8 +24,8 @@ Usage: ./build.sh [release|debug]
 
   ./build.sh [release|debug]   CLI (+ UI if Qt 6 / macOS)
   ./run.sh report              CLI after a build
-  bash scripts/check.sh        lint + AppAtticScanTests + CLI (CI parity)
-  bash scripts/check.sh --qt   also Linux Qt UI link proof
+  bash scripts/check.sh        fast: lint + AppAtticScanTests + CLI
+  bash scripts/check.sh --qt   full Linux CI parity, including Qt/WASM proof
   bash scripts/lint.sh
   swift test --filter UtilTests --disable-automatic-resolution
   ./core/build.sh test brew.zig

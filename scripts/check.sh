@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Local checks matching .github/workflows/linux.yml (lint + scan tests + CLI).
-# Linux Qt UI proof is separate: bash scripts/check.sh --qt
+# Fast local checks (lint + scan tests + CLI).
+# Full Linux CI parity: bash scripts/check.sh --qt
 # Usage: bash scripts/check.sh [--qt]
 set -euo pipefail
 
@@ -18,8 +18,8 @@ for arg in "$@"; do
             cat <<'EOF'
 Usage: bash scripts/check.sh [--qt]
 
-  (default)  lint + AppAtticScanTests + CLI debug build (CI test job minus Qt)
-  --qt       also bash scripts/linux-qt-link.sh
+  (default)  lint + AppAtticScanTests + CLI debug build
+  --qt       full Linux CI parity, including bash scripts/linux-qt-link.sh
 EOF
             exit 0
             ;;

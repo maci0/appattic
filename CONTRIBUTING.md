@@ -4,8 +4,8 @@ Setup, tests, and layout: [README.md](README.md).
 
 ```bash
 ./build.sh --help
-bash scripts/check.sh          # lint + AppAtticScanTests + CLI (CI parity)
-bash scripts/check.sh --qt     # also Linux Qt UI proof
+bash scripts/check.sh          # fast: lint + AppAtticScanTests + CLI
+bash scripts/check.sh --qt     # full Linux CI parity, including Qt/WASM proof
 swift test --filter UtilTests --disable-automatic-resolution
 ./core/build.sh test brew.zig
 ```
