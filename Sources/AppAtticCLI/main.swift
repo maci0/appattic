@@ -5,6 +5,7 @@ import Darwin
 import Glibc
 #endif
 import AppAtticScan
+import AppAtticCLIKit
 
 @main
 enum AppAtticCLI {

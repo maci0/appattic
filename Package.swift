@@ -38,10 +38,11 @@ let package = Package(
     dependencies: uiDeps,
     targets: [
         .target(name: "AppAtticScan"),
-        .executableTarget(name: "AppAtticCLI", dependencies: ["AppAtticScan"]),
+        .target(name: "AppAtticCLIKit"),
+        .executableTarget(name: "AppAtticCLI", dependencies: ["AppAtticScan", "AppAtticCLIKit"]),
         .testTarget(
             name: "AppAtticScanTests",
-            dependencies: ["AppAtticScan"],
+            dependencies: ["AppAtticScan", "AppAtticCLIKit"],
             path: "tests/AppAtticScanTests"
         ),
     ] + uiTargets
