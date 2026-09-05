@@ -467,8 +467,7 @@ final class ScannerViewModel {
                     .appendingPathComponent("appattic-run-\(UUID().uuidString).err")
                 try writeOwnerOnlyFile(Data(script.utf8), to: url)
                 defer { try? FileManager.default.removeItem(at: url) }
-                FileManager.default.createFile(atPath: errURL.path, contents: nil)
-                try restrictOwnerOnlyFile(at: errURL)
+                try writeOwnerOnlyFile(Data(), to: errURL)
                 defer { try? FileManager.default.removeItem(at: errURL) }
                 let errHandle = try FileHandle(forWritingTo: errURL)
                 defer { try? errHandle.close() }
@@ -513,7 +512,7 @@ final class ScannerViewModel {
             } catch {
                 DispatchQueue.main.async {
                     vm.isScanning = false
-                    vm.errorMessage = error.localizedDescription
+                    vm.errorMessage = redactHomePaths(error.localizedDescription)
                     completion(false)
                 }
             }
