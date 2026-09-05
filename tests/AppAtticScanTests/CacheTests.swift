@@ -198,6 +198,19 @@ final class CacheTests: XCTestCase {
         XCTAssertEqual(dirNameStamp("localbin", dir.appendingPathComponent("missing").path), "")
     }
 
+    func testInventoryEntryStampChangesWhenEntryIsUpdated() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("inventory-stamp-\(UUID().uuidString)")
+        let entry = dir.appendingPathComponent("Example@2.desktop")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data("old".utf8).write(to: entry)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 10)], ofItemAtPath: entry.path)
+        let before = inventoryEntryStamp(dir: dir.path, name: entry.lastPathComponent)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 20)], ofItemAtPath: entry.path)
+        XCTAssertTrue(before.hasPrefix("Example\\@2.desktop@"), before)
+        XCTAssertNotEqual(before, inventoryEntryStamp(dir: dir.path, name: entry.lastPathComponent))
+    }
+
     func testFingerprintStampsWineAndBrewPrefixBin() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("fp-tools-\(UUID().uuidString)")
         let bin = root.appendingPathComponent("bin")

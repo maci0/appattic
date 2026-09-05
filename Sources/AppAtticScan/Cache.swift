@@ -136,14 +136,19 @@ public func scanFingerprint(
             guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
             let desktops = names.filter { $0.hasSuffix(".desktop") }.sorted()
             if !desktops.isEmpty {
-                lines.append("desk:\(stampEscape(dir)):\(stampJoin(desktops))")
+                lines.append("desk:\(stampEscape(dir)):\(stampJoin(desktops.map { inventoryEntryStamp(dir: dir, name: $0) }))")
             }
         }
     } else {
         let homeApps = (FileManager.default.homeDirectoryForCurrentUser.path as NSString)
             .appendingPathComponent("Applications")
         for root in ["/Applications", homeApps] {
-            let names = iterApps(in: root).map { URL(fileURLWithPath: $0).lastPathComponent }.sorted()
+            let names = iterApps(in: root).map {
+                inventoryEntryStamp(
+                    dir: URL(fileURLWithPath: $0).deletingLastPathComponent().path,
+                    name: URL(fileURLWithPath: $0).lastPathComponent
+                )
+            }.sorted()
             lines.append("apps:\(stampEscape(root)):\(stampJoin(names))")
         }
     }
@@ -263,6 +268,14 @@ func stampName(dir: String, name: String) -> String {
     let resolved = dest.hasPrefix("/") ? dest : (dir as NSString).appendingPathComponent(dest)
     if FileManager.default.fileExists(atPath: resolved) { return name }
     return name + "?"
+}
+
+func inventoryEntryStamp(dir: String, name: String) -> String {
+    let path = (dir as NSString).appendingPathComponent(name)
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+          let mtime = attrs[.modificationDate] as? Date
+    else { return name }
+    return "\(name.replacingOccurrences(of: "@", with: "\\@"))@\(mtime.timeIntervalSince1970.bitPattern)"
 }
 
 func pathMtimeStamp(_ label: String, _ path: String) -> String {
