@@ -80,6 +80,8 @@ private struct UnixMeta {
 private func unixMtime(_ st: stat) -> TimeInterval {
     #if canImport(Glibc)
     return TimeInterval(st.st_mtim.tv_sec)
+    #elseif canImport(Darwin)
+    return TimeInterval(st.st_mtimespec.tv_sec)
     #else
     return TimeInterval(st.st_mtime)
     #endif
