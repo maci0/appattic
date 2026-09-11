@@ -1,15 +1,19 @@
 #include "hostexec.h"
 
+#include <limits.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifndef _WIN32
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <poll.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -133,6 +137,15 @@ static int ctr_query_ok(char **tok, int n) {
     return 0;
 }
 
+/* Overflow: keep complete lines only. A truncated last name must not become a leftover. */
+static int take_complete_output(char *out, size_t n, int truncated) {
+    if (n > (size_t)INT_MAX) n = (size_t)INT_MAX;
+    if (!truncated) return (int)n;
+    while (n > 0 && out[n - 1] != '\n') n--;
+    if (n == 0) return APPATTIC_HOST_EXEC_BAD;
+    return (int)n;
+}
+
 static int parse_argv(const char *cmdline, char *buf, size_t bufn, char **argv, int maxn) {
     if (!cmdline || !cmdline[0] || strlen(cmdline) >= bufn) return -1;
     if (strpbrk(cmdline, ";|&`$<>\n\r()")) return -1;
@@ -153,7 +166,9 @@ int appattic_host_exec_allowed(const char *cmdline) {
     const char *base = base_of(tok[0]);
     const int is_snap = eq(base, "snap");
     const int is_pacman = eq(base, "pacman");
+    const int is_aur = eq(base, "paru") || eq(base, "yay") || eq(base, "pikaur");
     const int is_apt = eq(base, "apt-get") || eq(base, "apt");
+    const int is_dpkg = eq(base, "dpkg");
     const int is_ls = eq(base, "ls");
     const int is_readlink = eq(base, "readlink");
     const int is_realpath = eq(base, "realpath");
@@ -171,9 +186,9 @@ int appattic_host_exec_allowed(const char *cmdline) {
     const int is_gem = eq(base, "gem");
     const int is_composer = eq(base, "composer");
     const int is_ctr = eq(base, "docker") || eq(base, "podman");
-    if (!is_snap && !is_pacman && !is_apt && !is_ls && !is_readlink && !is_realpath && !is_test &&
-        !is_dnf && !is_zypper && !is_flatpak && !is_npm && !is_pnpm && !is_bun && !is_pipx &&
-        !is_pip && !is_uv && !is_brew && !is_gem && !is_composer && !is_ctr) {
+    if (!is_snap && !is_pacman && !is_aur && !is_apt && !is_dpkg && !is_ls && !is_readlink &&
+        !is_realpath && !is_test && !is_dnf && !is_zypper && !is_flatpak && !is_npm && !is_pnpm &&
+        !is_bun && !is_pipx && !is_pip && !is_uv && !is_brew && !is_gem && !is_composer && !is_ctr) {
         return 0;
     }
 
@@ -210,7 +225,8 @@ int appattic_host_exec_allowed(const char *cmdline) {
     int has_uninstall = 0, has_unused = 0;
     int has_g = 0, has_outdated = 0, has_pm = 0, has_tool = 0, has_json = 0;
     int has_upgradable = 0, has_upgrades = 0, has_check_update = 0, has_list_updates = 0;
-    int has_user = 0, has_format_json = 0;
+    int has_user = 0, has_format_json = 0, has_dpkg_list = 0;
+    int has_remote_ls = 0, has_app = 0, has_updates_flag = 0;
     for (int i = 1; i < n; i++) {
         const char *t = tok[i];
         if (is_flatpak && (eq(t, "uninstall") || eq(t, "remove"))) {
@@ -246,10 +262,16 @@ int appattic_host_exec_allowed(const char *cmdline) {
         if (eq(t, "--user")) has_user = 1;
         if (eq(t, "--format=json")) has_format_json = 1;
         if (eq(t, "--format") && i + 1 < n && eq(tok[i + 1], "json")) has_format_json = 1;
+        if (eq(t, "-l") || eq(t, "--list")) has_dpkg_list = 1;
+        if (eq(t, "remote-ls")) has_remote_ls = 1;
+        if (eq(t, "--app")) has_app = 1;
+        if (eq(t, "--updates")) has_updates_flag = 1;
+        if (strncmp(t, "--columns=", 10) == 0) continue;
     }
 
     if (is_snap) return has_list;
-    if (is_pacman) return has_Q;
+    if (is_pacman || is_aur) return has_Q;
+    if (is_dpkg) return has_dpkg_list && n == 2;
     if (is_apt) {
         if (has_autoremove) return has_s;
         return has_list && has_upgradable;
@@ -258,11 +280,16 @@ int appattic_host_exec_allowed(const char *cmdline) {
         return (has_repoquery && has_unneeded) || (has_list && has_upgrades) || has_check_update;
     }
     if (is_zypper) return (has_packages && has_unneeded) || has_list_updates;
-    if (is_flatpak) return has_uninstall && has_unused && has_s;
+    if (is_flatpak) {
+        if (has_uninstall && has_unused && has_s) return 1;
+        if (has_remote_ls && has_updates_flag && has_app) return 1;
+        if (has_list && has_app && !has_uninstall) return 1;
+        return 0;
+    }
     if (is_npm || is_pnpm) return has_g && (has_list || has_outdated);
     if (is_bun) return has_pm && has_list && has_g;
     if (is_pipx) return has_list;
-    if (is_pip) return has_list && has_user && has_outdated && has_format_json;
+    if (is_pip) return has_list && has_user && has_format_json;
     if (is_uv) return has_tool && has_list;
     if (is_brew) return has_outdated && has_json;
     if (is_gem) return has_outdated;
@@ -271,10 +298,149 @@ int appattic_host_exec_allowed(const char *cmdline) {
     return 0;
 }
 
+static atomic_int g_host_exec_cancel;
+
+void appattic_host_exec_request_cancel(void) {
+    atomic_store(&g_host_exec_cancel, 1);
+}
+
+void appattic_host_exec_clear_cancel(void) {
+    atomic_store(&g_host_exec_cancel, 0);
+}
+
+int appattic_host_exec_cancelled(void) {
+    return atomic_load(&g_host_exec_cancel) != 0;
+}
+
 static int env_truthy(const char *name) {
     const char *e = getenv(name);
     return e && e[0] && strcmp(e, "0") != 0;
 }
+
+int appattic_host_in_flatpak(void) {
+    return env_truthy("FLATPAK_ID");
+}
+
+#ifndef _WIN32
+#define USER_PATH_CAP 8192
+static int g_user_path_applied = 0;
+static char g_user_path[USER_PATH_CAP];
+
+static int dir_ok(const char *p) {
+    struct stat st;
+    return p && p[0] && stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static int path_has_dir(const char *path, const char *dir) {
+    const size_t n = strlen(dir);
+    const char *p = path;
+    while (p && *p) {
+        const char *colon = strchr(p, ':');
+        const size_t m = colon ? (size_t)(colon - p) : strlen(p);
+        if (m == n && strncmp(p, dir, n) == 0) return 1;
+        p = colon ? colon + 1 : NULL;
+    }
+    return 0;
+}
+
+static void path_prepend_dir(char *dst, size_t cap, const char *dir) {
+    char tmp[USER_PATH_CAP];
+    if (!dir_ok(dir) || path_has_dir(dst, dir)) return;
+    if (dst[0] == '\0') {
+        (void)snprintf(dst, cap, "%s", dir);
+        return;
+    }
+    if (snprintf(tmp, sizeof tmp, "%s:%s", dir, dst) >= (int)sizeof tmp) return;
+    (void)snprintf(dst, cap, "%s", tmp);
+}
+
+static void path_prepend_nvm(char *dst, size_t cap, const char *home) {
+    char root[PATH_MAX];
+    if (snprintf(root, sizeof root, "%s/.nvm/versions/node", home) >= (int)sizeof root) {
+        return;
+    }
+    DIR *d = opendir(root);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        char bin[PATH_MAX];
+        if (e->d_name[0] == '.') continue;
+        if (snprintf(bin, sizeof bin, "%s/%s/bin", root, e->d_name) >= (int)sizeof bin) {
+            continue;
+        }
+        path_prepend_dir(dst, cap, bin);
+    }
+    (void)closedir(d);
+}
+
+void appattic_host_apply_user_path(void) {
+    const char *home;
+    const char *old;
+    static const char *const rel[] = {
+        "/.local/bin",
+        "/bin",
+        "/.bun/bin",
+        "/.deno/bin",
+        "/.volta/bin",
+        "/.yarn/bin",
+        "/.cargo/bin",
+        "/.fnm/aliases/default/bin",
+        "/.local/share/pnpm",
+        "/.npm-global/bin",
+        NULL,
+    };
+    int i;
+    if (g_user_path_applied) return;
+    g_user_path_applied = 1;
+    old = getenv("PATH");
+    if (!old || !old[0]) old = "/usr/bin:/bin";
+    (void)snprintf(g_user_path, sizeof g_user_path, "%s", old);
+    home = getenv("HOME");
+    if (home && home[0]) {
+        path_prepend_nvm(g_user_path, sizeof g_user_path, home);
+        for (i = 0; rel[i]; i++) {
+            char dir[PATH_MAX];
+            if (snprintf(dir, sizeof dir, "%s%s", home, rel[i]) >= (int)sizeof dir) {
+                continue;
+            }
+            path_prepend_dir(g_user_path, sizeof g_user_path, dir);
+        }
+    }
+    if (env_truthy("FLATPAK_ID")) {
+        static const char *const host_dirs[] = {
+            "/run/host/usr/bin",
+            "/run/host/usr/local/bin",
+            "/run/host/usr/sbin",
+            "/run/host/bin",
+            NULL,
+        };
+        for (i = 0; host_dirs[i]; i++) {
+            path_prepend_dir(g_user_path, sizeof g_user_path, host_dirs[i]);
+        }
+    }
+    (void)setenv("PATH", g_user_path, 1);
+}
+
+static void rewrite_home_user_argv(char **argv) {
+    static char storage[MAX_TOK][PATH_MAX];
+    const char *home = getenv("HOME");
+    int slot = 0;
+    int i;
+    if (!home || !home[0]) return;
+    for (i = 0; argv[i] != NULL && slot < MAX_TOK; i++) {
+        const char *a = argv[i];
+        const char *rest;
+        if (strncmp(a, "/home/user", 10) != 0) continue;
+        rest = a + 10;
+        if (rest[0] != '\0' && rest[0] != '/') continue;
+        if (snprintf(storage[slot], PATH_MAX, "%s%s", home, rest) >= PATH_MAX) continue;
+        argv[i] = storage[slot];
+        slot++;
+    }
+}
+#else
+void appattic_host_apply_user_path(void) {}
+#endif
 
 static int use_fixture(void) {
     if (env_truthy("APPATTIC_HOST_EXEC_LIVE")) return 0;
@@ -297,6 +463,22 @@ static const char FIXTURE_APT_UPGRADABLE[] =
     "Listing...\n"
     "git/stable 1:2.39.5-0+deb12u2 amd64 [upgradable from: 1:2.39.2-1.1]\n"
     "code/stable 1.90.2-1718 amd64 [upgradable from: 1.90.0-1600]\n";
+
+static const char FIXTURE_DPKG[] =
+    "Desired=Unknown/Install/Remove/Purge/Hold\n"
+    "| Status=Not/Inst/Conf-files/Unpacked/halF-conf/Half-inst/trig-aWait/Trig-pend\n"
+    "|/ Err?=(none)/Reinst-required (Status,Err: uppercase=bad)\n"
+    "||/ Name           Version      Architecture Description\n"
+    "+++-==============-============-============-=================================\n"
+    "ii  bash           5.2.15-2     amd64        GNU Bourne Again SHell\n"
+    "rc  oldpkg         1.0-1        amd64        leftover config\n"
+    "rc  gone-lib       2.2-3        amd64        unused leftover\n";
+
+static const char FIXTURE_APT_SOURCES[] =
+    "google-chrome.list\n"
+    "deadsnakes-ubuntu-ppa-noble.list\n"
+    "nodesource.list\n"
+    "ubuntu.sources\n";
 
 static const char FIXTURE_PACMAN[] =
     "libfoo 1.2.3-1\n"
@@ -374,6 +556,15 @@ static const char FIXTURE_FLATPAK[] =
     " 1.     org.freedesktop.Platform.GL.default            23.08     r\n"
     " 2.     org.freedesktop.Platform.Locale                23.08     r\n";
 
+static const char FIXTURE_FLATPAK_UPDATES[] =
+    "Application\tVersion\n"
+    "org.mozilla.firefox\t130.0\n";
+
+static const char FIXTURE_FLATPAK_LIST[] =
+    "Application\tVersion\n"
+    "org.mozilla.firefox\t128.0\n"
+    "org.gnome.Calculator\t46.0\n";
+
 static const char FIXTURE_NPM[] =
     "{\"name\":\"lib\",\"dependencies\":{\"typescript\":{\"version\":\"5.4.5\"},"
     "\"prettier\":{\"version\":\"3.3.0\"}}}\n";
@@ -397,6 +588,18 @@ static const char FIXTURE_PIP[] =
     "[{\"name\":\"requests\",\"version\":\"2.28.1\",\"latest_version\":\"2.32.3\","
     "\"latest_filetype\":\"wheel\"},"
     "{\"name\":\"urllib3\",\"version\":\"1.26.18\",\"latest_version\":\"2.2.2\"}]\n";
+
+static const char FIXTURE_PIP_LIST[] =
+    "[{\"name\":\"httpie\",\"version\":\"3.2.2\"},"
+    "{\"name\":\"requests\",\"version\":\"2.28.1\"}]\n";
+
+static const char FIXTURE_PIP_NOT_REQUIRED[] =
+    "[{\"name\":\"httpie\",\"version\":\"3.2.2\"}]\n";
+
+static const char FIXTURE_LS_DENO[] =
+    "deno\n"
+    "file_server\n"
+    "deployctl\n";
 
 static const char FIXTURE_UV[] =
     "ruff v0.6.8\n"
@@ -493,9 +696,13 @@ static const char *fixture_for(const char *cmdline) {
         }
         return FIXTURE_APT;
     }
+    if (eq(base, "dpkg")) return FIXTURE_DPKG;
+    if (eq(base, "paru") || eq(base, "yay") || eq(base, "pikaur")) {
+        return FIXTURE_PACMAN_OUTDATED;
+    }
     if (eq(base, "pacman")) {
         for (int i = 1; i < n; i++) {
-            if (eq(tok[i], "-Qu")) return FIXTURE_PACMAN_OUTDATED;
+            if (eq(tok[i], "-Qu") || eq(tok[i], "-Qua")) return FIXTURE_PACMAN_OUTDATED;
         }
         return FIXTURE_PACMAN;
     }
@@ -513,11 +720,13 @@ static const char *fixture_for(const char *cmdline) {
         for (int i = 1; i < n; i++) {
             const char *t = tok[i];
             if (strstr(t, "/snap") != NULL) return FIXTURE_LS_SNAP;
+            if (strstr(t, "/.deno/bin") != NULL) return FIXTURE_LS_DENO;
             if (strstr(t, "/.local/bin") != NULL) return FIXTURE_LS_USER_BIN;
             if (eq(t, "/home/user/bin") || strstr(t, "/home/user/bin/") != NULL) {
                 return FIXTURE_LS_USER_HOME_BIN;
             }
             if (strstr(t, "/usr/bin") != NULL) return FIXTURE_LS_USR_BIN;
+            if (strstr(t, "sources.list.d") != NULL) return FIXTURE_APT_SOURCES;
             if (eq(t, "-A") || eq(t, "-a") || eq(t, "-1A") || eq(t, "-A1")) return FIXTURE_LS_DOT;
         }
         return FIXTURE_LS;
@@ -535,7 +744,19 @@ static const char *fixture_for(const char *cmdline) {
         }
         return FIXTURE_ZYPPER;
     }
-    if (eq(base, "flatpak")) return FIXTURE_FLATPAK;
+    if (eq(base, "flatpak")) {
+        int has_updates = 0, has_list = 0, has_remote_ls = 0;
+        for (int i = 1; i < n; i++) {
+            if (eq(tok[i], "--updates") || eq(tok[i], "remote-ls")) {
+                if (eq(tok[i], "remote-ls")) has_remote_ls = 1;
+                else has_updates = 1;
+            }
+            if (eq(tok[i], "list") || eq(tok[i], "ls")) has_list = 1;
+        }
+        if (has_remote_ls || has_updates) return FIXTURE_FLATPAK_UPDATES;
+        if (has_list) return FIXTURE_FLATPAK_LIST;
+        return FIXTURE_FLATPAK;
+    }
     if (eq(base, "pnpm")) return FIXTURE_PNPM;
     if (eq(base, "npm")) {
         for (int i = 1; i < n; i++) {
@@ -545,7 +766,16 @@ static const char *fixture_for(const char *cmdline) {
     }
     if (eq(base, "bun")) return FIXTURE_BUN;
     if (eq(base, "pipx")) return FIXTURE_PIPX;
-    if (eq(base, "pip") || eq(base, "pip3")) return FIXTURE_PIP;
+    if (eq(base, "pip") || eq(base, "pip3")) {
+        int has_outdated = 0, has_not_required = 0;
+        for (int i = 1; i < n; i++) {
+            if (eq(tok[i], "--outdated")) has_outdated = 1;
+            if (eq(tok[i], "--not-required")) has_not_required = 1;
+        }
+        if (has_outdated) return FIXTURE_PIP;
+        if (has_not_required) return FIXTURE_PIP_NOT_REQUIRED;
+        return FIXTURE_PIP_LIST;
+    }
     if (eq(base, "uv")) return FIXTURE_UV;
     if (eq(base, "brew")) return FIXTURE_BREW;
     if (eq(base, "gem")) return FIXTURE_GEM;
@@ -600,6 +830,7 @@ static int run_live(char **argv, char *out, size_t cap) {
         return APPATTIC_HOST_EXEC_FAIL;
     }
     if (pid == 0) {
+        static char env_path[USER_PATH_CAP + 16];
         (void)setpgid(0, 0);
         close(fds[0]);
         if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(127);
@@ -610,7 +841,33 @@ static int run_live(char **argv, char *out, size_t cap) {
             (void)dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
-        execvp(argv[0], argv);
+        appattic_host_apply_user_path();
+        rewrite_home_user_argv(argv);
+        if (appattic_host_in_flatpak()) {
+            char *spawn_argv[MAX_TOK + 6];
+            const char *path = getenv("PATH");
+            int i = 0;
+            int off = 3;
+            spawn_argv[0] = "flatpak-spawn";
+            spawn_argv[1] = "--host";
+            if (path && path[0]
+                && snprintf(env_path, sizeof env_path, "--env=PATH=%s", path)
+                    < (int)sizeof env_path) {
+                spawn_argv[2] = env_path;
+                off = 4;
+            } else {
+                spawn_argv[2] = "--";
+                off = 3;
+            }
+            if (off == 4) spawn_argv[3] = "--";
+            for (; argv[i] != NULL && i < MAX_TOK; i++) {
+                spawn_argv[i + off] = argv[i];
+            }
+            spawn_argv[i + off] = NULL;
+            execvp(spawn_argv[0], spawn_argv);
+        } else {
+            execvp(argv[0], argv);
+        }
         _exit(127);
     }
     (void)setpgid(pid, pid);
@@ -620,6 +877,10 @@ static int run_live(char **argv, char *out, size_t cap) {
     int timed_out = 0;
     size_t n = 0;
     while (n < cap) {
+        if (appattic_host_exec_cancelled()) {
+            timed_out = 1;
+            break;
+        }
         int wait_ms = HOST_EXEC_TIMEOUT_MS;
         if (start >= 0) {
             long now = monotonic_ms();
@@ -632,6 +893,7 @@ static int run_live(char **argv, char *out, size_t cap) {
             if (left > (long)HOST_EXEC_TIMEOUT_MS) left = (long)HOST_EXEC_TIMEOUT_MS;
             wait_ms = (int)left;
         }
+        if (wait_ms > 100) wait_ms = 100;
         struct pollfd pfd;
         pfd.fd = fds[0];
         pfd.events = POLLIN;
@@ -643,10 +905,7 @@ static int run_live(char **argv, char *out, size_t cap) {
             reap_child(pid);
             return APPATTIC_HOST_EXEC_FAIL;
         }
-        if (pr == 0) {
-            timed_out = 1;
-            break;
-        }
+        if (pr == 0) continue;
         ssize_t r = read(fds[0], out + n, cap - n);
         if (r < 0) {
             if (errno == EINTR) continue;
@@ -658,9 +917,14 @@ static int run_live(char **argv, char *out, size_t cap) {
         n += (size_t)r;
     }
     close(fds[0]);
-    if (timed_out || n == cap) {
+    if (timed_out) {
         reap_child(pid);
-        return timed_out ? APPATTIC_HOST_EXEC_FAIL : APPATTIC_HOST_EXEC_BAD;
+        return APPATTIC_HOST_EXEC_FAIL;
+    }
+    const int truncated = (n == cap);
+    if (truncated) {
+        reap_child(pid);
+        return take_complete_output(out, n, 1);
     }
     int st = 0;
     int reaped = 0;
@@ -708,9 +972,12 @@ int appattic_host_exec(const char *cmdline, char *out, size_t cap) {
         const char *text = fixture_for(cmdline);
         if (!text) return APPATTIC_HOST_EXEC_FAIL;
         size_t n = strlen(text);
-        if (n > cap) return APPATTIC_HOST_EXEC_BAD;
-        memcpy(out, text, n);
-        return (int)n;
+        if (n <= cap) {
+            memcpy(out, text, n);
+            return (int)n;
+        }
+        memcpy(out, text, cap);
+        return take_complete_output(out, cap, 1);
     }
 
 #ifndef _WIN32

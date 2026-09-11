@@ -1,7 +1,7 @@
 # TMOG design patterns (Dave's Attic, Shop Talk #91)
 
 Source: [Windows Task Manager's Creator Rebuilt It 30 Years Later | Shop Talk #91](https://www.youtube.com/watch?v=c3EEs-O3bGE)
-Channel: Dave's Attic (`@davepl`). Captions: `tmog-shoptalk-91.en.srt`.
+Channel: Dave's Attic (`@davepl`).
 Dave Plummer walking through Task Manager OG (TMOG) with Glenn. Quotes below are cleaned from auto-captions (rolling duplicates removed). Not a full episode transcript.
 
 ## Native per OS, one core

@@ -6,9 +6,9 @@ const host_exec = @import("host_exec.zig");
 const plugin_id = "gem";
 const query_cmd = "gem outdated";
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [8192]u8 = undefined;
+var exec_buf: [32768]u8 = undefined;
 
 const none_json =
     \\{"plugin":"gem","engine":null,"findings":[],"script":null,"dialog":{"title":"No gem","body":"gem is not on PATH. Plugin inactive."},"note":"gem missing"}
@@ -50,7 +50,7 @@ fn renderGem(hits: []const GemOutdated) bool {
     w.raw("{\"plugin\":\"gem\",\"engine\":\"gem\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
-        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "gem", "gem update ");
+        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "gem", "gem update ", false);
     }
     w.raw("],\"script\":null");
     w.raw(",\"dialog\":{\"title\":\"Outdated RubyGems?\",\"body\":\"User-install gems from gem outdated. Report-only. Named gem update waits for confirm. AppAttic does not run this upgrade.\"}}");
@@ -82,10 +82,13 @@ export fn plugin_query(present: i32) i32 {
         if (!renderGem(&.{})) return 1;
         return 0;
     }
-    var hits: [32]GemOutdated = undefined;
-    const n = parseGemOutdated(exec_buf[0..@intCast(nexec)], &hits);
-    if (!renderGem(hits[0..n])) return 1;
-    return 0;
+    var hits: [128]GemOutdated = undefined;
+    var n = parseGemOutdated(exec_buf[0..@intCast(nexec)], &hits);
+    while (true) {
+        if (renderGem(hits[0..n])) return 0;
+        if (n == 0) return 1;
+        n -= 1;
+    }
 }
 
 export fn result_ptr() i32 {

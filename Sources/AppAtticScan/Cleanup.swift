@@ -222,8 +222,12 @@ func commentedOutdatedLines(_ pkgs: [OutdatedPkg]) -> [String] {
             return "# apt install --only-upgrade \(quoted)"
         case "pacman":
             return "# pacman -S \(quoted)"
+        case "aur":
+            return "# \(aurHelperBin()) -S \(quoted)"
         case "dnf":
             return "# dnf upgrade \(quoted)"
+        case "yum":
+            return "# yum upgrade \(quoted)"
         case "zypper":
             return "# zypper update \(quoted)"
         case "app-store":
@@ -268,6 +272,35 @@ public func isProtectedPackagedPath(_ path: String) -> Bool {
     return roots.contains { path == $0 || path.hasPrefix($0 + "/") }
 }
 
+public func commandNeedsRoot(_ cmd: String) -> Bool {
+    let t = cmd.trimmingCharacters(in: .whitespaces)
+    if t.hasPrefix("rootcmd ") { return false }
+    let first = t.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+    let base = first.split(separator: "/").last.map(String.init) ?? first
+    switch base {
+    case "apt-get", "apt-mark", "apt", "pacman", "dnf", "dnf5", "yum", "zypper":
+        return true
+    default:
+        return t.contains(" '/etc/apt/sources.list.d/") || t.contains(" /etc/apt/sources.list.d/")
+    }
+}
+
+public func withRootCmd(_ cmd: String) -> String {
+    commandNeedsRoot(cmd) ? "rootcmd \(cmd)" : cmd
+}
+
+public let scriptRootHelper = """
+rootcmd() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif command -v pkexec >/dev/null 2>&1; then
+    pkexec "$@"
+  else
+    sudo "$@"
+  fi
+}
+"""
+
 public func leftoverRemoveCommand(path: String, rootLabel: String, extraPaths: [String] = []) -> String {
     if rootLabel == "LaunchAgents" {
         if isProtectedPackagedPath(path) {
@@ -277,7 +310,9 @@ public func leftoverRemoveCommand(path: String, rootLabel: String, extraPaths: [
         return "launchctl bootout gui/$(id -u) \(q) 2>/dev/null || true\nrm -rf \(q)"
     }
     var seen = Set<String>()
-    let paths = ([path] + extraPaths).filter { seen.insert($0).inserted && !isProtectedPackagedPath($0) }
+    let paths = ([path] + extraPaths).filter {
+        seen.insert($0).inserted && (!isProtectedPackagedPath($0) || $0.hasPrefix("/etc/apt/sources.list.d/"))
+    }
     if paths.isEmpty {
         return "# skipped packaged path \(shellQuote(path))"
     }
@@ -378,7 +413,7 @@ func staleCleanupScript(_ result: ScanResult) -> String {
     return lines.joined(separator: "\n") + "\n"
 }
 
-/// Printable `/bin/sh` for this CLI command. `outdated` is commented report-only; `update` is live Homebrew/Flatpak.
+/// Printable `/bin/sh` for this CLI command. `outdated` comments every upgrade; `update` is named live upgrades after confirm.
 /// `report` / `leftovers` / `stale` emit leftovers and REMOVE-tier uninstalls, not packages.
 public func dryRunScript(
     command: String,
@@ -505,8 +540,8 @@ public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [],
             title: $0.title,
             summary: $0.summary,
             reason: $0.reason,
-            kind: $0.kind,
-            bundleId: $0.bundle_id
+            bundleId: $0.bundle_id,
+            kind: $0.kind
         )
     }
     result.packages = data.packages ?? []

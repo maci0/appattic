@@ -36,6 +36,21 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(pkgs[1].version, "2.0.0")
     }
 
+    func testParseDpkgRcKeepsConfigRemnants() {
+        let text = """
+        ii  bash           5.2.15-2     amd64        GNU Bourne Again SHell
+        rc  oldpkg         1.0-1        amd64        leftover config
+        rc  gone-lib       2.2-3        amd64        unused leftover
+        """
+        let pkgs = parseDpkgRc(text)
+        XCTAssertEqual(pkgs.map(\.name), ["oldpkg", "gone-lib"])
+        XCTAssertEqual(pkgs[0].manager, "dpkg")
+        XCTAssertEqual(pkgs[0].kind, "orphan")
+        XCTAssertEqual(pkgs[0].version, "1.0-1")
+        XCTAssertEqual(packageRemoveCommand(pkgs[0]), "apt-get purge -y oldpkg")
+        XCTAssertFalse(pkgs[0].canMarkManual)
+    }
+
     func testParseDnfUnneededNames() {
         let text = """
         Last metadata expiration check: 1:23:45 ago on Wed 26 Aug 2026.
@@ -167,6 +182,28 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(pkgs[1].version, "3.2.2")
     }
 
+    func testParsePipUserListJSON() {
+        let text = """
+        [{"name":"httpie","version":"3.2.2"},{"name":"requests","version":"2.28.1"}]
+        """
+        let pkgs = parsePipUserList(text)
+        XCTAssertEqual(pkgs.map(\.name), ["httpie", "requests"])
+        XCTAssertEqual(pkgs[0].manager, "pip")
+        XCTAssertEqual(pkgs[0].kind, "global")
+        XCTAssertEqual(pkgs[0].version, "3.2.2")
+        XCTAssertTrue(parsePipUserList("not json").isEmpty)
+        XCTAssertTrue(parsePipUserList("[]").isEmpty)
+    }
+
+    func testParseDenoGlobalListSkipsRuntime() {
+        let pkgs = parseDenoGlobalList("deno\nfile_server\ndeployctl\n")
+        XCTAssertEqual(pkgs.map(\.name), ["file_server", "deployctl"])
+        XCTAssertEqual(pkgs[0].manager, "deno")
+        XCTAssertEqual(pkgs[0].kind, "global")
+        XCTAssertTrue(parseDenoGlobalList("deno\n").isEmpty)
+        XCTAssertTrue(parseDenoGlobalList("").isEmpty)
+    }
+
     func testEmptyAndJunkParsersStayEmpty() {
         XCTAssertTrue(parsePacmanOrphans("").isEmpty)
         XCTAssertTrue(parseAptAutoremove("Reading package lists... Done\n0 upgraded, 0 newly installed, 0 to remove").isEmpty)
@@ -179,6 +216,8 @@ final class PackageTests: XCTestCase {
         XCTAssertTrue(parsePipxList("nothing here").isEmpty)
         XCTAssertTrue(parseUvToolList("").isEmpty)
         XCTAssertTrue(parseUvToolList("- ruff\n").isEmpty)
+        XCTAssertTrue(parsePipUserList("").isEmpty)
+        XCTAssertTrue(parseDenoGlobalList("deno.exe\n").isEmpty)
     }
 
     func testPackageRemoveCommandsAreNamedAndQuoted() {
@@ -191,6 +230,8 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(packageRemoveCommand(entry("prettier", "bun", "global")), "bun remove -g prettier")
         XCTAssertEqual(packageRemoveCommand(entry("httpie", "pipx", "global")), "pipx uninstall httpie")
         XCTAssertEqual(packageRemoveCommand(entry("ruff", "uv", "global")), "uv tool uninstall ruff")
+        XCTAssertEqual(packageRemoveCommand(entry("httpie", "pip", "global")), "pip uninstall -y --user httpie")
+        XCTAssertEqual(packageRemoveCommand(entry("file_server", "deno", "global")), "deno uninstall --global file_server")
         XCTAssertEqual(
             packageRemoveCommand(entry("foo; rm /usr/bin/snap", "npm", "global")),
             "npm -g uninstall 'foo; rm /usr/bin/snap'"
@@ -218,9 +259,10 @@ final class PackageTests: XCTestCase {
                 entry("libkeep", "apt", "orphan"),
             ]
         )
-        XCTAssertTrue(script.contains("pacman -Rns libfoo"), script)
+        XCTAssertTrue(script.contains("rootcmd pacman -Rns libfoo"), script)
         XCTAssertTrue(script.contains("npm -g uninstall typescript"), script)
-        XCTAssertTrue(script.contains("apt-mark manual libkeep"), script)
+        XCTAssertTrue(script.contains("rootcmd apt-mark manual libkeep"), script)
+        XCTAssertFalse(script.contains("rootcmd npm"), script)
         XCTAssertFalse(script.contains("upgrade"), script)
         XCTAssertFalse(script.contains("-Syu"), script)
         XCTAssertFalse(script.contains("dist-upgrade"), script)

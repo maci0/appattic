@@ -15,7 +15,7 @@ One Foundation scan library, two executables:
 - `appattic`: CLI (`report`, `leftovers`, `stale`, `outdated`, `packages`, `update`)
 - `AppAtticUI`: SwiftCrossUI window on macOS (AppKit; SwiftPM product name `AppAtticUI` because APFS is case-insensitive and would collide with `appattic`). Linux UI is C++ Qt 6 in `ui/linux-qt`.
 
-The Python package is gone. `generate_icon.py` remains as a one-off asset script.
+The Python package is gone. Icons live in `packaging/`.
 
 ## Out of scope
 
@@ -31,10 +31,9 @@ The Python package is gone. `generate_icon.py` remains as a one-off asset script
 | Target | Kind | Depends on |
 |--------|------|------------|
 | `AppAtticScan` | library | Foundation only |
-| `AppAtticCLIKit` | library | none |
-| `appattic` | executable | `AppAtticScan`, `AppAtticCLIKit` |
+| `appattic` | executable | `AppAtticScan` |
 | `AppAtticUI` | executable (macOS only; target name `AppAttic`) | `AppAtticScan`, SwiftCrossUI, DefaultBackend |
-| `AppAtticScanTests` | test (`tests/AppAtticScanTests`) | `AppAtticScan`, `AppAtticCLIKit` |
+| `AppAtticScanTests` | test (`tests/AppAtticScanTests`) | `AppAtticScan` |
 
 On Linux, `Package.swift` omits the SwiftCrossUI product and dependency. Platform floor: macOS 13. Linux is a first-class scan and CLI host. Linux UI needs Qt 6 Widgets at build and run (`scripts/linux-qt-link.sh`).
 
@@ -57,7 +56,7 @@ On Linux, `Package.swift` omits the SwiftCrossUI product and dependency. Platfor
 | `Steam.swift` | Steam leftovers / uninstall helpers |
 | `CrossOver.swift` | CrossOver bottle helpers |
 
-`Sources/AppAtticCLIKit/CLIParse.swift` owns CLI flags and commands so argument parsing can be tested without depending on the scan library.
+`Sources/AppAtticScan/CLIParse.swift` owns CLI flags and commands.
 
 Scan types the UI already decodes (`ScanData`, `LeftoverItem`, `SoftwareItem`, `OutdatedEntry`, `ScanTotals`, `PackageEntry`) live in the library. The UI target imports `AppAtticScan`. `Sources/AppAttic/Models.swift` keeps only UI helpers (`formatDate`) that are not scan types.
 
@@ -148,7 +147,7 @@ Command: `swift test` (needs unrestricted permissions in this environment, same 
 
 ## Cutover
 
-Completed. `ScannerViewModel` calls `AppAtticScan.runFullScan`. The CLI links `AppAtticScan` and `AppAtticCLIKit`. The runtime Python package, `tests/*.py`, `APPATTIC_PYTHON`, and `copy_python` / `link_python` are gone. `generate_icon.py` remains as a one-off asset script.
+Completed. `ScannerViewModel` calls `AppAtticScan.runFullScan`. The CLI links `AppAtticScan`. The runtime Python package, `tests/*.py`, `APPATTIC_PYTHON`, and `copy_python` / `link_python` are gone.
 
 No dual-run of Python and Swift in production.
 

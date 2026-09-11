@@ -243,19 +243,12 @@ static wasm_trap_t *host_exec_cb(
     memcpy(cmd, data + cmd_ptr, (size_t)cmd_len);
     cmd[cmd_len] = '\0';
 
-    char tmp[8192];
-    const int n = appattic_host_exec(cmd, tmp, sizeof tmp);
+    const int n = appattic_host_exec(cmd, (char *)(data + out_ptr), (size_t)out_cap);
     if (n < 0) {
         results[0].of.i32 = n;
         wasmtime_extern_delete(&item);
         return NULL;
     }
-    if ((size_t)n > (size_t)out_cap) {
-        results[0].of.i32 = APPATTIC_HOST_EXEC_BAD;
-        wasmtime_extern_delete(&item);
-        return NULL;
-    }
-    memcpy(data + out_ptr, tmp, (size_t)n);
     results[0].of.i32 = n;
     wasmtime_extern_delete(&item);
     return NULL;
@@ -272,17 +265,38 @@ static int32_t parse_tag(char *spec, char **path_out) {
     return (int32_t)atoi(eq + 1);
 }
 
+static void plugin_id_from_path(const char *path, char *out, size_t cap) {
+    if (!out || cap == 0) return;
+    out[0] = '\0';
+    if (!path) return;
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    size_t n = 0;
+    for (; base[n] && n + 1 < cap; n++) {
+        const char c = base[n];
+        if (c == '.') break;
+        out[n] = (c == '_') ? '-' : c;
+    }
+    out[n] = '\0';
+}
+
 static int run_plugin(
     wasmtime_context_t *ctx,
     wasmtime_linker_t *linker,
     wasm_engine_t *engine,
     char *spec,
     appattic_json_fn on_json,
+    appattic_progress_fn on_progress,
+    int index,
+    int total,
     void *user,
     Err *e
 ) {
     char *path = NULL;
     const int32_t tag = parse_tag(spec, &path);
+    char id[128];
+    plugin_id_from_path(path, id, sizeof id);
+    if (on_progress) on_progress(id, index, total, user);
     if (access(path, R_OK) != 0) {
         fprintf(stderr, "skip %s (missing coeffect/file)\n", path);
         return 0;
@@ -290,7 +304,12 @@ static int run_plugin(
 
     wasmtime_module_t *mod = NULL;
     wasmtime_instance_t plug;
-    if (instantiate(ctx, linker, engine, path, &mod, &plug, e) != 0) return 1;
+    if (instantiate(ctx, linker, engine, path, &mod, &plug, e) != 0) {
+        fprintf(stderr, "skip %s (instantiate failed)\n", path);
+        e->failed = 0;
+        if (e->buf && e->len) e->buf[0] = '\0';
+        return 0;
+    }
 
     wasmtime_extern_t plug_abi, id_ptr, id_len, query, res_ptr, res_len, memory;
     wasmtime_extern_t *slots[7] = {
@@ -311,47 +330,47 @@ static int run_plugin(
     uint8_t *data = NULL;
     size_t mem_len = 0;
     const uint8_t *json = NULL;
-    char qerr[256];
     for (i = 0; i < 7; i++) {
-        if (must_export(ctx, &plug, names[i], slots[i], e)) goto fail_plugin;
+        if (must_export(ctx, &plug, names[i], slots[i], e)) goto skip_plugin;
         ngot++;
     }
     if (memory.kind != WASMTIME_EXTERN_MEMORY ||
         plug_abi.kind != WASMTIME_EXTERN_FUNC ||
         query.kind != WASMTIME_EXTERN_FUNC) {
-        fail_msg(e, "bad plugin exports");
-        goto fail_plugin;
+        fprintf(stderr, "skip %s (bad plugin exports)\n", path);
+        goto skip_plugin;
     }
-    if (call_i32(ctx, &plug_abi.of.func, &abi, e) != 0) goto fail_plugin;
+    if (call_i32(ctx, &plug_abi.of.func, &abi, e) != 0) goto skip_plugin;
     if (abi != 1) {
-        fail_msg(e, "plugin abi mismatch");
-        goto fail_plugin;
+        fprintf(stderr, "skip %s (plugin abi mismatch)\n", path);
+        goto skip_plugin;
     }
 
-    data = wasmtime_memory_data(ctx, &memory.of.memory);
-    mem_len = wasmtime_memory_data_size(ctx, &memory.of.memory);
     if (call_i32(ctx, &id_ptr.of.func, &ip, e) != 0 ||
         call_i32(ctx, &id_len.of.func, &il, e) != 0) {
-        goto fail_plugin;
+        goto skip_plugin;
     }
+    data = wasmtime_memory_data(ctx, &memory.of.memory);
+    mem_len = wasmtime_memory_data_size(ctx, &memory.of.memory);
     if (ip < 0 || il < 0 || (size_t)ip + (size_t)il > mem_len) {
-        fail_msg(e, "plugin id out of memory");
-        goto fail_plugin;
+        fprintf(stderr, "skip %s (plugin id out of memory)\n", path);
+        goto skip_plugin;
     }
 
-    if (call_i32_arg(ctx, &query.of.func, tag, &qrc, e) != 0) goto fail_plugin;
+    if (call_i32_arg(ctx, &query.of.func, tag, &qrc, e) != 0) goto skip_plugin;
     if (qrc != 0) {
-        snprintf(qerr, sizeof qerr, "plugin_query failed: %s", path);
-        fail_msg(e, qerr);
-        goto fail_plugin;
+        fprintf(stderr, "skip %s (plugin_query failed)\n", path);
+        goto skip_plugin;
     }
+    data = wasmtime_memory_data(ctx, &memory.of.memory);
+    mem_len = wasmtime_memory_data_size(ctx, &memory.of.memory);
     if (call_i32(ctx, &res_ptr.of.func, &rp, e) != 0 ||
         call_i32(ctx, &res_len.of.func, &rl, e) != 0) {
-        goto fail_plugin;
+        goto skip_plugin;
     }
     if (rp < 0 || rl < 0 || (size_t)rp + (size_t)rl > mem_len) {
-        fail_msg(e, "result out of memory");
-        goto fail_plugin;
+        fprintf(stderr, "skip %s (result out of memory)\n", path);
+        goto skip_plugin;
     }
     json = data + rp;
     if (contains(json, (size_t)rl, "system prune") ||
@@ -370,6 +389,13 @@ static int run_plugin(
     wasmtime_module_delete(mod);
     return 0;
 
+skip_plugin:
+    drop_externs(slots, ngot);
+    wasmtime_module_delete(mod);
+    e->failed = 0;
+    if (e->buf && e->len) e->buf[0] = '\0';
+    return 0;
+
 fail_plugin:
     drop_externs(slots, ngot);
     wasmtime_module_delete(mod);
@@ -381,6 +407,7 @@ int appattic_wasm_run(
     char **plugin_specs,
     int plugin_count,
     appattic_json_fn on_json,
+    appattic_progress_fn on_progress,
     void *user,
     char *err,
     size_t errlen
@@ -462,7 +489,21 @@ int appattic_wasm_run(
 
     int rc = 0;
     for (int i = 0; i < plugin_count; i++) {
-        if (run_plugin(ctx, linker, engine_rt, plugin_specs[i], on_json, user, &e) != 0) rc = 1;
+        if (appattic_host_exec_cancelled()) break;
+        if (run_plugin(
+                ctx,
+                linker,
+                engine_rt,
+                plugin_specs[i],
+                on_json,
+                on_progress,
+                i + 1,
+                plugin_count,
+                user,
+                &e
+            ) != 0) {
+            rc = 1;
+        }
     }
 
     wasmtime_extern_delete(&core_abi);

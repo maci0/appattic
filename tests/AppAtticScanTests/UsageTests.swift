@@ -456,7 +456,9 @@ final class UsageTests: XCTestCase {
         let path = try writeTemp(xml, suffix: ".xml")
         defer { try? FileManager.default.removeItem(atPath: path) }
         let hits = parseGnomeApplicationState(path)
-        XCTAssertEqual(hits["org.mozilla.firefox"]?.timeIntervalSince1970, 1_717_200_000, accuracy: 0.5)
+        let firefoxSeen = hits["org.mozilla.firefox"]
+        XCTAssertNotNil(firefoxSeen)
+        XCTAssertEqual(firefoxSeen!.timeIntervalSince1970, 1_717_200_000, accuracy: 0.5)
     }
 
     func testGnomeApplicationStateRejectsNonFiniteLastSeen() throws {

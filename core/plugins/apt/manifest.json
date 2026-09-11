@@ -15,7 +15,9 @@
     "host.exec": {
       "allow": [
         "apt",
-        "apt-get"
+        "apt-get",
+        "dpkg",
+        "ls"
       ],
       "denySubstrings": [
         "apt-get upgrade",

@@ -156,6 +156,82 @@ fn parseDepsObject(s: []const u8, i: *usize, out: []Dep) usize {
     return n;
 }
 
+pub const NamedVer = struct {
+    name: []const u8,
+    current: []const u8,
+    latest: []const u8,
+};
+
+fn takeCurrentLatest(s: []const u8, i: *usize, current: *[]const u8, latest: *[]const u8) void {
+    if (i.* >= s.len or s[i.*] != '{') {
+        _ = skipJsonValue(s, i);
+        return;
+    }
+    i.* += 1;
+    var wanted: []const u8 = "";
+    while (i.* < s.len) {
+        i.* = skipWs(s, i.*);
+        if (i.* >= s.len) break;
+        if (s[i.*] == '}') {
+            i.* += 1;
+            break;
+        }
+        if (s[i.*] == ',') {
+            i.* += 1;
+            continue;
+        }
+        const key = parseJsonString(s, i) orelse break;
+        i.* = skipWs(s, i.*);
+        if (i.* >= s.len or s[i.*] != ':') break;
+        i.* += 1;
+        i.* = skipWs(s, i.*);
+        if (std.mem.eql(u8, key, "current") and i.* < s.len and s[i.*] == '"') {
+            current.* = parseJsonString(s, i) orelse "";
+        } else if (std.mem.eql(u8, key, "latest") and i.* < s.len and s[i.*] == '"') {
+            latest.* = parseJsonString(s, i) orelse "";
+        } else if (std.mem.eql(u8, key, "wanted") and i.* < s.len and s[i.*] == '"') {
+            wanted = parseJsonString(s, i) orelse "";
+        } else {
+            if (!skipJsonValue(s, i)) break;
+        }
+    }
+    if (latest.*.len == 0) latest.* = wanted;
+}
+
+/// `npm outdated -g --json`: top-level object keyed by package name.
+pub fn parseJsonNamedOutdated(text: []const u8, out: []NamedVer) usize {
+    var n: usize = 0;
+    var i: usize = skipWs(text, 0);
+    if (i >= text.len or text[i] != '{') return 0;
+    i += 1;
+    while (i < text.len) {
+        i = skipWs(text, i);
+        if (i >= text.len) break;
+        if (text[i] == '}') break;
+        if (text[i] == ',') {
+            i += 1;
+            continue;
+        }
+        const name = parseJsonString(text, &i) orelse break;
+        i = skipWs(text, i);
+        if (i >= text.len or text[i] != ':') break;
+        i += 1;
+        i = skipWs(text, i);
+        var current: []const u8 = "";
+        var latest: []const u8 = "";
+        if (i < text.len and text[i] == '{') {
+            takeCurrentLatest(text, &i, &current, &latest);
+        } else {
+            if (!skipJsonValue(text, &i)) break;
+        }
+        if (n < out.len and jsonbuf.isSafePkgName(name) and (current.len > 0 or latest.len > 0)) {
+            out[n] = .{ .name = name, .current = current, .latest = latest };
+            n += 1;
+        }
+    }
+    return n;
+}
+
 /// Top-level (and sibling) `"dependencies"` objects. Does not walk nested dep trees.
 pub fn parseJsonDependencies(text: []const u8, out: []Dep) usize {
     var n: usize = 0;
@@ -237,6 +313,22 @@ test "parseJsonDependencies scoped and skips nested trees" {
     try std.testing.expectEqual(@as(usize, 1), n2);
     try std.testing.expectEqualStrings("typescript", buf[0].name);
     try std.testing.expectEqualStrings("5.4.5", buf[0].version);
+}
+
+test "parseJsonNamedOutdated npm outdated JSON" {
+    var buf: [4]NamedVer = undefined;
+    const text =
+        \\{"typescript":{"current":"5.4.5","wanted":"5.5.0","latest":"5.5.0"},"@vue/cli":{"current":"5.0.0","latest":"5.0.8"}}
+    ;
+    const n = parseJsonNamedOutdated(text, &buf);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqualStrings("typescript", buf[0].name);
+    try std.testing.expectEqualStrings("5.4.5", buf[0].current);
+    try std.testing.expectEqualStrings("5.5.0", buf[0].latest);
+    try std.testing.expectEqualStrings("@vue/cli", buf[1].name);
+    try std.testing.expectEqualStrings("5.0.8", buf[1].latest);
+    try std.testing.expectEqual(@as(usize, 0), parseJsonNamedOutdated("", &buf));
+    try std.testing.expectEqual(@as(usize, 0), parseJsonNamedOutdated("[]", &buf));
 }
 
 test "parseJsonDependencies empty junk" {

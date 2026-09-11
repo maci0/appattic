@@ -1,6 +1,5 @@
 import XCTest
 @testable import AppAtticScan
-@testable import AppAtticCLIKit
 
 final class ScanTests: XCTestCase {
     func testScanDataMatchesVerdictsBySoftwareIdentity() {
@@ -255,6 +254,111 @@ final class ScanTests: XCTestCase {
         let script = dryRunScript(command: "report", result: result, category: ["orion"])
         XCTAssertTrue(script.contains("/tmp/Orion"), script)
         XCTAssertFalse(script.contains("/tmp/Whisky"), script)
+    }
+
+    func testDryRunClassesKeepSystemDistroAndPackagesSeparate() {
+        let orphan = DataItem(
+            path: "/tmp/DeadApp",
+            name: "DeadApp",
+            rootLabel: "Caches",
+            kind: "dir",
+            status: "orphaned"
+        )
+        let shadow = DataItem(
+            path: "/tmp/overlay/python3",
+            name: "python3",
+            rootLabel: ".local/bin",
+            kind: "file",
+            status: "shadow",
+            shadows: "/usr/bin/python3"
+        )
+        let system = DataItem(
+            path: "/tmp/SysLeftover",
+            name: "SysLeftover",
+            rootLabel: "Caches",
+            kind: "dir",
+            status: "system"
+        )
+        let keep = Software(
+            name: "KeepMe",
+            kind: "app",
+            path: "/tmp/KeepMe.app",
+            source: "app"
+        )
+        let remove = Software(
+            name: "RemoveMe",
+            kind: "app",
+            path: "/tmp/RemoveMe.app",
+            source: "brew-cask",
+            lastUsed: Date().addingTimeInterval(-400 * 86400),
+            caskName: "remove-me"
+        )
+        let result = ScanResult()
+        result.dataItems = [orphan, shadow, system]
+        result.software = [keep, remove]
+        result.verdicts = [
+            Verdict(software: keep, tier: "keep", reason: "in use"),
+            Verdict(software: remove, tier: "remove", reason: "idle"),
+        ]
+        result.outdated = [
+            OutdatedPkg(name: "firefox", manager: "pacman", currentVersion: "1", latestVersion: "2"),
+        ]
+        result.packages = [
+            PackageEntry(name: "libfoo", manager: "pacman", kind: "orphan"),
+        ]
+
+        let leftovers = dryRunScript(command: "leftovers", result: result)
+        XCTAssertTrue(leftovers.hasPrefix("#!/bin/sh"), leftovers)
+        XCTAssertTrue(leftovers.contains("/tmp/DeadApp"), leftovers)
+        XCTAssertTrue(leftovers.contains("/tmp/overlay/python3"), leftovers)
+        XCTAssertFalse(leftovers.contains("/tmp/SysLeftover"), leftovers)
+        XCTAssertFalse(leftovers.contains("KeepMe"), leftovers)
+        XCTAssertFalse(leftovers.contains("RemoveMe"), leftovers)
+        XCTAssertFalse(leftovers.contains("pacman -S"), leftovers)
+        XCTAssertFalse(leftovers.contains("-Syu"), leftovers)
+        XCTAssertFalse(leftovers.contains("pacman -Rns"), leftovers)
+
+        let stale = dryRunScript(command: "stale", result: result)
+        XCTAssertTrue(stale.hasPrefix("#!/bin/sh"), stale)
+        XCTAssertTrue(stale.contains("brew uninstall --cask remove-me"), stale)
+        XCTAssertFalse(stale.contains("KeepMe"), stale)
+        XCTAssertFalse(stale.contains("/tmp/DeadApp"), stale)
+        XCTAssertFalse(stale.contains("pacman -S"), stale)
+        XCTAssertFalse(stale.contains("-Syu"), stale)
+        XCTAssertFalse(stale.contains("upgrade"), stale)
+
+        let outdated = dryRunScript(command: "outdated", result: result)
+        XCTAssertTrue(outdated.contains("# pacman -S firefox"), outdated)
+        XCTAssertFalse(scriptHasActionableCommands(outdated), outdated)
+        XCTAssertFalse(outdated.contains("\npacman -S firefox"), outdated)
+        XCTAssertFalse(outdated.contains("-Syu"), outdated)
+
+        let update = dryRunScript(command: "update", result: result)
+        XCTAssertTrue(update.contains("rootcmd pacman --noconfirm -S firefox"), update)
+        XCTAssertFalse(update.contains("-Syu"), update)
+        XCTAssertTrue(scriptHasActionableCommands(update), update)
+
+        let packages = dryRunScript(command: "packages", result: result)
+        XCTAssertTrue(packages.hasPrefix("#!/bin/sh"), packages)
+        XCTAssertTrue(packages.contains("pacman -Rns libfoo"), packages)
+        XCTAssertFalse(packages.contains("/tmp/DeadApp"), packages)
+        XCTAssertFalse(packages.contains("brew uninstall"), packages)
+        XCTAssertFalse(packages.contains("-Syu"), packages)
+        XCTAssertFalse(packages.contains("upgrade"), packages)
+        XCTAssertNotEqual(packages, leftovers)
+        XCTAssertNotEqual(packages, stale)
+        XCTAssertNotEqual(packages, outdated)
+
+        let report = dryRunScript(command: "report", result: result)
+        XCTAssertTrue(report.contains("/tmp/DeadApp"), report)
+        XCTAssertTrue(report.contains("/tmp/overlay/python3"), report)
+        XCTAssertTrue(report.contains("brew uninstall --cask remove-me"), report)
+        XCTAssertTrue(report.contains("# pacman -S firefox"), report)
+        XCTAssertFalse(report.contains("/tmp/SysLeftover"), report)
+        XCTAssertFalse(report.contains("KeepMe"), report)
+        XCTAssertFalse(report.contains("pacman -Rns"), report)
+        XCTAssertFalse(report.contains("-Syu"), report)
+        XCTAssertFalse(report.contains("\npacman -S firefox"), report)
     }
 }
 

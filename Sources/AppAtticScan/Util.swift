@@ -32,7 +32,7 @@ public func isDnfListingNoise(_ line: String) -> Bool {
 
 public func parseOsRelease(_ text: String) -> [String: String] {
     var out: [String: String] = [:]
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+    for raw in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
         let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if line.isEmpty || line.hasPrefix("#") { continue }
         guard let eq = line.firstIndex(of: "=") else { continue }
@@ -235,7 +235,31 @@ public func whichCommand(_ name: String) -> String? {
     if name.contains("/") {
         return FileManager.default.isExecutableFile(atPath: name) ? name : nil
     }
-    let extras = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    var extras = [
+        home + "/.local/bin",
+        home + "/bin",
+        home + "/.bun/bin",
+        home + "/.deno/bin",
+        home + "/.volta/bin",
+        home + "/.yarn/bin",
+        home + "/.cargo/bin",
+        home + "/.fnm/aliases/default/bin",
+        home + "/.local/share/pnpm",
+        home + "/.npm-global/bin",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
+    let nvmRoot = home + "/.nvm/versions/node"
+    if let vers = try? FileManager.default.contentsOfDirectory(atPath: nvmRoot) {
+        for v in vers where !v.hasPrefix(".") {
+            extras.append(nvmRoot + "/" + v + "/bin")
+        }
+    }
     let pathDirs = (ProcessInfo.processInfo.environment["PATH"] ?? "")
         .split(separator: ":")
         .map(String.init)
@@ -430,6 +454,7 @@ public func cleanupPathDirectories(home: String = FileManager.default.homeDirect
         "/usr/local/bin",
         "/home/linuxbrew/.linuxbrew/bin",
         (home as NSString).appendingPathComponent(".local/bin"),
+        (home as NSString).appendingPathComponent("bin"),
         "/usr/bin",
         "/bin",
     ]

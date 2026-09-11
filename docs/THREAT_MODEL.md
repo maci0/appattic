@@ -14,7 +14,7 @@ AppAttic is a local cleanup utility (CLI `appattic`, macOS AppKit UI, Linux Qt 6
 | 2 | Scan cache or WASM plugin JSON is treated as a trusted finding list and becomes cleanup commands | Build/runtime plugins; cache file → app | Attacker-chosen paths or package names in the script the user is asked to run | Cache fingerprint + 24h age (`Cache.swift`). WASM `host.exec` query allowlist (`hostexec.c`). Qt drops some `rm` of `/usr/` (`finding.cpp`) | Cache has no MAC. Plugin `.wasm` is unsigned. Qt uses plugin-supplied `command` almost verbatim. Swift leftover `rm` has no `/usr` deny. |
 | 3 | Leftover classifier lists a credential or config tree as orphaned (`rm -rf ~/.aws` and similar) | Filesystem → leftover model | Secret loss (cloud keys, Docker config) | `linuxSystemNames` / `appleServiceNames` mark `.ssh`, `.gnupg`, and many OS dirs `system` (`Leftovers.swift`) | `.aws` is scanned as a home leaf and is not in the system-name set. Misclassification is a recurring class. |
 | 4 | `host.exec` is the only host import; a bug there is WASM breakout to process spawn | WASM guest → host | Arbitrary subprocess if allowlist fails | Allowlist + metacharacter reject + destructive-token deny (`hostexec.c`). No WASI filesystem. | No Wasmtime fuel/epoch. `APPATTIC_CORE_OUT` loads whatever `.wasm` files are there. Live `execvp` on Linux unless `APPATTIC_HOST_EXEC_FIXTURE`. |
-| 5 | Outdated / brew / Flatpak talk to the network; answers are parsed as versions and names | App → internet | Wrong upgrade target; attacker who owns the tap/index influences `brew upgrade` / `flatpak update` | Untrusted Homebrew casks listed, not updated (`BrewInfo.swift`, `Outdated.swift`). Distro and App Store upgrades are report-only. `HOMEBREW_NO_AUTO_UPDATE=1`. | iTunes lookup is HTTPS with no pinning. Package-manager stdout is trusted JSON/text. |
+| 5 | Outdated / brew / Flatpak talk to the network; answers are parsed as versions and names | App → internet | Wrong upgrade target; attacker who owns the tap/index influences `brew upgrade` / `flatpak update` | Untrusted Homebrew casks listed, not updated (`BrewInfo.swift`, `Outdated.swift`). Named distro upgrades run only after confirm as `/bin/sh`, never via `host.exec`. App Store stays report-only. `HOMEBREW_NO_AUTO_UPDATE=1`. | iTunes lookup is HTTPS with no pinning. Package-manager stdout is trusted JSON/text. |
 | 6 | Build scripts download toolchains | Build → runtime | Compromised zig/wasmtime/Swift/linuxdeploy becomes the binary you ship | SHA-256 pins in `scripts/dep-checksums.sha256` for Zig, Wasmtime, Swift, linuxdeploy, appimagetool. Dockerfiles copy that file and `verify-sha256.sh` next to `linux-deps.sh` before `--install`. | No GPG. `swift:5.10.1-jammy` and `archlinux:base-devel` are tag-pinned, not digest-pinned. |
 
 ## Attack surface inventory
@@ -36,9 +36,10 @@ No TCP/HTTP listener, webhook, or `serve` command. `parseCLIArguments(["serve"])
 | Variable | Where | Role |
 |---|---|---|
 | `APPATTIC_CORE_OUT` | `ui/linux-qt/corehost.cpp`, `run.sh` | Directory of `appattic_core.wasm` and plugins. AppImage and `./run.sh --ui` set this. Untrusted if an attacker can write that directory or the variable. |
-| `APPATTIC_PAGE` | `ContentView.swift`, `ui/linux-qt/main.cpp` | Initial sidebar page. Not a privilege control. |
+| `APPATTIC_PAGE` | `ContentView.swift`, `ui/linux-qt/main.cpp` | Initial sidebar page (`overview`, `leftovers`, `stale`, `outdated`, `packages`, `disk`, `settings`). Not a privilege control. |
 | `APPATTIC_HOST_EXEC_LIVE` | `core/host/hostexec.c` | Forces `execvp` of allowlisted queries (default on Linux). |
 | `APPATTIC_HOST_EXEC_FIXTURE` | `core/host/hostexec.c` | Injects canned stdout (default on Darwin). |
+| `FLATPAK_ID` | `core/host/hostexec.c`, `ui/linux-qt/corehost.cpp` | Set by Flatpak. Live `host.exec` wraps `flatpak-spawn --host`. Plugin tags also search `/run/host/usr/bin`. |
 | `XDG_DATA_HOME` / `XDG_*` | `Cache.swift`, `Settings.swift`, `Discover.swift`, `ui/linux-qt/settings.cpp` | Settings and scan-cache location; leftover roots. |
 | `PATH`, `USER`, `LOGNAME`, `LANG`, `NO_COLOR` | `Util.swift`, `CLIParse` help, CLI color | Binary resolution and display. `whichCommand` searches `PATH` plus Homebrew paths. |
 | `HOMEBREW_NO_AUTO_UPDATE` | set by `runCommand` in `Util.swift` | Stops brew from self-updating during scans. |
@@ -49,7 +50,7 @@ No TCP/HTTP listener, webhook, or `serve` command. `parseCLIArguments(["serve"])
 |---|---|---|
 | `settings.json` | `Sources/AppAtticScan/Settings.swift`, `ui/linux-qt/settings.cpp` | Local. Unknown keys / bad types are errors. Missing file → defaults (`confirmDelete` true, `includeSystem` false). |
 | `last-scan.json` | `Sources/AppAtticScan/Cache.swift` | Trusted if fingerprint, `includeSystem`, and age match. No signature. Becomes leftover/stale/outdated rows. |
-| Homebrew / apt / pacman / dnf / zypper / Flatpak / Snap / npm / pipx stdout | `Outdated.swift`, `Packages.swift`, `BrewInfo.swift`, WASM plugins | Treated as structured inventory. |
+| Homebrew / apt / pacman / paru / yay / dnf / yum / zypper / Flatpak / Snap / npm / pipx stdout | `Outdated.swift`, `Packages.swift`, `BrewInfo.swift`, WASM plugins | Treated as structured inventory. |
 | iTunes Lookup JSON | `Outdated.swift` `itunesRequest` | HTTPS `https://itunes.apple.com/lookup`, 12s timeout. Used for App Store version/title/description only (report-only). |
 | Desktop files, plists, XBEL, shell history | `Discover.swift`, `Leftovers.swift`, `Usage.swift` | Local FS. History capped at 500_000 lines. |
 | Plugin `.wasm` | `core/host/embed.c`, `ui/linux-qt/corehost.cpp` | Loaded if the file exists. ABI 1 required. Not signed. |
@@ -166,7 +167,7 @@ Impact is local and user-scoped, not a multi-tenant data breach. The concrete wo
 | UI `confirmDelete` default true; CLI `confirmLiveUpdate` on a TTY | `Settings.swift`, `ContentView.swift`, `ui/linux-qt/main.cpp`, `AppAtticCLI/main.swift` | Accidental click or interactive CLI update | Disabled UI setting; non-interactive CLI `update` |
 | `--dry-run` prints, does not run (except it short-circuits before `update` run) | `CLIParse.swift`, `main.swift` | Review of leftover/stale/package scripts | Operator pasting the script into a root shell |
 | `shellQuote` | `Util.swift` | Metacharacters in paths/names inside generated `sh` | A finding that should not have been listed at all |
-| KEEP / `system` / untrusted-cask / report-only distro upgrades | `Recommend.swift`, `Leftovers.swift`, `Outdated.swift`, `Packages.swift` | Default CLI script omits KEEP and system leftovers; no `apt upgrade` live | REVIEW-tier if the UI user opts in; `.aws`-class misses; plugin `command` |
+| KEEP / `system` / untrusted-cask / no full distro upgrade | `Recommend.swift`, `Leftovers.swift`, `Outdated.swift`, `Packages.swift` | Default CLI script omits KEEP and system leftovers; no `apt upgrade` / `-Syu`; named upgrades only after confirm | REVIEW-tier if the UI user opts in; `.aws`-class misses; plugin `command` |
 | Steam/CrossOver not deleted | `Cleanup.swift` `uninstallCommand` | Steam library `rm` | User running a hand-edited script |
 | Qt `/usr` rm filter and overlay-only delete | `ui/linux-qt/finding.cpp` `isProtectedPackagedPath`, `leftoverCleanupCommand` | `rm` of packaged `/usr` paths in the Qt UI | Swift leftover `rm`; Qt commands that are not `rm` |
 | `host.exec` allowlist | `core/host/hostexec.c`, `hostexec.h` | WASM spawn of destructive argv | Plugin-authored cleanup JSON; Swift `Process` path (separate, argv-array) |

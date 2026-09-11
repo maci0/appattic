@@ -49,7 +49,7 @@ components:
 
 ## Overview
 
-AppAttic is a native utility (Finder / Activity Monitor / GNOME Settings density), not a web dashboard. Same design principles as [TMOG](https://tmog.org), documented from Dave Plummer's Dave's Attic walkthrough in [`docs/tmog-design-language.md`](docs/tmog-design-language.md) ([Shop Talk #91](https://www.youtube.com/watch?v=c3EEs-O3bGE)). Native chrome on each OS, one shared core, system-specific helpers, summary first then deeper lists, tree actions on a parent or one child, installed software sortable by size with uninstall as a first-class verb. Missing platform data stays on screen (empty or "unknown"), it is not hidden. Phosphor / VFD / saturation-11 is Dave's personal chrome, not AppAttic.
+AppAttic is a native utility. Linux Qt follows TMOG's cockpit rules (`DESIGN_RULES.md` in the TMOG tree, [`docs/tmog-design-language.md`](docs/tmog-design-language.md)): summary first, dense type, label/value/accent hierarchy, missing values stay on screen, one hue per concept, brightness on live data. Native toolkit per OS, one shared core, tree actions on a parent or one child, installed software sortable by size with uninstall as a first-class verb. Phosphor palettes, VFD seven-segment meters, and bloom stay Dave's personal chrome. They are not AppAttic.
 
 Software stack follows that native-per-OS split. macOS: SwiftCrossUI `DefaultBackend` (AppKit). Windows: WinUI via SwiftCrossUI if present (not shipped). Linux: C++ Qt 6 Widgets in `ui/linux-qt`, same toolkit as TMOG Linux. The Linux Qt package-manager and leftover queries are WASM plugins; native code keeps windows, lists, inspector, buttons, and system alerts. The Swift CLI and macOS UI still use `AppAtticScan`. Direction: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Build on the distro you run (Arch, Fedora, Debian/Ubuntu, openSUSE). An Ubuntu-built binary is not assumed to start on Arch. Pacman vs apt is the same job through different plugins.
 
@@ -61,29 +61,33 @@ List and inspector fill is white in light mode, `#1e1e1e` in dark mode. Sidebar 
 
 Interactive accent is system blue. Status: system red (orphaned / REMOVE), amber (REVIEW / outdated version; darker than system yellow in light mode), green (KEEP). Never use color alone. Rows keep a text status.
 
-The product mark (`packaging/appattic.svg`, `generate_icon.py`) uses that same dark fill `#1e1e1e`, dark chrome `#2e2e2e`, accent `#0a84ff`, KEEP `#30d158`, and REMOVE `#ff453a`. GitHub canvas (`#0d1117`, `#58a6ff`, `#21262d`) is not the mark.
+The product mark (`packaging/appattic.svg`) uses that same dark fill `#1e1e1e`, dark chrome `#2e2e2e`, accent `#0a84ff`, KEEP `#30d158`, and REMOVE `#ff453a`. GitHub canvas (`#0d1117`, `#58a6ff`, `#21262d`) is not the mark.
 
 ## Typography
 
-Platform UI stack. 13pt body, 13pt bold section titles, 11pt secondary columns (kind, location, modified, size). No marketing display face. No oversized metric numerals.
+macOS uses 13pt body and 11pt secondary columns on the system UI face. Linux Qt uses Selawik when it is installed (TMOG's application font), otherwise the desktop UI font. Page and section titles use bundled Michroma (OFL), the TMOG display face. Instrument and inspector labels are small, uppercase, and tracked. Values sit under those labels at body size plus two points, DemiBold, with tabular figures on sizes. Paths and scripts use the desktop fixed-width font. No VFD digit grid. No oversized marketing numerals.
+
+The Linux sidebar is a source list (window fill, theme icons, style-drawn rows) with Settings pinned at the bottom, like TMOG. The detail pane carries a Michroma page title. Toolbars are QToolBar.
 
 ## Layout
 
-`NavigationSplitView`: source-list sidebar (min width ~220) plus detail. Detail is a compact toolbar of tools (search, Select All, Rescan), then content, then a Finder-style status bar when something is checked. The page name lives in the sidebar, not as a second title in the toolbar. Content insets ~16.
+`NavigationSplitView`: source-list sidebar (min width ~220) plus detail. Detail is a compact toolbar of tools (search, Select All, Rescan), then content, then a Finder-style status bar when something is checked. The page name lives in the sidebar and as a Michroma title in the detail toolbar, matching TMOG. Content insets ~16.
 
-Sidebar items: Overview, Leftovers, Stale Apps, Outdated, Packages, Settings.
+Overview is a cockpit: one row of instruments (uppercase label, value, semantic color on leftovers), then three dense lists. Installed apps stay "Not scanned" on Linux. Empty structure stays visible while a scan runs.
+
+Sidebar items: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settings. Disk Usage is a devices list plus a scan view (tree, ring or treemap, allocated vs apparent, this-file-system-only). Charts are native Qt painting on Linux. macOS shows the tree and devices. Delete from this page is Move to Trash after confirm, not a shell script.
 
 Lists are compact table-style rows with a header and secondary columns, sorted by size. Empty, scanning, and error states are short copy. Delete uses a system alert. Script preview is a sheet.
 
-Packages follows TMOG installed-apps plus process tree: one dense list of installed packages, default sort by size, manager and kind columns. Kind is Orphan (distro auto, nothing still needs it) or Global (npm/pnpm/bun -g, pipx, uv tool). Filter chips or a segmented control: All, Leaves, Globals. Expand a row to see dependency children when the manager gives a tree. Remove the parent the way TMOG kills a process tree (unused deps go with it). Remove one child only when that node is selected alone. Mark as manually installed is a keep verb for apt/pacman/dnf/zypper only. Same confirm + `sh` preview as leftover cleanup. Outdated stays version skew. Packages is keep-or-drop.
+Packages follows TMOG installed-apps plus process tree: one dense list of installed packages, default sort by size, manager and kind columns. Kind is Orphan (distro auto, nothing still needs it, including dpkg `rc` config remnants) or Global (npm/pnpm/bun -g, top-level pip user-site, pipx, uv tool, Deno ~/.deno/bin). AUR outdated uses paru/yay/pikaur (`-Qua`). Named distro upgrades and package removes wait for confirm, then run via `pkexec` or `sudo`. yum is the dnf plugin when `dnf` is missing. PPA source files under `/etc/apt/sources.list.d` show on Leftovers as review. Removing one is `rm` of that file after confirm, with `pkexec`/`sudo`. Not automatic. Filter chips or a segmented control: All, Leaves, Globals. Expand a row to see dependency children when the manager gives a tree. Remove the parent the way TMOG kills a process tree (unused deps go with it). Remove one child only when that node is selected alone. Mark as manually installed is a keep verb for apt/pacman/dnf/zypper only. Same confirm + `sh` preview as leftover cleanup. Outdated stays version skew. Packages is keep-or-drop.
 
-Overview: compact totals (label column + value), then one scrolling row of equal lists (largest leftovers, largest stale, outdated packages). Tapping a row opens that list with the item selected. While a scan is running and no results exist yet, totals read as in progress and lists say Scanning, not an empty clean machine.
+Overview: compact totals (label column + value), then one scrolling row of equal lists (largest leftovers, largest stale, outdated packages). Tapping a row opens that list with the item selected. While a scan is running and no results exist yet, totals read as in progress and lists show the current plugin plus N/M, not an empty clean machine.
 
 Selected list row uses system blue with on-accent (white) text, including secondary columns. Gray secondary text is not used on the selected row.
 
-Cleanup membership is an `in` mark in the first column, plus the inspector toggle and toolbar Select All.
+Cleanup membership is a leftover tickbox on Linux (an `in` mark on other lists), plus the inspector toggle and toolbar Select All.
 
-Do not rebuild leftover/stale/outdated lists on every scan progress tick. Progress is a status string only.
+Do not rebuild leftover/stale/outdated lists on every scan progress tick. Progress is a status string plus a determinate N/M bar. The string names the plugin that is running (leftover home folder, pacman, npm, and so on).
 
 AppKit `List` selection is unreliable (re-selects the current row and can eat clicks). Sidebar and leftover/stale/outdated rows are tappable `ScrollView` rows, not selectable `List`s.
 
@@ -103,11 +107,11 @@ Platform controls. No custom pills or metric cards.
 
 Tappable source-list rows (`ScrollView` + `onTapGesture`). Changing selection switches the detail pane. Do not use AppKit `List` for this sidebar.
 
-Toolbar: tools only. Rescan always. Search on Leftovers, Stale Apps, Outdated, and Packages. Select All on leftover, stale, outdated, and packages lists (updatable Homebrew/Flatpak only on Outdated). Count of visible rows sits on the leading edge in 11pt secondary text. Scan age (cached or live) sits next to the count when a scan is not running. A running scan replaces that age with Scanning. Empty search results say what missed and offer Clear search. Destructive delete, package remove, mark-manual, and package update only after confirm when Settings says so. Action buttons stay disabled while a scan or script is running.
+Toolbar: tools only. Rescan always. Search on Leftovers, Stale Apps, Outdated, and Packages. Select All on leftover, stale, outdated, and packages lists (updatable Homebrew, Flatpak, apt, pacman, AUR, dnf, yum, and zypper rows on Outdated). Count of visible rows sits on the leading edge in 11pt secondary text. Scan age (cached or live) sits next to the count when a scan is not running. A running scan replaces that age with the current plugin and N/M, and a compact progress bar. Empty search results say what missed and offer Clear search. Destructive delete, package remove, mark-manual, and package update only after confirm when Settings says so. Action buttons stay disabled while a scan or script is running.
 
 ### Tables / rows
 
-Header plus name and secondary columns (location, modified, size for leftovers; status, last used, size for stale; manager, current → latest for outdated; manager, kind, size for packages). Native checkboxes are not used inside the list on AppKit. The first column shows `in` when the item is in the cleanup, update, remove, or mark-manual set.
+Header plus name and secondary columns (location, modified, size for leftovers; status, last used, size for stale; manager, current → latest for outdated; manager, kind, size for packages). Native checkboxes are not used inside the list on AppKit. The first column shows `in` when the item is in the cleanup, update, remove, or mark-manual set. Linux leftovers use a native tickbox in that column. The inspector Include in cleanup toggle and Select All stay in sync with it.
 
 ### Alerts and sheets
 
@@ -117,7 +121,10 @@ Delete and Update: system alert. Script preview: sheet with copyable `sh`. Never
 
 ### Do
 
-- Do keep density at native utility scale (13/11pt, compact rows).
+- Do keep density at native utility scale (macOS 13/11pt, Linux Selawik or desktop font, Michroma titles, compact rows with readable leading).
+- Do let the Linux Qt style draw sidebar rows, toolbars, and table headers. Overlay only the count.
+- Do keep missing numbers on screen (`unknown`, `Not scanned`, `…`). Do not hide the slot.
+- Do spend color on leftover/remove (red), review/shadow/outdated (amber), keep (green). Chrome stays quiet.
 - Do use system semantic colors with a text label.
 - Do keep scan and `rm` off the main thread.
 - Do pin sidebar items to the top of the pane (`Spacer` under the rows).

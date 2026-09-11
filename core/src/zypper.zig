@@ -7,10 +7,10 @@ const plugin_id = "zypper";
 const query_cmd = "zypper --non-interactive packages --unneeded";
 const outdated_cmd = "zypper --non-interactive list-updates";
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [4096]u8 = undefined;
-var exec_up_buf: [4096]u8 = undefined;
+var exec_buf: [65536]u8 = undefined;
+var exec_up_buf: [65536]u8 = undefined;
 
 const none_json =
     \\{"plugin":"zypper","engine":null,"findings":[],"script":null,"dialog":{"title":"No zypper","body":"zypper is not on PATH. Plugin inactive."},"note":"zypper missing"}
@@ -109,7 +109,7 @@ fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated)
     for (outdated) |h| {
         if (!first) w.raw(",");
         first = false;
-        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "zypper", "zypper update ");
+        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "zypper", "zypper --non-interactive update ", true);
     }
     w.raw("],\"script\":");
     if (orphans.len == 0) {
@@ -123,7 +123,7 @@ fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated)
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove zypper unneeded?\",\"body\":\"Named --unneeded packages only. Outdated packages are report-only. Named zypper update waits for confirm. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove zypper unneeded?\",\"body\":\"Named --unneeded packages only. Named zypper update waits for confirm. Not a full distro upgrade. Nothing runs until you confirm.\"}}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -147,18 +147,28 @@ export fn plugin_query(present: i32) i32 {
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
-    var orphans: [32]ZypperOrphan = undefined;
+    var orphans: [128]ZypperOrphan = undefined;
     var n_orph: usize = 0;
     const nexec = host_exec.run(query_cmd, &exec_buf);
     if (nexec >= 0) n_orph = parseZypperUnneeded(exec_buf[0..@intCast(nexec)], &orphans);
 
-    var outdated: [32]ZypperOutdated = undefined;
+    var outdated: [128]ZypperOutdated = undefined;
     var n_out: usize = 0;
     const nq = host_exec.run(outdated_cmd, &exec_up_buf);
     if (nq >= 0) n_out = parseZypperListUpdates(exec_up_buf[0..@intCast(nq)], &outdated);
 
-    if (!renderZypper(orphans[0..n_orph], outdated[0..n_out])) return 1;
-    return 0;
+    while (true) {
+        if (renderZypper(orphans[0..n_orph], outdated[0..n_out])) return 0;
+        if (n_out > 0) {
+            n_out -= 1;
+            continue;
+        }
+        if (n_orph > 0) {
+            n_orph -= 1;
+            continue;
+        }
+        return 1;
+    }
 }
 
 export fn result_ptr() i32 {
@@ -221,8 +231,8 @@ test "plugin_query present JSON includes zypper list-updates outdated" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"git\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "2.43.0-1.1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "2.45.1-1.1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "zypper update git") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "zypper --non-interactive update git") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "zypper dup") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "list-updates") == null);
 }

@@ -248,7 +248,8 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
 public func outdatedIsUpdatable(manager: String, kind: String?) -> Bool {
     if kind == "untrusted" { return false }
     switch manager {
-    case "brew-formula", "brew-cask", "flatpak":
+    case "brew-formula", "brew-cask", "flatpak",
+         "apt", "pacman", "aur", "dnf", "yum", "zypper":
         return true
     default:
         return false

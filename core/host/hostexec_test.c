@@ -1,6 +1,7 @@
 #include "hostexec.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int fail(const char *msg) {
@@ -42,11 +43,19 @@ int main(void) {
     rc |= expect_allow("pacman -Qdt");
     rc |= expect_allow("pacman -Qqdt");
     rc |= expect_allow("pacman -Qu");
+    rc |= expect_allow("paru -Qua");
+    rc |= expect_allow("yay -Qua");
+    rc |= expect_allow("pikaur -Qua");
+    rc |= expect_allow("/usr/bin/paru -Qua");
+    rc |= expect_allow("dpkg -l");
+    rc |= expect_allow("/usr/bin/dpkg -l");
+    rc |= expect_allow("ls -1 /etc/apt/sources.list.d");
     rc |= expect_allow("snap list --all");
     rc |= expect_allow("ls -1");
     rc |= expect_allow("ls -1A");
     rc |= expect_allow("ls -1A /home/user");
     rc |= expect_allow("ls -1 /home/user/.config");
+    rc |= expect_allow("ls -1 /home/user/.deno/bin");
     rc |= expect_allow("/bin/ls -1A");
     rc |= expect_allow("ls /home/user/.config");
     rc |= expect_allow("ls -1 /home/user/snap");
@@ -83,6 +92,11 @@ int main(void) {
     rc |= expect_allow("flatpak remove --unused --dry-run");
     rc |= expect_allow("/usr/bin/flatpak uninstall --unused --dry-run");
     rc |= expect_allow("flatpak uninstall --unused --simulate");
+    rc |= expect_allow("flatpak remote-ls --updates --app");
+    rc |= expect_allow("flatpak remote-ls --updates --app --columns=application,version");
+    rc |= expect_allow("/usr/bin/flatpak remote-ls --updates --app");
+    rc |= expect_allow("flatpak list --app");
+    rc |= expect_allow("flatpak list --app --columns=application,version");
     rc |= expect_allow("npm ls -g --depth=0 --json");
     rc |= expect_allow("npm ls -g --depth=0");
     rc |= expect_allow("npm outdated -g --json");
@@ -98,6 +112,10 @@ int main(void) {
     rc |= expect_allow("pipx list");
     rc |= expect_allow("pipx list --json");
     rc |= expect_allow("/usr/bin/pipx list --json");
+    rc |= expect_allow("pip list --user --format=json");
+    rc |= expect_allow("pip list --user --not-required --format=json");
+    rc |= expect_allow("pip3 list --user --not-required --format=json");
+    rc |= expect_allow("pip3 list --user --format=json");
     rc |= expect_allow("pip list --user --outdated --format=json");
     rc |= expect_allow("pip3 list --user --outdated --format=json");
     rc |= expect_allow("/usr/bin/pip list --user --outdated --format=json");
@@ -132,6 +150,13 @@ int main(void) {
     rc |= expect_deny("apt-get -s autoremove -y");
     rc |= expect_deny("apt-get -s autoremove --yes");
     rc |= expect_deny("apt-get purge -y libfoo0");
+    rc |= expect_deny("paru -S foo");
+    rc |= expect_deny("yay -S foo");
+    rc |= expect_deny("pikaur -S foo");
+    rc |= expect_deny("paru -Rns foo");
+    rc |= expect_deny("dpkg --purge oldpkg");
+    rc |= expect_deny("dpkg -P oldpkg");
+    rc |= expect_deny("dpkg -r oldpkg");
     rc |= expect_deny("apt-get upgrade");
     rc |= expect_deny("apt upgrade");
     rc |= expect_deny("apt list");
@@ -194,8 +219,8 @@ int main(void) {
     rc |= expect_deny("flatpak uninstall --unused");
     rc |= expect_deny("flatpak remove --unused");
     rc |= expect_deny("flatpak update -y org.mozilla.firefox");
-    rc |= expect_deny("flatpak remote-ls --updates --app");
-    rc |= expect_deny("flatpak list --app");
+    rc |= expect_deny("flatpak remote-ls --app");
+    rc |= expect_deny("flatpak list");
     rc |= expect_deny("flatpak uninstall org.freedesktop.Platform");
     rc |= expect_deny("rm /usr/bin/flatpak");
     rc |= expect_deny("npm uninstall -g typescript");
@@ -251,7 +276,9 @@ int main(void) {
     rc |= expect_deny("pip3 list --outdated --format=json");
     rc |= expect_deny("pip list --user");
     rc |= expect_deny("pip list --user --outdated");
-    rc |= expect_deny("pip list --user --format=json");
+    rc |= expect_deny("deno uninstall --global file_server");
+    rc |= expect_deny("deno install --global jsr:@std/http/file_server");
+    rc |= expect_deny("deno eval console.log(1)");
     rc |= expect_deny("pip freeze --user");
     rc |= expect_deny("pip list --user --outdated --format=json --path /tmp/venv");
     rc |= expect_deny("pip list --user --outdated --format=json --target /tmp");
@@ -273,6 +300,17 @@ int main(void) {
     rc |= expect_deny("npm ls -g --prefix=/tmp/proj");
     rc |= expect_deny("composer global outdated --working-dir=/tmp/proj");
     rc |= expect_deny("");
+    rc |= expect_deny("flatpak-spawn --host pacman -Qdt");
+    rc |= expect_deny("flatpak-spawn --host ls -1");
+
+    unsetenv("FLATPAK_ID");
+    if (appattic_host_in_flatpak()) return fail("FLATPAK_ID unset must not report sandbox");
+    if (setenv("FLATPAK_ID", "org.appattic.AppAttic", 1) != 0) return fail("setenv FLATPAK_ID");
+    if (!appattic_host_in_flatpak()) return fail("FLATPAK_ID set must report sandbox");
+    rc |= expect_allow("pacman -Qdt");
+    rc |= expect_deny("pacman -Rns libfoo");
+    unsetenv("FLATPAK_ID");
+    if (appattic_host_in_flatpak()) return fail("FLATPAK_ID cleared");
 
     char out[4096];
     int     n = appattic_host_exec("apt-get -s autoremove", out, sizeof out);
@@ -366,6 +404,30 @@ int main(void) {
     out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
     if (!strstr(out, "gone-app")) return fail("ls fixture text");
 
+    {
+        char tiny[16];
+        n = appattic_host_exec("ls -1", tiny, sizeof tiny);
+        if (n != 9 || memcmp(tiny, "gone-app\n", 9) != 0) {
+            return fail("ls overflow must keep complete lines");
+        }
+        char too_small[4];
+        n = appattic_host_exec("ls -1", too_small, sizeof too_small);
+        if (n != APPATTIC_HOST_EXEC_BAD) return fail("ls overflow with no complete line");
+    }
+
+    n = appattic_host_exec("flatpak remote-ls --updates --app", out, sizeof out);
+    if (n <= 0) return fail("flatpak updates fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "org.mozilla.firefox") || !strstr(out, "130.0")) {
+        return fail("flatpak updates fixture text");
+    }
+    n = appattic_host_exec("flatpak list --app", out, sizeof out);
+    if (n <= 0) return fail("flatpak list fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "org.mozilla.firefox") || !strstr(out, "128.0")) {
+        return fail("flatpak list fixture text");
+    }
+
     n = appattic_host_exec("ls -1 /home/user/snap", out, sizeof out);
     if (n <= 0) return fail("ls snap fixture missing");
     out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
@@ -450,6 +512,16 @@ int main(void) {
     if (n <= 0) return fail("pipx fixture missing");
     out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
     if (!strstr(out, "httpie") || !strstr(out, "3.2.2")) return fail("pipx fixture text");
+
+    n = appattic_host_exec("pip list --user --format=json", out, sizeof out);
+    if (n <= 0) return fail("pip list fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "httpie") || !strstr(out, "3.2.2")) return fail("pip list fixture text");
+
+    n = appattic_host_exec("ls -1 /home/user/.deno/bin", out, sizeof out);
+    if (n <= 0) return fail("deno ls fixture missing");
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (!strstr(out, "file_server") || !strstr(out, "deployctl")) return fail("deno ls fixture text");
 
     n = appattic_host_exec("pip list --user --outdated --format=json", out, sizeof out);
     if (n <= 0) return fail("pip fixture missing");

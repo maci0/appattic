@@ -16,15 +16,11 @@ int runCoreWasm(
     void (*onJson)(const char *json, size_t jsonLen, void *user),
     void *user,
     char *err,
-    size_t errlen
+    size_t errlen,
+    void (*onProgress)(const char *pluginId, int index, int total, void *user) = nullptr
 );
 
-int collectCoreWasm(
-    const QString &coreWasm,
-    const QStringList &pluginSpecs,
-    QByteArray *blobs,
-    char *err,
-    size_t errlen
-);
+void requestCoreWasmCancel();
+void clearCoreWasmCancel();
 
 #endif

@@ -1,0 +1,9 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/icons">
+    <file alias="appattic.png">../../packaging/appattic.png</file>
+  </qresource>
+  <qresource prefix="/fonts">
+    <file alias="Michroma-Regular.ttf">fonts/Michroma-Regular.ttf</file>
+  </qresource>
+</RCC>

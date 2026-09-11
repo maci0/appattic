@@ -7,10 +7,10 @@ const plugin_id = "pacman";
 const query_cmd = "pacman -Qdt";
 const outdated_cmd = "pacman -Qu";
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [4096]u8 = undefined;
-var exec_up_buf: [4096]u8 = undefined;
+var exec_buf: [65536]u8 = undefined;
+var exec_up_buf: [65536]u8 = undefined;
 
 const none_json =
     \\{"plugin":"pacman","engine":null,"findings":[],"script":null,"dialog":{"title":"No pacman","body":"pacman is not on PATH. Plugin inactive."},"note":"pacman missing"}
@@ -83,14 +83,14 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"orphaned\",\"command\":\"pacman -Rns ");
+        w.raw(",\"status\":\"orphaned\",\"command\":\"pacman --noconfirm -Rns ");
         w.raw(h.name);
         w.raw("\",\"manager\":\"pacman\"}");
     }
     for (outdated) |h| {
         if (!first) w.raw(",");
         first = false;
-        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "pacman", "pacman -S ");
+        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "pacman", "pacman --noconfirm -S ", true);
     }
     w.raw("],\"script\":");
     if (orphans.len == 0) {
@@ -98,13 +98,13 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic pacman. Review before running.\\n");
         for (orphans) |h| {
-            w.raw("pacman -Rns ");
+            w.raw("pacman --noconfirm -Rns ");
             w.raw(h.name);
             w.raw("\\n");
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove pacman orphans?\",\"body\":\"Named -Qdt leaves only. Outdated packages are report-only. Named pacman -S waits for confirm. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove pacman orphans?\",\"body\":\"Named -Qdt leaves only. Named pacman -S waits for confirm. Not a full system upgrade. Nothing runs until you confirm.\"}}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -128,18 +128,28 @@ export fn plugin_query(present: i32) i32 {
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
-    var orphans: [32]PacmanOrphan = undefined;
+    var orphans: [128]PacmanOrphan = undefined;
     var n_orph: usize = 0;
     const nexec = host_exec.run(query_cmd, &exec_buf);
     if (nexec >= 0) n_orph = parsePacmanQdt(exec_buf[0..@intCast(nexec)], &orphans);
 
-    var outdated: [32]PacmanOutdated = undefined;
+    var outdated: [128]PacmanOutdated = undefined;
     var n_out: usize = 0;
     const nq = host_exec.run(outdated_cmd, &exec_up_buf);
     if (nq >= 0) n_out = parsePacmanQu(exec_up_buf[0..@intCast(nq)], &outdated);
 
-    if (!renderPacman(orphans[0..n_orph], outdated[0..n_out])) return 1;
-    return 0;
+    while (true) {
+        if (renderPacman(orphans[0..n_orph], outdated[0..n_out])) return 0;
+        if (n_out > 0) {
+            n_out -= 1;
+            continue;
+        }
+        if (n_orph > 0) {
+            n_orph -= 1;
+            continue;
+        }
+        return 1;
+    }
 }
 
 export fn result_ptr() i32 {
@@ -181,7 +191,7 @@ test "plugin_query present JSON comes from pacman -Qdt fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "libfoo") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "1.2.3-1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "libbar") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "pacman -Rns libfoo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "pacman --noconfirm -Rns libfoo") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "-Syu") == null);
 }
 
@@ -198,8 +208,8 @@ test "plugin_query present JSON includes pacman -Qu outdated" {
     try std.testing.expect(std.mem.indexOf(u8, json, "coreutils") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "9.5-1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "9.5-2") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "pacman -S coreutils") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "pacman --noconfirm -S coreutils") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "-Syu") == null);
 }
 

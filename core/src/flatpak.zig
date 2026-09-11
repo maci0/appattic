@@ -5,10 +5,14 @@ const host_exec = @import("host_exec.zig");
 
 const plugin_id = "flatpak";
 const query_cmd = "flatpak uninstall --unused --dry-run";
+const updates_cmd = "flatpak remote-ls --updates --app --columns=application,version";
+const list_cmd = "flatpak list --app --columns=application,version";
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [4096]u8 = undefined;
+var exec_buf: [65536]u8 = undefined;
+var exec_up_buf: [65536]u8 = undefined;
+var exec_list_buf: [65536]u8 = undefined;
 
 const none_json =
     \\{"plugin":"flatpak","engine":null,"findings":[],"script":null,"dialog":{"title":"No flatpak","body":"flatpak is not on PATH. Plugin inactive."},"note":"flatpak missing"}
@@ -17,6 +21,12 @@ const none_json =
 pub const FlatpakUnused = struct {
     name: []const u8,
     branch: []const u8,
+};
+
+pub const FlatpakOutdated = struct {
+    name: []const u8,
+    current: []const u8,
+    latest: []const u8,
 };
 
 fn isNumberedPrefix(t: []const u8) bool {
@@ -101,11 +111,74 @@ pub fn parseFlatpakUnused(text: []const u8, out: []FlatpakUnused) usize {
     return n;
 }
 
-fn renderFlatpak(hits: []const FlatpakUnused) bool {
+const FlatpakRow = struct {
+    name: []const u8,
+    version: []const u8,
+};
+
+fn skipFlatpakHeader(name: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(name, "application") or
+        std.ascii.eqlIgnoreCase(name, "application id") or
+        std.ascii.eqlIgnoreCase(name, "name") or
+        std.ascii.eqlIgnoreCase(name, "id");
+}
+
+fn parseFlatpakAppRows(text: []const u8, out: []FlatpakRow) usize {
+    var n: usize = 0;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |raw| {
+        if (n == out.len) break;
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0) continue;
+        var name: []const u8 = "";
+        var version: []const u8 = "";
+        if (std.mem.indexOfScalar(u8, line, '\t') != null) {
+            var it = std.mem.splitScalar(u8, line, '\t');
+            name = std.mem.trim(u8, it.next() orelse "", " ");
+            version = std.mem.trim(u8, it.next() orelse "", " ");
+        } else {
+            var it = std.mem.tokenizeAny(u8, line, " \t");
+            name = it.next() orelse continue;
+            version = it.next() orelse "";
+        }
+        if (name.len == 0 or skipFlatpakHeader(name)) continue;
+        if (!jsonbuf.isSafeIdent(name)) continue;
+        out[n] = .{ .name = name, .version = version };
+        n += 1;
+    }
+    return n;
+}
+
+fn versionOf(rows: []const FlatpakRow, name: []const u8) []const u8 {
+    for (rows) |r| {
+        if (std.mem.eql(u8, r.name, name)) return r.version;
+    }
+    return "";
+}
+
+/// `flatpak remote-ls --updates --app` plus `flatpak list --app` current versions.
+pub fn parseFlatpakUpdates(updates_text: []const u8, installed_text: []const u8, out: []FlatpakOutdated) usize {
+    var latest_rows: [128]FlatpakRow = undefined;
+    var current_rows: [128]FlatpakRow = undefined;
+    const n_latest = parseFlatpakAppRows(updates_text, &latest_rows);
+    const n_cur = parseFlatpakAppRows(installed_text, &current_rows);
+    var n: usize = 0;
+    for (latest_rows[0..n_latest]) |row| {
+        if (n == out.len) break;
+        const current = versionOf(current_rows[0..n_cur], row.name);
+        out[n] = .{ .name = row.name, .current = current, .latest = row.version };
+        n += 1;
+    }
+    return n;
+}
+
+fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     w.raw("{\"plugin\":\"flatpak\",\"engine\":\"flatpak\",\"findings\":[");
-    for (hits, 0..) |h, i| {
-        if (i != 0) w.raw(",");
+    var first = true;
+    for (hits) |h| {
+        if (!first) w.raw(",");
+        first = false;
         w.raw("{\"kind\":\"unused-runtime\",\"id\":");
         w.str(h.name);
         w.raw(",\"name\":");
@@ -117,10 +190,15 @@ fn renderFlatpak(hits: []const FlatpakUnused) bool {
         w.raw(",\"status\":\"orphaned\",\"command\":\"flatpak uninstall -y ");
         w.raw(h.name);
         if (h.branch.len > 0) {
-            w.raw(" ");
+            w.raw("//");
             w.raw(h.branch);
         }
         w.raw("\",\"manager\":\"flatpak\"}");
+    }
+    for (outdated) |h| {
+        if (!first) w.raw(",");
+        first = false;
+        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "flatpak", "flatpak update -y ", true);
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
@@ -131,14 +209,14 @@ fn renderFlatpak(hits: []const FlatpakUnused) bool {
             w.raw("flatpak uninstall -y ");
             w.raw(h.name);
             if (h.branch.len > 0) {
-                w.raw(" ");
+                w.raw("//");
                 w.raw(h.branch);
             }
             w.raw("\\n");
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove unused Flatpak runtimes?\",\"body\":\"Named unused runtimes only. Installed apps stay on Stale Apps. Outdated updates stay report-only. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove unused Flatpak runtimes?\",\"body\":\"Named unused runtimes only. Named flatpak update waits for confirm. Nothing runs until you confirm.\"}}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -162,15 +240,30 @@ export fn plugin_query(present: i32) i32 {
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
+    var hits: [128]FlatpakUnused = undefined;
+    var n: usize = 0;
     const nexec = host_exec.run(query_cmd, &exec_buf);
-    if (nexec < 0) {
-        if (!renderFlatpak(&.{})) return 1;
-        return 0;
+    if (nexec >= 0) n = parseFlatpakUnused(exec_buf[0..@intCast(nexec)], &hits);
+
+    var outdated: [128]FlatpakOutdated = undefined;
+    var n_out: usize = 0;
+    const nq = host_exec.run(updates_cmd, &exec_up_buf);
+    if (nq >= 0) {
+        var installed: []const u8 = "";
+        const nl = host_exec.run(list_cmd, &exec_list_buf);
+        if (nl >= 0) installed = exec_list_buf[0..@intCast(nl)];
+        n_out = parseFlatpakUpdates(exec_up_buf[0..@intCast(nq)], installed, &outdated);
     }
-    var hits: [32]FlatpakUnused = undefined;
-    const n = parseFlatpakUnused(exec_buf[0..@intCast(nexec)], &hits);
-    if (!renderFlatpak(hits[0..n])) return 1;
-    return 0;
+
+    while (true) {
+        if (renderFlatpak(hits[0..n], outdated[0..n_out])) return 0;
+        if (n_out > 0) {
+            n_out -= 1;
+            continue;
+        }
+        if (n == 0) return 1;
+        n -= 1;
+    }
 }
 
 export fn result_ptr() i32 {
@@ -227,10 +320,27 @@ test "plugin_query present JSON comes from unused fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "unused-runtime") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "org.freedesktop.Platform.GL.default") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "23.08") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "flatpak uninstall -y org.freedesktop.Platform.GL.default") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "flatpak uninstall -y org.freedesktop.Platform.GL.default//23.08") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "flatpak remote-ls") == null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "org.mozilla.firefox") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "org.mozilla.firefox") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "flatpak update -y org.mozilla.firefox") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"current_version\":\"128.0\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"latest_version\":\"130.0\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "rm /usr/bin/flatpak") == null);
+}
+
+test "parseFlatpakUpdates joins current from list" {
+    var buf: [4]FlatpakOutdated = undefined;
+    const n = parseFlatpakUpdates(
+        "Application Version\norg.mozilla.firefox 130.0\n",
+        "Application Version\norg.mozilla.firefox 128.0\n",
+        &buf,
+    );
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqualStrings("org.mozilla.firefox", buf[0].name);
+    try std.testing.expectEqualStrings("128.0", buf[0].current);
+    try std.testing.expectEqualStrings("130.0", buf[0].latest);
 }
 
 test "plugin_query missing is empty findings" {

@@ -1,0 +1,31 @@
+{
+  "id": "deno",
+  "url": "deno.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.deno",
+    "appattic.script.deno",
+    "appattic.dialog.deno"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "ls"
+      ],
+      "denySubstrings": [
+        "uninstall",
+        "install",
+        "run",
+        "eval"
+      ]
+    }
+  },
+  "config": {
+    "globalOnly": true
+  },
+  "disabled": false
+}

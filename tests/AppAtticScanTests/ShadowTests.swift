@@ -273,6 +273,7 @@ final class ShadowTests: XCTestCase {
     func testDefaultOverlayRootsIncludeLocalBinAndDesktop() {
         let roots = defaultOverlayShadowRoots(home: "/home/u", env: [:])
         XCTAssertTrue(roots.contains { $0.dir == "/home/u/.local/bin" && $0.kind == "file" })
+        XCTAssertTrue(roots.contains { $0.dir == "/home/u/bin" && $0.kind == "file" && $0.label == "bin" })
         XCTAssertTrue(roots.contains { $0.dir == "/home/u/.local/share/applications" && $0.kind == "desktop" })
         XCTAssertTrue(roots.contains { $0.dir.hasSuffix("/.cargo/bin") && $0.kind == "file" })
         let pkgs = defaultPackageShadowDirs(home: "/home/u", env: [:], which: { _ in nil })

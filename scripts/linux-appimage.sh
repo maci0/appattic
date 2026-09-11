@@ -200,6 +200,13 @@ fi
 
 cp -L "$WASMTIME_SO" "$APPDIR/usr/bin/libwasmtime.so"
 
+META_DEST="$APPDIR/usr/share/metainfo"
+mkdir -p "$META_DEST"
+if [[ -f "$ROOT/packaging/org.appattic.AppAttic.metainfo.xml" ]]; then
+    cp -f "$ROOT/packaging/org.appattic.AppAttic.metainfo.xml" \
+        "$META_DEST/appattic.metainfo.xml"
+fi
+
 WASM_DEST="$APPDIR/usr/share/appattic"
 mkdir -p "$WASM_DEST"
 while IFS= read -r f; do

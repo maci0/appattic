@@ -6,9 +6,9 @@ const host_exec = @import("host_exec.zig");
 const plugin_id = "composer";
 const query_cmd = "composer global outdated";
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [8192]u8 = undefined;
+var exec_buf: [32768]u8 = undefined;
 
 const none_json =
     \\{"plugin":"composer","engine":null,"findings":[],"script":null,"dialog":{"title":"No composer","body":"composer is not on PATH. Plugin inactive."},"note":"composer missing"}
@@ -52,7 +52,7 @@ fn renderComposer(hits: []const ComposerOutdated) bool {
     w.raw("{\"plugin\":\"composer\",\"engine\":\"composer\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
-        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "composer", "composer global update ");
+        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "composer", "composer global update ", false);
     }
     w.raw("],\"script\":null");
     w.raw(",\"dialog\":{\"title\":\"Outdated Composer globals?\",\"body\":\"Global composer.json packages only. Not project vendor. Report-only. Named composer global update waits for confirm. AppAttic does not run this upgrade.\"}}");
@@ -84,10 +84,13 @@ export fn plugin_query(present: i32) i32 {
         if (!renderComposer(&.{})) return 1;
         return 0;
     }
-    var hits: [32]ComposerOutdated = undefined;
-    const n = parseComposerOutdated(exec_buf[0..@intCast(nexec)], &hits);
-    if (!renderComposer(hits[0..n])) return 1;
-    return 0;
+    var hits: [128]ComposerOutdated = undefined;
+    var n = parseComposerOutdated(exec_buf[0..@intCast(nexec)], &hits);
+    while (true) {
+        if (renderComposer(hits[0..n])) return 0;
+        if (n == 0) return 1;
+        n -= 1;
+    }
 }
 
 export fn result_ptr() i32 {

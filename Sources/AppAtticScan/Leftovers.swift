@@ -25,27 +25,27 @@ let homeDotData = [
     ".npm", ".cargo", ".rustup", ".android", ".m2",
 ]
 
-let linuxSystemNames: Set<String> = [
-    "fontconfig", "dconf", "gconf", "gtk-2.0", "gtk-3.0", "gtk-4.0", "glib-2.0",
-    "pulse", "pipewire", "systemd", "user-dirs.dirs", "user-dirs.locale",
-    "xdg", "mime", "icons", "themes", "applications", "desktop-directories",
-    "ibus", "fcitx", "fcitx5", "environment.d", "procps", "tracker3",
-    "upstart", "kde", "plasma", "xfce4", "recently-used.xbel", "flatpak",
-    "containers", "Trash", "xorg", "session", "update-notifier",
-    "dbus", "gvfs", "xdg-desktop-portal", "gnome-shell", "gnome-session",
-    "snap", "fish", "zsh", "bash", "git", "nvim", "vim", "ssh", "gnupg",
-    "aws", "docker",
-    "tmux", "direnv", "starship", "asdf", "nvm", "pyenv", "rbenv", "rustup",
-    "cargo", "npm", "yarn", "pnpm", "pip", "conda", "htop", "curl",
-    "thumbnails", "mesa_shader_cache", "mesa_shader_cache_db", "nvidia",
-    "gnome-software", "evolution", "update-manager", "gvfs-metadata",
-    "man",
-    "uv", "bun", "go", "helm", "gh", "virtualenv", "configstore",
-    "node", "node-gyp", "bazelisk", "black", "pythonentrypoints",
-    "swift", "gcloud", "btop", "wasmtime", "zls",
-    "kube", "kubectl", "kubebuilder", "jetpack", "jetpackcache",
-    "pacman", "yay", "paru", "makepkg", "dnf", "dnf5", "yum", "zypper", "rpm",
-]
+func parseNewlineNameSet(_ text: String) -> Set<String> {
+    Set(
+        text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+    )
+}
+
+func loadLinuxSystemNamesText() -> String {
+    if let url = Bundle.module.url(forResource: "linux-system-names", withExtension: "txt"),
+       let text = try? String(contentsOf: url, encoding: .utf8)
+    {
+        return text
+    }
+    let here = URL(fileURLWithPath: #filePath)
+    let repo = here.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let file = repo.appendingPathComponent("core/src/linux-system-names.txt")
+    return (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+}
+
+let linuxSystemNames: Set<String> = parseNewlineNameSet(loadLinuxSystemNamesText())
 
 let snapSystemNames: Set<String> = [
     "bare", "core", "snapd", "gtk-common-themes", "gtk3-common-themes",
@@ -143,8 +143,17 @@ public func expandNameAliases(_ n: String) -> Set<String> {
 public func classifyLinuxSystemName(_ name: String) -> (String, String?) {
     let n = posixLowercased(name)
     let nn = norm(name)
-    if linuxSystemNames.contains(n) || linuxSystemNames.contains(nn) || n.hasPrefix("gtk-") || n.hasPrefix("xdg") {
+    if linuxSystemNames.contains(n) || linuxSystemNames.contains(nn)
+        || n.hasPrefix("gtk-") || n.hasPrefix("xdg")
+        || n.hasPrefix("kde") || n.hasPrefix("kwin") || n.hasPrefix("plasma")
+        || n.hasPrefix("baloo") {
         return ("system", nil)
+    }
+    if n.hasSuffix("rc"), n.count > 2 {
+        let stem = String(n.dropLast(2))
+        if linuxSystemNames.contains(stem) {
+            return ("system", nil)
+        }
     }
     if snapSystemNames.contains(n) {
         return ("system", nil)
@@ -154,10 +163,6 @@ public func classifyLinuxSystemName(_ name: String) -> (String, String?) {
     }
     let parts = n.split(separator: "-")
     if n.hasPrefix("gnome-"), let last = parts.last, last.allSatisfy(\.isNumber) {
-        return ("system", nil)
-    }
-    let stem = n.split { $0 == "-" || $0 == "_" }.first.map(String.init) ?? ""
-    if linuxSystemNames.contains(stem), stem.count >= 2 {
         return ("system", nil)
     }
     return ("orphaned", nil)
@@ -414,6 +419,7 @@ private let orphanRoot: [String: String] = [
     "snap": "Snap leftover.",
     "home": "Home-directory leftover.",
     ".local/bin": "Broken PATH command. The tool is gone.",
+    "bin": "Broken PATH command. The tool is gone.",
     "Preferences": "Preference leftover.",
     "Saved Application State": "Saved window leftover.",
     "Containers": "Sandbox leftover.",
@@ -448,6 +454,7 @@ private let summaryRoot: [String: String] = [
     "snap": "Snap data folder",
     "home": "Home-directory app data",
     ".local/bin": "Broken command",
+    "bin": "Broken command",
 ]
 
 let leftoverNameSuffixes = [".savedstate", ".plist", ".binarycookies"]
@@ -524,10 +531,20 @@ public func leftoverDisplayName(name: String, extraPaths: [String] = []) -> Stri
 }
 
 func isUserBinLeftoverPath(_ path: String) -> Bool {
-    path.contains("/.local/bin/")
+    if path.contains("/.local/bin/")
         || path.contains("/usr/local/bin/")
         || path.contains("/opt/homebrew/bin/")
         || path.contains("/.linuxbrew/bin/")
+    {
+        return true
+    }
+    let dir = URL(fileURLWithPath: path).deletingLastPathComponent()
+    guard dir.lastPathComponent == "bin" else { return false }
+    let parent = dir.deletingLastPathComponent().lastPathComponent
+    if parent == "usr" || parent == "local" || parent == "opt" { return false }
+    if path.contains("/.local/") || path.contains("/.cargo/") { return false }
+    if path.contains("/homebrew") || path.contains("/linuxbrew") { return false }
+    return true
 }
 
 private func leftoverMatchesCategory(
@@ -1280,7 +1297,10 @@ func defaultUserBinDirs(
     fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
     which: WhichFn = whichCommand
 ) -> [String] {
-    var dirs = [(home as NSString).appendingPathComponent(".local/bin")]
+    var dirs = [
+        (home as NSString).appendingPathComponent(".local/bin"),
+        (home as NSString).appendingPathComponent("bin"),
+    ]
     let brewPrefixBin = which("brew").map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }
     if shouldScanUserBinDir(usrLocalBin, brewPrefixBin: brewPrefixBin, fileExists: fileExists) {
         dirs.append(usrLocalBin)
@@ -1295,6 +1315,8 @@ func userBinRootLabel(_ dir: String) -> String {
     if path.contains("/.linuxbrew/bin") { return "linuxbrew/bin" }
     if path.hasSuffix("/.cargo/bin") { return ".cargo/bin" }
     if path.hasSuffix("/.local/share/applications") { return ".local/share/applications" }
+    if path.hasSuffix("/.local/bin") { return ".local/bin" }
+    if URL(fileURLWithPath: path).lastPathComponent == "bin" { return "bin" }
     return ".local/bin"
 }
 

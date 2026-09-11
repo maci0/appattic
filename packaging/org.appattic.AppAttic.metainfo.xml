@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.appattic.AppAttic</id>
+  <name>AppAttic</name>
+  <summary>Leftovers, stale apps, unused packages, and disk usage</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <developer id="org.appattic">
+    <name>AppAttic</name>
+  </developer>
+  <launchable type="desktop-id">org.appattic.AppAttic.desktop</launchable>
+  <url type="homepage">https://github.com/maci0/appattic</url>
+  <description>
+    <p>
+      AppAttic finds leftover data from uninstalled apps, unused installed
+      software, unused distro and language packages, outdated versions, and
+      large folders. Nothing is deleted until you review a script or confirm
+      in the window. Disk usage can move a folder to Trash after you confirm.
+    </p>
+    <p>
+      The Linux window is Qt 6. Package-manager queries run on the host when
+      installed as a Flatpak (flatpak-spawn --host). Distro upgrades are
+      report-only.
+    </p>
+  </description>
+  <categories>
+    <category>Utility</category>
+    <category>System</category>
+  </categories>
+  <provides>
+    <binary>appattic-qt</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.1.3" date="2026-09-07"/>
+  </releases>
+</component>

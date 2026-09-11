@@ -114,9 +114,9 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
     return n;
 }
 
-var result_buf: [4096]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var path_store: [2048]u8 = undefined;
+var path_store: [8192]u8 = undefined;
 
 fn render(hits: []const BrokenLink) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
@@ -179,10 +179,13 @@ export fn plugin_query(present: i32) i32 {
         result_nbytes = @intCast(missing_json.len);
         return 0;
     }
-    var found: [32]BrokenLink = undefined;
-    const n = findBrokenLinks(&found, &path_store);
-    if (!render(found[0..n])) return 1;
-    return 0;
+    var found: [128]BrokenLink = undefined;
+    var n = findBrokenLinks(&found, &path_store);
+    while (true) {
+        if (render(found[0..n])) return 0;
+        if (n == 0) return 1;
+        n -= 1;
+    }
 }
 
 export fn result_ptr() i32 {

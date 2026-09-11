@@ -228,11 +228,25 @@ export fn plugin_query(present: i32) i32 {
     var images: [16]Hit = undefined;
     var volumes: [16]Hit = undefined;
     var containers: [16]Hit = undefined;
-    const nimg = parseDanglingImages(parseBuf(ni, &images_buf), &images);
-    const nvol = parseDanglingVolumes(parseBuf(nv, &volumes_buf), &volumes);
-    const nps = parseExitedContainers(parseBuf(np, &ps_buf), &containers);
-    if (!renderCtr(engine, images[0..nimg], volumes[0..nvol], containers[0..nps])) return 1;
-    return 0;
+    var nimg = parseDanglingImages(parseBuf(ni, &images_buf), &images);
+    var nvol = parseDanglingVolumes(parseBuf(nv, &volumes_buf), &volumes);
+    var nps = parseExitedContainers(parseBuf(np, &ps_buf), &containers);
+    while (true) {
+        if (renderCtr(engine, images[0..nimg], volumes[0..nvol], containers[0..nps])) return 0;
+        if (nps > 0) {
+            nps -= 1;
+            continue;
+        }
+        if (nvol > 0) {
+            nvol -= 1;
+            continue;
+        }
+        if (nimg > 0) {
+            nimg -= 1;
+            continue;
+        }
+        return 1;
+    }
 }
 
 export fn result_ptr() i32 {
