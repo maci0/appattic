@@ -1,6 +1,6 @@
 # Specs
 
-Requirement and architecture records. Visual rules live in [`DESIGN.md`](../../../DESIGN.md). Implementation plan for the Swift port: [`../plans/2026-08-18-swift-scan-port.md`](../plans/2026-08-18-swift-scan-port.md).
+Requirement and architecture records. Visual rules live in [`DESIGN.md`](../../../DESIGN.md).
 
 | Document | Status | Role |
 |----------|--------|------|

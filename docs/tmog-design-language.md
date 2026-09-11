@@ -1,6 +1,6 @@
 # TMOG design language
 
-Source: Dave Plummer, Dave's Attic, [Shop Talk #91](https://www.youtube.com/watch?v=c3EEs-O3bGE) (25 Aug 2026 captions in `docs/research/tmog-shoptalk-91.en.srt`). Quote file: `docs/research/tmog-shoptalk-91-patterns.md`. Site copy on [tmog.org](https://tmog.org) matches the same language: native per OS, summary first, system light and dark plus phosphor schemes.
+Source: Dave Plummer, Dave's Attic, [Shop Talk #91](https://www.youtube.com/watch?v=c3EEs-O3bGE). Quote file: `docs/research/tmog-shoptalk-91-patterns.md`. Site copy on [tmog.org](https://tmog.org) matches the same language: native per OS, summary first, system light and dark plus phosphor schemes.
 
 This is the design language of Task Manager OG as Dave walked it. AppAttic adopts the principles and list/tree patterns. It does not adopt VFD meters, bloom, or saturation-11 chrome. See [Adoption](#appattic-adoption).
 

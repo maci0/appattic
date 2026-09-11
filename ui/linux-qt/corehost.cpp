@@ -1,5 +1,6 @@
 #include "corehost.h"
 #include "embed.h"
+#include "hostexec.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -29,16 +30,59 @@ QString coreOutDir() {
     return QDir(candidates.constFirst()).absolutePath();
 }
 
+static QStringList languageBinDirs() {
+    QStringList dirs;
+    const QDir home = QDir::home();
+    const QStringList rel = {
+        QStringLiteral(".local/bin"),
+        QStringLiteral("bin"),
+        QStringLiteral(".bun/bin"),
+        QStringLiteral(".deno/bin"),
+        QStringLiteral(".volta/bin"),
+        QStringLiteral(".yarn/bin"),
+        QStringLiteral(".cargo/bin"),
+        QStringLiteral(".fnm/aliases/default/bin"),
+        QStringLiteral(".local/share/pnpm"),
+        QStringLiteral(".npm-global/bin"),
+    };
+    for (const QString &r : rel) {
+        const QString p = home.filePath(r);
+        if (QDir(p).exists()) dirs << p;
+    }
+    const QDir nvm(home.filePath(QStringLiteral(".nvm/versions/node")));
+    if (nvm.exists()) {
+        const QStringList vers = nvm.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString &v : vers) {
+            const QString bin = nvm.filePath(v + QStringLiteral("/bin"));
+            if (QDir(bin).exists()) dirs << bin;
+        }
+    }
+    if (!qEnvironmentVariableIsEmpty("FLATPAK_ID")) {
+        dirs << QStringLiteral("/run/host/usr/bin")
+             << QStringLiteral("/run/host/usr/local/bin")
+             << QStringLiteral("/run/host/usr/sbin")
+             << QStringLiteral("/run/host/bin");
+    }
+    return dirs;
+}
+
+static bool hostHasExecutable(const QString &name) {
+    if (!QStandardPaths::findExecutable(name).isEmpty()) return true;
+    const QStringList extra = languageBinDirs();
+    if (extra.isEmpty()) return false;
+    return !QStandardPaths::findExecutable(name, extra).isEmpty();
+}
+
 static int pluginTag(const QString &wasmPath) {
     const QFileInfo fi(wasmPath);
     const QString stem = fi.completeBaseName();
     if (stem == QLatin1String("container_runtime")) {
-        if (!QStandardPaths::findExecutable(QStringLiteral("podman")).isEmpty()) return 2;
-        if (!QStandardPaths::findExecutable(QStringLiteral("docker")).isEmpty()) return 1;
+        if (hostHasExecutable(QStringLiteral("podman"))) return 2;
+        if (hostHasExecutable(QStringLiteral("docker"))) return 1;
         return 0;
     }
     if (stem == QLatin1String("snapd")) {
-        return QStandardPaths::findExecutable(QStringLiteral("snap")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("snap")) ? 1 : 0;
     }
     if (stem == QLatin1String("path_xdg_config")) {
         return homePathTag("XDG_CONFIG_HOME", QStringLiteral(".config"));
@@ -74,84 +118,66 @@ static int pluginTag(const QString &wasmPath) {
     if (stem == QLatin1String("path_home_dot")) {
         return QDir::home().exists() ? 1 : 0;
     }
-    if (stem == QLatin1String("path_application_support")) {
-        return QDir::home().exists(QStringLiteral("Library/Application Support")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_caches")) {
-        return QDir::home().exists(QStringLiteral("Library/Caches")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_preferences")) {
-        return QDir::home().exists(QStringLiteral("Library/Preferences")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_saved_state")) {
-        return QDir::home().exists(QStringLiteral("Library/Saved Application State")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_containers")) {
-        return QDir::home().exists(QStringLiteral("Library/Containers")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_group_containers")) {
-        return QDir::home().exists(QStringLiteral("Library/Group Containers")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_logs")) {
-        return QDir::home().exists(QStringLiteral("Library/Logs")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_webkit")) {
-        return QDir::home().exists(QStringLiteral("Library/WebKit")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_httpstorages")) {
-        return QDir::home().exists(QStringLiteral("Library/HTTPStorages")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_launchagents")) {
-        return QDir::home().exists(QStringLiteral("Library/LaunchAgents")) ? 1 : 0;
-    }
     if (stem == QLatin1String("pacman")) {
-        return QStandardPaths::findExecutable(QStringLiteral("pacman")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("pacman")) ? 1 : 0;
+    }
+    if (stem == QLatin1String("aur")) {
+        if (hostHasExecutable(QStringLiteral("paru"))) return 1;
+        if (hostHasExecutable(QStringLiteral("yay"))) return 1;
+        if (hostHasExecutable(QStringLiteral("pikaur"))) return 1;
+        return 0;
     }
     if (stem == QLatin1String("apt")) {
-        if (!QStandardPaths::findExecutable(QStringLiteral("apt-get")).isEmpty()) return 1;
-        if (!QStandardPaths::findExecutable(QStringLiteral("apt")).isEmpty()) return 1;
+        if (hostHasExecutable(QStringLiteral("apt-get"))) return 1;
+        if (hostHasExecutable(QStringLiteral("apt"))) return 1;
+        if (hostHasExecutable(QStringLiteral("dpkg"))) return 1;
         return 0;
     }
     if (stem == QLatin1String("dnf")) {
-        if (!QStandardPaths::findExecutable(QStringLiteral("dnf5")).isEmpty()) return 1;
-        if (!QStandardPaths::findExecutable(QStringLiteral("dnf")).isEmpty()) return 1;
-        if (!QStandardPaths::findExecutable(QStringLiteral("yum")).isEmpty()) return 1;
+        if (hostHasExecutable(QStringLiteral("dnf5"))) return 1;
+        if (hostHasExecutable(QStringLiteral("dnf"))) return 1;
+        if (hostHasExecutable(QStringLiteral("yum"))) return 1;
         return 0;
     }
     if (stem == QLatin1String("zypper")) {
-        return QStandardPaths::findExecutable(QStringLiteral("zypper")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("zypper")) ? 1 : 0;
     }
     if (stem == QLatin1String("flatpak")) {
-        return QStandardPaths::findExecutable(QStringLiteral("flatpak")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("flatpak")) ? 1 : 0;
     }
     if (stem == QLatin1String("npm")) {
-        return QStandardPaths::findExecutable(QStringLiteral("npm")).isEmpty() ? 0 : 1;
+        if (hostHasExecutable(QStringLiteral("npm"))) return 1;
+        if (hostHasExecutable(QStringLiteral("node"))) return 1;
+        return 0;
     }
     if (stem == QLatin1String("pnpm")) {
-        return QStandardPaths::findExecutable(QStringLiteral("pnpm")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("pnpm")) ? 1 : 0;
     }
     if (stem == QLatin1String("bun")) {
-        return QStandardPaths::findExecutable(QStringLiteral("bun")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("bun")) ? 1 : 0;
     }
     if (stem == QLatin1String("pipx")) {
-        return QStandardPaths::findExecutable(QStringLiteral("pipx")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("pipx")) ? 1 : 0;
     }
     if (stem == QLatin1String("pip")) {
-        if (!QStandardPaths::findExecutable(QStringLiteral("pip")).isEmpty()) return 1;
-        if (!QStandardPaths::findExecutable(QStringLiteral("pip3")).isEmpty()) return 1;
+        if (hostHasExecutable(QStringLiteral("pip"))) return 1;
+        if (hostHasExecutable(QStringLiteral("pip3"))) return 1;
         return 0;
     }
     if (stem == QLatin1String("uv")) {
-        return QStandardPaths::findExecutable(QStringLiteral("uv")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("uv")) ? 1 : 0;
     }
     if (stem == QLatin1String("brew")) {
-        return QStandardPaths::findExecutable(QStringLiteral("brew")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("brew")) ? 1 : 0;
     }
     if (stem == QLatin1String("gem")) {
-        return QStandardPaths::findExecutable(QStringLiteral("gem")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("gem")) ? 1 : 0;
     }
     if (stem == QLatin1String("composer")) {
-        return QStandardPaths::findExecutable(QStringLiteral("composer")).isEmpty() ? 0 : 1;
+        return hostHasExecutable(QStringLiteral("composer")) ? 1 : 0;
+    }
+    if (stem == QLatin1String("deno")) {
+        return hostHasExecutable(QStringLiteral("deno")) ? 1 : 0;
     }
     return 1;
 }
@@ -175,17 +201,8 @@ QStringList pluginWasmFiles(const QString &out) {
         QStringLiteral("/path_shadow.wasm"),
         QStringLiteral("/path_user_bin.wasm"),
         QStringLiteral("/path_home_dot.wasm"),
-        QStringLiteral("/path_application_support.wasm"),
-        QStringLiteral("/path_caches.wasm"),
-        QStringLiteral("/path_preferences.wasm"),
-        QStringLiteral("/path_saved_state.wasm"),
-        QStringLiteral("/path_containers.wasm"),
-        QStringLiteral("/path_group_containers.wasm"),
-        QStringLiteral("/path_logs.wasm"),
-        QStringLiteral("/path_webkit.wasm"),
-        QStringLiteral("/path_httpstorages.wasm"),
-        QStringLiteral("/path_launchagents.wasm"),
         QStringLiteral("/pacman.wasm"),
+        QStringLiteral("/aur.wasm"),
         QStringLiteral("/apt.wasm"),
         QStringLiteral("/dnf.wasm"),
         QStringLiteral("/zypper.wasm"),
@@ -199,6 +216,7 @@ QStringList pluginWasmFiles(const QString &out) {
         QStringLiteral("/gem.wasm"),
         QStringLiteral("/composer.wasm"),
         QStringLiteral("/pip.wasm"),
+        QStringLiteral("/deno.wasm"),
     };
     QStringList paths;
     paths.reserve(names.size());
@@ -207,6 +225,7 @@ QStringList pluginWasmFiles(const QString &out) {
 }
 
 QStringList taggedPluginSpecs(const QString &out) {
+    appattic_host_apply_user_path();
     const QStringList plugins = pluginWasmFiles(out);
     QStringList specs;
     specs.reserve(plugins.size());
@@ -222,7 +241,8 @@ int runCoreWasm(
     void (*onJson)(const char *json, size_t jsonLen, void *user),
     void *user,
     char *err,
-    size_t errlen
+    size_t errlen,
+    void (*onProgress)(const char *pluginId, int index, int total, void *user)
 ) {
     std::vector<QByteArray> specBytes;
     std::vector<char *> ptrs;
@@ -236,25 +256,17 @@ int runCoreWasm(
         ptrs.empty() ? nullptr : ptrs.data(),
         int(ptrs.size()),
         onJson,
+        onProgress,
         user,
         err,
         errlen
     );
 }
 
-static void appendJsonLine(const char *json, size_t len, void *user) {
-    if (!user) return;
-    auto *out = static_cast<QByteArray *>(user);
-    out->append(json, int(len));
-    out->append('\n');
+void requestCoreWasmCancel() {
+    appattic_host_exec_request_cancel();
 }
 
-int collectCoreWasm(
-    const QString &coreWasm,
-    const QStringList &pluginSpecs,
-    QByteArray *blobs,
-    char *err,
-    size_t errlen
-) {
-    return runCoreWasm(coreWasm, pluginSpecs, appendJsonLine, blobs, err, errlen);
+void clearCoreWasmCancel() {
+    appattic_host_exec_clear_cancel();
 }

@@ -7,8 +7,6 @@ const host_exec = @import("host_exec.zig");
 const Io = std.Io;
 const Dir = Io.Dir;
 
-// Spec id path-overlay-shadow stays a url-null stub. This wasm is the
-// overlay-vs-packaged implementation. Do not add a second shadow plugin.
 const plugin_id = "path-shadow";
 
 fn nativeIo() Io {
@@ -137,28 +135,41 @@ fn findShadowsExec(
 ) usize {
     var n: usize = 0;
     var used: usize = 0;
-    var ls_buf: [2048]u8 = undefined;
+    var ls_buf: [65536]u8 = undefined;
+    var ov_buf: [512]u8 = undefined;
+    var pkg_buf: [512]u8 = undefined;
+    var name_store: [8192]u8 = undefined;
     var names: [64][]const u8 = undefined;
+    var name_used: usize = 0;
 
     for (overlayDirs) |odir| {
         var cmd_buf: [512]u8 = undefined;
         const ls_cmd = std.fmt.bufPrint(&cmd_buf, "ls -1 {s}", .{odir}) catch continue;
         const ls_n = host_exec.run(ls_cmd, &ls_buf);
         if (ls_n < 0) continue;
-        const name_n = listingNames(ls_buf[0..@intCast(ls_n)], &names);
+        const raw_n = listingNames(ls_buf[0..@intCast(ls_n)], &names);
+        var copied: usize = 0;
+        while (copied < raw_n) : (copied += 1) {
+            const src = names[copied];
+            if (name_used + src.len > name_store.len) break;
+            const start = name_used;
+            @memcpy(name_store[name_used..][0..src.len], src);
+            name_used += src.len;
+            names[copied] = name_store[start..name_used];
+        }
 
-        for (names[0..name_n]) |name| {
+        for (names[0..copied]) |name| {
             if (n >= out.len) return n;
             const overlay_path = joinPath(odir, name, path_store, &used) orelse continue;
             if (!fileExistsExec(overlay_path)) continue;
-            const resolved_overlay = resolvePathExec(overlay_path, &ls_buf) orelse continue;
+            const resolved_overlay = resolvePathExec(overlay_path, &ov_buf) orelse continue;
 
             var packaged: ?[]const u8 = null;
             var same = false;
             for (packageDirs) |pdir| {
                 const pkg_path = joinPath(pdir, name, path_store, &used) orelse continue;
                 if (!fileExistsExec(pkg_path)) continue;
-                const resolved_pkg = resolvePathExec(pkg_path, &ls_buf) orelse continue;
+                const resolved_pkg = resolvePathExec(pkg_path, &pkg_buf) orelse continue;
                 if (std.mem.eql(u8, resolved_overlay, resolved_pkg)) {
                     same = true;
                     break;
@@ -194,6 +205,7 @@ const none_json =
 ;
 
 const overlay_fixture = "/home/user/.local/bin";
+const overlay_home_bin = "/home/user/bin";
 const package_fixture = "/usr/bin";
 
 fn renderShadows(hits: []const ShadowFinding) bool {
@@ -249,13 +261,16 @@ export fn plugin_query(present: i32) i32 {
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
-    const overlays = [_][]const u8{overlay_fixture};
+    const overlays = [_][]const u8{ overlay_fixture, overlay_home_bin };
     const packages = [_][]const u8{package_fixture};
     var hits: [32]ShadowFinding = undefined;
     var paths: [2048]u8 = undefined;
-    const n = findShadows(&overlays, &packages, &hits, &paths);
-    if (!renderShadows(hits[0..n])) return 1;
-    return 0;
+    var n = findShadows(&overlays, &packages, &hits, &paths);
+    while (true) {
+        if (renderShadows(hits[0..n])) return 0;
+        if (n == 0) return 1;
+        n -= 1;
+    }
 }
 
 export fn result_ptr() i32 {

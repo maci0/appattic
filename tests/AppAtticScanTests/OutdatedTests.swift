@@ -161,6 +161,7 @@ final class OutdatedTests: XCTestCase {
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=arch\n"), "arch")
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=\"manjaro\"\nID_LIKE=arch\n"), "arch")
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=endeavouros\nID_LIKE=arch\n"), "arch")
+        XCTAssertEqual(linuxDistroFamily(osRelease: "ID=cachyos\nID_LIKE=arch\n"), "arch")
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=fedora\n"), "fedora")
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=rhel\nID_LIKE=\"fedora\"\n"), "fedora")
         XCTAssertEqual(linuxDistroFamily(osRelease: "ID=opensuse-tumbleweed\nID_LIKE=\"suse opensuse\"\n"), "suse")
@@ -261,6 +262,24 @@ final class OutdatedTests: XCTestCase {
         XCTAssertEqual(pkgs.first?.manager, "apt")
         XCTAssertTrue(cmds.contains { $0.contains("--upgradable") })
         XCTAssertFalse(cmds.contains { $0.contains("-Qu") })
+    }
+
+    func testQueryAurUsesParuQuaAndIsUpdatable() {
+        var cmds: [[String]] = []
+        let pkgs = queryAur(
+            which: { name in name == "paru" ? "/usr/bin/paru" : nil },
+            run: { cmd, _ in
+                cmds.append(cmd)
+                return (1, "yay-bin 12.0-1 -> 12.1-1\n", "")
+            }
+        )
+        XCTAssertEqual(pkgs.map(\.name), ["yay-bin"])
+        XCTAssertEqual(pkgs.first?.manager, "aur")
+        XCTAssertTrue(pkgs.first?.updatable ?? false)
+        let cmd = updateCommand(pkgs[0]) ?? ""
+        XCTAssertEqual(cmd, "paru --noconfirm -S yay-bin")
+        XCTAssertTrue(cmds.contains { $0.contains("-Qua") }, "\(cmds)")
+        XCTAssertFalse(cmds.contains { $0.contains("-S") })
     }
 
     func testQueryPacmanKeepsUpdatesWhenExitIsOne() {
@@ -369,23 +388,51 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(script.contains("# zypper update vim"), script)
     }
 
-    func testOutdatedReportFooterMentionsNativeLinuxAsReportOnly() {
+    func testOutdatedReportFooterMentionsNamedDistroUpgrades() {
         let lines = outdatedReportFooter([
             OutdatedPkg(name: "firefox", manager: "pacman", currentVersion: "1", latestVersion: "2"),
         ])
-        XCTAssertTrue(lines.contains(where: { $0.contains("report-only") && $0.contains("pacman") }), "\(lines)")
-        XCTAssertTrue(lines.contains(where: { $0.contains("dnf") }), "\(lines)")
-        XCTAssertTrue(lines.contains(where: { $0.contains("zypper") }), "\(lines)")
+        XCTAssertTrue(lines.contains(where: { $0.contains("pacman") && $0.contains("update") }), "\(lines)")
+        XCTAssertFalse(lines.contains(where: { $0.contains("report-only") && $0.contains("pacman") }), "\(lines)")
     }
 
-    func testUpdateScriptEmptyMentionsNativeLinuxManagers() {
+    func testUpdateScriptIncludesNamedPacmanUpgrade() {
         let script = updateScript([
             OutdatedPkg(name: "firefox", manager: "pacman", currentVersion: "1", latestVersion: "2"),
         ])
-        XCTAssertTrue(script.contains("pacman"), script)
-        XCTAssertTrue(script.contains("dnf"), script)
-        XCTAssertTrue(script.contains("zypper"), script)
-        XCTAssertFalse(script.contains("\npacman -S "), script)
+        XCTAssertTrue(script.contains("rootcmd pacman --noconfirm -S firefox"), script)
+        XCTAssertTrue(script.contains("Not a full distro upgrade"), script)
+        XCTAssertFalse(script.contains("-Syu"), script)
+    }
+
+    func testUpdateScriptIncludesNamedAptAurYumZypper() {
+        let script = updateScript([
+            OutdatedPkg(name: "git", manager: "apt", currentVersion: "1", latestVersion: "2"),
+            OutdatedPkg(name: "yay-bin", manager: "aur", currentVersion: "1", latestVersion: "2"),
+            OutdatedPkg(name: "htop", manager: "yum", currentVersion: "1", latestVersion: "2"),
+            OutdatedPkg(name: "vim", manager: "zypper", currentVersion: "1", latestVersion: "2"),
+        ])
+        XCTAssertTrue(script.contains("rootcmd apt-get -y install --only-upgrade git"), script)
+        XCTAssertTrue(
+            script.contains("paru --noconfirm -S yay-bin")
+                || script.contains("yay --noconfirm -S yay-bin")
+                || script.contains("pikaur --noconfirm -S yay-bin"),
+            script
+        )
+        XCTAssertTrue(script.contains("rootcmd yum upgrade -y htop"), script)
+        XCTAssertTrue(script.contains("rootcmd zypper --non-interactive update vim"), script)
+        XCTAssertFalse(script.contains("apt upgrade"), script)
+        XCTAssertFalse(script.contains("-Syu"), script)
+    }
+
+    func testQueryYumSetsYumManagerAndUpgradeCommand() {
+        let pkgs = queryDnf(which: { name in name == "yum" ? "/usr/bin/yum" : nil }, run: { _, _ in
+            (100, "git.x86_64                    2.45.1-1.el7            updates\n", "")
+        })
+        XCTAssertEqual(pkgs.map(\.name), ["git"])
+        XCTAssertEqual(pkgs.first?.manager, "yum")
+        XCTAssertTrue(pkgs.first?.updatable ?? false)
+        XCTAssertEqual(updateCommand(pkgs[0]), "yum upgrade -y git")
     }
 
     func testApplyMarksFormulaAndCaskSoftware() {
@@ -402,7 +449,7 @@ final class OutdatedTests: XCTestCase {
         XCTAssertEqual(wget.summary, "Internet file retriever")
         XCTAssertTrue(code.outdated)
         XCTAssertTrue(firefox.outdated)
-        XCTAssertEqual(firefox.currentVersion, "127.0")
+        XCTAssertEqual(firefox.version, "127.0")
     }
 
     func testOutdatedReasonNamesVersions() {
@@ -531,7 +578,7 @@ final class OutdatedTests: XCTestCase {
             kind: "untrusted"
         )
         let brewLines = outdatedReportFooter([brew])
-        XCTAssertTrue(brewLines.contains(where: { $0.contains("Homebrew and Flatpak") }))
+        XCTAssertTrue(brewLines.contains(where: { $0.contains("Homebrew") && $0.contains("Flatpak") }))
         XCTAssertFalse(brewLines.contains(where: { $0.contains("report-only") }))
         let storeLines = outdatedReportFooter([store])
         XCTAssertFalse(storeLines.contains(where: { $0.contains("Homebrew and Flatpak") }))
@@ -540,7 +587,7 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(onlyUntrusted.contains(where: { $0.contains("Untrusted casks") }))
         XCTAssertFalse(onlyUntrusted.contains(where: { $0.contains("report-only") }))
         let mix = outdatedReportFooter([brew, store, untrusted])
-        XCTAssertTrue(mix.contains(where: { $0.contains("Homebrew and Flatpak") }))
+        XCTAssertTrue(mix.contains(where: { $0.contains("Homebrew") && $0.contains("Flatpak") }))
         XCTAssertTrue(mix.contains(where: { $0.contains("Untrusted casks") }))
         XCTAssertTrue(mix.contains(where: { $0.contains("report-only") }))
     }

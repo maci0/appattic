@@ -56,15 +56,15 @@ public final class OutdatedPkg {
 public func outdatedReportFooter(_ pkgs: [OutdatedPkg]) -> [String] {
     var lines: [String] = []
     if pkgs.contains(where: \.updatable) {
-        lines.append("Homebrew and Flatpak: appattic update --dry-run, then appattic update.")
+        lines.append("Named upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf, yum, zypper): appattic update --dry-run, then appattic update. Not a full distro upgrade.")
     }
     if pkgs.contains(where: { $0.kind == "untrusted" }) {
         lines.append("Untrusted casks stay listed. AppAttic will not trust the tap.")
     }
     if pkgs.contains(where: {
-        ["app-store", "apt", "snap", "pacman", "dnf", "zypper"].contains($0.manager)
+        ["app-store", "snap"].contains($0.manager)
     }) {
-        lines.append("App Store, apt, pacman, dnf, zypper, and Snap are report-only.")
+        lines.append("App Store and Snap stay report-only.")
     }
     return lines
 }
@@ -86,12 +86,14 @@ private let managerLabel: [String: String] = [
     "snap": "Snap",
     "apt": "apt",
     "pacman": "pacman",
+    "aur": "AUR",
     "dnf": "dnf",
+    "yum": "yum",
     "zypper": "zypper",
 ]
 
 public let outdatedSkippedManagersNote =
-    "Untrusted casks, App Store, apt, pacman, dnf, zypper, and Snap are skipped."
+    "Untrusted casks, App Store, and Snap are skipped."
 
 public func outdatedReason(_ pkg: OutdatedPkg) -> String {
     if let reason = pkg.reason, !reason.isEmpty { return reason }
@@ -127,6 +129,13 @@ public func applyUntrustedCasks(_ pkgs: [OutdatedPkg], refused: [UntrustedCask])
     return out
 }
 
+func aurHelperBin(_ which: WhichFn = whichCommand) -> String {
+    for name in ["paru", "yay", "pikaur"] {
+        if which(name) != nil { return name }
+    }
+    return "paru"
+}
+
 public func updateCommand(_ pkg: OutdatedPkg) -> String? {
     guard pkg.updatable else { return nil }
     let quoted = shellQuote(pkg.name)
@@ -137,12 +146,24 @@ public func updateCommand(_ pkg: OutdatedPkg) -> String? {
         return "brew upgrade --cask \(quoted)"
     case "flatpak":
         return "flatpak update -y \(quoted)"
+    case "apt":
+        return "apt-get -y install --only-upgrade \(quoted)"
+    case "pacman":
+        return "pacman --noconfirm -S \(quoted)"
+    case "aur":
+        return "\(aurHelperBin()) --noconfirm -S \(quoted)"
+    case "dnf":
+        return "dnf upgrade -y \(quoted)"
+    case "yum":
+        return "yum upgrade -y \(quoted)"
+    case "zypper":
+        return "zypper --non-interactive update \(quoted)"
     default:
         return nil
     }
 }
 
-/// Live Homebrew/Flatpak upgrade script. CLI `update` with no `--dry-run` runs this; the UI confirms first.
+/// Named upgrade script. CLI `update` with no `--dry-run` runs this; the UI confirms first.
 public func updateScript(_ pkgs: [OutdatedPkg]) -> String {
     let cmds = pkgs.compactMap(updateCommand)
     var lines = [
@@ -156,8 +177,12 @@ public func updateScript(_ pkgs: [OutdatedPkg]) -> String {
         lines.append("# Nothing to update. \(outdatedSkippedManagersNote)")
         return lines.joined(separator: "\n") + "\n"
     }
-    lines.append("# Homebrew and Flatpak only")
-    lines.append(contentsOf: cmds)
+    let wrapped = cmds.map(withRootCmd)
+    if wrapped.contains(where: { $0.hasPrefix("rootcmd ") }) {
+        lines.append(scriptRootHelper)
+    }
+    lines.append("# Named package upgrades. Not a full distro upgrade.")
+    lines.append(contentsOf: wrapped)
     return lines.joined(separator: "\n") + "\n"
 }
 
@@ -388,7 +413,7 @@ public func parsePacmanQu(_ text: String) -> [OutdatedPkg] {
     return out
 }
 
-public func parseDnfUpgrades(_ text: String) -> [OutdatedPkg] {
+public func parseDnfUpgrades(_ text: String, manager: String = "dnf") -> [OutdatedPkg] {
     let re = try! NSRegularExpression(
         pattern: #"^([A-Za-z0-9_+.-]+?)(?:\.(x86_64|aarch64|i686|noarch|ppc64le|s390x))?\s+(\S*[0-9]\S*)\s+\S+"#
     )
@@ -404,7 +429,7 @@ public func parseDnfUpgrades(_ text: String) -> [OutdatedPkg] {
         else { continue }
         out.append(OutdatedPkg(
             name: String(s[n]),
-            manager: "dnf",
+            manager: manager,
             latestVersion: String(s[latest])
         ))
     }
@@ -800,6 +825,28 @@ public func queryApt(
     return parseAptUpgradable(out)
 }
 
+public func queryAur(
+    progress: ((String) -> Void)? = nil,
+    which: WhichFn = whichCommand,
+    run: CommandRun = runCommand
+) -> [OutdatedPkg] {
+    for name in ["paru", "yay", "pikaur"] {
+        guard let path = which(name) else { continue }
+        progress?("  · checking AUR updates…")
+        let (rc, out, _) = run([path, "-Qua"], 60)
+        if rc != 0 && rc != 1 { continue }
+        return parsePacmanQu(out).map { pkg in
+            OutdatedPkg(
+                name: pkg.name,
+                manager: "aur",
+                currentVersion: pkg.currentVersion,
+                latestVersion: pkg.latestVersion
+            )
+        }
+    }
+    return []
+}
+
 public func queryPacman(
     progress: ((String) -> Void)? = nil,
     which: WhichFn = whichCommand,
@@ -820,8 +867,9 @@ public func queryDnf(
     guard let path = which("dnf5") ?? which("dnf") ?? which("yum") else { return [] }
     progress?("  · checking dnf updates…")
     let name = URL(fileURLWithPath: path).lastPathComponent
+    let manager = name == "yum" ? "yum" : "dnf"
     func parsed(_ rc: Int32, _ out: String) -> [OutdatedPkg]? {
-        if rc == 0 || rc == 100 { return parseDnfUpgrades(out) }
+        if rc == 0 || rc == 100 { return parseDnfUpgrades(out, manager: manager) }
         return nil
     }
     if name != "yum" {
@@ -853,6 +901,7 @@ public func collectLinux(
     var pkgs: [OutdatedPkg] = []
     pkgs.append(contentsOf: queryFlatpak(progress: progress, which: which, run: run))
     pkgs.append(contentsOf: querySnap(progress: progress, which: which, run: run))
+    pkgs.append(contentsOf: queryAur(progress: progress, which: which, run: run))
     let family = linuxDistroFamily(osRelease: osRelease ?? linuxOsReleaseText())
     switch resolveDistroPackageManager(family: family, which: which) {
     case .pacman:

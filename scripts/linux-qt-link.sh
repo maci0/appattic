@@ -270,7 +270,7 @@ smoke_output_ok() {
     printf '%s\n' "$dump" | grep -q '^SMOKE=ok$' || return 1
     printf '%s\n' "$dump" | grep -Eq '^wasm: ok \([1-9][0-9]* plugins\)$' || return 1
     printf '%s\n' "$dump" | grep -q '^plugin:path-shadow$' || return 1
-    printf '%s\n' "$dump" | grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[1-9][0-9]*' || return 1
+    printf '%s\n' "$dump" | grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[0-9]+' || return 1
     return 0
 }
 

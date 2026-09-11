@@ -17,13 +17,13 @@ const outdated_cmds = [_][]const u8{
     "yum check-update",
 };
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [4096]u8 = undefined;
-var exec_up_buf: [4096]u8 = undefined;
+var exec_buf: [65536]u8 = undefined;
+var exec_up_buf: [65536]u8 = undefined;
 
 const none_json =
-    \\{"plugin":"dnf","engine":null,"findings":[],"script":null,"dialog":{"title":"No dnf","body":"dnf is not on PATH. Plugin inactive."},"note":"dnf missing"}
+    \\{"plugin":"dnf","engine":null,"findings":[],"script":null,"dialog":{"title":"No dnf","body":"dnf, dnf5, or yum is not on PATH. Plugin inactive."},"note":"dnf missing"}
 ;
 
 pub const DnfOrphan = struct {
@@ -105,10 +105,28 @@ pub fn parseDnfUnneeded(text: []const u8, out: []DnfOrphan) usize {
     return n;
 }
 
-fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated) bool {
+fn managerFromCmd(cmd: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, cmd, "yum") or std.mem.indexOf(u8, cmd, "/yum ") != null) return "yum";
+    return "dnf";
+}
+
+fn removePrefix(manager: []const u8) []const u8 {
+    if (std.mem.eql(u8, manager, "yum")) return "yum remove -y ";
+    return "dnf remove -y ";
+}
+
+fn upgradePrefix(manager: []const u8) []const u8 {
+    if (std.mem.eql(u8, manager, "yum")) return "yum upgrade -y ";
+    return "dnf upgrade -y ";
+}
+
+fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager: []const u8) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
-    w.raw("{\"plugin\":\"dnf\",\"engine\":\"dnf\",\"findings\":[");
+    w.raw("{\"plugin\":\"dnf\",\"engine\":");
+    w.str(manager);
+    w.raw(",\"findings\":[");
     var first = true;
+    const rm = removePrefix(manager);
     for (orphans) |h| {
         if (!first) w.raw(",");
         first = false;
@@ -116,37 +134,45 @@ fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated) bool {
         w.str(h.name);
         w.raw(",\"name\":");
         w.str(h.name);
-        w.raw(",\"status\":\"orphaned\",\"command\":\"dnf remove -y ");
+        w.raw(",\"status\":\"orphaned\",\"command\":\"");
+        w.raw(rm);
         w.raw(h.name);
-        w.raw("\",\"manager\":\"dnf\"}");
+        w.raw("\",\"manager\":");
+        w.str(manager);
+        w.raw("}");
     }
     for (outdated) |h| {
         if (!first) w.raw(",");
         first = false;
-        jsonbuf.writeOutdated(&w, h.name, "", h.latest, "dnf", "dnf upgrade ");
+        jsonbuf.writeOutdated(&w, h.name, "", h.latest, manager, upgradePrefix(manager), true);
     }
     w.raw("],\"script\":");
     if (orphans.len == 0) {
         w.raw("null");
     } else {
-        w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic dnf. Review before running.\\n");
+        w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic ");
+        w.raw(manager);
+        w.raw(". Review before running.\\n");
         for (orphans) |h| {
-            w.raw("dnf remove -y ");
+            w.raw(rm);
             w.raw(h.name);
             w.raw("\\n");
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove dnf unneeded?\",\"body\":\"Named repoquery --unneeded packages only. Outdated packages are report-only. Named dnf upgrade waits for confirm. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove dnf unneeded?\",\"body\":\"Named repoquery --unneeded packages only. Named dnf/yum upgrade waits for confirm. Not a full distro upgrade. Nothing runs until you confirm.\"}}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
 }
 
-fn runQuery(buf: []u8, cmds: []const []const u8) i32 {
+fn runQuery(buf: []u8, cmds: []const []const u8, used: *[]const u8) i32 {
     for (cmds) |cmd| {
         const n = host_exec.run(cmd, buf);
-        if (n >= 0) return n;
+        if (n >= 0) {
+            used.* = cmd;
+            return n;
+        }
     }
     return host_exec.fail;
 }
@@ -169,18 +195,31 @@ export fn plugin_query(present: i32) i32 {
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
-    var orphans: [32]DnfOrphan = undefined;
+    var orphans: [128]DnfOrphan = undefined;
     var n_orph: usize = 0;
-    const nexec = runQuery(&exec_buf, &query_cmds);
+    var used_q: []const u8 = query_cmds[0];
+    const nexec = runQuery(&exec_buf, &query_cmds, &used_q);
     if (nexec >= 0) n_orph = parseDnfUnneeded(exec_buf[0..@intCast(nexec)], &orphans);
 
-    var outdated: [32]DnfOutdated = undefined;
+    var outdated: [128]DnfOutdated = undefined;
     var n_out: usize = 0;
-    const nq = runQuery(&exec_up_buf, &outdated_cmds);
+    var used_u: []const u8 = outdated_cmds[0];
+    const nq = runQuery(&exec_up_buf, &outdated_cmds, &used_u);
     if (nq >= 0) n_out = parseDnfUpgrades(exec_up_buf[0..@intCast(nq)], &outdated);
 
-    if (!renderDnf(orphans[0..n_orph], outdated[0..n_out])) return 1;
-    return 0;
+    const mgr = if (nexec >= 0) managerFromCmd(used_q) else managerFromCmd(used_u);
+    while (true) {
+        if (renderDnf(orphans[0..n_orph], outdated[0..n_out], mgr)) return 0;
+        if (n_out > 0) {
+            n_out -= 1;
+            continue;
+        }
+        if (n_orph > 0) {
+            n_orph -= 1;
+            continue;
+        }
+        return 1;
+    }
 }
 
 export fn result_ptr() i32 {
@@ -234,9 +273,8 @@ test "plugin_query present JSON includes dnf list --upgrades outdated" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"git\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "2.45.1-1.fc40") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "dnf upgrade git") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":false") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "dnf upgrade -y") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "dnf upgrade -y git") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "dnf leaves") == null);
 }
 

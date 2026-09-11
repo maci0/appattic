@@ -171,6 +171,7 @@ public func scanFingerprint(
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     var toolDirs: [(String, String)] = [
         ("localbin", (home as NSString).appendingPathComponent(".local/bin")),
+        ("homebin", (home as NSString).appendingPathComponent("bin")),
         ("usrlocalbin", "/usr/local/bin"),
         ("homebrewbin", "/opt/homebrew/bin"),
         ("linuxbrewbin", "/home/linuxbrew/.linuxbrew/bin"),

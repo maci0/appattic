@@ -37,12 +37,14 @@ let package = Package(
     ] + uiProducts,
     dependencies: uiDeps,
     targets: [
-        .target(name: "AppAtticScan"),
-        .target(name: "AppAtticCLIKit"),
-        .executableTarget(name: "AppAtticCLI", dependencies: ["AppAtticScan", "AppAtticCLIKit"]),
+        .target(
+            name: "AppAtticScan",
+            resources: [.copy("linux-system-names.txt")]
+        ),
+        .executableTarget(name: "AppAtticCLI", dependencies: ["AppAtticScan"]),
         .testTarget(
             name: "AppAtticScanTests",
-            dependencies: ["AppAtticScan", "AppAtticCLIKit"],
+            dependencies: ["AppAtticScan"],
             path: "tests/AppAtticScanTests"
         ),
     ] + uiTargets

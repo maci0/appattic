@@ -5,7 +5,6 @@ import Darwin
 import Glibc
 #endif
 import AppAtticScan
-import AppAtticCLIKit
 
 @main
 enum AppAtticCLI {
@@ -25,6 +24,10 @@ enum AppAtticCLI {
             fputs("error: \(err)\n", stderr)
             fputs("\(cliUsageHint)\n", stderr)
             Foundation.exit(2)
+        }
+        if opts.command == "disk" {
+            runDiskCommand(opts)
+            return
         }
         let settings: AppAtticSettings
         do {
@@ -95,7 +98,7 @@ enum AppAtticCLI {
                 fputs("Update cancelled.\n", stderr)
                 return
             }
-            fputs("Updating \(n) Homebrew/Flatpak package(s)…\n", stderr)
+            fputs("Updating \(n) package(s)…\n", stderr)
             let rc = runShellScript(script)
             if rc != 0 {
                 fputs("error: update failed (exit \(rc))\n", stderr)
@@ -124,6 +127,24 @@ enum AppAtticCLI {
                 printOutdated(result)
                 printPackages(result)
             }
+        }
+    }
+}
+
+func runDiskCommand(_ opts: CLIOptions) {
+    let root = opts.diskPath ?? FileManager.default.homeDirectoryForCurrentUser.path
+    fputs("scanning \(root)\n", stderr)
+    fflush(stderr)
+    let tree = scanDiskUsage(root: root, oneFileSystem: !opts.allFileSystems)
+    print(formatDiskTree(tree, allocatedSize: opts.allocated, top: opts.top), terminator: "")
+    if let jsonPath = opts.json {
+        do {
+            let data = try diskUsageJSON(tree)
+            try writeOwnerOnlyFile(data, to: URL(fileURLWithPath: jsonPath))
+            fputs("JSON written to \(jsonPath)\n", stderr)
+        } catch {
+            fputs("error writing JSON: \(error.localizedDescription)\n", stderr)
+            Foundation.exit(1)
         }
     }
 }
@@ -356,7 +377,7 @@ func printPackages(_ result: ScanResult) {
 
 func confirmLiveUpdate(count: Int) -> Bool {
     if isatty(STDIN_FILENO) == 0 { return true }
-    fputs("Update \(count) Homebrew/Flatpak package(s)? [y/N] ", stderr)
+    fputs("Update \(count) package(s)? [y/N] ", stderr)
     fflush(stderr)
     guard let line = readLine() else { return false }
     let answer = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -372,7 +393,15 @@ func runShellScript(_ script: String) -> Int32 {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [url.path]
         var env = ProcessInfo.processInfo.environment
-        let extras = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let extras = [
+            (home as NSString).appendingPathComponent("bin"),
+            (home as NSString).appendingPathComponent(".local/bin"),
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+        ]
         var seen = Set<String>()
         var parts: [String] = []
         for dir in extras + (env["PATH"] ?? "").split(separator: ":").map(String.init) {

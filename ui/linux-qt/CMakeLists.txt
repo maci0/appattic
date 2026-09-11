@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 if(NOT DEFINED ENV{SOURCE_DATE_EPOCH} OR "$ENV{SOURCE_DATE_EPOCH}" STREQUAL "")
     set(ENV{SOURCE_DATE_EPOCH} "0")
@@ -20,6 +21,7 @@ check_pie_supported()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Threads REQUIRED)
 
 get_filename_component(APPATTIC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
@@ -75,6 +77,10 @@ add_executable(appattic-qt
     settings.cpp
     corehost.cpp
     smoke.cpp
+    diskusage.cpp
+    diskchart.cpp
+    diskpage.cpp
+    appattic.qrc
     "${APPATTIC_ROOT}/core/host/embed.c"
     "${APPATTIC_ROOT}/core/host/hostexec.c"
 )
@@ -84,7 +90,7 @@ target_include_directories(appattic-qt PRIVATE
 )
 # Do not bake the configure-time source path into the binary. Runtime uses
 # APPATTIC_CORE_OUT, then paths relative to the executable (see coreOutDir).
-target_link_libraries(appattic-qt PRIVATE Qt6::Widgets wasmtime)
+target_link_libraries(appattic-qt PRIVATE Qt6::Widgets wasmtime Threads::Threads)
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(appattic-qt PRIVATE
         -fstack-protector-strong
@@ -97,11 +103,17 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         "-ffile-prefix-map=${CMAKE_BINARY_DIR}=/build"
         "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=/build"
         "-fmacro-prefix-map=${CMAKE_BINARY_DIR}=/build"
-        $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
-        $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=2>
         $<$<COMPILE_LANGUAGE:C>:-Wall>
         $<$<COMPILE_LANGUAGE:C>:-Wextra>
     )
+    # KDE/Flatpak SDKs already pass -Wp,-D_FORTIFY_SOURCE=3. Re-defining it
+    # with -Werror fails GCC 15.
+    if(NOT DEFINED ENV{FLATPAK_DEST})
+        target_compile_options(appattic-qt PRIVATE
+            $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
+            $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=2>
+        )
+    endif()
     if(UNIX AND NOT APPLE)
         target_compile_options(appattic-qt PRIVATE -fstack-clash-protection)
         target_link_options(appattic-qt PRIVATE
@@ -129,13 +141,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     )
     # Source-level so a separate AUTOMOC TU does not inherit -Werror.
     set_property(SOURCE main.cpp finding.cpp settings.cpp smoke.cpp
+        diskusage.cpp diskchart.cpp diskpage.cpp
         APPEND PROPERTY COMPILE_OPTIONS -Werror)
 endif()
 if(UNIX AND NOT APPLE)
     get_filename_component(_wasmtime_libdir "${WASMTIME_LIBRARY}" DIRECTORY)
     set_target_properties(appattic-qt PROPERTIES
         BUILD_RPATH "${_wasmtime_libdir}"
-        INSTALL_RPATH "\$ORIGIN"
+        INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../lib"
         BUILD_WITH_INSTALL_RPATH OFF
         INSTALL_RPATH_USE_LINK_PATH OFF
         POSITION_INDEPENDENT_CODE ON
@@ -155,4 +168,12 @@ endif()
 if(EXISTS "${APPATTIC_ROOT}/packaging/appattic.svg")
     install(FILES "${APPATTIC_ROOT}/packaging/appattic.svg"
         DESTINATION share/icons/hicolor/scalable/apps)
+endif()
+if(EXISTS "${APPATTIC_ROOT}/packaging/appattic.png")
+    install(FILES "${APPATTIC_ROOT}/packaging/appattic.png"
+        DESTINATION share/icons/hicolor/128x128/apps)
+endif()
+if(EXISTS "${APPATTIC_ROOT}/packaging/org.appattic.AppAttic.metainfo.xml")
+    install(FILES "${APPATTIC_ROOT}/packaging/org.appattic.AppAttic.metainfo.xml"
+        DESTINATION share/metainfo)
 endif()

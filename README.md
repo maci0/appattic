@@ -1,6 +1,6 @@
 # AppAttic
 
-Local cleanup tool for leftover data from uninstalled apps, unused installed software, unused distro orphans and language globals, and packages that have a newer version available. Nothing is deleted until you review a script or confirm in the UI.
+Local cleanup tool for leftover data from uninstalled apps, unused installed software, unused distro orphans and language globals, packages that have a newer version available, and a disk usage analyzer (folder sizes, devices, ring/treemap charts). Nothing is deleted until you review a script or confirm in the UI. Move to Trash from Disk Usage asks first.
 
 macOS and Linux. Today: one Foundation scan library (`AppAtticScan`), a Gtk-free CLI (`appattic`), a SwiftCrossUI AppKit window on macOS (`AppAtticUI`), and a C++ Qt 6 window on Linux (`ui/linux-qt`). Direction: Zig core compiled to WASM, extra package managers and dialog copy as WASM plugins, native widgets only in the shell. Spec: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Linux UI is Qt 6, same toolkit as TMOG Linux. Qt-on-Linux is not claimed linked until `scripts/linux-qt-link.sh` runs on a real Linux host.
 
@@ -8,8 +8,9 @@ macOS and Linux. Today: one Foundation scan library (`AppAtticScan`), a Gtk-free
 
 - **Leftovers.** User data whose owner app is gone (Application Support, caches, XDG dirs, and similar), plus user overlays (`~/.local/bin`, `~/bin`, `~/.cargo/bin`, `~/.local/share/applications`) that hide a same-named packaged file. Overlay rows use status `shadow`; cleanup removes the overlay only. Apple/system/toolchain dirs are not counted as reclaimable.
 - **Stale.** Installed apps and brew formulas with weak or old usage. Last-used comes from Spotlight (macOS, including the inner executable), running processes, prefs mtime, data-dir mtime, Linux `recently-used.xbel`, and shell history for CLI tools. Unused is not the same as outdated.
-- **Outdated.** Newer version available from Homebrew, Flatpak, Snap, apt, pacman, dnf, zypper, or the App Store. Homebrew formulas/casks and Flatpak can be updated from the UI after you confirm, or immediately with `appattic update` (`--dry-run` prints the script first). App Store, apt, pacman, dnf, zypper, and Snap stay report-only. Untrusted Homebrew casks are listed and are not updated.
+- **Outdated.** Newer version available from Homebrew, Flatpak, Snap, apt, pacman, AUR (paru/yay/pikaur), dnf/yum, zypper, or the App Store. Named upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf/yum, zypper) run from the Outdated page after you confirm, or with `appattic update` (`--dry-run` prints the script first). Not a full distro upgrade (`apt upgrade`, `pacman -Syu`). App Store and Snap stay report-only. Untrusted Homebrew casks are listed and are not updated. Debian/Ubuntu also lists `dpkg` config remnants (`rc`) and PPA source files.
 - **Packages.** Distro orphans (nothing still needs them) and user-global language tools (`npm`/`pnpm`/`bun -g`, pipx, `uv tool`). Remove and mark-as-manual are confirm + script only. Distro upgrades are never included.
+- **Disk usage.** Folder and device sizes with a tree, allocated vs apparent size, ring and treemap charts (Linux Qt), scan home / folder / file system, open in the file manager, and move to Trash after confirm. Other file systems are not descended into unless you ask. Directory symlinks are not followed. `appattic disk [PATH]` prints the tree.
 
 Tiers for installed software: KEEP (in use), REVIEW (idle, check first), REMOVE (stale and easy to reinstall). Default CLI cleanup scripts (`report --dry-run`, `leftovers --dry-run`, `stale --dry-run`) only include orphaned leftovers, PATH overlays, and REMOVE-tier items. `packages --dry-run` is a separate package script. The UI can also uninstall REVIEW-tier apps you opt into.
 
@@ -25,6 +26,8 @@ Swift 5.10.1 (`.swift-version`). `./build.sh` uses `swift` on PATH, then `/opt/s
 ./run.sh stale
 ./run.sh outdated
 ./run.sh packages
+./run.sh disk
+./run.sh disk /var --top 20 --allocated
 ./run.sh update --dry-run
 ```
 
@@ -57,7 +60,7 @@ Environment:
 | Variable | Used by | Role |
 |---|---|---|
 | `APPATTIC_CORE_OUT` | Linux Qt | Directory of `appattic_core.wasm` and plugins. AppImage sets this. |
-| `APPATTIC_PAGE` | UI | Initial sidebar: `overview` (default), `leftovers`, `stale`, `outdated`, `packages`, `settings`. |
+| `APPATTIC_PAGE` | UI | Initial sidebar: `overview` (default), `leftovers`, `stale`, `outdated`, `packages`, `disk`, `settings`. |
 | `NO_COLOR` | CLI | Disable ANSI color when set to a non-empty value. Also `--no-color` or `TERM=dumb`. |
 | `XDG_DATA_HOME` | Linux | Absolute data root; parent of `appattic/settings.json`, `last-scan.json`, and user desktop entries. |
 | `XDG_CONFIG_HOME` | Linux | Absolute configuration root scanned for leftovers and usage history. |
@@ -150,6 +153,17 @@ bash scripts/linux-appimage.sh
 
 Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downloads pinned linuxdeploy, linuxdeploy-plugin-qt, and appimagetool into `dist/.appimage-tools/` and checks SHA-256. WASM modules ship under `usr/share/appattic/`; `libwasmtime.so` sits next to the binary.
 
+Flatpak (Qt 6 from org.kde.Platform, host package-manager queries via `flatpak-spawn --host`):
+
+```bash
+# needs flatpak-builder; installs org.kde.Sdk//6.10 from Flathub if missing
+bash scripts/linux-flatpak.sh
+# dist/AppAttic.flatpak
+flatpak run org.appattic.AppAttic
+```
+
+The sandbox gets `--filesystem=host` so leftover and disk scans can see the machine. Plugin tags look under `/run/host` when `FLATPAK_ID` is set, because the sandbox PATH has no host pacman or apt. Scan plugins still cannot run `rm` or distro upgrades through `host.exec`. Manifest: `packaging/flatpak/org.appattic.AppAttic.yml`.
+
 Container builds:
 
 ```bash
@@ -161,7 +175,7 @@ podman build -t appattic-arch -f Dockerfile.arch .
 
 Ubuntu image installs Qt 6, runs `AppAtticScanTests`, and links the CLI plus the Qt window. `Dockerfile.arch` does the same on Arch. GitHub Actions `.github/workflows/linux.yml` runs both Ubuntu and archlinux jobs.
 
-Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Settings. The last scan is shown immediately if one was saved. AppAttic then checks its inventory fingerprint in the background and rescans if app, package-manager, tool, Steam/CrossOver, or leftover state changed, or if the scan is over 24 hours old. Checkmarks on leftovers, stale apps, outdated rows, and Packages rows survive a background refresh if those items are still present. Settings (confirm before running; on macOS, include system apps) and ignored leftover paths persist in `settings.json` (see above). The Linux window does not scan installed system apps. Ignore a leftover from its inspector to hide it on later scans. Include-in-cleanup uses the inspector toggle and toolbar Select All.
+Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settings. The last scan is shown immediately if one was saved. AppAttic then checks its inventory fingerprint in the background and rescans if app, package-manager, tool, Steam/CrossOver, or leftover state changed, or if the scan is over 24 hours old. Checkmarks on leftovers, stale apps, outdated rows, and Packages rows survive a background refresh if those items are still present. Settings (confirm before running; on macOS, include system apps) and ignored leftover paths persist in `settings.json` (see above). The Linux window does not scan installed system apps. Ignore a leftover from its inspector to hide it on later scans. Include-in-cleanup uses the leftover list tickbox on Linux, the inspector toggle, and toolbar Select All.
 
 ## Layout
 
@@ -172,7 +186,7 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Settings. The last
 | `Sources/AppAttic/` | SwiftCrossUI app (AppKit on macOS) |
 | `ui/linux-qt/` | C++ Qt 6 Widgets shell (Linux). Window, findings, settings, WASM host paths, and smoke are separate files |
 | `tests/AppAtticScanTests/` | XCTest port of the old scanner cases |
-| `generate_icon.py` | One-off PNG icon generator. Not used at scan or UI runtime. |
+
 | `DESIGN.md` | Native UI visual rules |
 | `docs/superpowers/specs/` | Requirement and architecture records (Swift port implemented; Zig WASM core accepted) |
 | `core/` | Zig `wasm32` spike (core + plugins + C Wasmtime embedder) |
@@ -181,6 +195,6 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Settings. The last
 
 - Homebrew `outdated` is called without `--greedy`, so auto-updating casks are not flagged just because the bottle is older than the running app.
 - An untrusted Homebrew cask is still listed on Outdated. Other formula and cask descriptions still load. AppAttic will not trust the tap.
-- Outdated Homebrew formulas/casks and Flatpak apps can be updated from the Outdated page (confirm first) or `./run.sh update` (runs now; pass `--dry-run` to print the script). App Store, apt, pacman, dnf, zypper, and Snap stay report-only.
+- Named outdated upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf/yum, zypper) run from the Outdated page (confirm first) or `./run.sh update` (runs now; pass `--dry-run` to print the script). App Store and Snap stay report-only.
 - Missing package managers are skipped. A failed `brew outdated` (network) does not fail the scan.
 - Review every path in a generated script before running it.

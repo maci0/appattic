@@ -1,6 +1,5 @@
 import XCTest
 @testable import AppAtticScan
-@testable import AppAtticCLIKit
 
 final class CLIFlagTests: XCTestCase {
     func testParseErrorsUseSwiftErrorHandling() {
@@ -38,8 +37,24 @@ final class CLIFlagTests: XCTestCase {
     func testUpdateCommand() {
         XCTAssertEqual(parseCLIArguments(["update"]).command, "update")
         XCTAssertTrue(parseCLIArguments(["update", "--dry-run"]).dryRun)
-        XCTAssertTrue(cliHelpText.contains("no prompt"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("prompts on a TTY"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("--dry-run"), cliHelpText)
         XCTAssertTrue(cliHelpText.contains("--help"), cliHelpText)
+    }
+
+    func testDiskCommand() {
+        XCTAssertEqual(parseCLIArguments(["disk"]).command, "disk")
+        let opts = parseCLIArguments(["disk", "/var", "--allocated", "--all-file-systems", "--top", "5"])
+        XCTAssertEqual(opts.command, "disk")
+        XCTAssertEqual(opts.diskPath, "/var")
+        XCTAssertTrue(opts.allocated)
+        XCTAssertTrue(opts.allFileSystems)
+        XCTAssertEqual(opts.top, 5)
+        XCTAssertNil(opts.error)
+        XCTAssertTrue(cliHelpText.contains("disk"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("--all-file-systems"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("--allocated"), cliHelpText)
+        XCTAssertEqual(parseCLIArguments(["disk", "/a", "/b"]).error, "unexpected argument: /b")
     }
 
     func testPackagesCommand() {

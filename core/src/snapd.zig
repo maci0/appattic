@@ -92,10 +92,10 @@ fn keepFromNames(names: []const []const u8, buf: []u8) []const u8 {
     return buf[0..used];
 }
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [4096]u8 = undefined;
-var snap_home_exec_buf: [2048]u8 = undefined;
+var exec_buf: [65536]u8 = undefined;
+var snap_home_exec_buf: [16384]u8 = undefined;
 
 const none_json =
     \\{"plugin":"snapd","engine":null,"findings":[],"script":null,"dialog":{"title":"No snapd","body":"snap is not on PATH. Plugin inactive."},"note":"snapd missing"}
@@ -199,7 +199,7 @@ export fn plugin_query(present: i32) i32 {
     }
     const snap_text = exec_buf[0..@intCast(nexec)];
     var disabled: [32]DisabledRev = undefined;
-    const n_disabled = parseSnapListAll(snap_text, &disabled);
+    var n_disabled = parseSnapListAll(snap_text, &disabled);
 
     var installed_names: [64][]const u8 = undefined;
     const n_installed = parseInstalledSnapNames(snap_text, installed_names[0..]);
@@ -217,11 +217,22 @@ export fn plugin_query(present: i32) i32 {
             snap_home_root,
             &orphans,
             &paths,
+            "",
         );
     }
 
-    if (!renderSnapd(disabled[0..n_disabled], orphans[0..n_orphans])) return 1;
-    return 0;
+    while (true) {
+        if (renderSnapd(disabled[0..n_disabled], orphans[0..n_orphans])) return 0;
+        if (n_orphans > 0) {
+            n_orphans -= 1;
+            continue;
+        }
+        if (n_disabled > 0) {
+            n_disabled -= 1;
+            continue;
+        }
+        return 1;
+    }
 }
 
 export fn result_ptr() i32 {

@@ -162,6 +162,12 @@ final class ClassifyTests: XCTestCase {
         }
     }
 
+    func testHyphenatedAppDataIsNotSystem() {
+        for name in ["git-cola", "docker-desktop", "npm-check-updates", "go-task"] {
+            XCTAssertEqual(ident().classify(name, kind: "dir").0, "orphaned", name)
+        }
+    }
+
     func testAppleSupportDirsAreSystem() {
         for name in [
             "CrashReporter", "CloudDocs", "CallHistoryDB", "CallHistoryTransactions",
@@ -1268,7 +1274,7 @@ final class ClassifyTests: XCTestCase {
         XCTAssertEqual(hits.map(\.name), ["mini-swe-agent"])
         XCTAssertEqual(hits[0].status, "orphaned")
         XCTAssertEqual(hits[0].kind, "symlink")
-        XCTAssertEqual(hits[0].rootLabel, ".local/bin")
+        XCTAssertEqual(hits[0].rootLabel, "bin")
         XCTAssertEqual(hits[0].path, ghost.path)
         XCTAssertTrue(hits[0].extraPaths.isEmpty)
     }
@@ -1310,8 +1316,12 @@ final class ClassifyTests: XCTestCase {
         XCTAssertEqual(userBinRootLabel("/home/linuxbrew/.linuxbrew/bin"), "linuxbrew/bin")
         XCTAssertEqual(userBinRootLabel("/opt/homebrew/bin"), "homebrew/bin")
         XCTAssertEqual(userBinRootLabel("/Users/x/.local/bin"), ".local/bin")
+        XCTAssertEqual(userBinRootLabel("/home/u/bin"), "bin")
+        XCTAssertEqual(userBinRootLabel("/Users/x/bin"), "bin")
         XCTAssertTrue(isUserBinLeftoverPath("/home/linuxbrew/.linuxbrew/bin/jq"))
         XCTAssertTrue(isUserBinLeftoverPath("/opt/homebrew/bin/wget"))
+        XCTAssertTrue(isUserBinLeftoverPath("/home/u/bin/jq"))
+        XCTAssertFalse(isUserBinLeftoverPath("/usr/bin/jq"))
         XCTAssertFalse(isUserBinLeftoverPath("/tmp/not-a-bin/jq"))
     }
 
@@ -1351,14 +1361,14 @@ final class ClassifyTests: XCTestCase {
             fileExists: { $0 == "/usr/local/bin" },
             which: { _ in "/opt/homebrew/bin/brew" }
         )
-        XCTAssertEqual(dirs, ["/Users/x/.local/bin", "/usr/local/bin"])
+        XCTAssertEqual(dirs, ["/Users/x/.local/bin", "/Users/x/bin", "/usr/local/bin"])
         let intel = defaultUserBinDirs(
             home: "/Users/x",
             usrLocalBin: "/usr/local/bin",
             fileExists: { $0 == "/usr/local/bin" },
             which: { _ in "/usr/local/bin/brew" }
         )
-        XCTAssertEqual(intel, ["/Users/x/.local/bin"])
+        XCTAssertEqual(intel, ["/Users/x/.local/bin", "/Users/x/bin"])
     }
 
     func testBrokenUserBinLinksWithSameDestDirCollapse() throws {
@@ -1509,6 +1519,11 @@ final class ClassifyTests: XCTestCase {
         XCTAssertEqual(classifyLinuxSystemName("bare").0, "system")
         XCTAssertEqual(classifyLinuxSystemName("fontconfig").0, "system")
         XCTAssertEqual(classifyLinuxSystemName("man").0, "system")
+        XCTAssertEqual(classifyLinuxSystemName("kdeconnect").0, "system")
+        XCTAssertEqual(classifyLinuxSystemName("kwinrc").0, "system")
+        XCTAssertEqual(classifyLinuxSystemName("plasma-workspace").0, "system")
+        XCTAssertEqual(classifyLinuxSystemName("dolphinrc").0, "system")
+        XCTAssertEqual(classifyLinuxSystemName("baloofilerc").0, "system")
         for name in ["uv", "bun", "go-build", "helm", "gcloud", "btop"] {
             XCTAssertEqual(classifyLinuxSystemName(name).0, "system", name)
         }

@@ -94,7 +94,8 @@ pub fn isSafeIdent(s: []const u8) bool {
     return true;
 }
 
-/// Report-only outdated finding. Named upgrade lives in `command`. Never live-exec.
+/// Named outdated finding. `updatable` means the confirm script may run `command`.
+/// host.exec still never runs that command.
 pub fn writeOutdated(
     w: *W,
     name: []const u8,
@@ -102,6 +103,7 @@ pub fn writeOutdated(
     latest: []const u8,
     manager: []const u8,
     command: []const u8,
+    updatable: bool,
 ) void {
     w.raw("{\"kind\":\"outdated\",\"id\":");
     w.str(name);
@@ -115,15 +117,21 @@ pub fn writeOutdated(
         w.raw(",\"latest_version\":");
         w.str(latest);
     }
-    w.raw(",\"status\":\"outdated\",\"updatable\":false,\"command\":");
-    var cmd_buf: [384]u8 = undefined;
-    if (command.len + name.len > cmd_buf.len) {
-        w.failed = true;
-        return;
+    w.raw(",\"status\":\"outdated\",\"updatable\":");
+    w.raw(if (updatable) "true" else "false");
+    w.raw(",\"command\":");
+    if (command.len == 0) {
+        w.raw("null");
+    } else {
+        var cmd_buf: [384]u8 = undefined;
+        if (command.len + name.len > cmd_buf.len) {
+            w.failed = true;
+            return;
+        }
+        @memcpy(cmd_buf[0..command.len], command);
+        @memcpy(cmd_buf[command.len..][0..name.len], name);
+        w.str(cmd_buf[0 .. command.len + name.len]);
     }
-    @memcpy(cmd_buf[0..command.len], command);
-    @memcpy(cmd_buf[command.len..][0..name.len], name);
-    w.str(cmd_buf[0 .. command.len + name.len]);
     w.raw(",\"manager\":");
     w.str(manager);
     w.raw("}");
@@ -192,10 +200,19 @@ test "json writer overflow sets failed" {
 test "writeOutdated JSON-escapes command and name" {
     var buf: [512]u8 = undefined;
     var w = W{ .buf = &buf };
-    writeOutdated(&w, "a\"b", "1", "2", "apt", "apt install ");
+    writeOutdated(&w, "a\"b", "1", "2", "apt", "apt install ", true);
     const got = w.slice() orelse return error.Overflow;
     try std.testing.expect(std.mem.indexOf(u8, got, "a\\\"b") != null);
     try std.testing.expect(std.mem.indexOf(u8, got, "\"command\":\"apt install a\\\"b\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "\"updatable\":true") != null);
+
+    var buf2: [256]u8 = undefined;
+    var w2 = W{ .buf = &buf2 };
+    writeOutdated(&w2, "typescript", "5.4.5", "5.5.0", "npm", "", false);
+    const got2 = w2.slice() orelse return error.Overflow;
+    try std.testing.expect(std.mem.indexOf(u8, got2, "\"command\":null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got2, "\"updatable\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got2, "\"command\":\"typescript\"") == null);
 }
 
 test "isSafeIdent rejects empty and shell metacharacters" {

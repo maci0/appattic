@@ -1,9 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=AppAttic
-Comment=Local cleanup tool for leftover app data
+Comment=Leftovers, stale apps, unused packages, and disk usage
 Exec=appattic-qt
 Icon=appattic
 Categories=Utility;System;
+Keywords=cleanup;leftover;stale;disk;usage;packages;
 Terminal=false
 StartupWMClass=appattic-qt

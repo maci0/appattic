@@ -1,11 +1,14 @@
 #include "corehost.h"
+#include "diskpage.h"
 #include "finding.h"
 #include "settings.h"
 #include "smoke.h"
+#include "uistyle.h"
 
 #include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
+#include <QAtomicInteger>
 #include <QByteArray>
 #include <QCheckBox>
 #include <QClipboard>
@@ -24,9 +27,11 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QFrame>
+#include <QGridLayout>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QIODevice>
 #include <QKeySequence>
 #include <QLabel>
@@ -36,6 +41,7 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMetaType>
 #include <QMessageBox>
 #include <QModelIndex>
 #include <QObject>
@@ -43,6 +49,8 @@
 #include <QPalette>
 #include <QPlainTextEdit>
 #include <QProcess>
+#include <QProcessEnvironment>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QRect>
 #include <QSaveFile>
@@ -50,6 +58,7 @@
 #include <QSet>
 #include <QSignalBlocker>
 #include <QSize>
+#include <QSizePolicy>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -60,6 +69,7 @@
 #include <QTemporaryFile>
 #include <QThread>
 #include <QTimer>
+#include <QToolBar>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QUrl>
@@ -79,6 +89,10 @@ static void resetWidgetPalette(QWidget *w) {
     w->setPalette(QApplication::palette());
 }
 
+static QString packageChildMarkKey(const QString &parentUid, const QString &child) {
+    return parentUid + QChar(0x1e) + child;
+}
+
 static qint64 addBytes(qint64 a, qint64 b) {
     if (b <= 0) return a;
     if (a > std::numeric_limits<qint64>::max() - b) return std::numeric_limits<qint64>::max();
@@ -94,20 +108,24 @@ static bool isDarkPalette(const QPalette &p) {
     return p.color(QPalette::Window).lightness() < 128;
 }
 
-static QFont bodyFont() {
-    return QApplication::font();
+static QFont bodyFont() { return aaBodyFont(); }
+static QFont smallFont() { return aaSmallFont(); }
+static QFont titleFont() { return aaTitleFont(); }
+static QFont pageFont() { return aaPageFont(); }
+static QFont sectionFont() { return aaSectionFont(); }
+static QFont labelFont() { return aaLabelFont(); }
+static QFont numericFont() { return aaNumericFont(); }
+static QFont valueFont() { return aaValueFont(); }
+static QFont monoFont() { return aaMonoFont(); }
+
+static int rowPx(const QWidget *w = nullptr) {
+    return aaRowPx(w);
 }
 
-static QFont smallFont() {
-    QFont f = QApplication::font();
-    const int ps = f.pointSize();
-    if (ps > 0) f.setPointSize(qMax(9, ps - 2));
-    else if (f.pixelSize() > 0) f.setPixelSize(qMax(11, f.pixelSize() - 2));
-    return f;
-}
-
-static int rowPx() {
-    return QFontMetrics(bodyFont()).height() + 6;
+static QIcon themeIcon(const QString &name, const QString &fallback) {
+    QIcon ic = QIcon::fromTheme(name);
+    if (ic.isNull()) ic = QIcon::fromTheme(fallback);
+    return ic;
 }
 
 static QString pageSearchEmpty(Page page) {
@@ -177,7 +195,7 @@ static QString pageEmptyDetail(
         return QStringLiteral("No unused installed apps in this scan.");
     case Page::Outdated:
         return QStringLiteral(
-            "No outdated packages. Brew, Flatpak, Snap, apt, pacman, dnf, zypper, and the App Store reported nothing, or those tools are not installed."
+            "No outdated packages. Brew, Flatpak, Snap, apt, pacman, AUR, dnf, yum, zypper, and the App Store reported nothing, or those tools are not installed."
         );
     case Page::Packages:
         if (packageFilter == QLatin1String("globals")) {
@@ -185,7 +203,7 @@ static QString pageEmptyDetail(
         }
         if (packageFilter == QLatin1String("leaves")) {
             return QStringLiteral(
-                "No distro orphans. apt/pacman/dnf/zypper reported nothing, or those tools are not installed."
+                "No distro orphans. apt/pacman/dnf/yum/zypper reported nothing, or those tools are not installed."
             );
         }
         return QStringLiteral(
@@ -273,18 +291,91 @@ static QColor statusColor(const Finding &f, const Tone &t, Page page) {
     return t.dim;
 }
 
+class ScanWorker;
+
+struct ScanAccum {
+    ScanWorker *worker = nullptr;
+    QByteArray blobs;
+};
+
 class ScanWorker : public QObject {
     Q_OBJECT
+public:
+    void setWanted(int token) { m_wanted.storeRelease(token); }
+    void requestCancel() {
+        m_wanted.storeRelease(0);
+        requestCoreWasmCancel();
+    }
+    bool isCancelled() const { return m_wanted.loadAcquire() != m_token; }
 public slots:
-    void run(const QString &core, const QStringList &pluginSpecs) {
-        QByteArray blobs;
+    void run(const QString &core, const QStringList &pluginSpecs, int token) {
+        m_token = token;
+        if (isCancelled()) {
+            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
+            return;
+        }
+        clearCoreWasmCancel();
+        if (isCancelled()) {
+            requestCoreWasmCancel();
+            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
+            return;
+        }
+        ScanAccum acc;
+        acc.worker = this;
         char err[1024];
         err[0] = '\0';
-        const int rc = collectCoreWasm(core, pluginSpecs, &blobs, err, sizeof err);
-        emit finished(blobs, QString::fromUtf8(err), rc);
+        const int rc = runCoreWasm(
+            core,
+            pluginSpecs,
+            scanOnJson,
+            &acc,
+            err,
+            sizeof err,
+            scanOnProgress
+        );
+        if (isCancelled()) {
+            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
+            return;
+        }
+        QVector<Finding> findings;
+        for (const QByteArray &line : acc.blobs.split('\n')) {
+            if (line.isEmpty()) continue;
+            appendFindingsFromBlob(findings, line);
+        }
+        enrichFindingsUsageTiming(findings);
+        markOwnedPathLeftovers(findings);
+        groupLinuxLeftovers(findings);
+        emit progress(QStringLiteral("leftover-sizes"), 1, 1);
+        auto cancelled = [](void *user) -> bool {
+            return static_cast<ScanWorker *>(user)->isCancelled();
+        };
+        enrichLeftoverSizes(findings, cancelled, this);
+        if (isCancelled()) {
+            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
+            return;
+        }
+        emit finished(findings, QString::fromUtf8(err), rc);
     }
 signals:
-    void finished(const QByteArray &blobs, const QString &err, int rc);
+    void progress(const QString &pluginId, int index, int total);
+    void finished(const QVector<Finding> &findings, const QString &err, int rc);
+
+private:
+    static void scanOnJson(const char *json, size_t len, void *user) {
+        auto *acc = static_cast<ScanAccum *>(user);
+        if (!acc || !json) return;
+        acc->blobs.append(json, int(len));
+        acc->blobs.append('\n');
+    }
+
+    static void scanOnProgress(const char *pluginId, int index, int total, void *user) {
+        auto *acc = static_cast<ScanAccum *>(user);
+        if (!acc || !acc->worker) return;
+        emit acc->worker->progress(QString::fromUtf8(pluginId ? pluginId : ""), index, total);
+    }
+
+    QAtomicInteger<int> m_wanted{0};
+    int m_token = 0;
 };
 
 class SidebarDelegate : public QStyledItemDelegate {
@@ -296,44 +387,44 @@ public:
         initStyleOption(&o, idx);
         const QWidget *w = o.widget;
         QStyle *style = w ? w->style() : QApplication::style();
-        style->drawPrimitive(QStyle::PE_PanelItemViewItem, &o, p, w);
-
-        const QString name = idx.data(Qt::DisplayRole).toString();
         const int count = idx.data(Qt::UserRole).toInt();
-        QFont body = bodyFont();
-        QFont small = smallFont();
-        const QColor fg = o.palette.color(
-            o.state & QStyle::State_Selected ? QPalette::HighlightedText : QPalette::Text
-        );
-        QColor dim = fg;
-        if (!(o.state & QStyle::State_Selected)) {
-            dim = toneFrom(o.palette).dim;
-        } else {
-            dim.setAlpha(230);
-        }
-        p->setPen(fg);
-        p->setFont(body);
-        QRect nameR = o.rect.adjusted(10, 0, -10, 0);
+        int cw = 0;
         QString countText;
         if (count > 0) {
             countText = QString::number(count);
-            p->setFont(small);
-            const int cw = p->fontMetrics().horizontalAdvance(countText) + 4;
-            nameR.setRight(nameR.right() - cw);
-            p->setPen(dim);
-            p->drawText(
-                QRect(nameR.right(), o.rect.top(), cw, o.rect.height()),
-                Qt::AlignVCenter | Qt::AlignRight,
-                countText
-            );
-            p->setPen(fg);
-            p->setFont(body);
+            cw = QFontMetrics(smallFont()).horizontalAdvance(countText) + 12;
+            o.rect.setWidth(qMax(0, o.rect.width() - cw));
         }
-        p->drawText(nameR, Qt::AlignVCenter | Qt::AlignLeft, name);
+        style->drawControl(QStyle::CE_ItemViewItem, &o, p, w);
+        if (cw <= 0) return;
+        QColor dim = o.palette.color(
+            o.state & QStyle::State_Selected ? QPalette::HighlightedText : QPalette::PlaceholderText
+        );
+        if (o.state & QStyle::State_Selected) dim.setAlpha(210);
+        p->save();
+        p->setPen(dim);
+        p->setFont(smallFont());
+        p->drawText(
+            QRect(o.rect.right(), opt.rect.top(), cw - 8, opt.rect.height()),
+            Qt::AlignVCenter | Qt::AlignRight,
+            countText
+        );
+        p->restore();
     }
 
-    QSize sizeHint(const QStyleOptionViewItem &opt, const QModelIndex &) const override {
-        return QSize(opt.rect.width(), rowPx());
+    QSize sizeHint(const QStyleOptionViewItem &opt, const QModelIndex &idx) const override {
+        QStyleOptionViewItem o = opt;
+        initStyleOption(&o, idx);
+        const QWidget *w = o.widget;
+        QStyle *style = w ? w->style() : QApplication::style();
+        QSize s = style->sizeFromContents(
+            QStyle::CT_ItemViewItem,
+            &o,
+            QStyledItemDelegate::sizeHint(opt, idx),
+            w
+        );
+        s.setHeight(qMax(s.height(), rowPx(w)));
+        return s;
     }
 };
 
@@ -343,18 +434,27 @@ public:
 
     void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override {
         QStyledItemDelegate::initStyleOption(option, index);
+        option->showDecorationSelected = true;
         if (option->state & QStyle::State_Selected) {
             const QColor onAccent = option->palette.color(QPalette::HighlightedText);
             option->palette.setColor(QPalette::Text, onAccent);
             option->palette.setColor(QPalette::WindowText, onAccent);
+            option->palette.setColor(QPalette::HighlightedText, onAccent);
             option->palette.setBrush(QPalette::Text, onAccent);
             option->palette.setBrush(QPalette::WindowText, onAccent);
+            option->palette.setBrush(QPalette::HighlightedText, onAccent);
+        }
+        if (index.flags() & Qt::ItemIsUserCheckable) {
+            option->features |= QStyleOptionViewItem::HasCheckIndicator;
+            option->checkState = static_cast<Qt::CheckState>(
+                index.data(Qt::CheckStateRole).toInt()
+            );
         }
     }
 
     QSize sizeHint(const QStyleOptionViewItem &opt, const QModelIndex &index) const override {
         QSize s = QStyledItemDelegate::sizeHint(opt, index);
-        s.setHeight(rowPx());
+        s.setHeight(rowPx(opt.widget));
         return s;
     }
 };
@@ -366,65 +466,102 @@ public:
         setWindowTitle(QStringLiteral("AppAttic"));
         resize(1180, 720);
         setMinimumSize(800, 520);
-        QFont body = bodyFont();
-        setFont(body);
 
         m_scanThread = new QThread(this);
         m_worker = new ScanWorker;
         m_worker->moveToThread(m_scanThread);
         m_scanThread->start();
         connect(this, &MainWindow::requestScan, m_worker, &ScanWorker::run);
+        connect(m_worker, &ScanWorker::progress, this, &MainWindow::scanProgress);
         connect(m_worker, &ScanWorker::finished, this, &MainWindow::scanFinished);
 
         auto *outer = new QSplitter(Qt::Horizontal, this);
         outer->setChildrenCollapsible(false);
+        outer->setHandleWidth(1);
 
+        auto *side = new QWidget;
+        side->setFixedWidth(220);
+        auto *sv = new QVBoxLayout(side);
+        sv->setContentsMargins(0, 8, 0, 8);
+        sv->setSpacing(0);
         m_sidebar = new QListWidget;
-        m_sidebar->setFixedWidth(220);
-        m_sidebar->setFrameShape(QFrame::NoFrame);
-        m_sidebar->setContentsMargins(8, 8, 8, 8);
         m_sidebar->setItemDelegate(new SidebarDelegate(m_sidebar));
-        m_sidebar->setSpacing(2);
+        m_sidebar->setSpacing(0);
         m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        const QStringList pages = {
-            QStringLiteral("Overview"),
-            QStringLiteral("Leftovers"),
-            QStringLiteral("Stale Apps"),
-            QStringLiteral("Outdated"),
-            QStringLiteral("Packages"),
-            QStringLiteral("Settings"),
+        m_sidebar->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        m_sidebar->setIconSize(QSize(16, 16));
+        m_sidebar->setUniformItemSizes(true);
+        aaApplySourceList(m_sidebar);
+        struct SideSpec {
+            const char *name;
+            const char *icon;
+            const char *fallback;
         };
-        for (const QString &p : pages) {
-            auto *it = new QListWidgetItem(p);
+        const SideSpec pages[] = {
+            {"Overview", "view-list-details", "office-chart-area"},
+            {"Leftovers", "user-trash", "edit-delete"},
+            {"Stale Apps", "appointment-soon", "clock"},
+            {"Outdated", "software-update-available", "system-software-update"},
+            {"Packages", "package-x-generic", "application-x-rpm"},
+            {"Disk Usage", "drive-harddisk", "drive-harddisk-symbolic"},
+        };
+        for (const SideSpec &p : pages) {
+            auto *it = new QListWidgetItem(
+                themeIcon(QLatin1String(p.icon), QLatin1String(p.fallback)),
+                QLatin1String(p.name)
+            );
             it->setData(Qt::UserRole, 0);
             m_sidebar->addItem(it);
         }
+        m_settingsNav = new QListWidget;
+        m_settingsNav->setItemDelegate(new SidebarDelegate(m_settingsNav));
+        m_settingsNav->setSpacing(0);
+        m_settingsNav->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_settingsNav->setIconSize(QSize(16, 16));
+        m_settingsNav->setUniformItemSizes(true);
+        m_settingsNav->setFocusPolicy(Qt::StrongFocus);
+        aaApplySourceList(m_settingsNav);
+        auto *settingsItem = new QListWidgetItem(
+            themeIcon(QStringLiteral("configure"), QStringLiteral("preferences-system")),
+            QStringLiteral("Settings")
+        );
+        settingsItem->setData(Qt::UserRole, 0);
+        m_settingsNav->addItem(settingsItem);
+        m_settingsNav->setFixedHeight(rowPx(m_settingsNav) + 8);
+        sv->addWidget(m_sidebar, 1);
+        sv->addWidget(m_settingsNav, 0);
         m_sidebar->setCurrentRow(0);
+        m_settingsNav->clearSelection();
 
         auto *right = new QWidget;
         auto *rv = new QVBoxLayout(right);
         rv->setContentsMargins(0, 0, 0, 0);
         rv->setSpacing(0);
 
-        auto *tools = new QWidget;
-        tools->setAutoFillBackground(true);
-        {
-            QPalette tp = tools->palette();
-            tp.setColor(QPalette::Window, tp.color(QPalette::Button));
-            tools->setPalette(tp);
-        }
-        auto *th = new QHBoxLayout(tools);
-        th->setContentsMargins(16, 8, 16, 8);
-        th->setSpacing(8);
+        auto *tools = new QToolBar;
+        tools->setMovable(false);
+        tools->setFloatable(false);
+        tools->setIconSize(QSize(16, 16));
+        tools->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        tools->setContextMenuPolicy(Qt::PreventContextMenu);
+        m_pageTitle = new QLabel(QStringLiteral("Overview"));
+        m_pageTitle->setFont(pageFont());
+        m_pageTitle->setContentsMargins(8, 4, 12, 4);
         m_count = new QLabel;
-        QFont small = smallFont();
-        m_count->setFont(small);
+        m_count->setFont(smallFont());
         m_count->setForegroundRole(QPalette::PlaceholderText);
+        m_count->setContentsMargins(8, 0, 8, 0);
+        m_scanBar = new QProgressBar;
+        m_scanBar->setTextVisible(false);
+        m_scanBar->setFixedWidth(120);
+        m_scanBar->setMaximumHeight(6);
+        m_scanBar->setRange(0, 0);
+        m_scanBar->setToolTip(QStringLiteral("Scan progress"));
+        m_scanBar->hide();
         m_search = new QLineEdit;
         m_search->setPlaceholderText(QStringLiteral("Search"));
         m_search->setClearButtonEnabled(true);
         m_search->setFixedWidth(200);
-        m_search->setFont(body);
         m_search->setToolTip(QStringLiteral("Filter the current list by name, path, or kind"));
         m_filter = new QComboBox;
         m_filter->addItem(QStringLiteral("All"), QStringLiteral("all"));
@@ -448,29 +585,27 @@ public:
         m_filter->setToolTip(
             QStringLiteral("Leaves are distro orphans. Globals are user-level language tools.")
         );
-        m_filter->setFont(small);
         m_selectAll = new QPushButton(QStringLiteral("Select All"));
         m_selectAll->setToolTip(
             QStringLiteral("Include every visible item in cleanup, update, or remove")
         );
         m_rescan = new QPushButton(QStringLiteral("Rescan"));
-        th->addWidget(m_count);
-        th->addStretch();
-        th->addWidget(m_search);
-        th->addWidget(m_filter);
-        th->addWidget(m_selectAll);
-        th->addWidget(m_rescan);
-
-        auto *toolsRule = new QFrame;
-        toolsRule->setFrameShape(QFrame::HLine);
-        toolsRule->setFrameShadow(QFrame::Plain);
+        tools->addWidget(m_pageTitle);
+        m_countAct = tools->addWidget(m_count);
+        m_scanBarAct = tools->addWidget(m_scanBar);
+        auto *toolSpacer = new QWidget;
+        toolSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        tools->addWidget(toolSpacer);
+        m_searchAct = tools->addWidget(m_search);
+        m_filterAct = tools->addWidget(m_filter);
+        m_selectAllAct = tools->addWidget(m_selectAll);
+        m_rescanAct = tools->addWidget(m_rescan);
 
         m_errorBar = new QWidget;
         auto *eh = new QHBoxLayout(m_errorBar);
         eh->setContentsMargins(16, 8, 16, 8);
         eh->setSpacing(8);
         m_error = new QLabel;
-        m_error->setFont(body);
         m_error->setWordWrap(true);
         auto *errDismiss = new QPushButton(QStringLiteral("Dismiss"));
         eh->addWidget(m_error, 1);
@@ -489,6 +624,7 @@ public:
         auto *listPage = new QWidget;
         auto *listSplit = new QSplitter(Qt::Horizontal, listPage);
         listSplit->setChildrenCollapsible(false);
+        listSplit->setHandleWidth(1);
         auto *listLay = new QHBoxLayout(listPage);
         listLay->setContentsMargins(0, 0, 0, 0);
         listLay->addWidget(listSplit);
@@ -506,12 +642,12 @@ public:
         m_table->setSelectionMode(QAbstractItemView::SingleSelection);
         m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
         m_table->setAllColumnsShowFocus(true);
+        m_table->setTextElideMode(Qt::ElideRight);
         m_table->header()->setStretchLastSection(false);
+        m_table->header()->setHighlightSections(false);
+        m_table->header()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         m_table->setFrameShape(QFrame::NoFrame);
         m_table->setItemDelegate(new TableRowDelegate(m_table));
-        QFont head = small;
-        head.setBold(true);
-        m_table->header()->setFont(head);
         m_emptyPane = new QWidget;
         auto *ev = new QVBoxLayout(m_emptyPane);
         ev->setContentsMargins(16, 16, 16, 16);
@@ -523,17 +659,15 @@ public:
         eiv->setSpacing(8);
         eiv->setAlignment(Qt::AlignHCenter);
         m_emptyTitle = new QLabel;
-        QFont emptyTitleFont = body;
-        emptyTitleFont.setBold(true);
-        m_emptyTitle->setFont(emptyTitleFont);
+        m_emptyTitle->setFont(titleFont());
         m_emptyTitle->setAlignment(Qt::AlignCenter);
         m_emptyTitle->setWordWrap(true);
         m_emptyDetail = new QLabel;
         m_emptyDetail->setAlignment(Qt::AlignCenter);
         m_emptyDetail->setWordWrap(true);
-        m_emptyDetail->setFont(body);
         m_emptyDetail->setForegroundRole(QPalette::PlaceholderText);
-        m_emptyDetail->setMaximumWidth(400);
+        m_emptyDetail->setMaximumWidth(420);
+        m_emptyDetail->setMinimumWidth(220);
         m_clearSearch = new QPushButton(QStringLiteral("Clear search"));
         m_clearSearch->hide();
         m_emptyRetry = new QPushButton(QStringLiteral("Try Again"));
@@ -554,8 +688,8 @@ public:
         m_inspectorScroll->setMinimumWidth(280);
         m_inspectorHost = new QWidget;
         m_inspectorLay = new QVBoxLayout(m_inspectorHost);
-        m_inspectorLay->setContentsMargins(16, 16, 16, 16);
-        m_inspectorLay->setSpacing(10);
+        m_inspectorLay->setContentsMargins(16, 14, 16, 14);
+        m_inspectorLay->setSpacing(8);
         m_inspectorScroll->setWidget(m_inspectorHost);
 
         listSplit->addWidget(listPane);
@@ -567,20 +701,25 @@ public:
 
         m_settings = buildSettings();
         m_stack->addWidget(m_settings);
+        m_diskPage = new DiskPage;
+        m_stack->addWidget(m_diskPage);
+        connect(m_diskPage, &DiskPage::statusMessage, this, [this](const QString &msg) {
+            statusBar()->showMessage(msg);
+        });
 
-        m_actionBar = new QWidget;
-        m_actionBar->setAutoFillBackground(true);
-        {
-            QPalette ap = m_actionBar->palette();
-            ap.setColor(QPalette::Window, ap.color(QPalette::Button));
-            m_actionBar->setPalette(ap);
-        }
-        auto *ah = new QHBoxLayout(m_actionBar);
-        ah->setContentsMargins(12, 6, 12, 6);
+        auto *actionBar = new QToolBar;
+        actionBar->setMovable(false);
+        actionBar->setFloatable(false);
+        actionBar->setIconSize(QSize(16, 16));
+        actionBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        actionBar->setContextMenuPolicy(Qt::PreventContextMenu);
+        m_actionBar = actionBar;
         m_actionCount = new QLabel;
-        m_actionCount->setFont(small);
+        m_actionCount->setFont(smallFont());
+        m_actionCount->setContentsMargins(8, 0, 8, 0);
         m_actionBytes = new QLabel;
-        m_actionBytes->setFont(small);
+        m_actionBytes->setFont(smallFont());
+        m_actionBytes->setForegroundRole(QPalette::PlaceholderText);
         m_clearSel = new QPushButton(QStringLiteral("Clear"));
         m_clearSel->setToolTip(QStringLiteral("Clear the current selection"));
         m_preview = new QPushButton(QStringLiteral("Preview Script"));
@@ -588,23 +727,24 @@ public:
         m_markManualBtn->setToolTip(QStringLiteral("Mark selected distro packages as manually installed"));
         m_updateBtn = new QPushButton(QStringLiteral("Update"));
         m_deleteBtn = new QPushButton(QStringLiteral("Delete"));
-        ah->addWidget(m_actionCount);
-        ah->addWidget(m_actionBytes);
-        ah->addStretch();
-        ah->addWidget(m_clearSel);
-        ah->addWidget(m_preview);
-        ah->addWidget(m_markManualBtn);
-        ah->addWidget(m_updateBtn);
-        ah->addWidget(m_deleteBtn);
+        actionBar->addWidget(m_actionCount);
+        actionBar->addWidget(m_actionBytes);
+        auto *actionSpacer = new QWidget;
+        actionSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        actionBar->addWidget(actionSpacer);
+        actionBar->addWidget(m_clearSel);
+        actionBar->addWidget(m_preview);
+        actionBar->addWidget(m_markManualBtn);
+        actionBar->addWidget(m_updateBtn);
+        actionBar->addWidget(m_deleteBtn);
         m_actionBar->hide();
 
         rv->addWidget(tools);
-        rv->addWidget(toolsRule);
         rv->addWidget(m_errorBar);
         rv->addWidget(m_stack, 1);
         rv->addWidget(m_actionBar);
 
-        outer->addWidget(m_sidebar);
+        outer->addWidget(side);
         outer->addWidget(right);
         outer->setStretchFactor(0, 0);
         outer->setStretchFactor(1, 1);
@@ -615,17 +755,44 @@ public:
         auto *rescanAct = scanMenu->addAction(QStringLiteral("Rescan"));
         rescanAct->setShortcut(QKeySequence::Refresh);
         connect(rescanAct, &QAction::triggered, this, &MainWindow::rescan);
+        scanMenu->addSeparator();
+        connect(scanMenu->addAction(QStringLiteral("Scan Home")), &QAction::triggered, this, [this] {
+            selectPage(Page::DiskUsage);
+            m_diskPage->scanHome();
+        });
+        connect(scanMenu->addAction(QStringLiteral("Scan Folder")), &QAction::triggered, this, [this] {
+            selectPage(Page::DiskUsage);
+            m_diskPage->scanFolder();
+        });
+        connect(scanMenu->addAction(QStringLiteral("Scan File System")), &QAction::triggered, this, [this] {
+            selectPage(Page::DiskUsage);
+            m_diskPage->scanFilesystem();
+        });
+        connect(scanMenu->addAction(QStringLiteral("Scan Remote")), &QAction::triggered, this, [this] {
+            selectPage(Page::DiskUsage);
+            m_diskPage->scanRemote();
+        });
         auto *helpMenu = menuBar()->addMenu(QStringLiteral("Help"));
         auto *aboutAct = helpMenu->addAction(QStringLiteral("About AppAttic"));
         connect(aboutAct, &QAction::triggered, this, [this] {
             QMessageBox::about(
                 this,
                 QStringLiteral("AppAttic"),
-                QStringLiteral("AppAttic 1.1.3\nLeftovers, stale apps, outdated packages.")
+                QStringLiteral("AppAttic 1.1.3\nLeftovers, stale apps, outdated packages, disk usage.")
             );
         });
 
-        connect(m_sidebar, &QListWidget::currentRowChanged, this, &MainWindow::showPage);
+        connect(m_sidebar, &QListWidget::currentRowChanged, this, [this](int row) {
+            if (row < 0) return;
+            m_settingsNav->clearSelection();
+            showPage();
+        });
+        connect(m_settingsNav, &QListWidget::itemClicked, this, [this](QListWidgetItem *) {
+            m_sidebar->clearSelection();
+            m_settingsNav->setCurrentRow(0);
+            m_settingsNav->setFocus(Qt::MouseFocusReason);
+            showPage();
+        });
         connect(m_rescan, &QPushButton::clicked, this, &MainWindow::rescan);
         connect(m_search, &QLineEdit::textChanged, this, [this] { fillCurrent(); });
         connect(m_filter, &QComboBox::currentIndexChanged, this, [this] { fillCurrent(); });
@@ -634,16 +801,33 @@ public:
         connect(m_selectAll, &QPushButton::clicked, this, &MainWindow::toggleSelectAll);
         connect(m_table, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *cur, QTreeWidgetItem *) {
             m_selectedUid = cur ? cur->data(0, Qt::UserRole).toString() : QString();
+            m_selectedChild = cur ? cur->data(0, Qt::UserRole + 1).toString() : QString();
             rebuildInspector();
         });
         connect(m_table, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int col) {
             if (!it || col != 0) return;
+            if (currentPage() == Page::Leftovers) return;
             const QString uid = it->data(0, Qt::UserRole).toString();
-            if (uid.isEmpty() || it->data(0, Qt::UserRole + 1).isValid()) return;
+            if (uid.isEmpty()) return;
+            const QString child = it->data(0, Qt::UserRole + 1).toString();
+            if (!child.isEmpty()) {
+                if (currentPage() != Page::Packages) return;
+                const Finding *parent = findingByUid(uid);
+                if (!parent || packageChildCommand(*parent, child).isEmpty()) return;
+                const QString key = packageChildMarkKey(uid, child);
+                if (m_marked.contains(key)) m_marked.remove(key);
+                else m_marked.insert(key);
+                it->setText(0, m_marked.contains(key) ? QStringLiteral("in") : QString());
+                refreshMarkChrome();
+                rebuildInspector();
+                return;
+            }
             const Finding *f = findingByUid(uid);
             if (!f) return;
             if (m_markedManual.contains(uid)) {
                 m_markedManual.remove(uid);
+            } else if (m_marked.contains(uid) && !canMarkCleanup(*f, currentPage())) {
+                m_marked.remove(uid);
             } else if (canMarkCleanup(*f, currentPage())) {
                 if (m_marked.contains(uid)) m_marked.remove(uid);
                 else {
@@ -653,19 +837,32 @@ public:
             } else {
                 return;
             }
-            it->setText(
-                0,
-                (m_marked.contains(uid) || m_markedManual.contains(uid))
-                    ? QStringLiteral("in")
-                    : QString()
-            );
-            m_selectAll->setText(
-                allMarked(currentPage(), visibleRows(currentPage()))
-                    ? QStringLiteral("Deselect All")
-                    : QStringLiteral("Select All")
-            );
+            applyListMarkVisual(it, uid);
+            refreshMarkChrome();
             rebuildInspector();
-            refreshActionBar();
+        });
+        connect(m_table, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *it, int col) {
+            if (!it || col != 0 || currentPage() != Page::Leftovers) return;
+            if (!(it->flags() & Qt::ItemIsUserCheckable)) return;
+            if (it->data(0, Qt::UserRole + 1).isValid()) return;
+            const QString uid = it->data(0, Qt::UserRole).toString();
+            if (uid.isEmpty()) return;
+            const Finding *f = findingByUid(uid);
+            if (!f || !canMarkCleanup(*f, Page::Leftovers)) {
+                QSignalBlocker block(m_table);
+                it->setCheckState(0, Qt::Unchecked);
+                return;
+            }
+            const bool on = it->checkState(0) == Qt::Checked;
+            if (on == m_marked.contains(uid)) return;
+            if (on) {
+                m_marked.insert(uid);
+                m_markedManual.remove(uid);
+            } else {
+                m_marked.remove(uid);
+            }
+            refreshMarkChrome();
+            rebuildInspector();
         });
         connect(m_clearSel, &QPushButton::clicked, this, [this] {
             m_marked.clear();
@@ -682,6 +879,7 @@ public:
         loadSettings();
         applySystemAppearance();
         applyInitialPage();
+        fillCurrent();
         if (!m_settingsError) rescan();
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
         connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this](Qt::ColorScheme) {
@@ -692,13 +890,27 @@ public:
     }
 
     ~MainWindow() override {
+        if (m_scriptProc) {
+            m_scriptProc->kill();
+            m_scriptProc->waitForFinished(3000);
+            m_scriptProc = nullptr;
+        }
+        if (m_worker) {
+            disconnect(m_worker, nullptr, this, nullptr);
+            disconnect(this, nullptr, m_worker, nullptr);
+            m_worker->requestCancel();
+        }
         m_scanThread->quit();
-        m_scanThread->wait();
+        if (!m_scanThread->wait(8000)) {
+            m_scanThread->terminate();
+            m_scanThread->wait(2000);
+        }
         delete m_worker;
+        m_worker = nullptr;
     }
 
 signals:
-    void requestScan(const QString &core, const QStringList &pluginSpecs);
+    void requestScan(const QString &core, const QStringList &pluginSpecs, int token);
 
 private slots:
     void showPage() {
@@ -719,23 +931,48 @@ private slots:
             return;
         }
         m_scanning = true;
+        m_scanPhase = QStringLiteral("Starting scan…");
+        m_scanIndex = 0;
+        m_scanTotal = 0;
         m_rescan->setEnabled(false);
         m_selectAll->setEnabled(false);
-        statusBar()->showMessage(QStringLiteral("Scanning…"));
+        if (m_scanBar) {
+            m_scanBar->setRange(0, 0);
+            m_scanBar->show();
+        }
+        applyScanProgressUi();
         fillCurrent();
-        emit requestScan(core, taggedPluginSpecs(out));
+        const int token = ++m_scanGen;
+        if (m_worker) m_worker->setWanted(token);
+        emit requestScan(core, taggedPluginSpecs(out), token);
     }
 
-    void scanFinished(const QByteArray &blobs, const QString &err, int rc) {
+    void scanProgress(const QString &pluginId, int index, int total) {
+        m_scanIndex = index;
+        m_scanTotal = total;
+        m_scanPhase = pluginScanLabel(pluginId);
+        if (m_scanBar) {
+            if (total > 0) {
+                m_scanBar->setRange(0, total);
+                m_scanBar->setValue(index);
+            } else {
+                m_scanBar->setRange(0, 0);
+            }
+            m_scanBar->show();
+        }
+        applyScanProgressUi();
+    }
+
+    void scanFinished(const QVector<Finding> &findings, const QString &err, int rc) {
         m_scanning = false;
+        m_scanPhase.clear();
+        m_scanIndex = 0;
+        m_scanTotal = 0;
+        if (m_scanBar) m_scanBar->hide();
         m_hasScanned = true;
         m_rescan->setEnabled(true);
-        m_findings.clear();
-        for (const QByteArray &line : blobs.split('\n')) {
-            if (line.isEmpty()) continue;
-            parseBlob(line);
-        }
-        enrichFindingsUsageTiming(m_findings);
+        m_findings = findings;
+        pruneStaleMarks();
         m_scanOk = (rc == 0);
         m_scanAt = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"));
         if (rc != 0) {
@@ -861,18 +1098,13 @@ private:
         auto *title = new QLabel(
             question.isEmpty() ? QStringLiteral("Review every line before running.") : question
         );
-        QFont body = bodyFont();
-        title->setFont(body);
         title->setWordWrap(true);
         auto *hint = new QLabel(QStringLiteral("Review every line before running."));
-        QFont small = smallFont();
-        hint->setFont(small);
+        hint->setFont(smallFont());
         hint->setForegroundRole(QPalette::PlaceholderText);
         hint->setVisible(!question.isEmpty());
         auto *edit = new QPlainTextEdit;
-        QFont mono = smallFont();
-        mono.setFamily(QStringLiteral("monospace"));
-        edit->setFont(mono);
+        edit->setFont(monoFont());
         edit->setReadOnly(true);
         edit->setPlainText(script);
         auto *box = new QDialogButtonBox;
@@ -915,21 +1147,47 @@ private:
         }
     }
     Page currentPage() const {
+        if (m_settingsNav && !m_settingsNav->selectedItems().isEmpty()) return Page::Settings;
         const int row = m_sidebar->currentRow();
         if (row < 0) return Page::Overview;
         return static_cast<Page>(row);
     }
 
+    void selectPage(Page page) {
+        if (page == Page::Settings) {
+            m_sidebar->clearSelection();
+            if (m_settingsNav) m_settingsNav->setCurrentRow(0);
+        } else {
+            if (m_settingsNav) m_settingsNav->clearSelection();
+            m_sidebar->setCurrentRow(int(page));
+        }
+        showPage();
+    }
+
+    static QString pageTitle(Page page) {
+        switch (page) {
+        case Page::Overview: return QStringLiteral("Overview");
+        case Page::Leftovers: return QStringLiteral("Leftovers");
+        case Page::Stale: return QStringLiteral("Stale Apps");
+        case Page::Outdated: return QStringLiteral("Outdated");
+        case Page::Packages: return QStringLiteral("Packages");
+        case Page::DiskUsage: return QStringLiteral("Disk Usage");
+        case Page::Settings: return QStringLiteral("Settings");
+        }
+        return QStringLiteral("AppAttic");
+    }
+
     void applyInitialPage() {
         const QByteArray env = qgetenv("APPATTIC_PAGE");
         const QString v = QString::fromUtf8(env);
-        int row = 0;
-        if (v == QLatin1String("leftovers")) row = 1;
-        else if (v == QLatin1String("stale")) row = 2;
-        else if (v == QLatin1String("outdated")) row = 3;
-        else if (v == QLatin1String("packages")) row = 4;
-        else if (v == QLatin1String("settings")) row = 5;
-        m_sidebar->setCurrentRow(row);
+        Page page = Page::Overview;
+        if (v == QLatin1String("leftovers")) page = Page::Leftovers;
+        else if (v == QLatin1String("stale")) page = Page::Stale;
+        else if (v == QLatin1String("outdated")) page = Page::Outdated;
+        else if (v == QLatin1String("packages")) page = Page::Packages;
+        else if (v == QLatin1String("disk")) page = Page::DiskUsage;
+        else if (v == QLatin1String("settings")) page = Page::Settings;
+        selectPage(page);
     }
 
     void showError(const QString &msg) {
@@ -948,17 +1206,17 @@ private:
         v->setContentsMargins(0, 0, 0, 0);
         v->setSpacing(0);
         auto *stats = new QWidget;
-        auto *sh = new QHBoxLayout(stats);
-        sh->setContentsMargins(16, 12, 16, 12);
-        sh->setSpacing(28);
-        m_statInstalled = addStat(sh, QStringLiteral("Installed"));
-        m_statLeftovers = addStat(sh, QStringLiteral("Leftovers"));
-        m_statLeftoverData = addStat(sh, QStringLiteral("Leftover data"));
-        m_statStale = addStat(sh, QStringLiteral("Stale"));
-        m_statOutdated = addStat(sh, QStringLiteral("Outdated"));
-        m_statPackages = addStat(sh, QStringLiteral("Packages"));
-        m_statScan = addStat(sh, QStringLiteral("Last scan"));
-        sh->addStretch();
+        auto *sg = new QHBoxLayout(stats);
+        sg->setContentsMargins(8, 8, 8, 4);
+        sg->setSpacing(0);
+        m_statLeftovers = addInstrument(sg, QStringLiteral("Leftovers"));
+        m_statLeftoverData = addInstrument(sg, QStringLiteral("Leftover data"));
+        m_statStale = addInstrument(sg, QStringLiteral("Stale"));
+        m_statOutdated = addInstrument(sg, QStringLiteral("Outdated"));
+        m_statPackages = addInstrument(sg, QStringLiteral("Packages"));
+        m_statInstalled = addInstrument(sg, QStringLiteral("Installed"));
+        m_statScan = addInstrument(sg, QStringLiteral("Last scan"));
+        sg->addStretch();
         v->addWidget(stats);
 
         auto *line = new QFrame;
@@ -968,6 +1226,7 @@ private:
 
         auto *cols = new QSplitter(Qt::Horizontal);
         cols->setChildrenCollapsible(false);
+        cols->setHandleWidth(1);
         m_ovLeftovers = makeOverviewTree(QStringLiteral("Size"));
         m_ovStale = makeOverviewTree(QStringLiteral("Size"));
         m_ovOutdated = makeOverviewTree(QStringLiteral("Version"));
@@ -981,32 +1240,32 @@ private:
         v->addWidget(cols, 1);
         connect(m_ovLeftovers, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int) {
             m_selectedUid = it->data(0, Qt::UserRole).toString();
-            m_sidebar->setCurrentRow(int(Page::Leftovers));
+            selectPage(Page::Leftovers);
         });
         connect(m_ovStale, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int) {
             m_selectedUid = it->data(0, Qt::UserRole).toString();
-            m_sidebar->setCurrentRow(int(Page::Stale));
+            selectPage(Page::Stale);
         });
         connect(m_ovOutdated, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int) {
             m_selectedUid = it->data(0, Qt::UserRole).toString();
-            m_sidebar->setCurrentRow(int(Page::Outdated));
+            selectPage(Page::Outdated);
         });
         return w;
     }
 
-    QLabel *addStat(QHBoxLayout *sh, const QString &label) {
-        auto *box = new QWidget;
-        auto *bv = new QVBoxLayout(box);
-        bv->setContentsMargins(0, 0, 0, 0);
-        bv->setSpacing(2);
-        auto *l = new QLabel(label);
-        l->setFont(smallFont());
+    QLabel *addInstrument(QHBoxLayout *row, const QString &label) {
+        auto *w = new QWidget;
+        auto *v = new QVBoxLayout(w);
+        v->setContentsMargins(16, 6, 20, 6);
+        v->setSpacing(2);
+        auto *l = new QLabel(label.toUpper());
+        l->setFont(labelFont());
         l->setForegroundRole(QPalette::PlaceholderText);
         auto *val = new QLabel(QStringLiteral("unknown"));
-        val->setFont(bodyFont());
-        bv->addWidget(l);
-        bv->addWidget(val);
-        sh->addWidget(box);
+        val->setFont(valueFont());
+        v->addWidget(l);
+        v->addWidget(val);
+        row->addWidget(w, 0, Qt::AlignTop);
         return val;
     }
 
@@ -1021,9 +1280,8 @@ private:
         t->header()->setSectionResizeMode(1, QHeaderView::Stretch);
         t->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
         t->setFrameShape(QFrame::NoFrame);
-        QFont head = smallFont();
-        head.setBold(true);
-        t->header()->setFont(head);
+        t->setTextElideMode(Qt::ElideRight);
+        t->header()->setHighlightSections(false);
         t->setItemDelegate(new TableRowDelegate(t));
         t->setColumnHidden(1, false);
         return t;
@@ -1035,21 +1293,18 @@ private:
         v->setContentsMargins(0, 0, 0, 0);
         v->setSpacing(0);
         auto *h = new QLabel(title);
-        QFont f = bodyFont();
-        f.setBold(true);
-        h->setFont(f);
-        h->setContentsMargins(16, 8, 16, 8);
-        h->setAutoFillBackground(true);
-        QPalette p = h->palette();
-        p.setColor(QPalette::Window, p.color(QPalette::Button));
-        h->setPalette(p);
+        h->setFont(sectionFont());
+        h->setContentsMargins(16, 8, 16, 4);
+        auto *rule = new QFrame;
+        rule->setFrameShape(QFrame::HLine);
+        rule->setFrameShadow(QFrame::Plain);
         auto *empty = new QLabel;
         empty->setAlignment(Qt::AlignCenter);
         empty->setWordWrap(true);
         empty->setContentsMargins(16, 16, 16, 16);
-        empty->setFont(bodyFont());
         empty->setForegroundRole(QPalette::PlaceholderText);
         v->addWidget(h);
+        v->addWidget(rule);
         v->addWidget(tree, 1);
         v->addWidget(empty, 1);
         *emptyOut = empty;
@@ -1060,7 +1315,7 @@ private:
         auto *w = new QWidget;
         auto *v = new QVBoxLayout(w);
         v->setContentsMargins(16, 16, 16, 16);
-        v->setSpacing(16);
+        v->setSpacing(20);
         auto *row = new QHBoxLayout;
         row->setSpacing(32);
 
@@ -1118,9 +1373,7 @@ private:
         v->setContentsMargins(0, 0, 0, 0);
         v->setSpacing(8);
         auto *t = new QLabel(title);
-        QFont f = bodyFont();
-        f.setBold(true);
-        t->setFont(f);
+        t->setFont(sectionFont());
         v->addWidget(t);
         return {w, v};
     }
@@ -1131,10 +1384,6 @@ private:
         l->setWordWrap(true);
         l->setForegroundRole(QPalette::PlaceholderText);
         return l;
-    }
-
-    void parseBlob(const QByteArray &line) {
-        appendFindingsFromBlob(m_findings, line);
     }
 
     QVector<Finding> visibleRows(Page page) const {
@@ -1176,18 +1425,27 @@ private:
 
     void fillCurrent() {
         const Page page = currentPage();
+        if (m_pageTitle) m_pageTitle->setText(pageTitle(page));
         refreshSidebarCounts();
         const bool settings = page == Page::Settings;
         const bool overview = page == Page::Overview;
-        m_stack->setCurrentIndex(settings ? 2 : (overview ? 0 : 1));
-        const bool list = !settings && !overview;
-        m_search->setVisible(list);
-        m_filter->setVisible(page == Page::Packages);
-        m_selectAll->setVisible(list);
-        m_count->setVisible(list || overview);
+        const bool disk = page == Page::DiskUsage;
+        m_stack->setCurrentIndex(settings ? 2 : (overview ? 0 : (disk ? 3 : 1)));
+        const bool list = !settings && !overview && !disk;
+        const bool scanLive = m_scanning && !m_scanPhase.isEmpty();
+        const auto vis = [](QAction *act, QWidget *w, bool on) {
+            if (act) act->setVisible(on);
+            if (w) w->setVisible(on);
+        };
+        vis(m_searchAct, m_search, list);
+        vis(m_filterAct, m_filter, page == Page::Packages);
+        vis(m_selectAllAct, m_selectAll, list);
+        vis(m_rescanAct, m_rescan, !settings && !disk);
+        vis(m_countAct, m_count, list || overview || scanLive);
+        vis(m_scanBarAct, m_scanBar, scanLive);
         if (overview) fillOverview();
         else if (list) fillTable(page);
-        else refreshIgnoredLabel();
+        else if (settings) refreshIgnoredLabel();
         refreshActionBar();
     }
 
@@ -1215,8 +1473,11 @@ private:
         const int outdated = countPage(Page::Outdated);
         const int packages = countPage(Page::Packages);
         qint64 leftoverBytes = 0;
+        bool leftoverSized = false;
         for (const Finding &f : m_findings) {
-            if (!isLeftover(f) || f.bytes <= 0 || leftoverIsIgnored(f, m_ignored)) continue;
+            if (!matchPage(f, Page::Leftovers) || leftoverIsIgnored(f, m_ignored)) continue;
+            if (f.bytes < 0) continue;
+            leftoverSized = true;
             leftoverBytes = addBytes(leftoverBytes, f.bytes);
         }
         const bool scanningEmpty = isScanPending() && m_findings.isEmpty();
@@ -1241,15 +1502,18 @@ private:
         m_statLeftoverData->setText(
             scanningEmpty ? pending
                           : (settingsBlocked ? blockedMark
-                                             : (leftoverBytes > 0 ? humanSize(leftoverBytes)
-                                                                  : (leftovers > 0 ? QStringLiteral("unknown") : humanSize(0))))
+                                             : (leftovers > 0 && !leftoverSized
+                                                    ? QStringLiteral("unknown")
+                                                    : humanSize(leftoverBytes)))
         );
         m_statStale->setText(statCount(stale));
         m_statOutdated->setText(statCount(outdated));
         m_statPackages->setText(statCount(packages));
+        m_statInstalled->setFont(bodyFont());
+        m_statInstalled->setForegroundRole(QPalette::PlaceholderText);
         m_statScan->setText(
-            m_scanning ? QStringLiteral("Scanning…")
-                       : (m_scanAt.isEmpty() ? QStringLiteral("Never") : m_scanAt)
+            scanningEmpty ? pending
+                          : (m_scanAt.isEmpty() ? QStringLiteral("Never") : m_scanAt)
         );
 
         auto fillOv = [&](QTreeWidget *tree, QLabel *empty, Page page, const QString &emptyText) {
@@ -1278,11 +1542,8 @@ private:
                 it->setToolTip(0, displayName(f));
                 it->setToolTip(1, whatText(f, page));
                 if (!f.path.isEmpty()) it->setToolTip(2, f.path);
-                QFont body = bodyFont();
-                QFont small = smallFont();
-                it->setFont(0, body);
-                it->setFont(1, small);
-                it->setFont(2, small);
+                it->setFont(2, numericFont());
+                it->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
                 it->setForeground(1, t.dim);
                 it->setForeground(2, t.dim);
             }
@@ -1311,7 +1572,7 @@ private:
             Page::Outdated,
             QStringLiteral("No outdated packages in this scan.")
         );
-        m_count->setText(m_scanning ? QStringLiteral("Scanning") : QString());
+        m_count->setText(m_scanning ? scanStatusText() : QString());
     }
 
     void setupColumns(Page page) {
@@ -1343,14 +1604,21 @@ private:
         if (QTreeWidgetItem *head = m_table->headerItem()) {
             head->setToolTip(
                 0,
-                QStringLiteral("Click to include the item in cleanup, update, or remove")
+                page == Page::Leftovers
+                    ? QStringLiteral("Tick to include the leftover in cleanup")
+                    : QStringLiteral("Click to include the item in cleanup, update, or remove")
             );
         }
         m_table->header()->setSectionResizeMode(0, QHeaderView::Fixed);
-        m_table->setColumnWidth(0, 28);
+        m_table->setColumnWidth(0, page == Page::Leftovers ? 36 : 28);
         m_table->header()->setSectionResizeMode(1, QHeaderView::Stretch);
         for (int c = 2; c < headers.size(); ++c) {
             m_table->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
+        }
+        if (QTreeWidgetItem *head = m_table->headerItem()) {
+            if (page != Page::Outdated && headers.size() > 1) {
+                head->setTextAlignment(headers.size() - 1, Qt::AlignRight | Qt::AlignVCenter);
+            }
         }
     }
 
@@ -1369,25 +1637,33 @@ private:
         }
         m_table->setRootIsDecorated(hasKids && page == Page::Packages);
         m_table->setIndentation(hasKids && page == Page::Packages ? 18 : 0);
-        QFont body = bodyFont();
-        QFont small = smallFont();
-        QFont mark = small;
-        mark.setBold(true);
+        QFont nums = numericFont();
         QTreeWidgetItem *select = nullptr;
         for (const Finding &f : rows) {
             auto *it = new QTreeWidgetItem(m_table);
             const QString uid = f.uid();
             it->setData(0, Qt::UserRole, uid);
-            it->setFont(0, mark);
             const bool markedCleanup = m_marked.contains(uid);
             const bool markedKeep = m_markedManual.contains(uid);
-            it->setText(0, (markedCleanup || markedKeep) ? QStringLiteral("in") : QString());
             it->setForeground(0, palette().color(QPalette::Highlight));
             it->setText(1, displayName(f));
-            it->setFont(1, body);
-            it->setSizeHint(0, QSize(28, rowPx()));
+            it->setSizeHint(0, QSize(page == Page::Leftovers ? 36 : 28, rowPx(m_table)));
+            if (page == Page::Leftovers && canMarkCleanup(f, page)) {
+                it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+                it->setCheckState(0, markedCleanup ? Qt::Checked : Qt::Unchecked);
+                it->setText(0, QString());
+            } else {
+                it->setFlags(it->flags() & ~Qt::ItemIsUserCheckable);
+                it->setData(0, Qt::CheckStateRole, QVariant());
+                it->setText(0, (markedCleanup || markedKeep) ? QStringLiteral("in") : QString());
+            }
             if (markedCleanup) {
-                it->setToolTip(0, QStringLiteral("Included. Click to remove from the selection."));
+                it->setToolTip(
+                    0,
+                    page == Page::Leftovers
+                        ? QStringLiteral("Included. Untick to remove from the selection.")
+                        : QStringLiteral("Included. Click to remove from the selection.")
+                );
             } else if (markedKeep) {
                 it->setToolTip(
                     0,
@@ -1396,7 +1672,9 @@ private:
             } else if (canMarkCleanup(f, page)) {
                 it->setToolTip(
                     0,
-                    QStringLiteral("Click to include in cleanup, update, or remove.")
+                    page == Page::Leftovers
+                        ? QStringLiteral("Tick to include in cleanup.")
+                        : QStringLiteral("Click to include in cleanup, update, or remove.")
                 );
             } else {
                 it->setToolTip(0, QString());
@@ -1408,9 +1686,8 @@ private:
                 it->setText(2, locationLabel(f));
                 it->setText(3, modifiedLabel(f));
                 it->setText(4, f.bytes >= 0 ? humanSize(f.bytes) : QStringLiteral("unknown"));
-                it->setFont(2, small);
-                it->setFont(3, small);
-                it->setFont(4, small);
+                it->setFont(4, nums);
+                it->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
                 it->setForeground(2, t.dim);
                 it->setForeground(3, t.dim);
                 it->setForeground(4, t.dim);
@@ -1423,9 +1700,8 @@ private:
                 it->setText(2, statusLabel(f));
                 it->setText(3, modifiedLabel(f));
                 it->setText(4, f.bytes >= 0 ? humanSize(f.bytes) : QStringLiteral("unknown"));
-                it->setFont(2, small);
-                it->setFont(3, small);
-                it->setFont(4, small);
+                it->setFont(4, nums);
+                it->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
                 it->setForeground(2, statusColor(f, t, page));
                 it->setForeground(3, t.dim);
                 it->setForeground(4, t.dim);
@@ -1438,8 +1714,6 @@ private:
                 }
                 it->setText(2, managerLabel(f));
                 it->setText(3, ver);
-                it->setFont(2, small);
-                it->setFont(3, small);
                 it->setForeground(2, t.dim);
                 it->setForeground(3, t.amber);
                 break;
@@ -1448,38 +1722,65 @@ private:
                 it->setText(2, managerLabel(f));
                 it->setText(3, humanKind(f.kind));
                 it->setText(4, f.bytes >= 0 ? humanSize(f.bytes) : QStringLiteral("unknown"));
-                it->setFont(2, small);
-                it->setFont(3, small);
-                it->setFont(4, small);
+                it->setFont(4, nums);
+                it->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
                 it->setForeground(2, t.dim);
                 it->setForeground(3, statusColor(f, t, page));
                 it->setForeground(4, t.dim);
                 for (const QString &child : f.children) {
                     auto *kid = new QTreeWidgetItem(it);
                     kid->setText(1, child);
-                    kid->setFont(1, small);
                     kid->setForeground(1, t.dim);
                     kid->setData(0, Qt::UserRole, uid);
                     kid->setData(0, Qt::UserRole + 1, child);
-                    kid->setSizeHint(0, QSize(28, rowPx()));
+                    kid->setSizeHint(0, QSize(28, rowPx(m_table)));
+                    const QString childKey = packageChildMarkKey(uid, child);
+                    kid->setText(0, m_marked.contains(childKey) ? QStringLiteral("in") : QString());
+                    kid->setForeground(0, palette().color(QPalette::Highlight));
+                    kid->setToolTip(
+                        0,
+                        m_marked.contains(childKey)
+                            ? QStringLiteral("Included. Click to remove from the selection.")
+                            : QStringLiteral("Click to include this dependency in remove.")
+                    );
                 }
                 break;
             default:
                 break;
             }
-            if (uid == m_selectedUid) select = it;
+            if (uid == m_selectedUid) {
+                select = it;
+                if (!m_selectedChild.isEmpty()) {
+                    for (int k = 0; k < it->childCount(); ++k) {
+                        if (it->child(k)->data(0, Qt::UserRole + 1).toString() == m_selectedChild) {
+                            select = it->child(k);
+                            break;
+                        }
+                    }
+                }
+            }
         }
         if (!select && m_table->topLevelItemCount() > 0) {
             select = m_table->topLevelItem(0);
             m_selectedUid = select->data(0, Qt::UserRole).toString();
         }
-        if (select) m_table->setCurrentItem(select);
-        else m_selectedUid.clear();
+        if (select) {
+            if (select->parent()) select->parent()->setExpanded(true);
+            m_table->setCurrentItem(select);
+        } else {
+            m_selectedUid.clear();
+            m_selectedChild.clear();
+        }
 
         const bool scanningEmpty = isScanPending() && m_findings.isEmpty();
         const bool scanFailed = m_hasScanned && !m_scanning && !m_scanOk && m_findings.isEmpty();
         const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
-        if (rows.isEmpty()) {
+        if (rows.isEmpty() && scanningEmpty) {
+            m_table->show();
+            m_emptyPane->hide();
+            m_clearSearch->hide();
+            m_emptyRetry->hide();
+        } else if (rows.isEmpty()) {
             m_table->hide();
             m_emptyPane->show();
             if (settingsBlocked) {
@@ -1491,15 +1792,17 @@ private:
                 );
             } else {
                 m_emptyTitle->setText(pageEmptyTitle(page, scanningEmpty, scanFailed));
-                m_emptyDetail->setText(pageEmptyDetail(
-                    page,
-                    scanningEmpty,
-                    scanFailed,
-                    m_search->text(),
-                    m_ignored.size(),
-                    m_filter->currentData().toString(),
-                    m_error->text()
-                ));
+                m_emptyDetail->setText(
+                    pageEmptyDetail(
+                        page,
+                        scanningEmpty,
+                        scanFailed,
+                        m_search->text(),
+                        m_ignored.size(),
+                        m_filter->currentData().toString(),
+                        m_error->text()
+                    )
+                );
             }
             m_clearSearch->setVisible(
                 !m_search->text().trimmed().isEmpty() && !scanningEmpty && !scanFailed && !settingsBlocked
@@ -1511,11 +1814,12 @@ private:
             m_clearSearch->hide();
             m_emptyRetry->hide();
         }
+        m_inspectorScroll->setVisible(m_table->isVisible());
         QString count = countLabel(page, rows.size());
         if (scanningEmpty) {
-            count = QStringLiteral("Scanning");
+            count = scanStatusText();
         } else if (m_scanning) {
-            count += QStringLiteral(" · Scanning");
+            count += QStringLiteral(" · ") + scanStatusText();
         } else if (!m_scanAt.isEmpty()) {
             count += QStringLiteral(" · ") + m_scanAt;
         }
@@ -1528,9 +1832,59 @@ private:
             }
         }
         m_selectAll->setText(allMarked(page, rows) ? QStringLiteral("Deselect All") : QStringLiteral("Select All"));
-        m_selectAll->setVisible(anyMarkable);
-        m_selectAll->setEnabled(anyMarkable && !m_scanning);
-        rebuildInspector();
+        const bool showSelect = anyMarkable && !scanningEmpty;
+        if (m_selectAllAct) m_selectAllAct->setVisible(showSelect);
+        m_selectAll->setVisible(showSelect);
+        m_selectAll->setEnabled(showSelect && !m_scanning);
+        if (m_table->isVisible()) rebuildInspector();
+        else clearInspector();
+    }
+
+    void pruneStaleMarks() {
+        QSet<QString> live;
+        for (const Finding &f : m_findings) {
+            if (canMarkCleanup(f, Page::Leftovers) || canMarkCleanup(f, Page::Stale)
+                || canMarkCleanup(f, Page::Outdated) || canMarkCleanup(f, Page::Packages)) {
+                live.insert(f.uid());
+            }
+            if (canMarkManual(f)) live.insert(f.uid());
+            if (!isPackage(f)) continue;
+            for (const QString &child : f.children) {
+                if (!packageChildCommand(f, child).isEmpty()) {
+                    live.insert(packageChildMarkKey(f.uid(), child));
+                }
+            }
+        }
+        m_marked.intersect(live);
+        m_markedManual.intersect(live);
+    }
+
+    void applyListMarkVisual(QTreeWidgetItem *it, const QString &uid) {
+        const Page page = currentPage();
+        const bool on = m_marked.contains(uid) || m_markedManual.contains(uid);
+        QSignalBlocker block(m_table);
+        if (page == Page::Leftovers && (it->flags() & Qt::ItemIsUserCheckable)) {
+            it->setCheckState(0, on ? Qt::Checked : Qt::Unchecked);
+            it->setText(0, QString());
+            it->setToolTip(
+                0,
+                on ? QStringLiteral("Included. Untick to remove from the selection.")
+                   : QStringLiteral("Tick to include in cleanup.")
+            );
+        } else {
+            it->setText(0, on ? QStringLiteral("in") : QString());
+        }
+    }
+
+    void refreshMarkChrome() {
+        if (m_selectAll) {
+            m_selectAll->setText(
+                allMarked(currentPage(), visibleRows(currentPage()))
+                    ? QStringLiteral("Deselect All")
+                    : QStringLiteral("Select All")
+            );
+        }
+        refreshActionBar();
     }
 
     bool allMarked(Page page, const QVector<Finding> &rows) const {
@@ -1561,6 +1915,39 @@ private:
     bool isScanPending() const {
         const bool noError = !m_error || m_error->text().isEmpty();
         return m_scanning || (!m_hasScanned && noError);
+    }
+
+    QString scanStatusText() const {
+        if (m_scanPhase.isEmpty()) return QStringLiteral("Scanning…");
+        if (m_scanTotal > 0 && m_scanIndex > 0) {
+            return m_scanPhase
+                + QStringLiteral(" (")
+                + QString::number(m_scanIndex)
+                + QLatin1Char('/')
+                + QString::number(m_scanTotal)
+                + QLatin1Char(')');
+        }
+        return m_scanPhase;
+    }
+
+    void applyScanProgressUi() {
+        const QString msg = scanStatusText();
+        statusBar()->showMessage(msg);
+        if (m_count && m_scanning) m_count->setText(msg);
+        const QString ov = QStringLiteral("Scanning…");
+        if (m_scanning && m_ovLeftEmpty && m_ovLeftEmpty->isVisible()) {
+            m_ovLeftEmpty->setText(ov);
+        }
+        if (m_scanning && m_ovStaleEmpty && m_ovStaleEmpty->isVisible()) {
+            m_ovStaleEmpty->setText(ov);
+        }
+        if (m_scanning && m_ovOutEmpty && m_ovOutEmpty->isVisible()) {
+            m_ovOutEmpty->setText(ov);
+        }
+        if (m_scanBar) {
+            m_scanBar->setToolTip(msg);
+            m_scanBar->setVisible(m_scanning && !m_scanPhase.isEmpty());
+        }
     }
 
     QString emptyDetail(Page page) const {
@@ -1636,10 +2023,10 @@ private:
 
     QLabel *inspectorLabel(const QString &text, int pt, bool bold, const QColor &color, bool mono = false) {
         auto *l = new QLabel(text);
-        QFont f = font();
-        f.setPointSize(pt);
-        f.setBold(bold);
-        if (mono) f.setFamily(QStringLiteral("monospace"));
+        QFont f = bodyFont();
+        if (bold) f = titleFont();
+        else if (mono) f = monoFont();
+        else if (pt <= 11) f = smallFont();
         l->setFont(f);
         l->setWordWrap(true);
         l->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -1653,12 +2040,13 @@ private:
         auto *row = new QWidget;
         auto *h = new QHBoxLayout(row);
         h->setContentsMargins(0, 0, 0, 0);
-        h->setSpacing(8);
+        h->setSpacing(10);
         const Tone t = toneFrom(palette());
-        auto *k = inspectorLabel(label, 11, false, t.dim);
-        k->setFixedWidth(88);
+        auto *k = inspectorLabel(label.toUpper(), 11, false, t.dim);
+        k->setFont(labelFont());
+        k->setFixedWidth(QFontMetrics(labelFont()).horizontalAdvance(QStringLiteral("MODIFIED")) + 12);
         k->setAlignment(Qt::AlignRight | Qt::AlignTop);
-        auto *v = inspectorLabel(value, mono ? 11 : 13, false, color, mono);
+        auto *v = inspectorLabel(value, 13, false, color, mono);
         h->addWidget(k);
         h->addWidget(v, 1);
         m_inspectorLay->addWidget(row);
@@ -1669,11 +2057,13 @@ private:
         const Page page = currentPage();
         const Tone t = toneFrom(palette());
         const Finding *f = findingByUid(m_selectedUid);
-        if (page == Page::Overview || page == Page::Settings) return;
+        if (page == Page::Overview || page == Page::Settings || page == Page::DiskUsage) return;
         if (isScanPending() && m_findings.isEmpty()) {
             m_inspectorLay->addWidget(inspectorLabel(QStringLiteral("Scanning"), 13, true, t.text));
             m_inspectorLay->addWidget(inspectorLabel(
-                QStringLiteral("Results appear here when the scan finishes."),
+                !m_scanPhase.isEmpty()
+                    ? scanStatusText()
+                    : QStringLiteral("Results appear here when the scan finishes."),
                 13,
                 false,
                 t.dim
@@ -1703,9 +2093,15 @@ private:
             m_inspectorLay->addStretch();
             return;
         }
-        m_inspectorLay->addWidget(inspectorLabel(displayName(*f), 13, true, t.text));
-        addFact(QStringLiteral("What"), whatText(*f, page), t.text);
-        addFact(QStringLiteral("Why"), whyText(*f), t.text);
+        if (!m_selectedChild.isEmpty() && page == Page::Packages) {
+            m_inspectorLay->addWidget(inspectorLabel(m_selectedChild, 13, true, t.text));
+            addFact(QStringLiteral("What"), QStringLiteral("Dependency of %1").arg(displayName(*f)), t.text);
+            addFact(QStringLiteral("Why"), QStringLiteral("Selected alone. Remove this package, not the parent tree."), t.text);
+        } else {
+            m_inspectorLay->addWidget(inspectorLabel(displayName(*f), 13, true, t.text));
+            addFact(QStringLiteral("What"), whatText(*f, page), t.text);
+            addFact(QStringLiteral("Why"), whyText(*f), t.text);
+        }
         addFact(
             QStringLiteral("Kind"),
             f->kind.isEmpty() ? QStringLiteral("-") : humanKind(f->kind),
@@ -1739,7 +2135,31 @@ private:
 
         m_inspectorLay->addStretch();
 
-        if (canMarkCleanup(*f, page)) {
+        if (!m_selectedChild.isEmpty() && page == Page::Packages) {
+            const QString child = m_selectedChild;
+            const QString uid = f->uid();
+            const QString key = packageChildMarkKey(uid, child);
+            auto *inc = new QCheckBox(QStringLiteral("Include this dependency in remove"));
+            inc->setChecked(m_marked.contains(key));
+            inc->setEnabled(!packageChildCommand(*f, child).isEmpty());
+            connect(inc, &QCheckBox::toggled, this, [this, uid, child, key](bool on) {
+                if (on) m_marked.insert(key);
+                else m_marked.remove(key);
+                for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
+                    QTreeWidgetItem *parent = m_table->topLevelItem(i);
+                    if (parent->data(0, Qt::UserRole).toString() != uid) continue;
+                    for (int k = 0; k < parent->childCount(); ++k) {
+                        QTreeWidgetItem *kid = parent->child(k);
+                        if (kid->data(0, Qt::UserRole + 1).toString() != child) continue;
+                        kid->setText(0, on ? QStringLiteral("in") : QString());
+                        break;
+                    }
+                    break;
+                }
+                refreshMarkChrome();
+            });
+            m_inspectorLay->addWidget(inc);
+        } else if (canMarkCleanup(*f, page)) {
             auto *inc = new QCheckBox(
                 page == Page::Outdated ? QStringLiteral("Include in update")
                                        : (page == Page::Packages ? QStringLiteral("Include in remove")
@@ -1757,15 +2177,10 @@ private:
                 for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
                     QTreeWidgetItem *it = m_table->topLevelItem(i);
                     if (it->data(0, Qt::UserRole).toString() != uid) continue;
-                    it->setText(0, on ? QStringLiteral("in") : QString());
+                    applyListMarkVisual(it, uid);
                     break;
                 }
-                m_selectAll->setText(
-                    allMarked(currentPage(), visibleRows(currentPage()))
-                        ? QStringLiteral("Deselect All")
-                        : QStringLiteral("Select All")
-                );
-                refreshActionBar();
+                refreshMarkChrome();
             });
             m_inspectorLay->addWidget(inc);
         }
@@ -1783,15 +2198,10 @@ private:
                 for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
                     QTreeWidgetItem *it = m_table->topLevelItem(i);
                     if (it->data(0, Qt::UserRole).toString() != uid) continue;
-                    it->setText(
-                        0,
-                        (m_marked.contains(uid) || m_markedManual.contains(uid))
-                            ? QStringLiteral("in")
-                            : QString()
-                    );
+                    applyListMarkVisual(it, uid);
                     break;
                 }
-                refreshActionBar();
+                refreshMarkChrome();
             });
             m_inspectorLay->addWidget(keep);
         }
@@ -1835,7 +2245,10 @@ private:
             ++n;
             if (f.bytes > 0) bytes = addBytes(bytes, f.bytes);
         }
-        m_actionBar->setVisible(n > 0);
+        const Page page = currentPage();
+        m_actionBar->setVisible(
+            n > 0 && page != Page::Overview && page != Page::Settings && page != Page::DiskUsage
+        );
         m_actionCount->setText(QStringLiteral("%1 selected").arg(n));
         m_actionBytes->setText(bytes > 0 ? humanSize(bytes) : QString());
         const bool busy = m_scanning;
@@ -1855,9 +2268,15 @@ private:
     int cleanupMarkCount() const {
         int n = 0;
         for (const Finding &f : m_findings) {
-            if (!m_marked.contains(f.uid())) continue;
             if (isOutdated(f) && !isLeftover(f) && !isStale(f) && !isPackage(f)) continue;
-            ++n;
+            if (m_marked.contains(f.uid())) {
+                ++n;
+                continue;
+            }
+            if (!isPackage(f)) continue;
+            for (const QString &child : f.children) {
+                if (m_marked.contains(packageChildMarkKey(f.uid(), child))) ++n;
+            }
         }
         return n;
     }
@@ -1871,46 +2290,67 @@ private:
         return n;
     }
 
-    QString cleanupScript() const {
-        QStringList lines;
-        lines << QStringLiteral("#!/bin/sh") << QStringLiteral("set -e")
-              << QStringLiteral("# AppAttic. Review before running.");
-        for (const Finding &f : m_findings) {
-            if (!m_marked.contains(f.uid())) continue;
-            if (isOutdated(f) && !isLeftover(f) && !isStale(f) && !isPackage(f)) continue;
-            const QString cmd = isLeftover(f) ? leftoverCleanupCommand(f) : f.command;
-            if (cmd.isEmpty()) continue;
-            lines << cmd;
+    static QString finishScript(QStringList header, const QStringList &body) {
+        bool needRoot = false;
+        for (const QString &line : body) {
+            if (line.startsWith(QLatin1String("rootcmd "))) needRoot = true;
         }
-        return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+        if (needRoot) header << scriptRootHelper();
+        return (header + body).join(QLatin1Char('\n')) + QLatin1Char('\n');
+    }
+
+    QString cleanupScript() const {
+        QStringList header;
+        header << QStringLiteral("#!/bin/sh") << QStringLiteral("set -e")
+               << QStringLiteral("# AppAttic. Review before running.");
+        QStringList body;
+        for (const Finding &f : m_findings) {
+            if (isOutdated(f) && !isLeftover(f) && !isStale(f) && !isPackage(f)) continue;
+            if (m_marked.contains(f.uid())) {
+                const QString raw = isLeftover(f) ? leftoverCleanupCommand(f) : f.command;
+                if (raw.isEmpty()) continue;
+                body << withRootCmd(raw);
+                continue;
+            }
+            if (!isPackage(f)) continue;
+            for (const QString &child : f.children) {
+                if (!m_marked.contains(packageChildMarkKey(f.uid(), child))) continue;
+                const QString raw = packageChildCommand(f, child);
+                if (raw.isEmpty()) continue;
+                body << withRootCmd(raw);
+            }
+        }
+        return finishScript(header, body);
     }
 
     QString updateScript() const {
-        QStringList lines;
-        lines << QStringLiteral("#!/bin/sh") << QStringLiteral("set -e")
-              << QStringLiteral("# AppAttic. Review before running.");
+        QStringList header;
+        header << QStringLiteral("#!/bin/sh") << QStringLiteral("set -e")
+               << QStringLiteral("# AppAttic. Review before running.");
+        QStringList body;
         for (const Finding &f : m_findings) {
             if (!m_marked.contains(f.uid()) || !isOutdated(f)) continue;
             if (!f.updatable) continue;
-            const QString cmd = f.updateCommand.isEmpty() ? f.command : f.updateCommand;
-            if (cmd.isEmpty()) continue;
-            lines << cmd;
+            const QString raw = f.updateCommand.isEmpty() ? f.command : f.updateCommand;
+            if (raw.isEmpty()) continue;
+            body << withRootCmd(raw);
         }
-        return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+        return finishScript(header, body);
     }
 
     QString markManualScript() const {
-        QStringList lines;
-        lines << QStringLiteral("#!/bin/sh") << QStringLiteral("set -e")
-              << QStringLiteral("# AppAttic. Review before running.")
-              << QStringLiteral("# Mark as manually installed (keep)");
+        QStringList header;
+        header << QStringLiteral("#!/bin/sh") << QStringLiteral("set -e")
+               << QStringLiteral("# AppAttic. Review before running.")
+               << QStringLiteral("# Mark as manually installed (keep)");
+        QStringList body;
         for (const Finding &f : m_findings) {
             if (!m_markedManual.contains(f.uid())) continue;
-            const QString cmd = markManualCommand(f);
-            if (cmd.isEmpty()) continue;
-            lines << cmd;
+            const QString raw = markManualCommand(f);
+            if (raw.isEmpty()) continue;
+            body << withRootCmd(raw);
         }
-        return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+        return finishScript(header, body);
     }
 
     static QString scriptBodyLines(const QString &script) {
@@ -1955,16 +2395,34 @@ private:
         statusBar()->showMessage(progress);
         refreshActionBar();
         auto *proc = new QProcess(this);
+        m_scriptProc = proc;
+        proc->setProcessChannelMode(QProcess::MergedChannels);
+        proc->setStandardInputFile(QProcess::nullDevice());
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("DEBIAN_FRONTEND"), QStringLiteral("noninteractive"));
+        env.insert(QStringLiteral("APT_LISTCHANGES_FRONTEND"), QStringLiteral("none"));
+        proc->setProcessEnvironment(env);
+        m_scriptOutput.clear();
+        connect(proc, &QProcess::readyRead, this, [this, proc] {
+            m_scriptOutput += proc->readAll();
+        });
         connect(proc, &QProcess::finished, this, [this, proc, path = tmp.fileName()](int code) {
+            if (m_scriptProc == proc) m_scriptProc = nullptr;
             QFile::remove(path);
             m_scanning = false;
             m_rescan->setEnabled(true);
             if (code != 0) {
-                QString err = redactHomePaths(QString::fromUtf8(proc->readAllStandardError()).trimmed());
+                m_scriptOutput += proc->readAll();
+                QString err = redactHomePaths(QString::fromUtf8(m_scriptOutput).trimmed());
+                if (err.size() > 400) err = err.right(400);
                 if (err.isEmpty()) {
-                    err = QStringLiteral("The script failed (exit %1). Selected items were kept.").arg(code);
-                } else if (err.size() > 400) {
-                    err = err.left(400);
+                    err = QStringLiteral(
+                        "The script failed (exit %1). Commands before the failure may have already run."
+                    ).arg(code);
+                } else {
+                    err = QStringLiteral(
+                        "The script failed (exit %1). Commands before the failure may have already run.\n%2"
+                    ).arg(code).arg(err);
                 }
                 showError(err);
                 refreshActionBar();
@@ -1982,6 +2440,7 @@ private:
         });
         connect(proc, &QProcess::errorOccurred, this, [this, proc, path = tmp.fileName()](QProcess::ProcessError err) {
             if (err != QProcess::FailedToStart) return;
+            if (m_scriptProc == proc) m_scriptProc = nullptr;
             QFile::remove(path);
             m_scanning = false;
             m_rescan->setEnabled(true);
@@ -2004,7 +2463,8 @@ private:
         resetWidgetPalette(m_ovLeftovers);
         resetWidgetPalette(m_ovStale);
         resetWidgetPalette(m_ovOutdated);
-        if (m_sidebar) m_sidebar->setAutoFillBackground(false);
+        if (m_sidebar) aaApplySourceList(m_sidebar);
+        if (m_settingsNav) aaApplySourceList(m_settingsNav);
         m_applyingAppearance = false;
     }
 
@@ -2112,9 +2572,12 @@ private:
     }
 
     QListWidget *m_sidebar = nullptr;
+    QListWidget *m_settingsNav = nullptr;
+    QLabel *m_pageTitle = nullptr;
     QStackedWidget *m_stack = nullptr;
     QWidget *m_overview = nullptr;
     QWidget *m_settings = nullptr;
+    DiskPage *m_diskPage = nullptr;
     QTreeWidget *m_table = nullptr;
     QWidget *m_emptyPane = nullptr;
     QLabel *m_emptyTitle = nullptr;
@@ -2126,6 +2589,13 @@ private:
     QWidget *m_inspectorHost = nullptr;
     QVBoxLayout *m_inspectorLay = nullptr;
     QLabel *m_count = nullptr;
+    QProgressBar *m_scanBar = nullptr;
+    QAction *m_countAct = nullptr;
+    QAction *m_scanBarAct = nullptr;
+    QAction *m_searchAct = nullptr;
+    QAction *m_filterAct = nullptr;
+    QAction *m_selectAllAct = nullptr;
+    QAction *m_rescanAct = nullptr;
     QLabel *m_error = nullptr;
     QLineEdit *m_search = nullptr;
     QComboBox *m_filter = nullptr;
@@ -2157,12 +2627,19 @@ private:
     QLabel *m_ovOutEmpty = nullptr;
     QThread *m_scanThread = nullptr;
     ScanWorker *m_worker = nullptr;
+    QProcess *m_scriptProc = nullptr;
+    QByteArray m_scriptOutput;
     QVector<Finding> m_findings;
     QSet<QString> m_marked;
     QSet<QString> m_markedManual;
     QSet<QString> m_ignored;
     QString m_selectedUid;
+    QString m_selectedChild;
+    int m_scanGen = 0;
     QString m_scanAt;
+    QString m_scanPhase;
+    int m_scanIndex = 0;
+    int m_scanTotal = 0;
     bool m_scanning = false;
     bool m_hasScanned = false;
     bool m_scanOk = false;
@@ -2245,6 +2722,46 @@ static int smokeUiCopy() {
     return 0;
 }
 
+static QIcon loadAppIcon() {
+    QIcon embedded(QStringLiteral(":/icons/appattic.png"));
+    if (!embedded.isNull()) return embedded;
+    QIcon themed = QIcon::fromTheme(QStringLiteral("appattic"));
+    if (themed.isNull()) {
+        themed = QIcon::fromTheme(QStringLiteral("org.appattic.AppAttic"));
+    }
+    if (!themed.isNull()) return themed;
+    const QDir exeDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        exeDir.absoluteFilePath(QStringLiteral("../share/icons/hicolor/128x128/apps/appattic.png")),
+        exeDir.absoluteFilePath(QStringLiteral("../share/icons/hicolor/scalable/apps/appattic.svg")),
+        exeDir.absoluteFilePath(QStringLiteral("../share/icons/hicolor/scalable/apps/org.appattic.AppAttic.svg")),
+        exeDir.absoluteFilePath(QStringLiteral("../../../packaging/appattic.png")),
+        exeDir.absoluteFilePath(QStringLiteral("../../../packaging/appattic.svg")),
+    };
+    for (const QString &p : candidates) {
+        if (QFileInfo::exists(p)) return QIcon(p);
+    }
+    return {};
+}
+
+static void applyAppIdentity() {
+    QApplication::setApplicationName(QStringLiteral("AppAttic"));
+    QApplication::setApplicationDisplayName(QStringLiteral("AppAttic"));
+    QApplication::setOrganizationName(QStringLiteral("AppAttic"));
+    // Wayland compositor looks up the header icon by this desktop-file id.
+    if (!qEnvironmentVariableIsEmpty("FLATPAK_ID")) {
+        QGuiApplication::setDesktopFileName(QStringLiteral("org.appattic.AppAttic"));
+    } else {
+        QGuiApplication::setDesktopFileName(QStringLiteral("appattic"));
+    }
+    const QIcon icon = loadAppIcon();
+    if (!icon.isNull()) QApplication::setWindowIcon(icon);
+    if (QIcon::themeName().isEmpty()) {
+        QIcon::setThemeName(QStringLiteral("breeze"));
+    }
+    aaLoadAppFonts();
+}
+
 int main(int argc, char **argv) {
     if (argvHas(argc, argv, "--help") || argvHas(argc, argv, "-h")) {
         return runHelp();
@@ -2260,13 +2777,21 @@ int main(int argc, char **argv) {
         return smokeUiCopy();
     }
     QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("AppAttic"));
-    QApplication::setOrganizationName(QStringLiteral("AppAttic"));
-    QFont appFont = app.font();
-    appFont.setPointSize(13);
-    app.setFont(appFont);
+    qRegisterMetaType<QVector<Finding>>();
+    applyAppIdentity();
     MainWindow w;
+    if (!QApplication::windowIcon().isNull()) w.setWindowIcon(QApplication::windowIcon());
     w.show();
+    if (const QByteArray grab = qgetenv("APPATTIC_GRAB"); !grab.isEmpty()) {
+        auto *grabTimer = new QTimer(&w);
+        grabTimer->setSingleShot(true);
+        QObject::connect(grabTimer, &QTimer::timeout, &app, [&w, grab] {
+            const QString path = QString::fromLocal8Bit(grab);
+            const bool ok = w.grab().save(path);
+            QCoreApplication::exit(ok ? 0 : 1);
+        });
+        grabTimer->start(400);
+    }
     return app.exec();
 }
 

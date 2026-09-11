@@ -6,10 +6,12 @@ const host_exec = @import("host_exec.zig");
 
 const plugin_id = "npm";
 const query_cmd = "npm ls -g --depth=0 --json";
+const outdated_cmd = "npm outdated -g --json";
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [8192]u8 = undefined;
+var exec_buf: [65536]u8 = undefined;
+var exec_out_buf: [65536]u8 = undefined;
 
 const none_json =
     \\{"plugin":"npm","engine":null,"findings":[],"script":null,"dialog":{"title":"No npm","body":"npm is not on PATH. Plugin inactive."},"note":"npm missing"}
@@ -22,7 +24,7 @@ pub const NpmGlobal = struct {
 
 /// Parse `npm ls -g --depth=0 --json`. User-global `dependencies` only.
 pub fn parseNpmGlobalList(text: []const u8, out: []NpmGlobal) usize {
-    var deps: [32]jsonscan.Dep = undefined;
+    var deps: [128]jsonscan.Dep = undefined;
     const n = jsonscan.parseJsonDependencies(text, &deps);
     const cap = @min(n, out.len);
     for (0..cap) |i| {
@@ -31,11 +33,13 @@ pub fn parseNpmGlobalList(text: []const u8, out: []NpmGlobal) usize {
     return cap;
 }
 
-fn renderNpm(hits: []const NpmGlobal) bool {
+fn renderNpm(hits: []const NpmGlobal, outdated: []const jsonscan.NamedVer) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     w.raw("{\"plugin\":\"npm\",\"engine\":\"npm\",\"findings\":[");
-    for (hits, 0..) |h, i| {
-        if (i != 0) w.raw(",");
+    var first = true;
+    for (hits) |h| {
+        if (!first) w.raw(",");
+        first = false;
         w.raw("{\"kind\":\"global\",\"id\":");
         w.str(h.name);
         w.raw(",\"name\":");
@@ -47,6 +51,11 @@ fn renderNpm(hits: []const NpmGlobal) bool {
         w.raw(",\"status\":\"global\",\"command\":\"npm -g uninstall ");
         w.raw(h.name);
         w.raw("\",\"manager\":\"npm\"}");
+    }
+    for (outdated) |h| {
+        if (!first) w.raw(",");
+        first = false;
+        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "npm", "", false);
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
@@ -60,7 +69,7 @@ fn renderNpm(hits: []const NpmGlobal) bool {
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove npm globals?\",\"body\":\"User-global -g packages only. Not project node_modules. Named uninstall waits for confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove npm globals?\",\"body\":\"User-global -g packages only. Not project node_modules. Outdated rows are report-only. Named uninstall waits for confirm.\"}}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -84,15 +93,25 @@ export fn plugin_query(present: i32) i32 {
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
+    var hits: [128]NpmGlobal = undefined;
+    var n: usize = 0;
     const nexec = host_exec.run(query_cmd, &exec_buf);
-    if (nexec < 0) {
-        if (!renderNpm(&.{})) return 1;
-        return 0;
+    if (nexec >= 0) n = parseNpmGlobalList(exec_buf[0..@intCast(nexec)], &hits);
+
+    var outdated: [128]jsonscan.NamedVer = undefined;
+    var n_out: usize = 0;
+    const nq = host_exec.run(outdated_cmd, &exec_out_buf);
+    if (nq >= 0) n_out = jsonscan.parseJsonNamedOutdated(exec_out_buf[0..@intCast(nq)], &outdated);
+
+    while (true) {
+        if (renderNpm(hits[0..n], outdated[0..n_out])) return 0;
+        if (n_out > 0) {
+            n_out -= 1;
+            continue;
+        }
+        if (n == 0) return 1;
+        n -= 1;
     }
-    var hits: [32]NpmGlobal = undefined;
-    const n = parseNpmGlobalList(exec_buf[0..@intCast(nexec)], &hits);
-    if (!renderNpm(hits[0..n])) return 1;
-    return 0;
 }
 
 export fn result_ptr() i32 {
@@ -131,6 +150,9 @@ test "plugin_query present JSON comes from npm ls -g fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "5.4.5") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "prettier") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "npm -g uninstall typescript") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "5.5.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "npm install") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "package.json") == null);
 }

@@ -12,6 +12,9 @@ public func packageWhatText(manager: String, kind: String) -> String {
     if kind == "global" {
         return "User-global \(label) tool"
     }
+    if manager == "dpkg" {
+        return "Removed package still has config files (dpkg)"
+    }
     return "Distro package nothing still needs (\(label))"
 }
 
@@ -19,6 +22,9 @@ public func packageWhyText(manager: String, kind: String) -> String {
     let label = manager.replacingOccurrences(of: "-", with: " ")
     if kind == "global" {
         return "Language tool installed with \(label) for this user, not a project lockfile."
+    }
+    if manager == "dpkg" {
+        return "dpkg status rc: the package is gone, config remnants remain. Purge drops them."
     }
     return "\(label) reports this as an orphan: installed as a dependency, nothing installed still requires it."
 }
@@ -84,12 +90,14 @@ public func filterPackages(
 public func packageRemoveCommand(_ entry: PackageEntry) -> String {
     let q = shellQuote(entry.name)
     switch entry.manager {
-    case "pacman":
+    case "pacman", "aur":
         return "pacman -Rns \(q)"
-    case "apt":
+    case "apt", "dpkg":
         return "apt-get purge -y \(q)"
     case "dnf":
         return "dnf remove -y \(q)"
+    case "yum":
+        return "yum remove -y \(q)"
     case "zypper":
         return "zypper --non-interactive rm \(q)"
     case "npm":
@@ -102,6 +110,10 @@ public func packageRemoveCommand(_ entry: PackageEntry) -> String {
         return "pipx uninstall \(q)"
     case "uv":
         return "uv tool uninstall \(q)"
+    case "pip":
+        return "pip uninstall -y --user \(q)"
+    case "deno":
+        return "deno uninstall --global \(q)"
     default:
         return "# \(entry.manager) \(q)"
     }
@@ -132,22 +144,27 @@ public func packageActionScript(remove: [PackageEntry], markManual: [PackageEntr
         "# Review every line before running. Nothing here is deleted automatically.",
         "# Distro system updates are not included.",
     ]
+    var body: [String] = []
     if !remove.isEmpty {
-        lines.append("")
-        lines.append("# Remove unused distro packages and language globals")
+        body.append("")
+        body.append("# Remove unused distro packages and language globals")
         for item in remove {
-            lines.append(packageRemoveCommand(item))
+            body.append(withRootCmd(packageRemoveCommand(item)))
         }
     }
     if !markManual.isEmpty {
-        lines.append("")
-        lines.append("# Mark as manually installed (keep)")
+        body.append("")
+        body.append("# Mark as manually installed (keep)")
         for item in markManual {
             if let cmd = packageMarkManualCommand(item) {
-                lines.append(cmd)
+                body.append(withRootCmd(cmd))
             }
         }
     }
+    if body.contains(where: { $0.hasPrefix("rootcmd ") }) {
+        lines.append(scriptRootHelper)
+    }
+    lines.append(contentsOf: body)
     if remove.isEmpty && markManual.isEmpty {
         lines.append("")
         lines.append("# No packages selected.")
@@ -164,6 +181,20 @@ public func parsePacmanOrphans(_ text: String) -> [PackageEntry] {
         guard let name = parts.first, !name.isEmpty else { continue }
         let version = parts.count >= 2 ? parts[1] : nil
         out.append(makePackage(name: name, manager: "pacman", kind: "orphan", version: version))
+    }
+    return out
+}
+
+public func parseDpkgRc(_ text: String) -> [PackageEntry] {
+    var out: [PackageEntry] = []
+    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        let s = raw.trimmingCharacters(in: .whitespaces)
+        guard s.count >= 3, s.hasPrefix("rc"), s.dropFirst(2).first?.isWhitespace == true else { continue }
+        let rest = s.dropFirst(2).trimmingCharacters(in: .whitespaces)
+        let parts = rest.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let name = parts.first, !name.isEmpty else { continue }
+        let version = parts.count >= 2 ? parts[1] : nil
+        out.append(makePackage(name: name, manager: "dpkg", kind: "orphan", version: version))
     }
     return out
 }
@@ -360,6 +391,14 @@ public func collectPackages(
         ) {
             out.append(contentsOf: parseAptAutoremove(text))
         }
+        progress?("  · listing dpkg config remnants…")
+        if let text = runPackageQuery(
+            which: which, run: run, names: ["dpkg"],
+            args: ["-l"],
+            ok: { $0 == 0 }
+        ) {
+            out.append(contentsOf: parseDpkgRc(text))
+        }
     case .dnf:
         progress?("  · listing dnf unneeded packages…")
         if let text = runPackageQuery(
@@ -415,5 +454,53 @@ public func collectPackages(
     ) {
         out.append(contentsOf: parseUvToolList(text))
     }
+    if let text = runPackageQuery(
+        which: which, run: run, names: ["pip", "pip3"],
+        args: ["list", "--user", "--not-required", "--format=json"]
+    ) {
+        out.append(contentsOf: parsePipUserList(text))
+    } else if let text = runPackageQuery(
+        which: which, run: run, names: ["pip", "pip3"],
+        args: ["list", "--user", "--format=json"]
+    ) {
+        out.append(contentsOf: parsePipUserList(text))
+    }
+    out.append(contentsOf: listDenoGlobals())
     return out
+}
+
+public func parsePipUserList(_ text: String) -> [PackageEntry] {
+    guard let arr = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]] else {
+        return []
+    }
+    var out: [PackageEntry] = []
+    for obj in arr {
+        guard let name = obj["name"] as? String, !name.isEmpty else { continue }
+        let version = obj["version"] as? String
+        out.append(makePackage(name: name, manager: "pip", kind: "global", version: version))
+    }
+    return out
+}
+
+public func parseDenoGlobalList(_ text: String) -> [PackageEntry] {
+    var out: [PackageEntry] = []
+    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty || name.hasPrefix(".") || name == "deno" || name == "deno.exe" { continue }
+        if name.contains("/") { continue }
+        out.append(makePackage(name: name, manager: "deno", kind: "global"))
+    }
+    return out
+}
+
+func listDenoGlobals() -> [PackageEntry] {
+    let bin = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".deno/bin")
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: bin.path) else {
+        return []
+    }
+    return names.compactMap { name -> PackageEntry? in
+        if name.isEmpty || name.hasPrefix(".") || name == "deno" || name == "deno.exe" { return nil }
+        return makePackage(name: name, manager: "deno", kind: "global")
+    }
 }

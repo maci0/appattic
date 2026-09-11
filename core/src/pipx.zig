@@ -10,9 +10,9 @@ const query_cmds = [_][]const u8{
     "pipx list",
 };
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [8192]u8 = undefined;
+var exec_buf: [32768]u8 = undefined;
 
 const none_json =
     \\{"plugin":"pipx","engine":null,"findings":[],"script":null,"dialog":{"title":"No pipx","body":"pipx is not on PATH. Plugin inactive."},"note":"pipx missing"}
@@ -168,10 +168,13 @@ export fn plugin_query(present: i32) i32 {
         if (!renderPipx(&.{})) return 1;
         return 0;
     }
-    var hits: [32]PipxTool = undefined;
-    const n = parsePipxList(exec_buf[0..@intCast(nexec)], &hits);
-    if (!renderPipx(hits[0..n])) return 1;
-    return 0;
+    var hits: [128]PipxTool = undefined;
+    var n = parsePipxList(exec_buf[0..@intCast(nexec)], &hits);
+    while (true) {
+        if (renderPipx(hits[0..n])) return 0;
+        if (n == 0) return 1;
+        n -= 1;
+    }
 }
 
 export fn result_ptr() i32 {

@@ -9,6 +9,7 @@ const spec = listing.Spec{
     .missing_note = "$HOME is missing. Plugin inactive.",
     .dialog_title = "Remove leftover home dirs?",
     .query_cmd = "ls -1A",
+    .allow = ".mozilla\n.thunderbird\n.steam\n.wine\n.java\n.gradle\n.android\n.m2\n",
 };
 
 comptime {
@@ -21,9 +22,9 @@ test "plugin_query present JSON uses home-dot root" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"path-home-dot\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "/home/user/.mozilla") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "/home/user/.wine") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"idleDays\":120") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"idleDays\":90") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "dconf") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, ".config") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, ".bashrc") == null);
 }
 
 test "plugin_query missing is empty findings" {

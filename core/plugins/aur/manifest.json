@@ -1,0 +1,33 @@
+{
+  "id": "aur",
+  "url": "aur.wasm",
+  "inject": [
+    "host.exec",
+    "appattic.plugin-abi"
+  ],
+  "provide": [
+    "appattic.findings.aur",
+    "appattic.dialog.aur"
+  ],
+  "isolate": {},
+  "intercept": {
+    "host.exec": {
+      "allow": [
+        "paru",
+        "yay",
+        "pikaur"
+      ],
+      "denySubstrings": [
+        "-S ",
+        "-Syu",
+        "-R",
+        "install",
+        "upgrade"
+      ]
+    }
+  },
+  "config": {
+    "reportOnlyUpgrade": true
+  },
+  "disabled": false
+}

@@ -126,6 +126,7 @@ final class UtilTests: XCTestCase {
         let dirs = cleanupPathDirectories(home: "/home/x")
         XCTAssertTrue(dirs.contains("/home/linuxbrew/.linuxbrew/bin"), "\(dirs)")
         XCTAssertTrue(dirs.contains("/home/x/.local/bin"), "\(dirs)")
+        XCTAssertTrue(dirs.contains("/home/x/bin"), "\(dirs)")
         XCTAssertTrue(dirs.contains("/opt/homebrew/bin"), "\(dirs)")
         XCTAssertTrue(dirs.contains("/usr/local/bin"), "\(dirs)")
     }

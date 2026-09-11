@@ -101,18 +101,9 @@ zig_wasm path_xdg_lib.zig path_xdg_lib.wasm
 zig_wasm path_var_app.zig path_var_app.wasm
 zig_wasm path_user_bin.zig path_user_bin.wasm
 zig_wasm path_home_dot.zig path_home_dot.wasm
-zig_wasm path_application_support.zig path_application_support.wasm
-zig_wasm path_caches.zig path_caches.wasm
-zig_wasm path_preferences.zig path_preferences.wasm
-zig_wasm path_saved_state.zig path_saved_state.wasm
-zig_wasm path_containers.zig path_containers.wasm
-zig_wasm path_group_containers.zig path_group_containers.wasm
-zig_wasm path_logs.zig path_logs.wasm
-zig_wasm path_webkit.zig path_webkit.wasm
-zig_wasm path_httpstorages.zig path_httpstorages.wasm
-zig_wasm path_launchagents.zig path_launchagents.wasm
 zig_wasm path_shadow.zig path_shadow.wasm
 zig_wasm pacman.zig pacman.wasm
+zig_wasm aur.zig aur.wasm
 zig_wasm apt.zig apt.wasm
 zig_wasm dnf.zig dnf.wasm
 zig_wasm zypper.zig zypper.wasm
@@ -126,6 +117,7 @@ zig_wasm brew.zig brew.wasm
 zig_wasm gem.zig gem.wasm
 zig_wasm composer.zig composer.wasm
 zig_wasm pip.zig pip.wasm
+zig_wasm deno.zig deno.wasm
 
 zig_test() {
     zig test "$root/src/$1"
@@ -135,6 +127,7 @@ zig_test jsonbuf.zig
 zig_test jsonscan.zig
 zig_test apt.zig
 zig_test pacman.zig
+zig_test aur.zig
 zig_test snapd.zig
 zig_test path_listing.zig
 zig_test path_xdg_config.zig
@@ -145,16 +138,6 @@ zig_test path_xdg_lib.zig
 zig_test path_var_app.zig
 zig_test path_user_bin.zig
 zig_test path_home_dot.zig
-zig_test path_application_support.zig
-zig_test path_caches.zig
-zig_test path_preferences.zig
-zig_test path_saved_state.zig
-zig_test path_containers.zig
-zig_test path_group_containers.zig
-zig_test path_logs.zig
-zig_test path_webkit.zig
-zig_test path_httpstorages.zig
-zig_test path_launchagents.zig
 zig_test path_shadow.zig
 zig_test dnf.zig
 zig_test zypper.zig
@@ -168,6 +151,7 @@ zig_test brew.zig
 zig_test gem.zig
 zig_test composer.zig
 zig_test pip.zig
+zig_test deno.zig
 zig_test container_runtime.zig
 
 wasmtime_libdir() {
@@ -258,7 +242,7 @@ cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
     "${wasmtime_libs[@]}" \
     -o "$out/host"
 
-echo "built $out/appattic_core.wasm $out/container_runtime.wasm $out/snapd.wasm $out/path_xdg_config.wasm $out/path_xdg_data.wasm $out/path_xdg_cache.wasm $out/path_xdg_state.wasm $out/path_xdg_lib.wasm $out/path_var_app.wasm $out/path_user_bin.wasm $out/path_home_dot.wasm $out/path_application_support.wasm $out/path_caches.wasm $out/path_preferences.wasm $out/path_saved_state.wasm $out/path_containers.wasm $out/path_group_containers.wasm $out/path_logs.wasm $out/path_webkit.wasm $out/path_httpstorages.wasm $out/path_launchagents.wasm $out/path_shadow.wasm $out/pacman.wasm $out/apt.wasm $out/dnf.wasm $out/zypper.wasm $out/flatpak.wasm $out/npm.wasm $out/pnpm.wasm $out/bun.wasm $out/pipx.wasm $out/uv.wasm $out/brew.wasm $out/gem.wasm $out/composer.wasm $out/pip.wasm $out/host"
-echo "try: $out/host $out/appattic_core.wasm $out/container_runtime.wasm=2 $out/snapd.wasm=1 $out/path_xdg_config.wasm=1 $out/path_xdg_data.wasm=1 $out/path_xdg_cache.wasm=1 $out/path_xdg_state.wasm=1 $out/path_xdg_lib.wasm=1 $out/path_var_app.wasm=1 $out/path_user_bin.wasm=1 $out/path_home_dot.wasm=1 $out/path_application_support.wasm=1 $out/path_caches.wasm=1 $out/path_preferences.wasm=1 $out/path_saved_state.wasm=1 $out/path_containers.wasm=1 $out/path_group_containers.wasm=1 $out/path_logs.wasm=1 $out/path_webkit.wasm=1 $out/path_httpstorages.wasm=1 $out/path_launchagents.wasm=1 $out/path_shadow.wasm=1 $out/pacman.wasm=1 $out/apt.wasm=1 $out/dnf.wasm=1 $out/zypper.wasm=1 $out/flatpak.wasm=1 $out/npm.wasm=1 $out/pnpm.wasm=1 $out/bun.wasm=1 $out/pipx.wasm=1 $out/uv.wasm=1 $out/brew.wasm=1 $out/gem.wasm=1 $out/composer.wasm=1 $out/pip.wasm=1"
+echo "built $out/appattic_core.wasm $out/container_runtime.wasm $out/snapd.wasm $out/path_xdg_config.wasm $out/path_xdg_data.wasm $out/path_xdg_cache.wasm $out/path_xdg_state.wasm $out/path_xdg_lib.wasm $out/path_var_app.wasm $out/path_user_bin.wasm $out/path_home_dot.wasm $out/path_shadow.wasm $out/pacman.wasm $out/aur.wasm $out/apt.wasm $out/dnf.wasm $out/zypper.wasm $out/flatpak.wasm $out/npm.wasm $out/pnpm.wasm $out/bun.wasm $out/pipx.wasm $out/uv.wasm $out/brew.wasm $out/gem.wasm $out/composer.wasm $out/pip.wasm $out/deno.wasm $out/host"
+echo "try: $out/host $out/appattic_core.wasm $out/container_runtime.wasm=2 $out/snapd.wasm=1 $out/path_xdg_config.wasm=1 $out/path_xdg_data.wasm=1 $out/path_xdg_cache.wasm=1 $out/path_xdg_state.wasm=1 $out/path_xdg_lib.wasm=1 $out/path_var_app.wasm=1 $out/path_user_bin.wasm=1 $out/path_home_dot.wasm=1 $out/path_shadow.wasm=1 $out/pacman.wasm=1 $out/aur.wasm=1 $out/apt.wasm=1 $out/dnf.wasm=1 $out/zypper.wasm=1 $out/flatpak.wasm=1 $out/npm.wasm=1 $out/pnpm.wasm=1 $out/bun.wasm=1 $out/pipx.wasm=1 $out/uv.wasm=1 $out/brew.wasm=1 $out/gem.wasm=1 $out/composer.wasm=1 $out/pip.wasm=1 $out/deno.wasm=1"
 echo "tag 0 = missing coeffect. Darwin host.exec injects fixtures."
 echo "backlog (not loaded): chocolatey nuget appstore steam"

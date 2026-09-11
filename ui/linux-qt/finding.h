@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QDateTime>
 #include <QJsonObject>
+#include <QMetaType>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -15,6 +16,7 @@ enum class Page : int {
     Stale,
     Outdated,
     Packages,
+    DiskUsage,
     Settings,
 };
 
@@ -52,10 +54,15 @@ struct Finding {
     }
 };
 
+Q_DECLARE_METATYPE(Finding)
+
 QString jsonStr(const QJsonObject &o, const char *key);
 QString pathIdentityKey(const QString &path);
 QDateTime parseIsoInstant(const QString &value);
 QString redactHomePaths(const QString &text, const QString &home = QString());
+/// WASM path plugins list `/home/user/...`. host.exec rewrites that argv to $HOME;
+/// findings JSON still uses the placeholder until ingest.
+QString expandHomeUserPlaceholder(const QString &text, const QString &home = QString());
 bool restrictOwnerOnlyFile(const QString &path);
 bool restrictOwnerOnlyDir(const QString &path);
 void restrictPrivateDataFile(const QString &path);
@@ -63,6 +70,7 @@ QString shellQuote(const QString &s);
 bool scriptHasCommands(const QString &script);
 QString humanSize(qint64 bytes);
 QString humanKind(const QString &kind);
+QString pluginScanLabel(const QString &pluginId);
 QString managerLabel(const Finding &f);
 QString locationLabel(const Finding &f);
 QString modifiedLabel(const Finding &f, const QDateTime &now = QDateTime::currentDateTime());
@@ -71,10 +79,15 @@ QString statusLabel(const Finding &f);
 bool isProtectedPackagedPath(const QString &path);
 bool isShadowFinding(const Finding &f);
 QString leftoverCleanupCommand(const Finding &f);
+QString packageChildCommand(const Finding &f, const QString &child);
+bool commandNeedsRoot(const QString &cmd);
+QString withRootCmd(const QString &cmd);
+QString scriptRootHelper();
+void groupLinuxLeftovers(QVector<Finding> &findings);
 bool isLeftover(const Finding &f);
 bool isOutdated(const Finding &f);
-/// Same rule as Swift `outdatedIsUpdatable`: Homebrew formulae/casks and Flatpak
-/// can be updated after confirm. Distro, language, and untrusted casks stay report-only.
+/// Same rule as Swift `outdatedIsUpdatable`: Homebrew, Flatpak, and named distro
+/// upgrades after confirm. App Store, Snap, language globals, and untrusted casks stay report-only.
 bool outdatedIsUpdatable(const QString &manager, const QString &kind);
 bool hasUsageTiming(const Finding &f);
 bool isStaleTierStatus(const QString &status);
@@ -82,6 +95,13 @@ bool isStaleFromLeftoverUsage(const Finding &f);
 bool isStale(const Finding &f);
 void enrichLeftoverUsageTiming(Finding &f);
 void enrichFindingsUsageTiming(QVector<Finding> &findings);
+void enrichLeftoverSizes(
+    QVector<Finding> &findings,
+    bool (*cancelled)(void *user) = nullptr,
+    void *user = nullptr
+);
+bool leftoverNameMatchesDesktop(const QString &name, const QSet<QString> &stems);
+void markOwnedPathLeftovers(QVector<Finding> &findings);
 bool isPackage(const Finding &f);
 bool matchPage(const Finding &f, Page page);
 int countPageRows(const QVector<Finding> &findings, Page page);

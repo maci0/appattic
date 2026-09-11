@@ -31,8 +31,6 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(run.contains("best_mtime"), run)
         XCTAssertTrue(run.contains("file_mtime"), run)
         XCTAssertTrue(run.contains("AppAttic.app/Contents/MacOS/AppAttic"), run)
-        let iconGen = try String(contentsOf: root.appendingPathComponent("generate_icon.py"), encoding: .utf8)
-        XCTAssertTrue(iconGen.contains("AppAttic.icns"), iconGen)
         let svg = try String(contentsOf: root.appendingPathComponent("packaging/appattic.svg"), encoding: .utf8)
         XCTAssertTrue(svg.contains("fill=\"#1e1e1e\""), svg)
         XCTAssertTrue(svg.contains("fill=\"#2e2e2e\""), svg)
@@ -42,11 +40,16 @@ final class PackagingTests: XCTestCase {
         XCTAssertFalse(svg.contains("#0d1117"), svg)
         XCTAssertFalse(svg.contains("#58a6ff"), svg)
         XCTAssertFalse(svg.contains("#21262d"), svg)
-        XCTAssertTrue(iconGen.contains("#1e1e1e"), iconGen)
-        XCTAssertTrue(iconGen.contains("#0a84ff"), iconGen)
-        XCTAssertTrue(iconGen.contains("#2e2e2e"), iconGen)
-        XCTAssertFalse(iconGen.contains("13, 17, 23"), iconGen)
-        XCTAssertFalse(iconGen.contains("88, 166, 255"), iconGen)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("generate_icon.py").path
+        ))
+        let keepNames = try String(
+            contentsOf: root.appendingPathComponent("core/src/linux-system-names.txt"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(keepNames.contains("gtk-3.0"), keepNames)
+        XCTAssertFalse(linuxSystemNames.isEmpty)
+        XCTAssertTrue(linuxSystemNames.contains("gtk-3.0"))
     }
 
     func testLinuxBuildUsesQtNotGtk() throws {
@@ -192,7 +195,7 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(qtMain.contains("Location"), qtMain)
         XCTAssertTrue(qtMain.contains("Last used"), qtMain)
         XCTAssertTrue(qtMain.contains("QThread"), qtMain)
-        XCTAssertTrue(qtMain.contains("m_scanThread->wait();"), qtMain)
+        XCTAssertTrue(qtMain.contains("m_scanThread->wait(8000)"), qtMain)
         XCTAssertFalse(qtMain.contains("wait(3000)"), qtMain)
         XCTAssertFalse(qtMain.contains("gtk.h"), qtMain)
         XCTAssertFalse(qtMain.contains("Gtk"), qtMain)
@@ -209,7 +212,7 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(qtMain.contains("pluginWasmFiles"), qtMain)
         XCTAssertTrue(qtMain.contains("taggedPluginSpecs"), qtMain)
         XCTAssertTrue(qtMain.contains("runCoreWasm"), qtMain)
-        XCTAssertTrue(qtMain.contains("collectCoreWasm"), qtMain)
+        XCTAssertFalse(qtMain.contains("collectCoreWasm"), qtMain)
         let mainCpp = try String(contentsOf: root.appendingPathComponent("ui/linux-qt/main.cpp"), encoding: .utf8)
         XCTAssertFalse(mainCpp.contains("#include \"embed.h\""), mainCpp)
         XCTAssertFalse(mainCpp.contains("appattic_wasm_run"), mainCpp)
@@ -219,8 +222,36 @@ final class PackagingTests: XCTestCase {
         let hostCpp = try String(contentsOf: root.appendingPathComponent("ui/linux-qt/corehost.cpp"), encoding: .utf8)
         XCTAssertTrue(hostCpp.contains("#include \"embed.h\""), hostCpp)
         XCTAssertTrue(hostCpp.contains("appattic_wasm_run"), hostCpp)
-        XCTAssertTrue(hostCpp.contains("stem == QLatin1String(\"path_containers\")"), hostCpp)
+        XCTAssertTrue(hostCpp.contains("onProgress"), hostCpp)
+        XCTAssertTrue(qtMain.contains("pluginScanLabel"), qtMain)
+        XCTAssertTrue(qtMain.contains("scanProgress"), qtMain)
+        XCTAssertTrue(qtMain.contains("QProgressBar"), qtMain)
+        XCTAssertTrue(qtMain.contains("setDesktopFileName"), qtMain)
+        XCTAssertTrue(qtMain.contains("setWindowIcon"), qtMain)
+        XCTAssertTrue(qtMain.contains(":/icons/appattic.png"), qtMain)
+        XCTAssertTrue(qtMain.contains("org.appattic.AppAttic"), qtMain)
+        let cmakeIcon = try String(
+            contentsOf: root.appendingPathComponent("ui/linux-qt/CMakeLists.txt"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(cmakeIcon.contains("appattic.qrc"), cmakeIcon)
+        XCTAssertTrue(cmakeIcon.contains("CMAKE_AUTORCC ON") || cmakeIcon.contains("AUTORCC"), cmakeIcon)
+        XCTAssertTrue(cmakeIcon.contains("hicolor/128x128/apps"), cmakeIcon)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("packaging/appattic.png").path
+            )
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("ui/linux-qt/appattic.qrc").path
+            )
+        )
+        XCTAssertFalse(hostCpp.contains("stem == QLatin1String(\"path_containers\")"), hostCpp)
         XCTAssertFalse(hostCpp.contains("stem.contains("), hostCpp)
+        XCTAssertTrue(hostCpp.contains("hostHasExecutable"), hostCpp)
+        XCTAssertTrue(hostCpp.contains("/run/host/usr/bin"), hostCpp)
+        XCTAssertTrue(hostCpp.contains("FLATPAK_ID"), hostCpp)
         XCTAssertTrue(qtMain.contains("bodyFont"), qtMain)
         XCTAssertTrue(qtMain.contains("isShadowFinding"), qtMain)
         XCTAssertTrue(qtMain.contains("leftoverCleanupCommand"), qtMain)
@@ -269,6 +300,8 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(verify.contains("--retry 5"), verify)
         XCTAssertTrue(verify.contains("--proto '=https'"), verify)
         XCTAssertTrue(verify.contains("--tlsv1.2"), verify)
+        XCTAssertTrue(verify.contains("BASH_SOURCE[0]"), verify)
+        XCTAssertFalse(verify.contains("$ROOT/scripts/dep-checksums.sha256"), verify)
 
         let appimage = try String(
             contentsOf: root.appendingPathComponent("scripts/linux-appimage.sh"),
@@ -288,13 +321,6 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(appimage.contains("AppImage/appimagetool"), appimage)
         XCTAssertTrue(appimage.contains("APPIMAGETOOL_VER=1.9.1"), appimage)
         XCTAssertFalse(appimage.contains("AppImageKit"), appimage)
-
-        let verify = try String(
-            contentsOf: root.appendingPathComponent("scripts/verify-sha256.sh"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(verify.contains("BASH_SOURCE[0]"), verify)
-        XCTAssertFalse(verify.contains("$ROOT/scripts/dep-checksums.sha256"), verify)
 
         let docker = try String(contentsOf: root.appendingPathComponent("Dockerfile"), encoding: .utf8)
         XCTAssertTrue(docker.contains("scripts/verify-sha256.sh"), docker)
@@ -326,6 +352,101 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(release.contains("timeout-minutes:"), release)
         XCTAssertTrue(release.contains("github.ref_name"), release)
         XCTAssertTrue(release.contains("actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809"), release)
+        XCTAssertTrue(release.contains("linux-appimage.sh"), release)
+    }
+
+    func testLinuxAppImageAndFlatpakPackaging() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let desktop = try String(
+            contentsOf: root.appendingPathComponent("packaging/appattic.desktop"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(desktop.contains("Exec=appattic-qt"), desktop)
+        XCTAssertTrue(desktop.contains("Icon=appattic"), desktop)
+        XCTAssertTrue(desktop.contains("StartupWMClass=appattic-qt"), desktop)
+        XCTAssertTrue(desktop.contains("Keywords="), desktop)
+
+        let meta = try String(
+            contentsOf: root.appendingPathComponent("packaging/org.appattic.AppAttic.metainfo.xml"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(meta.contains("<id>org.appattic.AppAttic</id>"), meta)
+        XCTAssertTrue(meta.contains("org.appattic.AppAttic.desktop"), meta)
+        XCTAssertTrue(meta.contains("<binary>appattic-qt</binary>"), meta)
+
+        let yml = try String(
+            contentsOf: root.appendingPathComponent("packaging/flatpak/org.appattic.AppAttic.yml"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(yml.contains("app-id: org.appattic.AppAttic"), yml)
+        XCTAssertTrue(yml.contains("org.kde.Platform"), yml)
+        XCTAssertTrue(yml.contains("runtime-version: \"6.10\""), yml)
+        XCTAssertTrue(yml.contains("command: appattic-qt"), yml)
+        XCTAssertTrue(yml.contains("--filesystem=host"), yml)
+        XCTAssertTrue(yml.contains("--talk-name=org.freedesktop.Flatpak"), yml)
+        XCTAssertTrue(yml.contains("wasmtime-v28.0.0-x86_64-linux-c-api.tar.xz"), yml)
+        XCTAssertTrue(yml.contains("23f282f333f07ec82a838928cbc86355cc4978c3618080d1a2e5714fec8411bf"), yml)
+        XCTAssertTrue(yml.contains("zig-x86_64-linux-0.16.0.tar.xz"), yml)
+        XCTAssertTrue(yml.contains("70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00"), yml)
+        XCTAssertTrue(yml.contains("WASMTIME_ROOT="), yml)
+
+        let script = try String(
+            contentsOf: root.appendingPathComponent("scripts/linux-flatpak.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(script.contains("flatpak-builder"), script)
+        XCTAssertTrue(script.contains("SMOKE=ok"), script)
+        XCTAssertTrue(script.contains("org.appattic.AppAttic"), script)
+        XCTAssertTrue(script.contains("AppAttic.flatpak"), script)
+        XCTAssertTrue(script.contains("--extra-sources"), script)
+        XCTAssertTrue(script.contains("curl_fetch"), script)
+        XCTAssertFalse(script.contains("curl -fsSL"), script)
+
+        let cmake = try String(
+            contentsOf: root.appendingPathComponent("ui/linux-qt/CMakeLists.txt"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(cmake.contains("$ORIGIN/../lib"), cmake)
+        XCTAssertTrue(cmake.contains("org.appattic.AppAttic.metainfo.xml"), cmake)
+        XCTAssertTrue(cmake.contains("share/metainfo"), cmake)
+
+        let host = try String(
+            contentsOf: root.appendingPathComponent("core/host/hostexec.c"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(host.contains("flatpak-spawn"), host)
+        XCTAssertTrue(host.contains("appattic_host_in_flatpak"), host)
+        XCTAssertTrue(host.contains("--host"), host)
+        let embed = try String(
+            contentsOf: root.appendingPathComponent("core/host/embed.h"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(embed.contains("appattic_progress_fn"), embed)
+        XCTAssertTrue(embed.contains("on_progress"), embed)
+        let hostCpp = try String(
+            contentsOf: root.appendingPathComponent("ui/linux-qt/corehost.cpp"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(hostCpp.contains("/run/host/usr/bin"), hostCpp)
+        XCTAssertTrue(hostCpp.contains("FLATPAK_ID"), hostCpp)
+        let smoke = try String(
+            contentsOf: root.appendingPathComponent("ui/linux-qt/smoke.cpp"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(smoke.contains("Flatpak host has"), smoke)
+        XCTAssertTrue(smoke.contains("/run/host/usr/bin/"), smoke)
+
+        let appimage = try String(
+            contentsOf: root.appendingPathComponent("scripts/linux-appimage.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(appimage.contains("dist/AppAttic-${APPIMAGE_ARCH}.AppImage") ||
+            appimage.contains("AppAttic-${APPIMAGE_ARCH}.AppImage"), appimage)
+        XCTAssertTrue(appimage.contains("usr/share/appattic"), appimage)
+        XCTAssertTrue(appimage.contains("libwasmtime.so"), appimage)
     }
 
     func testLinuxLeftoverPathPluginsHaveWasm() throws {
@@ -351,11 +472,9 @@ final class PackagingTests: XCTestCase {
             XCTAssertTrue(build.contains(wasm), "build.sh missing \(wasm)")
             XCTAssertTrue(qtMain.contains(wasm), "linux-qt missing \(wasm)")
         }
-        let overlay = try String(
-            contentsOf: root.appendingPathComponent("core/plugins/path-overlay-shadow/manifest.json"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(overlay.contains("\"url\": null"), overlay)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("core/plugins/path-overlay-shadow/manifest.json").path
+        ))
         XCTAssertFalse(qtMain.contains("chocolatey"), qtMain)
         XCTAssertFalse(qtMain.contains("nuget"), qtMain)
         XCTAssertFalse(qtMain.contains("appstore.wasm"), qtMain)
@@ -444,7 +563,7 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(zig.contains("Status: Accepted"), zig)
         XCTAssertTrue(zig.contains("host.exec"), zig)
         XCTAssertTrue(zig.contains("path_shadow.wasm"), zig)
-        XCTAssertTrue(zig.contains("path-overlay-shadow"), zig)
+        XCTAssertFalse(zig.contains("path-overlay-shadow"), zig)
         XCTAssertTrue(zig.contains("realpath"), zig)
         let coreReadme = try String(contentsOf: root.appendingPathComponent("core/README.md"), encoding: .utf8)
         XCTAssertTrue(coreReadme.contains("realpath"), coreReadme)
@@ -453,7 +572,7 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(coreReadme.contains(".zig-version"), coreReadme)
         XCTAssertFalse(coreReadme.contains("Swift UI (`AppAtticScan`)"), coreReadme)
         XCTAssertTrue(zig.contains("path_user_bin.wasm"), zig)
-        XCTAssertTrue(zig.contains("path_application_support.wasm"), zig)
+        XCTAssertFalse(zig.contains("path_application_support.wasm"), zig)
         XCTAssertFalse(zig.contains("No live query"), zig)
         XCTAssertFalse(zig.contains("Findings WASM that exists today is canned"), zig)
         XCTAssertFalse(zig.contains("Only these WASM modules"), zig)
@@ -635,6 +754,7 @@ final class PackagingTests: XCTestCase {
             "scripts/linux-deps.sh",
             "scripts/linux-qt-link.sh",
             "scripts/linux-appimage.sh",
+            "scripts/linux-flatpak.sh",
         ]
         for script in helpScripts {
             let (rc, stdout, stderr) = try run(script, ["--help"])
@@ -661,5 +781,9 @@ final class PackagingTests: XCTestCase {
         let (appimageRc, _, appimageErr) = try run("scripts/linux-appimage.sh", ["nope"])
         XCTAssertEqual(appimageRc, 2, appimageErr)
         XCTAssertTrue(appimageErr.contains("unknown argument"), appimageErr)
+
+        let (flatpakRc, _, flatpakErr) = try run("scripts/linux-flatpak.sh", ["nope"])
+        XCTAssertEqual(flatpakRc, 2, flatpakErr)
+        XCTAssertTrue(flatpakErr.contains("unknown argument"), flatpakErr)
     }
 }

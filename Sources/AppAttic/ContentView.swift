@@ -2,12 +2,32 @@ import Foundation
 import SwiftCrossUI
 import AppAtticScan
 
+private enum DateFmt {
+    static let medium: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+}
+
+func formatDate(_ iso: String?) -> String {
+    guard let iso = iso, !iso.isEmpty else { return "-" }
+    guard let d = parseISODate(iso) else { return String(iso.prefix(10)) }
+    guard let days = calendarDaysSince(d) else { return DateFmt.medium.string(from: d) }
+    if days <= 0 { return "Today" }
+    if days == 1 { return "Yesterday" }
+    if days < 45 { return "\(days) days ago" }
+    return DateFmt.medium.string(from: d)
+}
+
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
     case overview = "Overview"
     case leftovers = "Leftovers"
     case stale = "Stale Apps"
     case outdated = "Outdated"
     case packages = "Packages"
+    case diskUsage = "Disk Usage"
     case settings = "Settings"
     var id: Self { self }
 }
@@ -62,6 +82,7 @@ struct ContentView: View {
         case "stale": return .stale
         case "outdated": return .outdated
         case "packages": return .packages
+        case "disk": return .diskUsage
         case "settings": return .settings
         default: return .overview
         }
@@ -324,6 +345,8 @@ struct ContentView: View {
             outdatedPage
         case .packages:
             packagePage
+        case .diskUsage:
+            DiskUsageView()
         case .settings:
             settings
         }
@@ -571,7 +594,7 @@ struct ContentView: View {
                 isEmpty: rows.isEmpty,
                 emptyTitle: "No outdated packages",
                 emptyDetail: vm.searchText.isEmpty
-                    ? "Brew, Flatpak, Snap, apt, pacman, dnf, zypper, and the App Store reported nothing, or those tools are not installed."
+                    ? "Brew, Flatpak, Snap, apt, pacman, AUR, dnf, yum, zypper, and the App Store reported nothing, or those tools are not installed."
                     : "No outdated packages match this search.",
                 header: { outdatedHeader }
             ) {
@@ -1281,7 +1304,7 @@ struct ContentView: View {
                         Toggle("", isOn: confirmDeleteBinding)
                             .toggleStyle(.switch)
                     }
-                    Text("Shows an alert before rm, brew uninstall, package remove, or Homebrew/Flatpak updates.")
+                    Text("Shows an alert before rm, brew uninstall, package remove, or named package updates.")
                         .font(.system(size: 11))
                         .foregroundColor(Color.appDim)
                 }

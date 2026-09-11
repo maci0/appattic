@@ -21,6 +21,26 @@ const apt_upgradable_fixture =
     \\
 ;
 
+const dpkg_list_fixture =
+    \\Desired=Unknown/Install/Remove/Purge/Hold
+    \\| Status=Not/Inst/Conf-files/Unpacked/halF-conf/Half-inst/trig-aWait/Trig-pend
+    \\|/ Err?=(none)/Reinst-required (Status,Err: uppercase=bad)
+    \\||/ Name           Version      Architecture Description
+    \\+++-==============-============-============-=================================
+    \\ii  bash           5.2.15-2     amd64        GNU Bourne Again SHell
+    \\rc  oldpkg         1.0-1        amd64        leftover config
+    \\rc  gone-lib       2.2-3        amd64        unused leftover
+    \\
+;
+
+const apt_sources_fixture =
+    \\google-chrome.list
+    \\deadsnakes-ubuntu-ppa-noble.list
+    \\nodesource.list
+    \\ubuntu.sources
+    \\
+;
+
 const pacman_fixture =
     \\libfoo 1.2.3-1
     \\libbar 2.0.0-1
@@ -143,6 +163,19 @@ const flatpak_fixture =
     \\
 ;
 
+const flatpak_updates_fixture =
+    \\Application Version
+    \\org.mozilla.firefox 130.0
+    \\
+;
+
+const flatpak_list_fixture =
+    \\Application Version
+    \\org.mozilla.firefox 128.0
+    \\org.gnome.Calculator 46.0
+    \\
+;
+
 const npm_ls_fixture =
     \\{"name":"lib","dependencies":{"typescript":{"version":"5.4.5"},"prettier":{"version":"3.3.0"}}}
     \\
@@ -172,6 +205,23 @@ const pipx_fixture =
 
 const pip_fixture =
     \\[{"name":"requests","version":"2.28.1","latest_version":"2.32.3","latest_filetype":"wheel"},{"name":"urllib3","version":"1.26.18","latest_version":"2.2.2"}]
+    \\
+;
+
+const pip_list_fixture =
+    \\[{"name":"httpie","version":"3.2.2"},{"name":"requests","version":"2.28.1"}]
+    \\
+;
+
+const pip_not_required_fixture =
+    \\[{"name":"httpie","version":"3.2.2"}]
+    \\
+;
+
+const ls_deno_fixture =
+    \\deno
+    \\file_server
+    \\deployctl
     \\
 ;
 
@@ -237,6 +287,15 @@ fn fixtureFor(cmd: []const u8) ?[]const u8 {
     }
     if (std.mem.indexOf(u8, cmd, "--upgradable") != null) return apt_upgradable_fixture;
     if (std.mem.indexOf(u8, cmd, "autoremove") != null) return apt_fixture;
+    if (std.mem.startsWith(u8, cmd, "dpkg ") or std.mem.indexOf(u8, cmd, "/dpkg ") != null) {
+        return dpkg_list_fixture;
+    }
+    if (std.mem.startsWith(u8, cmd, "paru") or std.mem.startsWith(u8, cmd, "yay") or
+        std.mem.startsWith(u8, cmd, "pikaur") or std.mem.indexOf(u8, cmd, "/paru ") != null or
+        std.mem.indexOf(u8, cmd, "/yay ") != null or std.mem.indexOf(u8, cmd, "/pikaur ") != null)
+    {
+        return pacman_outdated_fixture;
+    }
     if (std.mem.indexOf(u8, cmd, "pacman") != null) {
         if (std.mem.indexOf(u8, cmd, "-Qu") != null) return pacman_outdated_fixture;
         return pacman_fixture;
@@ -254,6 +313,14 @@ fn fixtureFor(cmd: []const u8) ?[]const u8 {
     if (std.mem.indexOf(u8, cmd, "list-updates") != null) return zypper_updates_fixture;
     if (std.mem.indexOf(u8, cmd, "zypper") != null) return zypper_fixture;
     if (std.mem.startsWith(u8, cmd, "flatpak") or std.mem.indexOf(u8, cmd, "/flatpak") != null) {
+        if (std.mem.indexOf(u8, cmd, "remote-ls") != null or std.mem.indexOf(u8, cmd, "--updates") != null) {
+            return flatpak_updates_fixture;
+        }
+        if (std.mem.indexOf(u8, cmd, " list") != null or std.mem.endsWith(u8, cmd, " list") or
+            std.mem.indexOf(u8, cmd, " ls") != null)
+        {
+            return flatpak_list_fixture;
+        }
         return flatpak_fixture;
     }
     if (std.mem.startsWith(u8, cmd, "pnpm")) return pnpm_fixture;
@@ -263,11 +330,12 @@ fn fixtureFor(cmd: []const u8) ?[]const u8 {
     }
     if (std.mem.startsWith(u8, cmd, "bun")) return bun_fixture;
     if (std.mem.startsWith(u8, cmd, "pipx")) return pipx_fixture;
-    if (std.mem.startsWith(u8, cmd, "pip3 ") or std.mem.indexOf(u8, cmd, "/pip3 ") != null) {
-        return pip_fixture;
-    }
-    if (std.mem.startsWith(u8, cmd, "pip ") or std.mem.indexOf(u8, cmd, "/pip ") != null) {
-        return pip_fixture;
+    if (std.mem.startsWith(u8, cmd, "pip3 ") or std.mem.indexOf(u8, cmd, "/pip3 ") != null or
+        std.mem.startsWith(u8, cmd, "pip ") or std.mem.indexOf(u8, cmd, "/pip ") != null)
+    {
+        if (std.mem.indexOf(u8, cmd, "outdated") != null) return pip_fixture;
+        if (std.mem.indexOf(u8, cmd, "not-required") != null) return pip_not_required_fixture;
+        return pip_list_fixture;
     }
     if (std.mem.startsWith(u8, cmd, "uv")) return uv_fixture;
     if (std.mem.startsWith(u8, cmd, "brew ") or std.mem.indexOf(u8, cmd, "/brew ") != null) {
@@ -278,6 +346,12 @@ fn fixtureFor(cmd: []const u8) ?[]const u8 {
     }
     if (std.mem.startsWith(u8, cmd, "composer ") or std.mem.indexOf(u8, cmd, "/composer ") != null) {
         return composer_fixture;
+    }
+    if (std.mem.indexOf(u8, cmd, "/.deno/bin") != null and std.mem.startsWith(u8, cmd, "ls")) {
+        return ls_deno_fixture;
+    }
+    if (std.mem.indexOf(u8, cmd, "sources.list.d") != null and std.mem.startsWith(u8, cmd, "ls")) {
+        return apt_sources_fixture;
     }
     if (std.mem.indexOf(u8, cmd, "/.local/bin") != null and std.mem.startsWith(u8, cmd, "ls")) {
         return ls_user_bin_fixture;
@@ -310,9 +384,15 @@ fn fixtureFor(cmd: []const u8) ?[]const u8 {
 
 fn nativeRun(cmd: []const u8, out: []u8) i32 {
     const text = fixtureFor(cmd) orelse return fail;
-    if (text.len > out.len) return bad;
-    @memcpy(out[0..text.len], text);
-    return @intCast(text.len);
+    if (text.len <= out.len) {
+        @memcpy(out[0..text.len], text);
+        return @intCast(text.len);
+    }
+    @memcpy(out[0..out.len], text[0..out.len]);
+    var n = out.len;
+    while (n > 0 and out[n - 1] != '\n') n -= 1;
+    if (n == 0) return bad;
+    return @intCast(n);
 }
 
 /// Query-only host.exec. Wasm guest imports `host.exec`. Native tests inject fixtures.
@@ -349,6 +429,18 @@ test "native fixture routes apt pacman snap ls dnf zypper flatpak npm pnpm bun p
     const pu = run("pacman -Qu", &buf);
     try std.testing.expect(pu > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(pu)], "coreutils 9.5-1 -> 9.5-2") != null);
+
+    const aur = run("paru -Qua", &buf);
+    try std.testing.expect(aur > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(aur)], "coreutils 9.5-1 -> 9.5-2") != null);
+
+    const dpkg = run("dpkg -l", &buf);
+    try std.testing.expect(dpkg > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(dpkg)], "rc  oldpkg") != null);
+
+    const ppa = run("ls -1 /etc/apt/sources.list.d", &buf);
+    try std.testing.expect(ppa > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(ppa)], "deadsnakes-ubuntu-ppa-noble.list") != null);
 
     const s = run("snap list --all", &buf);
     try std.testing.expect(s > 0);
@@ -419,6 +511,15 @@ test "native fixture routes apt pacman snap ls dnf zypper flatpak npm pnpm bun p
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(f)], "org.freedesktop.Platform.GL.default") != null);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(f)], "remote-ls") == null);
 
+    const fu = run("flatpak remote-ls --updates --app --columns=application,version", &buf);
+    try std.testing.expect(fu > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(fu)], "org.mozilla.firefox") != null);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(fu)], "130.0") != null);
+
+    const fl = run("flatpak list --app --columns=application,version", &buf);
+    try std.testing.expect(fl > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(fl)], "128.0") != null);
+
     const nls = run("npm ls -g --depth=0 --json", &buf);
     try std.testing.expect(nls > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(nls)], "typescript") != null);
@@ -440,6 +541,11 @@ test "native fixture routes apt pacman snap ls dnf zypper flatpak npm pnpm bun p
     const px = run("pipx list --json", &buf);
     try std.testing.expect(px > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(px)], "httpie") != null);
+
+    const pipnr = run("pip list --user --not-required --format=json", &buf);
+    try std.testing.expect(pipnr > 0);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(pipnr)], "httpie") != null);
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(pipnr)], "urllib3") == null);
 
     const pip = run("pip list --user --outdated --format=json", &buf);
     try std.testing.expect(pip > 0);

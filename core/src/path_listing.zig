@@ -17,6 +17,9 @@ pub const Spec = struct {
     dialog_title: []const u8,
     /// `ls -1A` for home-dot leftovers (`.mozilla`, `.wine`). Others: `ls -1`.
     query_cmd: []const u8 = "ls -1",
+    /// If non-empty, only these names (newline list) are leftovers. Home-dot
+    /// is a whitelist; other path plugins stay denylist-only.
+    allow: []const u8 = "",
 };
 
 /// `ls` the leftover root. Roots with spaces stay as `query_cmd` only:
@@ -31,12 +34,10 @@ fn basenameOf(path: []const u8) []const u8 {
     return path;
 }
 
-/// Canned usage timing for path-home-dot smoke (no QFileInfo on fake /home/user paths).
 fn usageTimingExtra(comptime spec: Spec, name: []const u8) []const u8 {
-    if (!std.mem.eql(u8, spec.id, "path-home-dot")) return "";
-    if (std.mem.eql(u8, name, ".mozilla")) return ",\"idleDays\":120";
-    if (std.mem.eql(u8, name, ".wine")) return ",\"idleDays\":90";
-    return ",\"idleDays\":45";
+    _ = spec;
+    _ = name;
+    return "";
 }
 
 fn nameInKeep(name: []const u8, keep: []const u8) bool {
@@ -49,115 +50,7 @@ fn nameInKeep(name: []const u8, keep: []const u8) bool {
     return false;
 }
 
-const linux_system_names =
-    \\fontconfig
-    \\dconf
-    \\gconf
-    \\gtk-2.0
-    \\gtk-3.0
-    \\gtk-4.0
-    \\glib-2.0
-    \\pulse
-    \\pipewire
-    \\systemd
-    \\user-dirs.dirs
-    \\user-dirs.locale
-    \\xdg
-    \\mime
-    \\icons
-    \\themes
-    \\applications
-    \\desktop-directories
-    \\ibus
-    \\fcitx
-    \\fcitx5
-    \\environment.d
-    \\procps
-    \\tracker3
-    \\upstart
-    \\kde
-    \\plasma
-    \\xfce4
-    \\recently-used.xbel
-    \\flatpak
-    \\containers
-    \\Trash
-    \\xorg
-    \\session
-    \\update-notifier
-    \\dbus
-    \\gvfs
-    \\xdg-desktop-portal
-    \\gnome-shell
-    \\gnome-session
-    \\snap
-    \\fish
-    \\zsh
-    \\bash
-    \\git
-    \\nvim
-    \\vim
-    \\ssh
-    \\gnupg
-    \\aws
-    \\docker
-    \\tmux
-    \\direnv
-    \\starship
-    \\asdf
-    \\nvm
-    \\pyenv
-    \\rbenv
-    \\rustup
-    \\cargo
-    \\npm
-    \\yarn
-    \\pnpm
-    \\pip
-    \\conda
-    \\htop
-    \\curl
-    \\thumbnails
-    \\mesa_shader_cache
-    \\mesa_shader_cache_db
-    \\nvidia
-    \\gnome-software
-    \\evolution
-    \\update-manager
-    \\gvfs-metadata
-    \\man
-    \\uv
-    \\bun
-    \\go
-    \\helm
-    \\gh
-    \\virtualenv
-    \\configstore
-    \\node
-    \\node-gyp
-    \\bazelisk
-    \\black
-    \\pythonentrypoints
-    \\swift
-    \\gcloud
-    \\btop
-    \\wasmtime
-    \\zls
-    \\kube
-    \\kubectl
-    \\kubebuilder
-    \\jetpack
-    \\jetpackcache
-    \\pacman
-    \\yay
-    \\paru
-    \\makepkg
-    \\dnf
-    \\dnf5
-    \\yum
-    \\zypper
-    \\rpm
-;
+const linux_system_names = @embedFile("linux-system-names.txt");
 
 const snap_system_names =
     \\bare
@@ -195,6 +88,13 @@ pub fn isSystemLeftoverName(name: []const u8) bool {
     if (nameInListIgnoreCase(n, linux_system_names)) return true;
     if (nameInListIgnoreCase(n, snap_system_names)) return true;
     if (n.len >= 4 and std.ascii.eqlIgnoreCase(n[0..4], "gtk-")) return true;
+    if (n.len >= 3 and std.ascii.eqlIgnoreCase(n[0..3], "kde")) return true;
+    if (n.len >= 4 and std.ascii.eqlIgnoreCase(n[0..4], "kwin")) return true;
+    if (n.len >= 5 and std.ascii.eqlIgnoreCase(n[0..5], "baloo")) return true;
+    if (n.len >= 6 and std.ascii.eqlIgnoreCase(n[0..6], "plasma")) return true;
+    if (n.len > 2 and (n[n.len - 2] == 'r' or n[n.len - 2] == 'R') and (n[n.len - 1] == 'c' or n[n.len - 1] == 'C')) {
+        if (nameInListIgnoreCase(n[0 .. n.len - 2], linux_system_names)) return true;
+    }
     if (n.len >= 3 and std.ascii.eqlIgnoreCase(n[0..3], "xdg")) return true;
     if (n.len >= 4 and std.ascii.eqlIgnoreCase(n[0..4], "core")) {
         if (n.len == 4 or isAllDigits(n[4..])) return true;
@@ -204,9 +104,6 @@ pub fn isSystemLeftoverName(name: []const u8) bool {
             if (isAllDigits(n[dash + 1 ..])) return true;
         }
     }
-    var stem_end: usize = 0;
-    while (stem_end < n.len and n[stem_end] != '-' and n[stem_end] != '_') : (stem_end += 1) {}
-    if (stem_end >= 2 and nameInListIgnoreCase(n[0..stem_end], linux_system_names)) return true;
     return false;
 }
 
@@ -218,6 +115,7 @@ pub fn parseListing(
     root: []const u8,
     out: []Orphan,
     path_store: []u8,
+    allow: []const u8,
 ) usize {
     var n: usize = 0;
     var used: usize = 0;
@@ -232,6 +130,7 @@ pub fn parseListing(
         if (!jsonbuf.isSafeIdent(name)) continue;
         if (isSystemLeftoverName(name)) continue;
         if (nameInKeep(name, keep)) continue;
+        if (allow.len > 0 and !nameInKeep(name, allow)) continue;
         const path = if (line.len > 0 and line[0] == '/') line else blk: {
             const need = root.len + 1 + name.len;
             if (used + need > path_store.len) continue;
@@ -250,9 +149,9 @@ pub fn parseListing(
     return n;
 }
 
-var result_buf: [4096]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [2048]u8 = undefined;
+var exec_buf: [65536]u8 = undefined;
 var none_json_buf: [512]u8 = undefined;
 
 fn render(comptime spec: Spec, hits: []const Orphan) bool {
@@ -319,11 +218,14 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
         if (!render(spec, &.{})) return 1;
         return 0;
     }
-    var hits: [32]Orphan = undefined;
-    var paths: [1024]u8 = undefined;
-    const n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths);
-    if (!render(spec, hits[0..n])) return 1;
-    return 0;
+    var hits: [256]Orphan = undefined;
+    var paths: [32768]u8 = undefined;
+    var n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths, spec.allow);
+    while (true) {
+        if (render(spec, hits[0..n])) return 0;
+        if (n == 0) return 1;
+        n -= 1;
+    }
 }
 
 pub fn resultPtr() i32 {
@@ -382,6 +284,7 @@ test "parseListing orphans names not in keep" {
         "/home/user/.local/share",
         &hits,
         &paths,
+        "",
     );
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("gone-app", hits[0].name);
@@ -397,6 +300,7 @@ test "parseListing keeps home-dot leftovers and skips only . and .." {
         "/home/user",
         &hits,
         &paths,
+        "",
     );
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqualStrings(".mozilla", hits[0].name);
@@ -414,6 +318,7 @@ test "parseListing accepts full paths, skips . and .., keeps other dots" {
         "/home/user/.cache",
         &hits,
         &paths,
+        "",
     );
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqualStrings("gone-app", hits[0].name);
@@ -425,7 +330,7 @@ test "parseListing accepts full paths, skips . and .., keeps other dots" {
 test "parseListing empty listing" {
     var hits: [2]Orphan = undefined;
     var paths: [64]u8 = undefined;
-    try std.testing.expectEqual(@as(usize, 0), parseListing("", "dconf", "/home/user/.config", &hits, &paths));
+    try std.testing.expectEqual(@as(usize, 0), parseListing("", "dconf", "/home/user/.config", &hits, &paths, ""));
 }
 
 test "parseListing keeps utf8 leftover names" {
@@ -437,6 +342,7 @@ test "parseListing keeps utf8 leftover names" {
         "/home/user/.config",
         &hits,
         &paths,
+        "",
     );
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqualStrings("café", hits[0].name);
@@ -464,15 +370,37 @@ test "queryCommand appends root unless the root has spaces" {
         .query_cmd = "ls -1A",
     };
     try std.testing.expectEqualStrings("ls -1A /home/user", queryCommand(home_dot));
-    const darwin = Spec{
-        .id = "path-application-support",
+    const spaced = Spec{
+        .id = "path-xdg-config",
         .root_label = "Application Support",
-        .root = "/Users/user/Library/Application Support",
+        .root = "/tmp/Application Support",
         .keep = "",
         .missing_note = "",
         .dialog_title = "",
     };
-    try std.testing.expectEqualStrings("ls -1", queryCommand(darwin));
+    try std.testing.expectEqualStrings("ls -1", queryCommand(spaced));
+}
+
+test "render keeps a large leftover list" {
+    const spec = Spec{
+        .id = "path-xdg-config",
+        .root_label = ".config",
+        .root = "/home/user/.config",
+        .keep = "",
+        .missing_note = "",
+        .dialog_title = "Remove leftover config?",
+    };
+    var hits: [80]Orphan = undefined;
+    var names: [80][12]u8 = undefined;
+    var paths: [80][48]u8 = undefined;
+    for (0..80) |i| {
+        const n = std.fmt.bufPrint(&names[i], "app-{d:0>2}", .{i}) catch unreachable;
+        const p = std.fmt.bufPrint(&paths[i], "/home/user/.config/{s}", .{n}) catch unreachable;
+        hits[i] = .{ .name = n, .path = p };
+    }
+    try std.testing.expect(render(spec, &hits));
+    try std.testing.expect(std.mem.indexOf(u8, resultSlice(), "app-00") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resultSlice(), "app-79") != null);
 }
 
 test "parseListing skips system names even without keep" {
@@ -484,14 +412,42 @@ test "parseListing skips system names even without keep" {
         "/home/user/.config",
         &hits,
         &paths,
+        "",
     );
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("gone-app", hits[0].name);
     try std.testing.expect(isSystemLeftoverName("gtk-3.0"));
+    try std.testing.expect(isSystemLeftoverName("go-build"));
+    try std.testing.expect(isSystemLeftoverName("swift-build"));
+    try std.testing.expect(isSystemLeftoverName("kubebuilder-envtest"));
+    try std.testing.expect(isSystemLeftoverName("kdeconnect"));
+    try std.testing.expect(isSystemLeftoverName("kwinrc"));
+    try std.testing.expect(isSystemLeftoverName("plasma-org.kde.plasma.desktop-appletsrc"));
+    try std.testing.expect(isSystemLeftoverName("dolphinrc"));
+    try std.testing.expect(isSystemLeftoverName("baloofilerc"));
     try std.testing.expect(isSystemLeftoverName(".ssh"));
     try std.testing.expect(isSystemLeftoverName(".aws"));
     try std.testing.expect(isSystemLeftoverName(".docker"));
     try std.testing.expect(isSystemLeftoverName("dconf"));
     try std.testing.expect(!isSystemLeftoverName("gone-app"));
     try std.testing.expect(!isSystemLeftoverName(".mozilla"));
+    try std.testing.expect(!isSystemLeftoverName("git-cola"));
+    try std.testing.expect(!isSystemLeftoverName("docker-desktop"));
+    try std.testing.expect(!isSystemLeftoverName("npm-check-updates"));
+}
+
+test "parseListing home-dot allowlist skips .config and shell rc" {
+    var hits: [8]Orphan = undefined;
+    var paths: [512]u8 = undefined;
+    const n = parseListing(
+        ".mozilla\n.config\n.bashrc\n.local\n.cache\n.wine\n.profile\n",
+        "dconf\n",
+        "/home/user",
+        &hits,
+        &paths,
+        ".mozilla\n.wine\n",
+    );
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqualStrings(".mozilla", hits[0].name);
+    try std.testing.expectEqualStrings(".wine", hits[1].name);
 }

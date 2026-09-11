@@ -6,9 +6,9 @@ const host_exec = @import("host_exec.zig");
 const plugin_id = "uv";
 const query_cmd = "uv tool list";
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [4096]u8 = undefined;
+var exec_buf: [32768]u8 = undefined;
 
 const none_json =
     \\{"plugin":"uv","engine":null,"findings":[],"script":null,"dialog":{"title":"No uv","body":"uv is not on PATH. Plugin inactive."},"note":"uv missing"}
@@ -99,10 +99,13 @@ export fn plugin_query(present: i32) i32 {
         if (!renderUv(&.{})) return 1;
         return 0;
     }
-    var hits: [32]UvTool = undefined;
-    const n = parseUvToolList(exec_buf[0..@intCast(nexec)], &hits);
-    if (!renderUv(hits[0..n])) return 1;
-    return 0;
+    var hits: [128]UvTool = undefined;
+    var n = parseUvToolList(exec_buf[0..@intCast(nexec)], &hits);
+    while (true) {
+        if (renderUv(hits[0..n])) return 0;
+        if (n == 0) return 1;
+        n -= 1;
+    }
 }
 
 export fn result_ptr() i32 {

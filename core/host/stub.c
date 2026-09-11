@@ -27,7 +27,9 @@ int main(int argc, char **argv) {
     }
     char err[1024];
     err[0] = '\0';
-    int rc = appattic_wasm_run(argv[1], argv + 2, argc - 2, print_json, NULL, err, sizeof err);
+    int rc = appattic_wasm_run(
+        argv[1], argv + 2, argc - 2, print_json, NULL, NULL, err, sizeof err
+    );
     if (rc != 0 && err[0]) fprintf(stderr, "%s\n", err);
     return rc;
 }

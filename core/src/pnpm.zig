@@ -7,9 +7,9 @@ const host_exec = @import("host_exec.zig");
 const plugin_id = "pnpm";
 const query_cmd = "pnpm ls -g --depth=0 --json";
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var result_nbytes: u32 = 0;
-var exec_buf: [8192]u8 = undefined;
+var exec_buf: [32768]u8 = undefined;
 
 const none_json =
     \\{"plugin":"pnpm","engine":null,"findings":[],"script":null,"dialog":{"title":"No pnpm","body":"pnpm is not on PATH. Plugin inactive."},"note":"pnpm missing"}
@@ -22,7 +22,7 @@ pub const PnpmGlobal = struct {
 
 /// Parse `pnpm ls -g --depth=0 --json` (object or array of objects).
 pub fn parsePnpmGlobalList(text: []const u8, out: []PnpmGlobal) usize {
-    var deps: [32]jsonscan.Dep = undefined;
+    var deps: [128]jsonscan.Dep = undefined;
     const n = jsonscan.parseJsonDependencies(text, &deps);
     const cap = @min(n, out.len);
     for (0..cap) |i| {
@@ -89,10 +89,13 @@ export fn plugin_query(present: i32) i32 {
         if (!renderPnpm(&.{})) return 1;
         return 0;
     }
-    var hits: [32]PnpmGlobal = undefined;
-    const n = parsePnpmGlobalList(exec_buf[0..@intCast(nexec)], &hits);
-    if (!renderPnpm(hits[0..n])) return 1;
-    return 0;
+    var hits: [128]PnpmGlobal = undefined;
+    var n = parsePnpmGlobalList(exec_buf[0..@intCast(nexec)], &hits);
+    while (true) {
+        if (renderPnpm(hits[0..n])) return 0;
+        if (n == 0) return 1;
+        n -= 1;
+    }
 }
 
 export fn result_ptr() i32 {
