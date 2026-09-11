@@ -38,11 +38,11 @@ if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
     export SOURCE_DATE_EPOCH
 fi
 if [[ -z "${VERSION:-}" ]]; then
-    VERSION="$(git describe --tags --exact-match 2>/dev/null || printf '1.1.3')"
+    VERSION="$(git describe --tags --exact-match 2>/dev/null || printf '1.2.0')"
 fi
 VERSION="${VERSION#v}"
 if [[ -z "$VERSION" ]]; then
-    VERSION="1.1.3"
+    VERSION="1.2.0"
 fi
 export VERSION
 
