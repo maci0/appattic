@@ -19,8 +19,8 @@
     </p>
     <p>
       The Linux window is Qt 6. Package-manager queries run on the host when
-      installed as a Flatpak (flatpak-spawn --host). Distro upgrades are
-      report-only.
+      installed as a Flatpak (flatpak-spawn --host). Named package updates
+      wait for confirm. Full distro upgrades are not run.
     </p>
   </description>
   <categories>
@@ -32,6 +32,7 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.2.0" date="2026-09-11"/>
     <release version="1.1.3" date="2026-09-07"/>
   </releases>
 </component>

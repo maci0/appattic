@@ -862,7 +862,7 @@ int runVersion(int argc, char **argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("AppAttic"));
     QApplication::setOrganizationName(QStringLiteral("AppAttic"));
-    std::fprintf(stdout, "AppAttic 1.1.3\n");
+    std::fprintf(stdout, "AppAttic 1.2.0\n");
     std::fprintf(stdout, "Qt %s\n", qVersion());
     const QString out = coreOutDir();
     const QString core = out + QStringLiteral("/appattic_core.wasm");
@@ -884,7 +884,7 @@ int runSmoke(int argc, char **argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("AppAttic"));
     QApplication::setOrganizationName(QStringLiteral("AppAttic"));
-    std::fprintf(stdout, "AppAttic 1.1.3\n");
+    std::fprintf(stdout, "AppAttic 1.2.0\n");
     std::fprintf(stdout, "Qt %s\n", qVersion());
     if (smokeVerifyHelpers() != 0) {
         return 1;
