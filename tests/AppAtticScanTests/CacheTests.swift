@@ -33,7 +33,7 @@ final class CacheTests: XCTestCase {
             outdated: [],
             from_cache: true
         )
-        saveScanCache(ScanCacheFile(fingerprint: "fp1", includeSystem: false, data: data), to: url)
+        try writeScanCache(ScanCacheFile(fingerprint: "fp1", includeSystem: false, data: data), to: url)
         let loaded = try XCTUnwrap(loadScanCache(from: url))
         XCTAssertEqual(loaded.fingerprint, "fp1")
         XCTAssertFalse(loaded.includeSystem)
@@ -44,7 +44,8 @@ final class CacheTests: XCTestCase {
         XCTAssertEqual(loaded.data.leftovers[0].status, "orphaned")
         XCTAssertEqual(loaded.data.leftovers[0].size_bytes, 10)
         XCTAssertEqual(loaded.data.from_cache, false)
-        let mode = posixMode(url.path)
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        let mode = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? -1
         XCTAssertNotEqual(mode, -1)
         XCTAssertEqual(mode & 0o077, 0)
     }
@@ -408,7 +409,7 @@ final class CacheTests: XCTestCase {
             leftovers: [],
             software: []
         )
-        saveScanCache(ScanCacheFile(fingerprint: "fp", includeSystem: false, data: data), to: url)
+        try writeScanCache(ScanCacheFile(fingerprint: "fp", includeSystem: false, data: data), to: url)
         XCTAssertNotNil(loadScanCache(from: url))
         clearScanCache(at: url)
         XCTAssertNil(loadScanCache(from: url))

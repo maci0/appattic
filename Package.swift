@@ -42,6 +42,11 @@ let package = Package(
             resources: [.copy("linux-system-names.txt")]
         ),
         .executableTarget(name: "AppAtticCLI", dependencies: ["AppAtticScan"]),
+        .executableTarget(
+            name: "appattic-bench",
+            dependencies: ["AppAtticScan"],
+            path: "benchmarks/AppAtticBench"
+        ),
         .testTarget(
             name: "AppAtticScanTests",
             dependencies: ["AppAtticScan"],

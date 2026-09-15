@@ -46,11 +46,17 @@ public final class DiskUsageNode {
     }
 
     public func sortChildren(allocatedSize: Bool) {
-        children.sort { a, b in
-            let am = a.metric(allocatedSize: allocatedSize)
-            let bm = b.metric(allocatedSize: allocatedSize)
-            if am != bm { return am > bm }
-            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        if children.count > 1 {
+            // Fold the name once per child instead of bridging to NSString for
+            // every comparator call: tie-heavy directories do O(n) folds, not O(n log n).
+            var keyed = children.map { (node: $0, key: $0.name.lowercased()) }
+            keyed.sort { a, b in
+                let am = a.node.metric(allocatedSize: allocatedSize)
+                let bm = b.node.metric(allocatedSize: allocatedSize)
+                if am != bm { return am > bm }
+                return a.key < b.key
+            }
+            children = keyed.map(\.node)
         }
         for c in children { c.sortChildren(allocatedSize: allocatedSize) }
     }
@@ -77,7 +83,15 @@ private struct UnixMeta {
     var nlink: UInt64
 }
 
-private func unixMtime(_ st: stat) -> TimeInterval {
+/// Identity of a file for hardlink / bind-mount dedup. A packed value-keyed set
+/// avoids interpolating a `"dev:ino"` String for every directory entry.
+private struct FileKey: Hashable {
+    var dev: UInt64
+    var ino: UInt64
+}
+
+/// Shared with Leftovers.probeActivityMtime; file-private would hide it.
+func unixMtime(_ st: stat) -> TimeInterval {
     #if canImport(Glibc)
     return TimeInterval(st.st_mtim.tv_sec)
     #elseif canImport(Darwin)
@@ -112,9 +126,8 @@ private func unixMeta(_ path: String, follow: Bool = false) -> UnixMeta? {
     return unixMetaFromStat(st)
 }
 
-private func direntName(_ ent: dirent) -> String {
-    var e = ent
-    return withUnsafePointer(to: &e.d_name) { ptr in
+func direntName(_ ent: UnsafeMutablePointer<dirent>) -> String {
+    withUnsafePointer(to: &ent.pointee.d_name) { ptr in
         ptr.withMemoryRebound(to: CChar.self, capacity: 256) { String(cString: $0) }
     }
 }
@@ -134,8 +147,8 @@ public func scanDiskUsage(
     node.apparent = meta.apparent
     node.allocated = meta.allocated
     node.mtime = meta.mtime
-    var seen = Set<String>()
-    seen.insert("\(meta.dev):\(meta.ino)")
+    var seen = Set<FileKey>()
+    seen.insert(FileKey(dev: meta.dev, ino: meta.ino))
     let rootFd = path.withCString { open($0, O_RDONLY | O_DIRECTORY | O_CLOEXEC) }
     guard rootFd >= 0 else {
         node.unreadable = true
@@ -154,14 +167,15 @@ public func scanDiskUsage(
     return node
 }
 
-private let childDirFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+// Shared with Util.walkLogicalBytes; file-private would hide it from that caller.
+let childDirFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
 
 private func walkDiskFd(
     node: DiskUsageNode,
     fd: Int32,
     rootDev: UInt64,
     oneFileSystem: Bool,
-    seen: inout Set<String>,
+    seen: inout Set<FileKey>,
     cancel: () -> Bool
 ) {
     if cancel() { return }
@@ -183,9 +197,9 @@ private func walkDiskFd(
             if errno != 0 { node.unreadable = true }
             break
         }
-        let name = direntName(ent.pointee)
+        let name = direntName(ent)
         if name == "." || name == ".." { continue }
-        let childPath = (node.path as NSString).appendingPathComponent(name)
+        let childPath = node.path.hasSuffix("/") ? node.path + name : node.path + "/" + name
         var st = stat()
         let rc = name.withCString { fstatat(fd, $0, &st, AT_SYMLINK_NOFOLLOW) }
         if rc != 0 { continue }
@@ -199,7 +213,7 @@ private func walkDiskFd(
             mtime: meta.mtime,
             isDir: meta.isDir
         )
-        let key = "\(meta.dev):\(meta.ino)"
+        let key = FileKey(dev: meta.dev, ino: meta.ino)
         let seenDir = meta.isDir && seen.contains(key)
         let hardDup = !meta.isDir && meta.nlink > 1 && seen.contains(key)
         if !hardDup {
@@ -258,21 +272,116 @@ public func formatDiskTree(
     return lines.joined(separator: "\n") + "\n"
 }
 
+/// JSON for the disk tree, written straight into a byte buffer.
+///
+/// The old shape built a `[String: Any]` per node and handed the whole tree to
+/// `JSONSerialization`: 112 ms for a 2 300-node tree (~48 µs/node, mostly
+/// dictionary and NSNumber boxing), which is minutes on a real home directory.
+/// Field names and key order match `JSONSerialization` with `.sortedKeys`; the
+/// pretty-print layout is `indent: 2, "key": value`.
 public func diskUsageJSON(_ node: DiskUsageNode) throws -> Data {
-    func obj(_ n: DiskUsageNode) -> [String: Any] {
-        [
-            "name": n.name,
-            "path": n.path,
-            "apparent": n.apparent,
-            "allocated": n.allocated,
-            "items": n.items,
-            "isDir": n.isDir,
-            "unreadable": n.unreadable,
-            "mountPoint": n.mountPoint,
-            "children": n.children.map { obj($0) },
-        ]
+    var out: [UInt8] = []
+    out.reserveCapacity(1024 + node.items * 96)
+    appendDiskUsageJSON(node, to: &out, depth: 0)
+    return Data(out)
+}
+
+private let juTrue: [UInt8] = [0x74, 0x72, 0x75, 0x65]
+private let juFalse: [UInt8] = [0x66, 0x61, 0x6C, 0x73, 0x65]
+private let juEmptyArray: [UInt8] = [0x5B, 0x5D]
+
+private func appendDiskUsageJSON(_ n: DiskUsageNode, to out: inout [UInt8], depth: Int) {
+    func indent(_ d: Int) {
+        out.append(0x0A)
+        var i = 0
+        while i < d {
+            out.append(0x20)
+            out.append(0x20)
+            i += 1
+        }
     }
-    return try JSONSerialization.data(withJSONObject: obj(node), options: [.prettyPrinted, .sortedKeys])
+    out.append(0x7B) // {
+    indent(depth + 1); juKey("allocated", &out); juInt(n.allocated, &out); out.append(0x2C)
+    indent(depth + 1); juKey("apparent", &out); juInt(n.apparent, &out); out.append(0x2C)
+    indent(depth + 1); juKey("children", &out)
+    if n.children.isEmpty {
+        out.append(contentsOf: juEmptyArray)
+    } else {
+        out.append(0x5B) // [
+        for (i, c) in n.children.enumerated() {
+            if i > 0 { out.append(0x2C) }
+            indent(depth + 2)
+            appendDiskUsageJSON(c, to: &out, depth: depth + 2)
+        }
+        indent(depth + 1)
+        out.append(0x5D) // ]
+    }
+    out.append(0x2C)
+    indent(depth + 1); juKey("isDir", &out); out.append(contentsOf: n.isDir ? juTrue : juFalse); out.append(0x2C)
+    indent(depth + 1); juKey("items", &out); juInt(n.items, &out); out.append(0x2C)
+    indent(depth + 1); juKey("mountPoint", &out); out.append(contentsOf: n.mountPoint ? juTrue : juFalse); out.append(0x2C)
+    indent(depth + 1); juKey("name", &out); juString(n.name, &out); out.append(0x2C)
+    indent(depth + 1); juKey("path", &out); juString(n.path, &out); out.append(0x2C)
+    indent(depth + 1); juKey("unreadable", &out); out.append(contentsOf: n.unreadable ? juTrue : juFalse)
+    indent(depth)
+    out.append(0x7D) // }
+}
+
+@inline(__always)
+private func juKey(_ k: String, _ out: inout [UInt8]) {
+    juString(k, &out)
+    out.append(0x3A) // :
+    out.append(0x20)
+}
+
+private func juString(_ s: String, _ out: inout [UInt8]) {
+    out.append(0x22)
+    for b in s.utf8 {
+        switch b {
+        case 0x22: out.append(0x5C); out.append(0x22)
+        case 0x5C: out.append(0x5C); out.append(0x5C)
+        case 0x08: out.append(0x5C); out.append(0x62)
+        case 0x09: out.append(0x5C); out.append(0x74)
+        case 0x0A: out.append(0x5C); out.append(0x6E)
+        case 0x0C: out.append(0x5C); out.append(0x66)
+        case 0x0D: out.append(0x5C); out.append(0x72)
+        default:
+            if b < 0x20 {
+                out.append(0x5C); out.append(0x75)
+                out.append(0x30); out.append(0x30)
+                out.append(juHex(b >> 4)); out.append(juHex(b & 0x0F))
+            } else {
+                out.append(b)
+            }
+        }
+    }
+    out.append(0x22)
+}
+
+@inline(__always)
+private func juHex(_ v: UInt8) -> UInt8 {
+    v < 10 ? (0x30 + v) : (0x61 + v - 10)
+}
+
+private func juInt(_ value: Int, _ out: inout [UInt8]) {
+    if value == 0 {
+        out.append(0x30)
+        return
+    }
+    withUnsafeTemporaryAllocation(of: UInt8.self, capacity: 20) { buf in
+        // Negative digits are accumulated as-is so Int.min does not overflow on negation.
+        var n = value
+        let neg = n < 0
+        var i = 20
+        while n != 0 {
+            i -= 1
+            let d = n % 10
+            buf[i] = 0x30 &+ UInt8(truncatingIfNeeded: neg ? -d : d)
+            n /= 10
+        }
+        if neg { out.append(0x2D) }
+        out.append(contentsOf: UnsafeBufferPointer(start: buf.baseAddress! + i, count: 20 - i))
+    }
 }
 
 private let virtualFs: Set<String> = [

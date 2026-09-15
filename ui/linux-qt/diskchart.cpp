@@ -7,12 +7,11 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QToolTip>
-#include <QtMath>
 
 #include <algorithm>
 #include <cmath>
 
-QColor diskChartColor(int index) {
+static QColor diskChartColor(int index) {
     static const int kHue[] = {211, 8, 48, 145, 280, 32, 190, 330, 90, 250};
     const int hue = kHue[index % 10];
     const int sat = 160 - (index / 10) * 20;
@@ -61,11 +60,6 @@ void DiskChart::setMode(Mode mode) {
 
 QSize DiskChart::minimumSizeHint() const {
     return QSize(260, 260);
-}
-
-QColor DiskChart::colorFor(const DiskNode *node, int index) const {
-    Q_UNUSED(node);
-    return diskChartColor(index);
 }
 
 void DiskChart::paintEvent(QPaintEvent *) {
@@ -139,7 +133,7 @@ void DiskChart::paintRings(QPainter &p, const QRect &box) {
         }
         QColor col = sl.depth == 0
             ? palette().button().color()
-            : colorFor(sl.node, sl.colorIndex);
+            : diskChartColor(sl.colorIndex);
         if (m_hover == sl.node) col = col.lighter(118);
         p.setBrush(col);
         p.setPen(QPen(palette().window().color(), 1));
@@ -260,7 +254,7 @@ void DiskChart::paintTreemap(QPainter &p, const QRect &box) {
     for (int i = 0; i < kids.size() && i < rects.size(); ++i) {
         const QRectF r = rects[i];
         if (r.width() < 2 || r.height() < 2) continue;
-        QColor col = colorFor(kids[i], i);
+        QColor col = diskChartColor(i);
         if (m_hover == kids[i]) col = col.lighter(118);
         p.setBrush(col);
         p.setPen(QPen(palette().window().color(), 1));
@@ -350,7 +344,6 @@ void DiskChart::mouseMoveEvent(QMouseEvent *event) {
                 + humanSize(n->metric(m_allocated)) + QLatin1Char('\n')
                 + n->path;
             QToolTip::showText(event->globalPosition().toPoint(), tip, this);
-            emit nodeHovered(n);
         } else {
             QToolTip::hideText();
         }

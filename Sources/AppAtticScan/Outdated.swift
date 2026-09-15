@@ -3,6 +3,62 @@ import Foundation
 import FoundationNetworking
 #endif
 
+// Per-line hot loops below use manual index walks instead of NSRegularExpression
+// plus `trimmingCharacters` (which alone costs ~2.2 µs/line). Zero allocations
+// except the result Strings.
+// Compiled once. NSRegularExpression is immutable and safe to share across threads.
+private let localeRegionRE = try! NSRegularExpression(pattern: #"rg=([a-z]{2})"#, options: [.caseInsensitive])
+private let localeCountryRE = try! NSRegularExpression(pattern: #"_([A-Z]{2})"#)
+
+// Per-line hot loops below scan UTF-8 bytes directly. `Character.isWhitespace`
+// on String indices costs ~2 µs/line (grapheme/Unicode overhead); byte compares
+// run ~20 ns/line. Zero allocations except the result Strings.
+@inline(__always) func bWS(_ b: UInt8) -> Bool {
+    b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D || b == 0x0C || b == 0x0B
+}
+
+@inline(__always) func bDigit(_ b: UInt8) -> Bool { b >= 0x30 && b <= 0x39 }
+
+@inline(__always) func bAlphaNum(_ b: UInt8) -> Bool {
+    (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)
+}
+
+/// Byte range of the trimmed line inside `text.utf8`.
+@inline(__always) func trimRange(_ u: UnsafeBufferPointer<UInt8>) -> (Int, Int) {
+    var s = 0
+    var e = u.count
+    while s < e, bWS(u[s]) { s += 1 }
+    while e > s, bWS(u[e - 1]) { e -= 1 }
+    return (s, e)
+}
+
+/// Trimmed bounds of `u[ls..<e]`.
+@inline(__always) func trimBounds(_ u: UnsafeBufferPointer<UInt8>, _ e: Int, ls: Int) -> (Int, Int) {
+    var s = ls
+    var end = e
+    while s < end, bWS(u[s]) { s += 1 }
+    while end > s, bWS(u[end - 1]) { end -= 1 }
+    return (s, end)
+}
+
+/// Token bounds `[start, end)` from `i`, skipping leading whitespace.
+@inline(__always) func tokBounds(_ u: UnsafeBufferPointer<UInt8>, _ e: Int, _ i: inout Int) -> (Int, Int)? {
+    while i < e, bWS(u[i]) { i += 1 }
+    guard i < e else { return nil }
+    let s = i
+    while i < e, !bWS(u[i]) { i += 1 }
+    return (s, i)
+}
+
+/// Substring for UTF-8 byte bounds. The inputs we parse are ASCII-delimited
+/// slices; names may carry non-ASCII bytes but bounds always land on token
+/// edges so this never splits a scalar.
+@inline(__always) func tokSub(_ line: Substring, _ u: UnsafeBufferPointer<UInt8>, _ b: (Int, Int)) -> Substring {
+    let start = line.utf8.index(line.utf8.startIndex, offsetBy: b.0)
+    let end = line.utf8.index(start, offsetBy: b.1 - b.0)
+    return line[start..<end]
+}
+
 public final class OutdatedPkg {
     public var name: String
     public var manager: String
@@ -245,14 +301,6 @@ func queryBrewStatus(
     return (parseBrewOutdatedJSON(out), false)
 }
 
-public func queryBrew(
-    _ brew: String,
-    progress: ((String) -> Void)? = nil,
-    run: CommandRun = runCommand
-) -> [OutdatedPkg] {
-    queryBrewStatus(brew, progress: progress, run: run).pkgs
-}
-
 public func brewPackageMeta(_ data: [String: Any]) -> ([String: String], [String: String]) {
     var summaries: [String: String] = [:]
     var titles: [String: String] = [:]
@@ -301,27 +349,77 @@ public func attachSummaries(
 
 private func flatpakRows(_ text: String) -> [String: (String?, String?, String?)] {
     var mapping: [String: (String?, String?, String?)] = [:]
+    // Byte scan: the old `split().map(String.init)` + per-field
+    // `trimmingCharacters` cost ~8.6 µs/line.
     for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if line.isEmpty { continue }
-        var parts: [String]
-        if line.contains("\t") {
-            parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init).filter { !$0.isEmpty }
-        } else {
-            let toks = line.split(whereSeparator: \.isWhitespace).map(String.init)
-            if toks.count <= 3 {
-                parts = toks
+        guard let row = raw.utf8.withContiguousStorageIfAvailable({ u -> (Substring, Substring?, Substring?, Substring?)? in
+            let (ls, le) = trimRange(u)
+            guard ls < le else { return nil }
+            var bounds: [(Int, Int)] = []
+            bounds.reserveCapacity(4)
+            // Tab path: split on \t, drop empties. WS path: first 3 tokens,
+            // remainder is the 4th field.
+            var hasTab = false
+            for k in ls..<le where u[k] == 0x09 { hasTab = true; break }
+            if hasTab {
+                var f = ls
+                while f <= le {
+                    var g = f
+                    while g < le, u[g] != 0x09 { g += 1 }
+                    // Keep whitespace-only fields as positional placeholders
+                    // (the old `filter { !$0.isEmpty }` kept `" "`); trim on
+                    // materialize below.
+                    if f < g { bounds.append((f, g)) }
+                    f = g + 1
+                }
             } else {
-                parts = Array(toks.prefix(3)) + [toks.dropFirst(3).joined(separator: " ")]
+                var i = ls
+                for _ in 0..<3 {
+                    guard let tb = tokBounds(u, le, &i), tb.0 < tb.1 else { break }
+                    bounds.append(tb)
+                }
+                if bounds.count == 3 {
+                    let (rs, re) = trimBounds(u, le, ls: i)
+                    if rs < re { bounds.append((rs, re)) }
+                }
             }
-        }
-        guard let key = parts.first?.trimmingCharacters(in: .whitespaces), !key.isEmpty else { continue }
+            guard !bounds.isEmpty else { return nil }
+            // Trim on materialize: whitespace-only placeholders become "".
+            func sub(_ b: (Int, Int)) -> Substring {
+                let (ts, te) = trimBounds(u, b.1, ls: b.0)
+                return tokSub(raw, u, (ts, te))
+            }
+            let key = sub(bounds[0])
+            guard !key.isEmpty else { return nil }
+            // Extra fields fold into the summary: the old code joined the
+            // (empty-dropped, untrimmed) parts[3...] with "\t", then trimmed.
+            // Non-nil whenever a 4th field exists, even if it trims to "".
+            // Fast path: exactly 4 fields need no join.
+            var tail: Substring? = nil
+            if bounds.count == 4 {
+                tail = sub(bounds[3])
+            } else if bounds.count > 4 {
+                var acc = ""
+                acc.reserveCapacity(64)
+                for b in bounds[3...] {
+                    acc += String(sub(b))
+                    acc += "\t"
+                }
+                if acc.hasSuffix("\t") { acc.removeLast() }
+                tail = Substring(acc.trimmingCharacters(in: .whitespaces))
+            }
+            return (key,
+                    bounds.count > 1 ? sub(bounds[1]) : nil,
+                    bounds.count > 2 ? sub(bounds[2]) : nil,
+                    tail)
+        }) ?? nil else { continue }
+        let key = String(row.0)
         let low = key.lowercased()
-        if ["application", "application id", "name", "id"].contains(low) { continue }
-        let version = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : nil
-        var title = parts.count > 2 ? parts[2].trimmingCharacters(in: .whitespaces) : nil
-        let summary = parts.count > 3 ? parts[3...].joined(separator: "\t").trimmingCharacters(in: .whitespaces) : nil
-        if let t = title, t.lowercased() == key.lowercased() { title = nil }
+        if low == "application" || low == "application id" || low == "name" || low == "id" { continue }
+        let version = row.1.map(String.init)
+        var title = row.2.map(String.init)
+        let summary = row.3.map(String.init)
+        if let t = title, t.lowercased() == low { title = nil }
         mapping[key] = (version, title, summary)
     }
     return mapping
@@ -351,19 +449,37 @@ public func parseFlatpakUpdates(_ updatesText: String, installedText: String = "
     return out
 }
 
+/// First two tokens of a trimmed line, or nil when fewer.
+private func snapTokens(_ raw: Substring) -> (Substring, Substring)? {
+    raw.utf8.withContiguousStorageIfAvailable { u -> (Substring, Substring)? in
+        let (ls, le) = trimRange(u)
+        guard ls < le else { return nil }
+        var i = ls
+        guard let a = tokBounds(u, le, &i), a.0 < a.1,
+              let b = tokBounds(u, le, &i), b.0 < b.1
+        else { return nil }
+        return (tokSub(raw, u, a), tokSub(raw, u, b))
+    } ?? nil
+}
+
 private func snapNameVersionMap(_ text: String) -> [String: String] {
     var mapping: [String: String] = [:]
-    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        .map { $0.trimmingCharacters(in: .whitespaces) }
-        .filter { !$0.isEmpty }
-    if lines.isEmpty { return mapping }
-    if lines[0].lowercased().hasPrefix("all snaps up to date") { return mapping }
-    let start = lines[0].split(whereSeparator: \.isWhitespace).first?.lowercased() == "name" ? 1 : 0
-    for ln in lines.dropFirst(start) {
-        let parts = ln.split(whereSeparator: \.isWhitespace).map(String.init)
-        if parts.count >= 2 {
-            mapping[parts[0]] = parts[1]
-        }
+    let raws = text.split(separator: "\n", omittingEmptySubsequences: false)
+    // `All snaps up to date.` — case-insensitive prefix of the first non-empty
+    // line, matching the old check exactly. A `Name …` header on that same
+    // line is skipped by index, so single-token leaders can't shift it.
+    var headIdx: Int? = nil
+    for (idx, raw) in raws.enumerated() {
+        let t = raw.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { continue }
+        if t.lowercased().hasPrefix("all snaps up to date") { return mapping }
+        headIdx = t.split(whereSeparator: \.isWhitespace).first?.lowercased() == "name" ? idx : nil
+        break
+    }
+    for (idx, raw) in raws.enumerated() {
+        if idx == headIdx { continue }
+        guard let pair = snapTokens(raw) else { continue }
+        mapping[String(pair.0)] = String(pair.1)
     }
     return mapping
 }
@@ -376,61 +492,164 @@ public func parseSnapRefreshList(_ refreshText: String, installedText: String = 
     }
 }
 
+/// `apt list --upgradable` line: `name/dist latest arch [upgradable from: cur]`.
+func parseAptUpgradableLine(_ s: Substring) -> (name: String, current: String, latest: String)? {
+    s.utf8.withContiguousStorageIfAvailable { u -> (String, String, String)? in
+        let (ls, le) = trimRange(u)
+        guard ls < le else { return nil }
+        var i = ls
+        while i < le, u[i] != 0x2F /* / */, !bWS(u[i]) { i += 1 }
+        guard i < le, u[i] == 0x2F else { return nil }
+        let nameB = (ls, i)
+        i += 1
+        guard let distB = tokBounds(u, le, &i), distB.0 < distB.1,
+              let latestB = tokBounds(u, le, &i), latestB.0 < latestB.1,
+              let archB = tokBounds(u, le, &i), archB.0 < archB.1
+        else { return nil }
+        _ = distB
+        _ = archB
+        while i < le, bWS(u[i]) { i += 1 }
+        guard i < le, u[i] == 0x5B /* [ */ else { return nil }
+        i += 1
+        var close = i
+        while close < le, u[close] != 0x5D /* ] */ { close += 1 }
+        guard close < le else { return nil }
+        var bs = i
+        var be = close
+        while bs < be, bWS(u[bs]) { bs += 1 }
+        while be > bs, bWS(u[be - 1]) { be -= 1 }
+        // `upgradable from:` marker, case-insensitive.
+        let marker: [UInt8] = [0x75, 0x70, 0x67, 0x72, 0x61, 0x64, 0x61, 0x62, 0x6C, 0x65, 0x20, 0x66, 0x72, 0x6F, 0x6D, 0x3A]
+        guard be - bs > marker.count else { return nil }
+        for k in 0..<marker.count {
+            var c = u[bs + k]
+            if c >= 0x41, c <= 0x5A { c &+= 32 }
+            guard c == marker[k] else { return nil }
+        }
+        var cs = bs + marker.count
+        var ce = be
+        while cs < ce, bWS(u[cs]) { cs += 1 }
+        while ce > cs, bWS(u[ce - 1]) { ce -= 1 }
+        guard cs < ce else { return nil }
+        var k = cs
+        while k < ce, !bWS(u[k]) { k += 1 }
+        guard k == ce else { return nil }
+        return (String(tokSub(s, u, nameB)), String(tokSub(s, u, (cs, ce))), String(tokSub(s, u, latestB)))
+    } ?? nil
+}
+
 public func parseAptUpgradable(_ text: String) -> [OutdatedPkg] {
-    let re = try! NSRegularExpression(pattern: #"^([^/]+)/\S+\s+(\S+)\s+\S+\s+\[upgradable from:\s*([^\]]+)\]"#)
     var out: [OutdatedPkg] = []
-    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let s = line.trimmingCharacters(in: .whitespaces)
-        let range = NSRange(s.startIndex..., in: s)
-        guard let m = re.firstMatch(in: s, range: range), m.numberOfRanges >= 4,
-              let n = Range(m.range(at: 1), in: s),
-              let latest = Range(m.range(at: 2), in: s),
-              let cur = Range(m.range(at: 3), in: s)
-        else { continue }
-        out.append(OutdatedPkg(name: String(s[n]), manager: "apt", currentVersion: String(s[cur]), latestVersion: String(s[latest])))
+    out.reserveCapacity(1024)
+    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        guard let (name, cur, latest) = parseAptUpgradableLine(raw) else { continue }
+        out.append(OutdatedPkg(name: name, manager: "apt", currentVersion: cur, latestVersion: latest))
     }
     return out
 }
 
+/// `pacman -Qu` / `paru -Qua` line: `name cur -> latest [ignored?]`.
+func parsePacmanQuLine(_ s: Substring) -> (name: String, current: String, latest: String)? {
+    s.utf8.withContiguousStorageIfAvailable { u -> (String, String, String)? in
+        let (ls, le) = trimRange(u)
+        guard ls < le else { return nil }
+        var i = ls
+        guard let nameB = tokBounds(u, le, &i),
+              let curB = tokBounds(u, le, &i),
+              let arrowB = tokBounds(u, le, &i), arrowB.1 - arrowB.0 == 2,
+              u[arrowB.0] == 0x2D, u[arrowB.0 + 1] == 0x3E,
+              let latestB = tokBounds(u, le, &i), latestB.0 < latestB.1
+        else { return nil }
+        while i < le, bWS(u[i]) { i += 1 }
+        if i < le {
+            // Trailing `[ignored]` marker only.
+            guard u[i] == 0x5B /* [ */, u[le - 1] == 0x5D /* ] */ else { return nil }
+            var rs = i + 1
+            var re = le - 1
+            while rs < re, bWS(u[rs]) { rs += 1 }
+            while re > rs, bWS(u[re - 1]) { re -= 1 }
+            guard rs < re else { return nil }
+            var k = rs
+            while k < re, !bWS(u[k]) { k += 1 }
+            guard k == re else { return nil }
+        }
+        return (String(tokSub(s, u, nameB)), String(tokSub(s, u, curB)), String(tokSub(s, u, latestB)))
+    } ?? nil
+}
+
 public func parsePacmanQu(_ text: String) -> [OutdatedPkg] {
-    let re = try! NSRegularExpression(pattern: #"^(\S+)\s+(\S+)\s+->\s+(\S+)"#)
     var out: [OutdatedPkg] = []
-    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let s = line.trimmingCharacters(in: .whitespaces)
-        let range = NSRange(s.startIndex..., in: s)
-        guard let m = re.firstMatch(in: s, range: range), m.numberOfRanges >= 4,
-              let n = Range(m.range(at: 1), in: s),
-              let cur = Range(m.range(at: 2), in: s),
-              let latest = Range(m.range(at: 3), in: s)
-        else { continue }
+    out.reserveCapacity(1024)
+    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        guard let (name, cur, latest) = parsePacmanQuLine(raw) else { continue }
         out.append(OutdatedPkg(
-            name: String(s[n]),
+            name: name,
             manager: "pacman",
-            currentVersion: String(s[cur]),
-            latestVersion: String(s[latest])
+            currentVersion: cur,
+            latestVersion: latest
         ))
     }
     return out
 }
 
+/// `dnf list --upgrades` row: `name[.arch] version repo`. The version token must
+/// carry a digit; the repo token is required (name-only noise lines drop out).
+func parseDnfUpgradesLine(_ s: Substring) -> (name: String, latest: String)? {
+    s.utf8.withContiguousStorageIfAvailable { u -> (String, String)? in
+        let (ls, le) = trimRange(u)
+        guard ls < le else { return nil }
+        var i = ls
+        guard let nameB = tokBounds(u, le, &i),
+              let verB = tokBounds(u, le, &i),
+              let repoB = tokBounds(u, le, &i), repoB.0 < repoB.1
+        else { return nil }
+        var (ns, ne) = nameB
+        // Strip a known `.arch` suffix.
+        var dot = -1
+        var k = ne - 1
+        while k >= ns {
+            if u[k] == 0x2E /* . */ { dot = k; break }
+            k -= 1
+        }
+        if dot > ns {
+            let slen = ne - dot - 1
+            let archs: [[UInt8]] = [
+                [0x78, 0x38, 0x36, 0x5F, 0x36, 0x34], // x86_64
+                [0x61, 0x61, 0x72, 0x63, 0x68, 0x36, 0x34], // aarch64
+                [0x69, 0x36, 0x38, 0x36], // i686
+                [0x6E, 0x6F, 0x61, 0x72, 0x63, 0x68], // noarch
+                [0x70, 0x70, 0x63, 0x36, 0x34, 0x6C, 0x65], // ppc64le
+                [0x73, 0x33, 0x39, 0x30, 0x78], // s390x
+            ]
+            for a in archs where a.count == slen {
+                var match = true
+                for j in 0..<slen where u[dot + 1 + j] != a[j] { match = false; break }
+                if match { ne = dot; break }
+            }
+        }
+        guard ns < ne else { return nil }
+        // Name charset `[A-Za-z0-9_+.-]`, version carries a digit.
+        var hasDigit = false
+        for j in ns..<ne {
+            let c = u[j]
+            guard bAlphaNum(c) || c == 0x5F || c == 0x2B || c == 0x2E || c == 0x2D else { return nil }
+        }
+        for j in verB.0..<verB.1 where bDigit(u[j]) { hasDigit = true; break }
+        guard hasDigit else { return nil }
+        return (String(tokSub(s, u, (ns, ne))), String(tokSub(s, u, verB)))
+    } ?? nil
+}
+
 public func parseDnfUpgrades(_ text: String, manager: String = "dnf") -> [OutdatedPkg] {
-    let re = try! NSRegularExpression(
-        pattern: #"^([A-Za-z0-9_+.-]+?)(?:\.(x86_64|aarch64|i686|noarch|ppc64le|s390x))?\s+(\S*[0-9]\S*)\s+\S+"#
-    )
     var out: [OutdatedPkg] = []
-    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let s = line.trimmingCharacters(in: .whitespaces)
-        if s.isEmpty { continue }
-        if isDnfListingNoise(s) { continue }
-        let range = NSRange(s.startIndex..., in: s)
-        guard let m = re.firstMatch(in: s, range: range), m.numberOfRanges >= 4,
-              let n = Range(m.range(at: 1), in: s),
-              let latest = Range(m.range(at: 3), in: s)
-        else { continue }
+    out.reserveCapacity(1024)
+    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        if isDnfListingNoise(raw) { continue }
+        guard let (name, latest) = parseDnfUpgradesLine(raw) else { continue }
         out.append(OutdatedPkg(
-            name: String(s[n]),
+            name: name,
             manager: manager,
-            latestVersion: String(s[latest])
+            latestVersion: latest
         ))
     }
     return out
@@ -438,46 +657,84 @@ public func parseDnfUpgrades(_ text: String, manager: String = "dnf") -> [Outdat
 
 public func parseZypperListUpdates(_ text: String) -> [OutdatedPkg] {
     var out: [OutdatedPkg] = []
-    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let s = line.trimmingCharacters(in: .whitespaces)
-        if s.isEmpty || !s.contains("|") || s.hasPrefix("--") { continue }
-        let cols = s.split(separator: "|", omittingEmptySubsequences: false).map {
-            $0.trimmingCharacters(in: .whitespaces)
-        }
-        guard cols.count >= 5 else { continue }
-        let status = cols[0].lowercased()
-        let name = cols[2]
-        let current = cols[3]
-        let available = cols[4]
-        if status == "s" || name.isEmpty || name.lowercased() == "name" { continue }
+    out.reserveCapacity(256)
+    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        guard let cols = pipeColumns(raw), cols.count >= 5 else { continue }
+        guard let row = raw.utf8.withContiguousStorageIfAvailable({ u -> (Substring, Substring, Substring?)? in
+            // Status `S` rows and the header row drop out.
+            let (ss, se) = cols[0]
+            if se - ss == 1 {
+                var c = u[ss]
+                if c >= 0x41, c <= 0x5A { c &+= 32 }
+                if c == 0x73 /* s */ { return nil }
+            }
+            let name = tokSub(raw, u, cols[2])
+            guard !name.isEmpty, name.caseInsensitiveCompare("Name") != .orderedSame else { return nil }
+            let cur = tokSub(raw, u, cols[3])
+            let avail = tokSub(raw, u, cols[4])
+            return (name, avail, cur.isEmpty ? nil : cur)
+        }) ?? nil else { continue }
         out.append(OutdatedPkg(
-            name: name,
+            name: String(row.0),
             manager: "zypper",
-            currentVersion: current.isEmpty ? nil : current,
-            latestVersion: available
+            currentVersion: row.2.map(String.init),
+            latestVersion: String(row.1)
         ))
     }
     return out
 }
 
+/// `mas outdated` line: `id name (cur -> latest)`. The id is digits, the name
+/// is the head remainder, the parenthesised tail is exactly `a -> b`.
+func parseMasOutdatedLine(_ s: Substring) -> (id: String, name: String, current: String, latest: String)? {
+    s.utf8.withContiguousStorageIfAvailable { u -> (String, String, String, String)? in
+        let (ls, le) = trimRange(u)
+        guard ls < le, u[le - 1] == 0x29 /* ) */ else { return nil }
+        var open = le - 1
+        while open > ls, u[open] != 0x28 /* ( */ { open -= 1 }
+        guard open > ls else { return nil }
+        let (hs, he) = trimBounds(u, open, ls: ls)
+        let (ts, te) = trimBounds(u, le - 1, ls: open + 1)
+        // `->` split inside the tail.
+        var arrow = -1
+        var k = ts
+        while k + 1 < te {
+            if u[k] == 0x2D, u[k + 1] == 0x3E { arrow = k; break }
+            k += 1
+        }
+        guard arrow > ts else { return nil }
+        let (cs, ce) = trimBounds(u, arrow, ls: ts)
+        let (vs, ve) = trimBounds(u, te, ls: arrow + 2)
+        guard cs < ce, vs < ve else { return nil }
+        for j in cs..<ce where u[j] == 0x28 || u[j] == 0x29 { return nil }
+        for j in vs..<ve where u[j] == 0x28 || u[j] == 0x29 { return nil }
+        // Head: digits id, then the name.
+        var p = hs
+        while p < he, bDigit(u[p]) { p += 1 }
+        let idE = p
+        guard idE > hs, p < he, bWS(u[p]) else { return nil }
+        while p < he, bWS(u[p]) { p += 1 }
+        guard p < he else { return nil }
+        return (
+            String(tokSub(s, u, (hs, idE))),
+            String(tokSub(s, u, (p, he))),
+            String(tokSub(s, u, (cs, ce))),
+            String(tokSub(s, u, (vs, ve)))
+        )
+    } ?? nil
+}
+
 public func parseMasOutdated(_ text: String) -> [OutdatedPkg] {
-    let re = try! NSRegularExpression(pattern: #"^(\d+)\s+(.+?)\s+\((.+?)\s+->\s+(.+?)\)$"#)
     var out: [OutdatedPkg] = []
-    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let s = line.trimmingCharacters(in: .whitespaces)
-        let range = NSRange(s.startIndex..., in: s)
-        guard let m = re.firstMatch(in: s, range: range), m.numberOfRanges >= 5,
-              let idR = Range(m.range(at: 1), in: s),
-              let nameR = Range(m.range(at: 2), in: s),
-              let curR = Range(m.range(at: 3), in: s),
-              let latestR = Range(m.range(at: 4), in: s)
-        else { continue }
+    out.reserveCapacity(1024)
+    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        guard let (id, name, cur, latest) = parseMasOutdatedLine(raw) else { continue }
         out.append(OutdatedPkg(
-            name: String(s[idR]),
+            name: id,
             manager: "app-store",
-            currentVersion: String(s[curR]).trimmingCharacters(in: .whitespaces),
-            latestVersion: String(s[latestR]).trimmingCharacters(in: .whitespaces),
-            title: String(s[nameR]).trimmingCharacters(in: .whitespaces)
+            currentVersion: cur,
+            latestVersion: latest,
+            title: name
         ))
     }
     return out
@@ -495,14 +752,12 @@ public func storeCountries(_ localeText: String? = nil) -> [String] {
     }
     var countries: [String] = []
     let src = text ?? ""
-    let rgRE = try! NSRegularExpression(pattern: #"rg=([a-z]{2})"#, options: [.caseInsensitive])
     let ns = src as NSString
     let full = NSRange(location: 0, length: ns.length)
-    if let m = rgRE.firstMatch(in: src, range: full), m.numberOfRanges >= 2 {
+    if let m = localeRegionRE.firstMatch(in: src, range: full), m.numberOfRanges >= 2 {
         countries.append(ns.substring(with: m.range(at: 1)).lowercased())
     }
-    let locRE = try! NSRegularExpression(pattern: #"_([A-Z]{2})"#)
-    if let m = locRE.firstMatch(in: src, range: full), m.numberOfRanges >= 2 {
+    if let m = localeCountryRE.firstMatch(in: src, range: full), m.numberOfRanges >= 2 {
         let code = ns.substring(with: m.range(at: 1)).lowercased()
         if !countries.contains(code) { countries.append(code) }
     }
@@ -513,12 +768,20 @@ public func storeCountries(_ localeText: String? = nil) -> [String] {
 public func versionNewer(latest: String?, current: String?) -> Bool {
     func parts(_ v: String?) -> [Int] {
         var nums: [Int] = []
-        let re = try! NSRegularExpression(pattern: #"\d+"#)
         let src = v ?? ""
-        let ns = src as NSString
-        for m in re.matches(in: src, range: NSRange(location: 0, length: ns.length)) {
-            if let n = Int(ns.substring(with: m.range)) { nums.append(n) }
+        var cur = 0
+        var inDigits = false
+        for ch in src {
+            if ch.isNumber {
+                cur = cur * 10 + ch.wholeNumberValue!
+                inDigits = true
+            } else if inDigits {
+                nums.append(cur)
+                cur = 0
+                inDigits = false
+            }
         }
+        if inDigits { nums.append(cur) }
         while nums.last == 0 { nums.removeLast() }
         return nums
     }
@@ -563,7 +826,14 @@ public func parseMdlsMas(_ text: String) -> (String?, String?) {
 
 public func shortDesc(_ text: String?, limit: Int = 220) -> String? {
     guard let raw = text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
-    let para = raw.components(separatedBy: "\n\n").first ?? raw
+    // First paragraph without bridging to NSString (`components(separatedBy:)`
+    // decodes the whole string as UTF-16 per call).
+    let para: Substring
+    if let r = raw.range(of: "\n\n") {
+        para = raw[..<r.lowerBound]
+    } else {
+        para = raw[...]
+    }
     let collapsed = para.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     if collapsed.count <= limit { return collapsed }
     let prefix = String(collapsed.prefix(limit))
@@ -585,8 +855,7 @@ public func pkgFromItunes(
     let latest = (row["version"] as? String)?.trimmingCharacters(in: .whitespaces)
     let latestVal = (latest?.isEmpty == false) ? latest : nil
     guard versionNewer(latest: latestVal, current: current) else { return nil }
-    var title = (displayName ?? (row["trackName"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
-    if title.isEmpty { title = "" }
+    let title = (displayName ?? (row["trackName"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
     var titleOut: String? = title.isEmpty ? nil : title
     if let t = titleOut, t.lowercased() == bundleId.lowercased() { titleOut = nil }
     return OutdatedPkg(
@@ -790,14 +1059,43 @@ public func queryFlatpak(
 ) -> [OutdatedPkg] {
     guard let path = which("flatpak") else { return [] }
     progress?("  · checking Flatpak updates…")
-    var (rc, updates, _) = run(flatpakColumns(path: path, kind: "updates", withMeta: true), 60)
-    let withMeta = rc == 0
-    if !withMeta {
-        (rc, updates, _) = run(flatpakColumns(path: path, kind: "updates", withMeta: false), 60)
-        if rc != 0 { return [] }
+    // `remote-ls` (network) and `list` (local metadata walk, ~2.4 s itself)
+    // are independent: overlap them. WithoutActuallyEscaping is sound: the
+    // group joins before return.
+    return withoutActuallyEscaping(run) { run in
+        func pair(withMeta: Bool) -> (rc: Int32, updates: String, installed: String) {
+            let group = DispatchGroup()
+            let r1 = LockBox<(Int32, String)>((127, ""))
+            let r2 = LockBox<(Int32, String)>((127, ""))
+            group.enter()
+            DispatchQueue.global().async {
+                let (rc, out, _) = run(flatpakColumns(path: path, kind: "updates", withMeta: withMeta), 60)
+                r1.value = (rc, out)
+                group.leave()
+            }
+            group.enter()
+            DispatchQueue.global().async {
+                let (rc, out, _) = run(flatpakColumns(path: path, kind: "list", withMeta: withMeta), 60)
+                r2.value = (rc, out)
+                group.leave()
+            }
+            group.wait()
+            let (rc1, updates) = r1.value
+            let (rc2, installed) = r2.value
+            return (rc1, updates, rc2 == 0 ? installed : "")
+        }
+        var (rc, updates, installed) = pair(withMeta: true)
+        // A failing remote (GPG error on stderr) still prints other remotes'
+        // rows on stdout: use them instead of discarding and repaying the
+        // full `remote-ls` cost with plain columns. Retry plain only when BOTH
+        // outputs parse to nothing: that means old flatpak without --columns,
+        // not a flaky remote (local `list` still succeeds then).
+        if rc != 0, parseFlatpakUpdates(updates).isEmpty, installed.isEmpty {
+            (rc, updates, installed) = pair(withMeta: false)
+            if rc != 0, parseFlatpakUpdates(updates).isEmpty { return [] }
+        }
+        return parseFlatpakUpdates(updates, installedText: installed)
     }
-    let (rc2, installed, _) = run(flatpakColumns(path: path, kind: "list", withMeta: withMeta), 60)
-    return parseFlatpakUpdates(updates, installedText: rc2 == 0 ? installed : "")
 }
 
 public func querySnap(
@@ -807,10 +1105,29 @@ public func querySnap(
 ) -> [OutdatedPkg] {
     guard let path = which("snap") else { return [] }
     progress?("  · checking Snap updates…")
-    let (rc, refresh, _) = run([path, "refresh", "--list"], 60)
-    if rc != 0 { return [] }
-    let (rc2, listed, _) = run([path, "list"], 60)
-    return parseSnapRefreshList(refresh, installedText: rc2 == 0 ? listed : "")
+    // `refresh --list` and `list` are independent: overlap them.
+    return withoutActuallyEscaping(run) { run in
+        let group = DispatchGroup()
+        let r1 = LockBox<(Int32, String)>((127, ""))
+        let r2 = LockBox<(Int32, String)>((127, ""))
+        group.enter()
+        DispatchQueue.global().async {
+            let (rc, out, _) = run([path, "refresh", "--list"], 60)
+            r1.value = (rc, out)
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global().async {
+            let (rc, out, _) = run([path, "list"], 60)
+            r2.value = (rc, out)
+            group.leave()
+        }
+        group.wait()
+        let (rc, refresh) = r1.value
+        if rc != 0 { return [] }
+        let (rc2, listed) = r2.value
+        return parseSnapRefreshList(refresh, installedText: rc2 == 0 ? listed : "")
+    }
 }
 
 public func queryApt(
@@ -898,24 +1215,36 @@ public func collectLinux(
     run: CommandRun = runCommand,
     osRelease: String? = nil
 ) -> [OutdatedPkg] {
-    var pkgs: [OutdatedPkg] = []
-    pkgs.append(contentsOf: queryFlatpak(progress: progress, which: which, run: run))
-    pkgs.append(contentsOf: querySnap(progress: progress, which: which, run: run))
-    pkgs.append(contentsOf: queryAur(progress: progress, which: which, run: run))
+    // Manager queries are independent subprocess waits: run them concurrently
+    // (flatpak + AUR alone cost ~3 s sequential on this box). One summary
+    // progress line: per-manager lines would interleave across threads.
+    // The query closures never outlive this call (pmap joins), so rebinding
+    // the non-escaping params is sound.
+    progress?("  · checking Linux updates (flatpak, snap, AUR, distro)…")
     let family = linuxDistroFamily(osRelease: osRelease ?? linuxOsReleaseText())
-    switch resolveDistroPackageManager(family: family, which: which) {
-    case .pacman:
-        pkgs.append(contentsOf: queryPacman(progress: progress, which: which, run: run))
-    case .dnf:
-        pkgs.append(contentsOf: queryDnf(progress: progress, which: which, run: run))
-    case .zypper:
-        pkgs.append(contentsOf: queryZypper(progress: progress, which: which, run: run))
-    case .apt:
-        pkgs.append(contentsOf: queryApt(progress: progress, which: which, run: run))
-    case nil:
-        break
+    let distro = resolveDistroPackageManager(family: family, which: which)
+    return withoutActuallyEscaping(which) { which in
+        withoutActuallyEscaping(run) { run in
+            var queries: [() -> [OutdatedPkg]] = [
+                { queryFlatpak(which: which, run: run) },
+                { querySnap(which: which, run: run) },
+                { queryAur(which: which, run: run) },
+            ]
+            switch distro {
+            case .pacman:
+                queries.append { queryPacman(which: which, run: run) }
+            case .dnf:
+                queries.append { queryDnf(which: which, run: run) }
+            case .zypper:
+                queries.append { queryZypper(which: which, run: run) }
+            case .apt:
+                queries.append { queryApt(which: which, run: run) }
+            case nil:
+                break
+            }
+            return pmap(queries, workers: 4) { $0() }.flatMap { $0 }
+        }
     }
-    return pkgs
 }
 
 func softwareKeys(_ sw: Software) -> Set<String> {

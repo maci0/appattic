@@ -195,15 +195,6 @@ final class PackageTests: XCTestCase {
         XCTAssertTrue(parsePipUserList("[]").isEmpty)
     }
 
-    func testParseDenoGlobalListSkipsRuntime() {
-        let pkgs = parseDenoGlobalList("deno\nfile_server\ndeployctl\n")
-        XCTAssertEqual(pkgs.map(\.name), ["file_server", "deployctl"])
-        XCTAssertEqual(pkgs[0].manager, "deno")
-        XCTAssertEqual(pkgs[0].kind, "global")
-        XCTAssertTrue(parseDenoGlobalList("deno\n").isEmpty)
-        XCTAssertTrue(parseDenoGlobalList("").isEmpty)
-    }
-
     func testEmptyAndJunkParsersStayEmpty() {
         XCTAssertTrue(parsePacmanOrphans("").isEmpty)
         XCTAssertTrue(parseAptAutoremove("Reading package lists... Done\n0 upgraded, 0 newly installed, 0 to remove").isEmpty)
@@ -217,7 +208,6 @@ final class PackageTests: XCTestCase {
         XCTAssertTrue(parseUvToolList("").isEmpty)
         XCTAssertTrue(parseUvToolList("- ruff\n").isEmpty)
         XCTAssertTrue(parsePipUserList("").isEmpty)
-        XCTAssertTrue(parseDenoGlobalList("deno.exe\n").isEmpty)
     }
 
     func testPackageRemoveCommandsAreNamedAndQuoted() {
@@ -296,12 +286,15 @@ final class PackageTests: XCTestCase {
 
     func testCollectPackagesRoutesArchOrphansAndGlobals() {
         var cmds: [[String]] = []
+        let cmdsLock = NSLock()
         let pkgs = collectPackages(
             which: { name in
                 ["pacman", "npm"].contains(name) ? "/usr/bin/\(name)" : nil
             },
             run: { cmd, _ in
+                cmdsLock.lock()
                 cmds.append(cmd)
+                cmdsLock.unlock()
                 let bin = cmd.first.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
                 if bin == "pacman" { return (0, "libfoo 1.0-1\n", "") }
                 if bin == "npm" {
@@ -324,10 +317,13 @@ final class PackageTests: XCTestCase {
 
     func testCollectPackagesFedoraUsesRepoqueryNotLeaves() {
         var cmds: [[String]] = []
+        let cmdsLock = NSLock()
         let pkgs = collectPackages(
             which: { name in ["dnf", "dnf5"].contains(name) ? "/usr/bin/\(name)" : nil },
             run: { cmd, _ in
+                cmdsLock.lock()
                 cmds.append(cmd)
+                cmdsLock.unlock()
                 if cmd.contains("leaves") { return (0, "should-not-run\n", "") }
                 if cmd.contains("repoquery") { return (0, "libfoo\n", "") }
                 return (1, "", "missing")
@@ -341,10 +337,13 @@ final class PackageTests: XCTestCase {
 
     func testCollectPackagesDebianUsesAptGetDryRun() {
         var cmds: [[String]] = []
+        let cmdsLock = NSLock()
         let pkgs = collectPackages(
             which: { name in name == "apt-get" ? "/usr/bin/apt-get" : nil },
             run: { cmd, _ in
+                cmdsLock.lock()
                 cmds.append(cmd)
+                cmdsLock.unlock()
                 return (0, "Remv libfoo0 [1.0]\n", "")
             },
             osRelease: "ID=ubuntu\nID_LIKE=debian\n"
@@ -364,12 +363,15 @@ final class PackageTests: XCTestCase {
 
     func testCollectPackagesUnknownPrefersPacmanOverApt() {
         var cmds: [[String]] = []
+        let cmdsLock = NSLock()
         let pkgs = collectPackages(
             which: { name in
                 ["pacman", "apt", "apt-get"].contains(name) ? "/usr/bin/\(name)" : nil
             },
             run: { cmd, _ in
+                cmdsLock.lock()
                 cmds.append(cmd)
+                cmdsLock.unlock()
                 let bin = cmd.first.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
                 if bin == "pacman" { return (0, "libfoo 1.0-1\n", "") }
                 if bin == "apt-get" || bin == "apt" { return (0, "Remv should-not-run [1]\n", "") }
@@ -468,11 +470,6 @@ final class PackageTests: XCTestCase {
         XCTAssertTrue(result.incomplete)
         XCTAssertEqual(result.toScanData().incomplete, true)
         XCTAssertTrue(scanResult(from: result.toScanData()).incomplete)
-    }
-
-    func testFingerprintMentionsPackagesEpoch() {
-        let fp = scanFingerprint(which: { _ in nil }, run: { _, _ in (1, "", "") })
-        XCTAssertTrue(fp.contains("packages:1"), fp)
     }
 }
 

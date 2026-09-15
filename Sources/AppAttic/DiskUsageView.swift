@@ -5,22 +5,14 @@ import AppAtticScan
 import AppKit
 #endif
 
-private struct DiskRule: View {
-    var body: some View {
-        Color.appHairline
-            .frame(height: 1)
-            .frame(maxWidth: .infinity)
-    }
-}
-
 struct DiskUsageView: View {
     @State private var volumes: [DiskVolume] = listDiskVolumes()
     @State private var root: DiskUsageNode? = nil
     @State private var scanning = false
     @State private var status = ""
     @State private var path = FileManager.default.homeDirectoryForCurrentUser.path
-    @State private var allocated = true
-    @State private var oneFileSystem = true
+    private let allocated = true
+    private let oneFileSystem = true
     @State private var selected: DiskUsageNode? = nil
 
     var body: some View {
@@ -37,7 +29,7 @@ struct DiskUsageView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            DiskRule()
+            HRule()
             if scanning {
                 Text(status.isEmpty ? "Scanning" : status)
                     .font(.system(size: 13))
@@ -55,7 +47,7 @@ struct DiskUsageView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                DiskRule()
+                HRule()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         diskRows(root, depth: 0)
@@ -63,7 +55,7 @@ struct DiskUsageView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                 }
-                DiskRule()
+                HRule()
                 HStack {
                     if let selected {
                         Button("Open") {
@@ -107,7 +99,7 @@ struct DiskUsageView: View {
                                 }
                                 .padding(.vertical, 6)
                             }
-                            DiskRule()
+                            HRule()
                         }
                     }
                     .padding(.horizontal, 16)

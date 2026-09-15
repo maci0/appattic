@@ -6,7 +6,6 @@
 
 #include <QApplication>
 #include <QByteArray>
-#include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
@@ -862,7 +861,7 @@ int runVersion(int argc, char **argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("AppAttic"));
     QApplication::setOrganizationName(QStringLiteral("AppAttic"));
-    std::fprintf(stdout, "AppAttic 1.2.1\n");
+    std::fprintf(stdout, "AppAttic 1.3.0\n");
     std::fprintf(stdout, "Qt %s\n", qVersion());
     const QString out = coreOutDir();
     const QString core = out + QStringLiteral("/appattic_core.wasm");
@@ -884,7 +883,7 @@ int runSmoke(int argc, char **argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("AppAttic"));
     QApplication::setOrganizationName(QStringLiteral("AppAttic"));
-    std::fprintf(stdout, "AppAttic 1.2.1\n");
+    std::fprintf(stdout, "AppAttic 1.3.0\n");
     std::fprintf(stdout, "Qt %s\n", qVersion());
     if (smokeVerifyHelpers() != 0) {
         return 1;
@@ -940,6 +939,9 @@ int runSmoke(int argc, char **argv) {
     SmokeState st;
     char err[1024];
     err[0] = '\0';
+    /* taggedPluginSpecs rewrites PATH to find user tool dirs; runCoreWasm holds
+       the inverse. A finished scan must not leave the embedder's PATH rewritten. */
+    const QByteArray pathBefore = qgetenv("PATH");
     const int rc = runCoreWasm(
         core,
         taggedPluginSpecs(out),
@@ -949,6 +951,10 @@ int runSmoke(int argc, char **argv) {
         sizeof err,
         smokeProgress
     );
+    if (qgetenv("PATH") != pathBefore) {
+        std::fprintf(stderr, "wasm: run left PATH rewritten (scan effect not reverted)\n");
+        return 1;
+    }
     if (rc != 0) {
         std::fprintf(stderr, "wasm query failed: %s\n", err[0] ? err : "(no detail)");
         return 1;

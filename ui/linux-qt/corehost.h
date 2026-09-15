@@ -23,4 +23,9 @@ int runCoreWasm(
 void requestCoreWasmCancel();
 void clearCoreWasmCancel();
 
+/* Inverse of the PATH rewrite taggedPluginSpecs makes. runCoreWasm already
+   restores on every return; this covers a worker that was terminated before
+   it could return. Safe to call when nothing was applied. */
+void restoreCoreWasmPath();
+
 #endif

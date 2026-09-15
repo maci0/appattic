@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 public let appAliases: [String: [String]] = [
     "firefox": ["mozilla"],
@@ -19,6 +24,13 @@ public let appAliases: [String: [String]] = [
     "kagimacos": ["kagi", "orion"],
 ]
 
+/// Ownership rule for the two taxonomies that walk the same directories:
+/// Leftovers owns *data* (`~/.steam`, `~/.wine`, … listed here and in the
+/// `path-home-dot` plugin allowlist — keep both lists in sync); Packages owns
+/// *tools* (PATH overlays, globals). A path that is both data and an install
+/// root (e.g. `~/.steam/steamapps` vs the `steam` tool) is reported on
+/// Leftovers with a `shadow` status linking the packaged path, never deleted
+/// outright. See `isUserBinLeftoverPath` / `listShadowingOverlays`.
 let homeDotData = [
     ".mozilla", ".thunderbird", ".steam", ".wine", ".java",
     ".gradle", ".docker", ".kube", ".aws", ".gnupg", ".ssh",
@@ -112,10 +124,77 @@ let skipDescend: Set<String> = [
 
 let skipNestedRoots: Set<String> = ["Containers", "Group Containers", "WebKit"]
 
-let bundleIdRE = try! NSRegularExpression(pattern: #"^[a-z0-9]+(\.[a-z0-9_\-]+)+$"#)
-let daemonRE = try! NSRegularExpression(pattern: #"^[a-z][a-z0-9]{8,}d$"#)
-let teamIdRE = try! NSRegularExpression(pattern: #"^(?=.*[0-9])[A-Z0-9]{8,12}$"#, options: [.caseInsensitive])
-let uuidRE = try! NSRegularExpression(pattern: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#, options: [.caseInsensitive])
+@inline(__always) func isLowerAlnum(_ c: UInt8) -> Bool {
+    (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x7A)
+}
+
+/// `^[a-z0-9]+(\.[a-z0-9_\-]+)+$` on bytes. Case: callers pass lowercased input.
+public func isBundleId(_ s: String) -> Bool {
+    s.utf8.withContiguousStorageIfAvailable { u -> Bool in
+        let n = u.count
+        guard n >= 3 else { return false }
+        var i = 0
+        var dots = 0
+        while i < n {
+            let seg = i
+            while i < n, u[i] != 0x2E {
+                let c = u[i]
+                guard isLowerAlnum(c) || c == 0x5F || c == 0x2D else { return false }
+                i += 1
+            }
+            // First segment: `[a-z0-9]+` (no `_`/`-`); rest: `[a-z0-9_-]+`.
+            if i == seg { return false }
+            if dots == 0 {
+                for k in seg..<i where u[k] == 0x5F || u[k] == 0x2D { return false }
+            }
+            if i == n { break }
+            dots += 1
+            i += 1 // dot
+        }
+        return dots >= 1 && i == n && u[n - 1] != 0x2E
+    } ?? false
+}
+
+/// `^[a-z][a-z0-9]{8,}d$`: lowercase lead, 8+ alnum, trailing `d`, length ≥ 10.
+public func isDaemonName(_ s: String) -> Bool {
+    s.utf8.withContiguousStorageIfAvailable { u -> Bool in
+        let n = u.count
+        guard n >= 10, u[0] >= 0x61, u[0] <= 0x7A, u[n - 1] == 0x64 else { return false }
+        for k in 1..<(n - 1) where !isLowerAlnum(u[k]) { return false }
+        return true
+    } ?? false
+}
+
+/// `^(?=.*[0-9])[A-Z0-9]{8,12}$` case-insensitive: 8–12 ASCII alnum, one digit.
+public func isTeamId(_ s: String) -> Bool {
+    s.utf8.withContiguousStorageIfAvailable { u -> Bool in
+        let n = u.count
+        guard n >= 8, n <= 12 else { return false }
+        var digit = false
+        for k in 0..<n {
+            let c = u[k]
+            if c >= 0x30, c <= 0x39 { digit = true; continue }
+            guard (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) else { return false }
+        }
+        return digit
+    } ?? false
+}
+
+/// `^[0-9a-f]{8}-...$` case-insensitive UUID.
+public func isUUID(_ s: String) -> Bool {
+    s.utf8.withContiguousStorageIfAvailable { u -> Bool in
+        guard u.count == 36 else { return false }
+        @inline(__always) func hex(_ c: UInt8) -> Bool {
+            (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x66) || (c >= 0x41 && c <= 0x46)
+        }
+        for k in [8, 13, 18, 23] where u[k] != 0x2D { return false }
+        for k in 0..<36 {
+            if k == 8 || k == 13 || k == 18 || k == 23 { continue }
+            if !hex(u[k]) { return false }
+        }
+        return true
+    } ?? false
+}
 
 func fullMatch(_ re: NSRegularExpression, _ s: String) -> Bool {
     let range = NSRange(s.startIndex..., in: s)
@@ -279,8 +358,6 @@ public final class DataItem {
         self.extraPaths = extraPaths
     }
 
-    public var leftoverStatus: LeftoverStatus? { LeftoverStatus(rawValue: status) }
-
     public func toLeftoverItem() -> LeftoverItem {
         LeftoverItem(
             name: name,
@@ -341,12 +418,25 @@ public func skipNestedProbe(_ item: DataItem) -> Bool {
     return false
 }
 
+/// One `stat` (follows symlinks, like the old `attributesOfItem`): mtime and
+/// kind together, without Foundation's owner/group lookup per entry.
+private func statMtimeKind(_ path: String) -> (mtime: Date, isDir: Bool)? {
+    var st = stat()
+    guard path.withCString({ stat($0, &st) }) == 0 else { return nil }
+    let kind = Int32(st.st_mode) & Int32(S_IFMT)
+    return (Date(timeIntervalSince1970: unixMtime(st)), kind == Int32(S_IFDIR))
+}
+
 public func probeActivityMtime(
     _ path: String,
     maxEntries: Int = 80,
     maxDepth: Int = 2,
     timeout: TimeInterval = 0.2
 ) -> Date? {
+    // fd walk, not Foundation: `attributesOfItem` populates owner names per
+    // entry (NSS lookup) and `contentsOfDirectory(...).sorted()` sorts every
+    // directory for a max() that is order-independent. Same budget, timeout,
+    // dotfile/skipDescend, and follow-symlink semantics as before.
     let start = monotonicSeconds()
     var best: Date?
     var seen = 0
@@ -354,22 +444,25 @@ public func probeActivityMtime(
     while !stack.isEmpty {
         if monotonicSeconds() - start > timeout || seen >= maxEntries { break }
         let (current, depth) = stack.removeLast()
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: current),
-              let mtime = attrs[.modificationDate] as? Date
-        else { continue }
+        guard let (mtime, isDir) = statMtimeKind(current) else { continue }
         seen += 1
         if best == nil || mtime > best! { best = mtime }
-        if depth >= maxDepth { continue }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: current, isDirectory: &isDir), isDir.boolValue else { continue }
-        guard let children = try? FileManager.default.contentsOfDirectory(atPath: current) else { continue }
-        for name in children.sorted() {
+        if depth >= maxDepth || !isDir { continue }
+        guard let dirp = current.withCString({ opendir($0) }) else { continue }
+        // Collect names first, then close before pushing children.
+        var names: [String] = []
+        while true {
+            errno = 0
+            guard let ent = readdir(dirp) else { break }
+            let name = direntName(ent)
+            if name == "." || name == ".." || name.hasPrefix(".") { continue }
+            names.append(name)
+        }
+        for name in names {
             if monotonicSeconds() - start > timeout || seen >= maxEntries { break }
-            if name.hasPrefix(".") { continue }
             let child = (current as NSString).appendingPathComponent(name)
             if skipDescend.contains(name) {
-                if let st = try? FileManager.default.attributesOfItem(atPath: child),
-                   let mt = st[.modificationDate] as? Date {
+                if let (mt, _) = statMtimeKind(child) {
                     seen += 1
                     if best == nil || mt > best! { best = mt }
                 }
@@ -379,6 +472,7 @@ public func probeActivityMtime(
                 stack.append((child, depth + 1))
             }
         }
+        closedir(dirp)
     }
     return best
 }
@@ -460,14 +554,22 @@ private let summaryRoot: [String: String] = [
 let leftoverNameSuffixes = [".savedstate", ".plist", ".binarycookies"]
 
 func stripLeftoverNameSuffix(_ name: String) -> String {
-    let trimmed = name.trimmingCharacters(in: .whitespaces)
-    let low = posixLowercased(trimmed)
+    // Manual trim: `trimmingCharacters` bridges to NSString per call and this
+    // runs on every classified entry. Space/tab/CR/LF covers real filenames.
+    @inline(__always) func isTrim(_ c: Character) -> Bool {
+        c == " " || c == "\t" || c == "\n" || c == "\r"
+    }
+    var s = name[...]
+    while let f = s.first, isTrim(f) { s = s.dropFirst() }
+    while let l = s.last, isTrim(l) { s = s.dropLast() }
+    guard !s.isEmpty else { return "" }
+    let low = posixLowercased(String(s))
     for suffix in leftoverNameSuffixes {
         if low.hasSuffix(suffix) {
-            return String(trimmed.dropLast(suffix.count))
+            return String(s.dropLast(suffix.count))
         }
     }
-    return trimmed
+    return String(s)
 }
 
 func entryLabel(_ name: String) -> String {
@@ -484,14 +586,14 @@ let leftoverDisplaySkipTokens: Set<String> = [
 ]
 
 func leftoverTitleCase(_ name: String) -> String {
-    if name.contains(".") || name.contains("_") || name.contains("-") { return name }
+    if asciiHasByte(name, 0x2E) || asciiHasByte(name, 0x5F) || asciiHasByte(name, 0x2D) { return name }
     if name.contains(where: { $0.isUppercase }) { return name }
     guard let first = name.first else { return name }
     return String(first).uppercased() + name.dropFirst()
 }
 
 func isSimpleLeftoverLabel(_ label: String) -> Bool {
-    if label.hasPrefix("@") || label.contains(".") { return false }
+    if label.hasPrefix("@") || asciiHasByte(label, 0x2E) { return false }
     return label.count >= 2
 }
 
@@ -502,7 +604,7 @@ func prettyDnsLeftoverLabel(_ label: String) -> String? {
         if let canon = leftoverProductAliases[norm(core)] { return leftoverTitleCase(canon) }
         return nil
     }
-    if !core.contains(".") { return core }
+    if !asciiHasByte(core, 0x2E) { return core }
     let parts = core.split(separator: ".").map(String.init).filter { !$0.isEmpty }
     for part in parts.reversed() {
         let low = part.lowercased()
@@ -510,7 +612,7 @@ func prettyDnsLeftoverLabel(_ label: String) -> String? {
         if genericVendorLabels.contains(norm(part)) { continue }
         if isGenericOwnerToken(part) { continue }
         if leftoverDisplaySkipTokens.contains(low) { continue }
-        if fullMatch(teamIdRE, part) { continue }
+        if isTeamId(part) { continue }
         if part.count < 3 { continue }
         return part
     }
@@ -748,7 +850,7 @@ public func applyOrphanReasons(_ items: [DataItem], catalog: [String: String] = 
     }
 }
 
-func groupOrphanedLeftovers(_ items: [DataItem]) -> [DataItem] {
+public func groupOrphanedLeftovers(_ items: [DataItem]) -> [DataItem] {
     var buckets: [String: [DataItem]] = [:]
     for item in items {
         guard item.status == "orphaned", item.rootLabel != "LaunchAgents" else { continue }
@@ -759,12 +861,21 @@ func groupOrphanedLeftovers(_ items: [DataItem]) -> [DataItem] {
     collapseBundleIdChildBuckets(&buckets)
     collapseVendorPrefixBuckets(&buckets)
     let mergeKeys = Set(buckets.compactMap { $0.value.count > 1 ? $0.key : nil })
+    // Owner index: the old per-item `leftoverBucketKey` re-derived the group
+    // key and fell back to an O(buckets × size) identity scan, O(n²) after
+    // collapses moved members. One pass here instead.
+    var ownerOf: [ObjectIdentifier: String] = [:]
+    ownerOf.reserveCapacity(items.count)
+    for (key, group) in buckets {
+        for member in group { ownerOf[ObjectIdentifier(member)] = key }
+    }
     var consumed = Set<ObjectIdentifier>()
     var out: [DataItem] = []
+    out.reserveCapacity(items.count)
     for item in items {
         let id = ObjectIdentifier(item)
         if consumed.contains(id) { continue }
-        let key = leftoverBucketKey(item, buckets: buckets)
+        let key = ownerOf[id] ?? leftoverBucketKey(item, buckets: buckets)
         if item.status == "orphaned", item.rootLabel != "LaunchAgents", mergeKeys.contains(key),
            let group = buckets[key]
         {
@@ -929,28 +1040,47 @@ func leftoverBucketKey(_ item: DataItem, buckets: [String: [DataItem]]) -> Strin
     return own
 }
 
-func isBundleIdChild(_ childName: String, of parentName: String) -> Bool {
-    let child = entryLabel(childName)
-    let parent = entryLabel(parentName)
-    guard parent.contains(".") else { return false }
-    return posixLowercased(child).hasPrefix(posixLowercased(parent) + ".")
-}
-
 func collapseBundleIdChildBuckets(_ buckets: inout [String: [DataItem]]) {
-    let keys = buckets.keys.sorted { $0.count > $1.count }
-    for childKey in keys {
+    // Index: lowered entry label -> bucket keys holding an item with that label,
+    // plus per-bucket max label length (the old parent weight) and per-item labels.
+    // The old code compared every child×parent pair across buckets: O(B²·G²)
+    // string compares, 33 s for 3 000 distinct ids. A child can only belong to
+    // a bucket whose item label is a proper dot-prefix of its own, so enumerate
+    // the child's prefixes and look up owners: O(n·depth).
+    var itemLabel: [ObjectIdentifier: String] = [:]
+    var labelOwners: [String: Set<String>] = [:]
+    var bucketWeight: [String: Int] = [:]
+    for (key, group) in buckets {
+        var best = 0
+        for item in group {
+            let entry = entryLabel(item.name)
+            let ll = posixLowercased(entry)
+            itemLabel[ObjectIdentifier(item)] = ll
+            labelOwners[ll, default: []].insert(key)
+            if entry.count > best { best = entry.count }
+        }
+        bucketWeight[key] = best
+    }
+    // Snapshot keys: removals below must not disturb iteration.
+    for childKey in buckets.keys.sorted(by: { $0.count > $1.count }) {
         guard let childItems = buckets[childKey] else { continue }
         var bestParent: String?
         var bestLen = 0
-        for (parentKey, parentItems) in buckets where parentKey != childKey {
-            let hit = childItems.contains { child in
-                parentItems.contains { parent in isBundleIdChild(child.name, of: parent.name) }
-            }
-            guard hit else { continue }
-            let plen = parentItems.map { entryLabel($0.name).count }.max() ?? 0
-            if plen > bestLen {
-                bestLen = plen
-                bestParent = parentKey
+        for child in childItems {
+            guard let ll = itemLabel[ObjectIdentifier(child)] else { continue }
+            // Proper dot-prefixes of the child label, longest first. The
+            // parent side must itself contain a dot (mirrors isBundleIdChild).
+            var prefix = ll
+            while let dot = prefix.lastIndex(of: ".") {
+                prefix = String(prefix[..<dot])
+                guard asciiHasByte(prefix, 0x2E) else { break }
+                for parentKey in labelOwners[prefix] ?? [] where parentKey != childKey {
+                    let plen = bucketWeight[parentKey] ?? 0
+                    if plen > bestLen {
+                        bestLen = plen
+                        bestParent = parentKey
+                    }
+                }
             }
         }
         if let parentKey = bestParent, let moving = buckets.removeValue(forKey: childKey) {
@@ -1043,6 +1173,16 @@ public final class Identity {
     public var appByBid: [String: String] = [:]
     public var nameOwner: [String: String] = [:]
     public var stems: Set<String> = []
+    /// Precomputed `stem` + separator forms. The old per-call `stem + sep`
+    /// allocated 3 Strings per stem per classified entry. Built once at the
+    /// end of init; `stems` is never mutated after construction.
+    /// Indexed by first UTF-8 byte: ~200 stems share ~26 buckets, so each
+    /// entry checks ~8 candidates instead of all of them.
+    private var stemTests: [(stem: String, dash: String, under: String, dot: String)] = []
+    private var stemIndex: [UInt8: [(stem: String, dash: String, under: String, dot: String)]] = [:]
+    /// `brewRaw` minus generic tokens. The old loop re-checked
+    /// `isGenericOwnerToken` (lowercase + trim) per package per entry.
+    private var brewKeys: [String] = []
 
     public init(apps: [AppRecord], brew: BrewSnapshot, toolNames: [String] = []) {
         for a in apps {
@@ -1103,6 +1243,16 @@ public final class Identity {
                 brewNames.insert(alias)
             }
         }
+        stemTests = stems.filter { $0.count >= 5 }.map {
+            ($0, $0 + "-", $0 + "_", $0 + ".")
+        }
+        var index: [UInt8: [(stem: String, dash: String, under: String, dot: String)]] = [:]
+        for t in stemTests {
+            guard let f = t.stem.utf8.first else { continue }
+            index[f, default: []].append(t)
+        }
+        stemIndex = index
+        brewKeys = brewRaw.filter { !isGenericOwnerToken($0) }
     }
 
     func addStem(_ raw: String) {
@@ -1128,12 +1278,10 @@ public final class Identity {
 
     func ownedByStem(_ entry: String) -> Bool {
         let e = stripLeftoverNameSuffix(entry).lowercased()
-        for stem in stems {
-            if stem.count < 5 { continue }
-            if e == stem { return true }
-            for sep in ["-", "_", "."] {
-                if e.hasPrefix(stem + sep) { return true }
-            }
+        guard let f = e.utf8.first, let bucket = stemIndex[f] else { return false }
+        for t in bucket {
+            if e == t.stem { return true }
+            if e.hasPrefix(t.dash) || e.hasPrefix(t.under) || e.hasPrefix(t.dot) { return true }
         }
         return false
     }
@@ -1154,7 +1302,7 @@ public final class Identity {
         }
         if stem.isEmpty { return }
         let d = stem.lowercased()
-        if fullMatch(bundleIdRE, d) {
+        if isBundleId(d) {
             bundleIds.insert(d)
             if appByBid[d] == nil { appByBid[d] = app.displayName }
             if let vendor = vendorFromBid(d) { affinity.insert(vendor) }
@@ -1182,7 +1330,7 @@ public final class Identity {
         let core = stripLeftoverNameSuffix(name)
         let low = core.lowercased()
         let n = norm(core)
-        let bidLike = ["bundleid", "group", "savedstate", "plist"].contains(kind) || fullMatch(bundleIdRE, low)
+        let bidLike = ["bundleid", "group", "savedstate", "plist"].contains(kind) || isBundleId(low)
         if bidLike {
             var b = low
             if b.hasPrefix("group.") { b = String(b.dropFirst("group.".count)) }
@@ -1191,7 +1339,7 @@ public final class Identity {
         if names.contains(n) { return ("owned", nameOwner[n]) }
         if brewNames.contains(n) { return ("owned", nil) }
         if affinity.contains(n) { return ("owned", nil) }
-        let first = core.split { " \t._-".contains($0) }.first.map(String.init) ?? ""
+        let first = core.split { $0 == " " || $0 == "\t" || $0 == "." || $0 == "_" || $0 == "-" }.first.map(String.init) ?? ""
         let fn = norm(first)
         if affinity.contains(fn), fn.count >= 5 { return ("owned", nil) }
         if ownedByStem(core) { return ("owned", nameOwner[n]) }
@@ -1200,9 +1348,8 @@ public final class Identity {
         if scoped {
             brewKey = String(brewKey.dropFirst())
         }
-        for b in brewRaw {
-            if isGenericOwnerToken(b) { continue }
-            if !scoped, !b.contains("-") { continue }
+        for b in brewKeys {
+            if !scoped, !asciiHasByte(b, 0x2D) { continue }
             if b.count >= 2, brewKey.hasPrefix(b) {
                 let rest = brewKey.dropFirst(b.count)
                 if rest.isEmpty || !(rest.first?.isLetter == true || rest.first?.isNumber == true) {
@@ -1210,10 +1357,10 @@ public final class Identity {
                 }
             }
         }
-        if fullMatch(uuidRE, core) { return ("system", nil) }
+        if isUUID(core) { return ("system", nil) }
         let user = currentUsername()
         if !user.isEmpty, (low == user || n == norm(user)) { return ("system", nil) }
-        if appleServiceNames.contains(n) || fullMatch(daemonRE, low) || n.contains("ratelimiter") || n.contains("loginwindow") {
+        if appleServiceNames.contains(n) || isDaemonName(low) || asciiContains(n, "ratelimiter") || asciiContains(n, "loginwindow") {
             return ("system", nil)
         }
         if sharedRuntimeNames.contains(n) || sharedRuntimeNames.contains(low) { return ("system", nil) }
@@ -1259,7 +1406,7 @@ public final class Identity {
         if lastN.count >= 5, brewNames.contains(lastN), !isGenericOwnerToken(lastN) {
             return ("owned", nil)
         }
-        if labels.count >= 2, fullMatch(teamIdRE, labels[0]) {
+        if labels.count >= 2, isTeamId(labels[0]) {
             let tokens = teamIdVendors[labels[0].lowercased()] ?? []
             let known = affinity.union(names).union(stems)
             if !tokens.isDisjoint(with: known) { return ("owned", nil) }
@@ -1632,14 +1779,21 @@ public func scanLeftovers(
     if measureSizes {
         let toMeasure = items.filter { isListedLeftoverStatus($0.status) && !skipNestedProbe($0) }
         progress("  · measuring sizes for \(toMeasure.count) leftover folders…")
-        let sizes = pmap(items, workers: 4) { item -> (Int, Bool) in
-            if skipNestedProbe(item) { return (0, false) }
-            if !isListedLeftoverStatus(item.status) { return (0, true) }
-            return duSize(item.path, timeout: 6)
-        }
-        for (item, pair) in zip(items, sizes) {
-            item.sizeBytes = pair.0
-            item.sizeMeasured = pair.1
+        // One `du -sk` per chunk, not one spawn per folder.
+        let sizes = duSizes(toMeasure.map(\.path), timeout: 6)
+        let measuredIds = Set(toMeasure.map { ObjectIdentifier($0) })
+        for item in items {
+            if measuredIds.contains(ObjectIdentifier(item)) {
+                let pair = sizes[item.path] ?? (0, false)
+                item.sizeBytes = pair.0
+                item.sizeMeasured = pair.1
+            } else if skipNestedProbe(item) {
+                item.sizeBytes = 0
+                item.sizeMeasured = false
+            } else if !isListedLeftoverStatus(item.status) {
+                item.sizeBytes = 0
+                item.sizeMeasured = true
+            }
             if let attrs = try? FileManager.default.attributesOfItem(atPath: item.path),
                let mt = attrs[.modificationDate] as? Date {
                 item.mtime = mt
@@ -1696,7 +1850,13 @@ public func scanLaunchAgents(
             if !FileManager.default.fileExists(atPath: program) {
                 orphans.append(OrphanAgent(path: path, label: label, program: program))
             } else if program.contains(".app/") {
-                let bundle = program.components(separatedBy: ".app/").first.map { $0 + ".app" } ?? ""
+                // Bundle root without bridging to NSString.
+                let bundle: String
+                if let r = program.range(of: ".app/") {
+                    bundle = String(program[..<r.upperBound].dropLast())
+                } else {
+                    bundle = program
+                }
                 if !bundle.isEmpty, !FileManager.default.fileExists(atPath: bundle) {
                     orphans.append(OrphanAgent(path: path, label: label, program: program))
                 }

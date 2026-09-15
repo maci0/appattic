@@ -688,4 +688,127 @@ final class UsageTests: XCTestCase {
         try text.write(to: url, atomically: true, encoding: .utf8)
         return url.path
     }
+
+    /// Swift's `Character` treats "\r\n" as one grapheme cluster, so the old
+    /// `split(separator: "\n")` never split a CRLF history file: every line
+    /// stayed glued into one, and only the first token was ever indexed.
+    func testCRLFHistoryFileIndexesEveryLine() throws {
+        let path = try writeTemp(": 1717200000:0;crlftool --ok\r\n: 1717200001:0;jq .\r\n", suffix: ".hist")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        var idx = HistoryIndex()
+        parseHistoryFile(path, index: &idx)
+        XCTAssertTrue(idx.everUsed.contains("crlftool"), "\(idx.everUsed)")
+        XCTAssertTrue(idx.everUsed.contains("jq"), "CRLF file must split per line: \(idx.everUsed)")
+        XCTAssertEqual(idx.lastSeen["jq"], Date(timeIntervalSince1970: 1_717_200_001))
+    }
+
+    /// The ASCII byte scanner replaced the per-line regex path. Pin them together
+    /// on shapes where a hand-rolled scanner typically drifts: digit-run lengths,
+    /// a missing `;`, `#` after whitespace, CRLF, env assignments, absolute paths.
+    func testASCIIHistoryScannerMatchesRegexPath() {
+        let corpus = [
+            ": 1717200000:0;jq .",
+            ": 1717200000:0;",
+            ":1717200000:0;jq .",
+            ":  1717200000:9;jq .",
+            ": 171720000:0;short-epoch",
+            ": 17172000000:0;long-epoch",
+            ": 171720000000:0;too-long-epoch",
+            ": 1717200000:;no-duration",
+            ": 1717200000:0no-semicolon",
+            "  : 1717200000:0;indented",
+            "   ",
+            "",
+            "#comment",
+            "   #indented-comment",
+            ": 1717200000:0;#not-a-comment",
+            "FOO=bar jq .",
+            "_X1=a /usr/bin/jq .",
+            "FOO=jq .",
+            "jq",
+            "/usr/bin/jq --version",
+            "a//b arg",
+            "/ arg",
+            "  leading-space-cmd  ",
+            "-dash-cmd",
+            "cmd\twith\ttabs",
+            ": 1717200000:0;cmd\twith\ttab",
+            "weird:name=x",
+            "trailing-cr\r",
+            ": 1717200000:0;trailing-cr\r",
+            "9",
+            "cmd.+-chars_ok",
+            "#",
+            " # x",
+            "a/b/",
+            "x/y/z",
+        ].joined(separator: "\n") + "\n"
+
+        let fast = { () -> HistoryIndex in
+            var idx = HistoryIndex()
+            parseHistoryASCII(Array(corpus.utf8), index: &idx, keep: nil)
+            return idx
+        }()
+        let slow = { () -> HistoryIndex in
+            var idx = HistoryIndex()
+            parseHistoryFileRegex(corpus, index: &idx, keep: nil)
+            return idx
+        }()
+
+        XCTAssertEqual(fast.everUsed, slow.everUsed)
+        XCTAssertEqual(fast.lastSeen, slow.lastSeen)
+        XCTAssertEqual(fast.oldestSeen, slow.oldestSeen)
+
+        let fishCorpus = [
+            "- cmd: jq .",
+            "  when: 1717200000",
+            "- cmd:   spaced out  ",
+            "  when:   1717200001",
+            "- cmd: no-when",
+            "- cmd:",
+            "when: 1717200002",
+            "  when:1717200003",
+            "  when: 1717200004x",
+            "  when: 1717200005 ",
+            "   when: 1717200006",
+            "\twhen: 1717200007",
+            "- cmd: /usr/bin/jq --version",
+            "when: 1717200008",
+            "- cmd: FOO=bar jq .",
+            "when: 1717200009",
+            "",
+            "unrelated line",
+        ].joined(separator: "\n") + "\n"
+
+        let fastFish = { () -> HistoryIndex in
+            var idx = HistoryIndex()
+            parseFishHistoryASCII(Array(fishCorpus.utf8), index: &idx, keep: nil)
+            return idx
+        }()
+        let slowFish = { () -> HistoryIndex in
+            var idx = HistoryIndex()
+            parseFishHistoryRegex(fishCorpus, index: &idx, keep: nil)
+            return idx
+        }()
+        XCTAssertEqual(fastFish.everUsed, slowFish.everUsed)
+        XCTAssertEqual(fastFish.lastSeen, slowFish.lastSeen)
+        XCTAssertEqual(fastFish.oldestSeen, slowFish.oldestSeen)
+    }
+
+    /// `keep` filtering must see the original-case token, as the regex path does.
+    func testASCIIHistoryScannerKeepFilterMatchesRegexPath() {
+        let corpus = ": 1000000000:0;LS /secret\n: 1717200000:0;Jq .\n"
+        let fast = { () -> HistoryIndex in
+            var idx = HistoryIndex()
+            parseHistoryASCII(Array(corpus.utf8), index: &idx, keep: ["Jq"])
+            return idx
+        }()
+        let slow = { () -> HistoryIndex in
+            var idx = HistoryIndex()
+            parseHistoryFileRegex(corpus, index: &idx, keep: ["Jq"])
+            return idx
+        }()
+        XCTAssertEqual(fast.everUsed, slow.everUsed)
+        XCTAssertEqual(fast.lastSeen, slow.lastSeen)
+    }
 }

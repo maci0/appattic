@@ -963,3 +963,28 @@ bool leftoverIsIgnored(const Finding &f, const QSet<QString> &ignored) {
     }
     return false;
 }
+
+QString searchHaystack(const Finding &f) {
+    QString hay;
+    hay.reserve(256);
+    hay += displayName(f);
+    hay += QLatin1Char('\n');
+    hay += f.path;
+    hay += QLatin1Char('\n');
+    hay += f.kind;
+    hay += QLatin1Char('\n');
+    hay += managerLabel(f);
+    hay += QLatin1Char('\n');
+    hay += f.status;
+    hay += QLatin1Char('\n');
+    hay += f.packagedPath;
+    hay += QLatin1Char('\n');
+    hay += f.summary;
+    hay += QLatin1Char('\n');
+    hay += f.reason;
+    for (const QString &p : f.extraPaths) {
+        hay += QLatin1Char('\n');
+        hay += p;
+    }
+    return hay.toLower();
+}

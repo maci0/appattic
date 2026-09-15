@@ -42,15 +42,15 @@ final class OutdatedTests: XCTestCase {
     }
 
     func testQueryBrewSkipsGreedyAndReturnsEmptyOnFailure() {
-        XCTAssertTrue(queryBrew("").isEmpty)
+        XCTAssertTrue(queryBrewStatus("").pkgs.isEmpty)
         XCTAssertFalse(queryBrewStatus("").failed)
-        XCTAssertTrue(queryBrew("/opt/homebrew/bin/brew", run: { _, _ in (1, "", "failed to fetch") }).isEmpty)
+        XCTAssertTrue(queryBrewStatus("/opt/homebrew/bin/brew", run: { _, _ in (1, "", "failed to fetch") }).pkgs.isEmpty)
         XCTAssertTrue(queryBrewStatus("/opt/homebrew/bin/brew", run: { _, _ in (1, "", "failed to fetch") }).failed)
         var calls: [([String], TimeInterval)] = []
-        let empty = queryBrew("/opt/homebrew/bin/brew", run: { cmd, timeout in
+        let empty = queryBrewStatus("/opt/homebrew/bin/brew", run: { cmd, timeout in
             calls.append((cmd, timeout))
             return (0, #"{"formulae":[],"casks":[]}"#, "")
-        })
+        }).pkgs
         XCTAssertTrue(empty.isEmpty)
         XCTAssertEqual(calls[0].0, ["/opt/homebrew/bin/brew", "outdated", "--json=v2"])
         XCTAssertFalse(calls[0].0.contains("--greedy"))
@@ -109,8 +109,11 @@ final class OutdatedTests: XCTestCase {
 
     func testQueryFlatpakAsksForDescriptionColumns() {
         var calls: [[String]] = []
+        let callsLock = NSLock()
         let pkgs = queryFlatpak(which: { _ in "/usr/bin/flatpak" }, run: { cmd, _ in
+            callsLock.lock()
             calls.append(cmd)
+            callsLock.unlock()
             return (0, "org.mozilla.firefox\t128.0.3\tFirefox\tFast, Private & Safe Web Browser\n", "")
         })
         XCTAssertTrue(calls.contains { $0.joined(separator: " ").contains("name,description") })
@@ -220,6 +223,7 @@ final class OutdatedTests: XCTestCase {
 
     func testCollectLinuxOnArchQueriesPacmanNotApt() {
         var cmds: [[String]] = []
+        let cmdsLock = NSLock()
         let pkgs = collectLinux(
             which: { name in
                 switch name {
@@ -228,7 +232,9 @@ final class OutdatedTests: XCTestCase {
                 }
             },
             run: { cmd, _ in
+                cmdsLock.lock()
                 cmds.append(cmd)
+                cmdsLock.unlock()
                 if cmd.contains("-Qu") { return (1, "firefox 129.0-1 -> 129.0.1-1\n", "") }
                 return (0, "", "")
             },
@@ -242,6 +248,7 @@ final class OutdatedTests: XCTestCase {
 
     func testCollectLinuxOnUbuntuQueriesAptNotPacman() {
         var cmds: [[String]] = []
+        let cmdsLock = NSLock()
         let pkgs = collectLinux(
             which: { name in
                 switch name {
@@ -250,7 +257,9 @@ final class OutdatedTests: XCTestCase {
                 }
             },
             run: { cmd, _ in
+                cmdsLock.lock()
                 cmds.append(cmd)
+                cmdsLock.unlock()
                 if cmd.contains("--upgradable") {
                     return (0, "git/stable 1:2.39.5-0+deb12u2 amd64 [upgradable from: 1:2.39.2-1.1]\n", "")
                 }
@@ -291,6 +300,7 @@ final class OutdatedTests: XCTestCase {
 
     func testCollectLinuxOnFedoraQueriesDnfNotApt() {
         var cmds: [[String]] = []
+        let cmdsLock = NSLock()
         let pkgs = collectLinux(
             which: { name in
                 switch name {
@@ -299,7 +309,9 @@ final class OutdatedTests: XCTestCase {
                 }
             },
             run: { cmd, _ in
+                cmdsLock.lock()
                 cmds.append(cmd)
+                cmdsLock.unlock()
                 if cmd.contains("--upgrades") || cmd.contains("check-update") {
                     return (0, "git.x86_64                    2.45.1-1.fc40           updates\n", "")
                 }
@@ -316,6 +328,7 @@ final class OutdatedTests: XCTestCase {
 
     func testCollectLinuxOnSuseQueriesZypperNotApt() {
         var cmds: [[String]] = []
+        let cmdsLock = NSLock()
         let pkgs = collectLinux(
             which: { name in
                 switch name {
@@ -324,7 +337,9 @@ final class OutdatedTests: XCTestCase {
                 }
             },
             run: { cmd, _ in
+                cmdsLock.lock()
                 cmds.append(cmd)
+                cmdsLock.unlock()
                 if cmd.contains("list-updates") {
                     return (
                         0,
@@ -345,6 +360,7 @@ final class OutdatedTests: XCTestCase {
 
     func testCollectLinuxUnknownPrefersPacmanOverApt() {
         var cmds: [[String]] = []
+        let cmdsLock = NSLock()
         let pkgs = collectLinux(
             which: { name in
                 switch name {
@@ -353,7 +369,9 @@ final class OutdatedTests: XCTestCase {
                 }
             },
             run: { cmd, _ in
+                cmdsLock.lock()
                 cmds.append(cmd)
+                cmdsLock.unlock()
                 if cmd.contains("-Qu") { return (1, "firefox 129.0-1 -> 129.0.1-1\n", "") }
                 return (0, "", "")
             },

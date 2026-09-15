@@ -12,12 +12,10 @@ public:
     explicit DiskPage(QWidget *parent = nullptr);
     ~DiskPage() override;
 
-    void setSearch(const QString &text);
     void scanHome();
     void scanFolder();
     void scanFilesystem();
     void scanRemote();
-    bool isScanning() const { return m_scanning; }
 
 signals:
     void statusMessage(const QString &text);

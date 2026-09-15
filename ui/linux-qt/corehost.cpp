@@ -188,43 +188,29 @@ static int homePathTag(const char *xdgEnv, const QString &rel) {
     return QDir::home().exists(rel) ? 1 : 0;
 }
 
+/* The load list is the built output, not a second hand-kept registry. It used
+   to be 27 literal names duplicating core/build.sh's wasm_sources: a plugin
+   built but not listed never activated, and the only cross-check counted
+   modules, so the drift was silent. Sorted for a stable progress order. */
 QStringList pluginWasmFiles(const QString &out) {
-    const QStringList names = {
-        QStringLiteral("/container_runtime.wasm"),
-        QStringLiteral("/snapd.wasm"),
-        QStringLiteral("/path_xdg_config.wasm"),
-        QStringLiteral("/path_xdg_data.wasm"),
-        QStringLiteral("/path_xdg_cache.wasm"),
-        QStringLiteral("/path_xdg_state.wasm"),
-        QStringLiteral("/path_xdg_lib.wasm"),
-        QStringLiteral("/path_var_app.wasm"),
-        QStringLiteral("/path_shadow.wasm"),
-        QStringLiteral("/path_user_bin.wasm"),
-        QStringLiteral("/path_home_dot.wasm"),
-        QStringLiteral("/pacman.wasm"),
-        QStringLiteral("/aur.wasm"),
-        QStringLiteral("/apt.wasm"),
-        QStringLiteral("/dnf.wasm"),
-        QStringLiteral("/zypper.wasm"),
-        QStringLiteral("/flatpak.wasm"),
-        QStringLiteral("/npm.wasm"),
-        QStringLiteral("/pnpm.wasm"),
-        QStringLiteral("/bun.wasm"),
-        QStringLiteral("/pipx.wasm"),
-        QStringLiteral("/uv.wasm"),
-        QStringLiteral("/brew.wasm"),
-        QStringLiteral("/gem.wasm"),
-        QStringLiteral("/composer.wasm"),
-        QStringLiteral("/pip.wasm"),
-        QStringLiteral("/deno.wasm"),
-    };
+    QDir dir(out);
+    const QStringList names = dir.entryList(
+        QStringList{QStringLiteral("*.wasm")},
+        QDir::Files,
+        QDir::Name
+    );
     QStringList paths;
     paths.reserve(names.size());
-    for (const QString &n : names) paths << (out + n);
+    for (const QString &n : names) {
+        if (n == QLatin1String("appattic_core.wasm")) continue;
+        paths << (out + QLatin1Char('/') + n);
+    }
     return paths;
 }
 
 QStringList taggedPluginSpecs(const QString &out) {
+    /* pluginTag resolves binaries through PATH, so the user tool dirs must be
+       applied before tagging. runCoreWasm holds the inverse. */
     appattic_host_apply_user_path();
     const QStringList plugins = pluginWasmFiles(out);
     QStringList specs;
@@ -251,7 +237,7 @@ int runCoreWasm(
     for (const QString &s : pluginSpecs) specBytes.push_back(s.toUtf8());
     for (QByteArray &s : specBytes) ptrs.push_back(s.data());
     const QByteArray coreUtf8 = coreWasm.toUtf8();
-    return appattic_wasm_run(
+    const int rc = appattic_wasm_run(
         coreUtf8.constData(),
         ptrs.empty() ? nullptr : ptrs.data(),
         int(ptrs.size()),
@@ -261,6 +247,10 @@ int runCoreWasm(
         err,
         errlen
     );
+    /* PATH is process-global. Undo the apply that taggedPluginSpecs made so a
+       long-lived UI does not keep the scan's PATH after the scan ends. */
+    appattic_host_restore_user_path();
+    return rc;
 }
 
 void requestCoreWasmCancel() {
@@ -269,4 +259,8 @@ void requestCoreWasmCancel() {
 
 void clearCoreWasmCancel() {
     appattic_host_exec_clear_cancel();
+}
+
+void restoreCoreWasmPath() {
+    appattic_host_restore_user_path();
 }

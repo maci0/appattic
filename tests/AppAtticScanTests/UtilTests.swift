@@ -115,8 +115,9 @@ final class UtilTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-mode-\(UUID().uuidString).txt")
         try Data("x".utf8).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
-        restrictOwnerOnly(path: url.path)
-        let mode = posixMode(url.path)
+        try restrictOwnerOnlyFile(at: url)
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        let mode = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? -1
         XCTAssertNotEqual(mode, -1)
         XCTAssertEqual(mode & 0o077, 0)
         XCTAssertEqual(mode & 0o600, 0o600)
@@ -465,6 +466,48 @@ final class UtilTests: XCTestCase {
         XCTAssertEqual(spotlightFSSize("/Applications/The Unarchiver.app", run: run), 49_163_005)
         let missing: CommandRun = { _, _ in (0, "(null)\n", "") }
         XCTAssertNil(spotlightFSSize("/tmp/missing.app", run: missing))
+    }
+
+    func testDuSizesBatchesOneSpawnAndFallsBack() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("du-batch-\(UUID().uuidString)")
+        let dirA = root.appendingPathComponent("a")
+        let dirB = root.appendingPathComponent("b")
+        try FileManager.default.createDirectory(at: dirA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dirB, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data(repeating: 0x65, count: 100).write(to: dirA.appendingPathComponent("f.bin"))
+        try Data(repeating: 0x65, count: 100).write(to: dirB.appendingPathComponent("g.bin"))
+        var spawns = 0
+        let run: CommandRun = { cmd, _ in
+            spawns += 1
+            // Only dirA reported; dirB must fall back to the in-process walk.
+            // The missing path falls back too.
+            return (0, "4\t\(dirA.path)\n", "")
+        }
+        let sizes = duSizes([dirA.path, dirB.path, root.appendingPathComponent("gone").path], run: run)
+        // One spawn per chunk, not one per path (nor per fallback binary).
+        XCTAssertEqual(spawns, 1)
+        XCTAssertEqual(sizes[dirA.path]?.0, 4096)
+        XCTAssertEqual(sizes[dirA.path]?.1, true)
+        XCTAssertEqual(sizes[dirB.path]?.0, 100)
+        XCTAssertEqual(sizes[dirB.path]?.1, true)
+        XCTAssertEqual(sizes[root.appendingPathComponent("gone").path]?.1, false)
+    }
+
+    func testDuSizesFilePathsNeedNoSpawn() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("du-batch-file-\(UUID().uuidString).bin")
+        try Data(repeating: 0x66, count: 512).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var spawns = 0
+        let run: CommandRun = { cmd, _ in
+            spawns += 1
+            return (1, "", "")
+        }
+        let sizes = duSizes([url.path], run: run)
+        XCTAssertEqual(spawns, 0)
+        XCTAssertEqual(sizes[url.path]?.0, 512)
     }
 
     func testRedactHomePathsReplacesHomePrefixOnly() {

@@ -113,5 +113,8 @@ QString markManualCommand(const Finding &f);
 bool canMarkCleanup(const Finding &f, Page page);
 QStringList leftoverIgnoreKeys(const Finding &f);
 bool leftoverIsIgnored(const Finding &f, const QSet<QString> &ignored);
+/// Lowercased search haystack (name, path, kind, manager, status, packaged
+/// path, summary, reason, extra paths). Built on demand by the UI filter.
+QString searchHaystack(const Finding &f);
 
 #endif

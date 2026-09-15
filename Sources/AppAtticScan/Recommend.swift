@@ -100,8 +100,6 @@ public struct Verdict {
         self.reason = reason
         self.reclaimableBytes = reclaimableBytes
     }
-
-    public var softwareTier: SoftwareTier? { SoftwareTier(rawValue: tier) }
 }
 
 /// REVIEW and REMOVE rows, plus SYSTEM when `includeSystem` is on. KEEP is omitted.

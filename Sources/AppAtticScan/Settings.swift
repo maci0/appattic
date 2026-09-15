@@ -125,21 +125,6 @@ public func loadSettings(from url: URL = defaultSettingsURL()) throws -> AppAtti
     }
 }
 
-/// Decode settings.json with JSONDecoder only. Missing files throw; unknown keys are not rejected.
-public func readSettings(from url: URL = defaultSettingsURL()) throws -> AppAtticSettings {
-    let raw: Data
-    do {
-        raw = try Data(contentsOf: url)
-    } catch {
-        throw AppAtticIOError.readFailed(path: url.path, message: error.localizedDescription)
-    }
-    do {
-        return try JSONDecoder().decode(AppAtticSettings.self, from: raw)
-    } catch {
-        throw AppAtticIOError.decodeFailed(path: url.path, message: error.localizedDescription)
-    }
-}
-
 /// Write settings.json (pretty, sorted keys, normalized ignore list). Used by the UI.
 public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSettingsURL()) throws {
     let dir = url.deletingLastPathComponent()
@@ -165,52 +150,4 @@ public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSett
     } catch {
         throw SettingsError.unwritable(path: url.path, reason: error.localizedDescription)
     }
-}
-
-/// Write settings.json (sorted keys, no pretty-print, no normalize). Throws `AppAtticIOError`.
-public func writeSettings(_ settings: AppAtticSettings, to url: URL = defaultSettingsURL()) throws {
-    let dir = url.deletingLastPathComponent()
-    do {
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if dir.lastPathComponent.lowercased() == "appattic" {
-            try restrictOwnerOnlyDirectory(at: dir)
-        }
-    } catch {
-        throw AppAtticIOError.createDirectoryFailed(path: dir.path, message: error.localizedDescription)
-    }
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    let raw: Data
-    do {
-        raw = try encoder.encode(settings)
-    } catch {
-        throw AppAtticIOError.encodeFailed(message: error.localizedDescription)
-    }
-    do {
-        try raw.write(to: url, options: .atomic)
-        try restrictPrivateDataFile(at: url)
-    } catch {
-        throw AppAtticIOError.writeFailed(path: url.path, message: error.localizedDescription)
-    }
-}
-
-public func addIgnoredLeftover(_ path: String, to settings: AppAtticSettings) -> AppAtticSettings {
-    addIgnoredLeftovers([path], to: settings)
-}
-
-public func addIgnoredLeftovers(_ paths: [String], to settings: AppAtticSettings) -> AppAtticSettings {
-    var next = settings
-    for path in paths {
-        let key = pathIdentityKey(path)
-        if key.isEmpty { continue }
-        if next.ignoredLeftoverPaths.contains(where: { pathIdentityKey($0) == key }) { continue }
-        next.ignoredLeftoverPaths.append(key)
-    }
-    return next
-}
-
-public func clearIgnoredLeftovers(_ settings: AppAtticSettings) -> AppAtticSettings {
-    var next = settings
-    next.ignoredLeftoverPaths = []
-    return next
 }

@@ -1,5 +1,5 @@
 const std = @import("std");
-const abi = @import("abi.zig");
+const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
@@ -202,19 +202,7 @@ fn renderBrew(hits: []const BrewOutdated) bool {
     return true;
 }
 
-export fn plugin_abi_version() i32 {
-    return abi.ABI_VERSION;
-}
-
-export fn plugin_id_ptr() i32 {
-    return @intCast(@intFromPtr(plugin_id.ptr));
-}
-
-export fn plugin_id_len() i32 {
-    return @intCast(plugin_id.len);
-}
-
-export fn plugin_query(present: i32) i32 {
+fn query_impl(present: i32) i32 {
     if (present == 0) {
         @memcpy(result_buf[0..none_json.len], none_json);
         result_nbytes = @intCast(none_json.len);
@@ -234,12 +222,16 @@ export fn plugin_query(present: i32) i32 {
     }
 }
 
-export fn result_ptr() i32 {
+fn resultPtr() i32 {
     return @intCast(@intFromPtr(&result_buf));
 }
 
-export fn result_len() i32 {
+fn resultLen() i32 {
     return @intCast(result_nbytes);
+}
+
+comptime {
+    plugin_abi.bind(plugin_id, query_impl, resultPtr, resultLen);
 }
 
 test "parseBrewOutdatedJSON formulae and casks" {
@@ -284,7 +276,7 @@ test "parseBrewOutdatedJSON empty junk skips unsafe" {
 }
 
 test "plugin_query present JSON comes from brew outdated fixture" {
-    try std.testing.expectEqual(@as(i32, 0), plugin_query(1));
+    try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"brew\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
@@ -301,7 +293,7 @@ test "plugin_query present JSON comes from brew outdated fixture" {
 }
 
 test "plugin_query missing is empty findings" {
-    try std.testing.expectEqual(@as(i32, 0), plugin_query(0));
+    try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "brew missing") != null);

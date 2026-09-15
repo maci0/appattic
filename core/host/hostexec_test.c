@@ -4,10 +4,89 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 static int fail(const char *msg) {
     fprintf(stderr, "hostexec_test: %s\n", msg);
     return 1;
 }
+
+/* PATH is a process global: applying the user tool dirs must be revertible, or
+   a long-lived embedder keeps the rewritten PATH after the scan. */
+#if !defined(_WIN32)
+static int check_user_path_restores(void) {
+    const char *before = getenv("PATH");
+    char saved[4096];
+    if (snprintf(saved, sizeof saved, "%s", before ? before : "") >= (int)sizeof saved) {
+        return fail("PATH too long for the round-trip check");
+    }
+    char home[128];
+    char local[192];
+    char bin[192];
+    if (snprintf(home, sizeof home, "/tmp/appattic-hostexec-path-%ld", (long)getpid())
+        >= (int)sizeof home) {
+        return fail("temp home path overflow");
+    }
+    if (snprintf(local, sizeof local, "%s/.local", home) >= (int)sizeof local
+        || snprintf(bin, sizeof bin, "%s/.local/bin", home) >= (int)sizeof bin) {
+        return fail("temp bin path overflow");
+    }
+    (void)rmdir(bin);
+    (void)rmdir(local);
+    (void)rmdir(home);
+    if (mkdir(home, 0700) != 0) return fail("mkdir temp home");
+    if (mkdir(local, 0700) != 0) {
+        (void)rmdir(home);
+        return fail("mkdir temp local");
+    }
+    if (mkdir(bin, 0700) != 0) {
+        (void)rmdir(local);
+        (void)rmdir(home);
+        return fail("mkdir temp bin");
+    }
+    if (setenv("HOME", home, 1) != 0) return fail("setenv HOME");
+    if (setenv("FLATPAK_ID", "", 1) != 0) return fail("setenv FLATPAK_ID");
+
+    appattic_host_apply_user_path();
+    const char *applied = getenv("PATH");
+    if (!applied || !strstr(applied, bin)) {
+        return fail("apply_user_path did not prepend the user tool dir");
+    }
+    appattic_host_apply_user_path(); /* idempotent: still one copy */
+    const char *again = getenv("PATH");
+    if (!again || strcmp(again, applied) != 0) {
+        return fail("apply_user_path is not idempotent");
+    }
+
+    appattic_host_restore_user_path();
+    const char *after = getenv("PATH");
+    if (!after || strcmp(after, saved) != 0) {
+        return fail("restore_user_path did not bring PATH back");
+    }
+    appattic_host_restore_user_path(); /* second restore stays a no-op */
+    after = getenv("PATH");
+    if (!after || strcmp(after, saved) != 0) {
+        return fail("restore_user_path is not idempotent");
+    }
+
+    /* Re-armed: the next scan must be able to apply again. */
+    appattic_host_apply_user_path();
+    applied = getenv("PATH");
+    if (!applied || !strstr(applied, bin)) {
+        return fail("apply_user_path not re-armed after restore");
+    }
+    appattic_host_restore_user_path();
+
+    (void)rmdir(bin);
+    (void)rmdir(local);
+    (void)rmdir(home);
+    return 0;
+}
+#endif
 
 static int expect_allow(const char *cmd) {
     if (!appattic_host_exec_allowed(cmd)) {
@@ -597,6 +676,10 @@ int main(void) {
         return fail("docker ps fixture text");
     }
 
+    if (rc != 0) return 1;
+#if !defined(_WIN32)
+    rc |= check_user_path_restores();
+#endif
     if (rc != 0) return 1;
     printf("hostexec_test: ok\n");
     return 0;

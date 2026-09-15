@@ -1,5 +1,5 @@
 const std = @import("std");
-const abi = @import("abi.zig");
+const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const host_exec = @import("host_exec.zig");
 
@@ -161,19 +161,7 @@ const missing_json =
     \\{"plugin":"path-user-bin","engine":null,"findings":[],"script":null,"dialog":{"title":"No leftover root","body":"~/.local/bin is missing. Plugin inactive."},"note":"path missing"}
 ;
 
-export fn plugin_abi_version() i32 {
-    return abi.ABI_VERSION;
-}
-
-export fn plugin_id_ptr() i32 {
-    return @intCast(@intFromPtr(plugin_id.ptr));
-}
-
-export fn plugin_id_len() i32 {
-    return @intCast(plugin_id.len);
-}
-
-export fn plugin_query(present: i32) i32 {
+fn query_impl(present: i32) i32 {
     if (present == 0) {
         @memcpy(result_buf[0..missing_json.len], missing_json);
         result_nbytes = @intCast(missing_json.len);
@@ -188,12 +176,16 @@ export fn plugin_query(present: i32) i32 {
     }
 }
 
-export fn result_ptr() i32 {
+fn resultPtr() i32 {
     return @intCast(@intFromPtr(&result_buf));
 }
 
-export fn result_len() i32 {
+fn resultLen() i32 {
     return @intCast(result_nbytes);
+}
+
+comptime {
+    plugin_abi.bind(plugin_id, query_impl, resultPtr, resultLen);
 }
 
 pub fn resultSlice() []const u8 {
@@ -210,7 +202,7 @@ test "findBrokenLinks reports dangling symlink only" {
 }
 
 test "plugin_query present JSON uses symlink orphaned fields" {
-    try std.testing.expectEqual(@as(i32, 0), plugin_query(1));
+    try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = resultSlice();
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"path-user-bin\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"symlink\"") != null);
@@ -222,7 +214,7 @@ test "plugin_query present JSON uses symlink orphaned fields" {
 }
 
 test "plugin_query missing is empty findings" {
-    try std.testing.expectEqual(@as(i32, 0), plugin_query(0));
+    try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = resultSlice();
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
 }

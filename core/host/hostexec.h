@@ -38,8 +38,17 @@ int appattic_host_in_flatpak(void);
 
 /* Prepend ~/.local/bin, ~/.bun/bin, ~/.deno/bin, nvm, volta, cargo, and
    similar user tool dirs to PATH. Idempotent. Desktop launches often have
-   only /usr/bin, so pip/uv/bun/node/deno would otherwise be invisible. */
+   only /usr/bin, so pip/uv/bun/node/deno would otherwise be invisible.
+
+   PATH is process-global: the embedder pairs this with
+   appattic_host_restore_user_path once the scan is done, otherwise a
+   long-lived UI keeps a rewritten PATH after the scan that caused it. */
 void appattic_host_apply_user_path(void);
+
+/* Inverse of appattic_host_apply_user_path: put back the PATH captured at
+   apply time and re-arm apply for the next scan. No-op when apply never ran,
+   so a second call is safe. */
+void appattic_host_restore_user_path(void);
 
 /* Run an allowlisted query. Denied commands return APPATTIC_HOST_EXEC_DENY
    and write nothing. Darwin (and APPATTIC_HOST_EXEC_FIXTURE=1) injects

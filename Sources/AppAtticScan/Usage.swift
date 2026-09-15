@@ -185,9 +185,286 @@ func retainHistoryToken(_ token: String, keep: Set<String>?) -> Bool {
 
 public func parseHistoryFile(_ path: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
     guard let text = readUTF8File(path) else { return }
-    for (n, raw) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+    let bytes = Array(text.utf8)
+    if !historyBytesAreASCII(bytes) {
+        parseHistoryFileRegex(text, index: &index, keep: keep)
+        return
+    }
+    parseHistoryASCII(bytes, index: &index, keep: keep)
+}
+
+// MARK: - ASCII-fast history scanning
+//
+// The regex path below runs four NSRegularExpressions per line plus `line as
+// NSString`, a `String(raw)` per line, and `split().map(String.init)` per
+// command: 445 ms for a 50 000-line zsh history. The patterns match ASCII only
+// in practice, so scan UTF-8 bytes directly and keep the regex path for files
+// that carry non-ASCII bytes (where `\w`/`\s` are Unicode classes).
+
+/// Word-chunked scan for any byte with the high bit set. Returns false so the
+/// caller can fall back to the Unicode path.
+func historyBytesAreASCII(_ bytes: [UInt8]) -> Bool {
+    let n = bytes.count
+    let ascii = bytes.withUnsafeBytes { raw -> Bool in
+        let words = n / 8
+        var i = 0
+        while i < words {
+            if raw.loadUnaligned(fromByteOffset: i * 8, as: UInt64.self) & 0x8080_8080_8080_8080 != 0 {
+                return false
+            }
+            i += 1
+        }
+        var j = words * 8
+        while j < n {
+            if raw[j] >= 0x80 { return false }
+            j += 1
+        }
+        return true
+    }
+    return ascii
+}
+
+@inline(__always) func hxDigit(_ b: UInt8) -> Bool { b >= 0x30 && b <= 0x39 }
+
+/// ICU `\s` restricted to ASCII, and Swift `Character.isWhitespace` for ASCII.
+@inline(__always) func hxSpace(_ b: UInt8) -> Bool { b == 0x20 || (b >= 0x09 && b <= 0x0D) }
+
+/// Unicode `CharacterSet.whitespaces` restricted to ASCII (tab and Zs).
+@inline(__always) func hxTrimEdge(_ b: UInt8) -> Bool { b == 0x20 || b == 0x09 }
+
+@inline(__always) func hxWord(_ b: UInt8) -> Bool {
+    (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || b == 0x5F
+}
+
+func hxDigitsValue(_ b: [UInt8], _ i: Int, _ j: Int) -> Double {
+    var v = 0
+    var k = i
+    while k < j {
+        v = v * 10 + Int(b[k] - 0x30)
+        k += 1
+    }
+    return Double(v)
+}
+
+/// `fullMatch(envAssignRE, tok)` for `^[A-Za-z_]\w*=$` on ASCII bytes.
+@inline(__always)
+func hxIsEnvAssign(_ b: [UInt8], _ i: Int, _ j: Int) -> Bool {
+    guard j - i >= 2, b[j - 1] == 0x3D else { return false }
+    let f = b[i]
+    guard (f >= 0x41 && f <= 0x5A) || (f >= 0x61 && f <= 0x7A) || f == 0x5F else { return false }
+    var k = i + 1
+    while k < j - 1 {
+        if !hxWord(b[k]) { return false }
+        k += 1
+    }
+    return true
+}
+
+/// `fullMatch(cmdTokenRE, tok)` for `^[A-Za-z0-9_][\w.+-]*$` on ASCII bytes.
+@inline(__always)
+func hxIsCommandToken(_ b: [UInt8], _ i: Int, _ j: Int) -> Bool {
+    guard j > i else { return false }
+    let f = b[i]
+    guard (f >= 0x41 && f <= 0x5A) || (f >= 0x61 && f <= 0x7A) || (f >= 0x30 && f <= 0x39) || f == 0x5F else {
+        return false
+    }
+    var k = i + 1
+    while k < j {
+        let c = b[k]
+        if !(hxWord(c) || c == 0x2E || c == 0x2B || c == 0x2D) { return false }
+        k += 1
+    }
+    return true
+}
+
+/// `firstCommandToken` on ASCII bytes: first whitespace-delimited token that is
+/// not an env assignment, reduced to its last non-empty `/` segment.
+func hxFirstCommand(_ b: [UInt8], _ start: Int, _ end: Int) -> (Int, Int)? {
+    var i = start
+    while i < end {
+        while i < end, hxSpace(b[i]) { i += 1 }
+        if i >= end { return nil }
+        var j = i
+        while j < end, !hxSpace(b[j]) { j += 1 }
+        if !hxIsEnvAssign(b, i, j) {
+            var e = j
+            while e > i, b[e - 1] == 0x2F { e -= 1 }
+            if e == i { return nil }
+            var s = e
+            while s > i, b[s - 1] != 0x2F { s -= 1 }
+            return (s, e)
+        }
+        i = j
+    }
+    return nil
+}
+
+/// `posixLowercased` for an ASCII token, without a heap allocation for the
+/// intermediate byte buffer.
+func hxLowerToken(_ b: [UInt8], _ i: Int, _ j: Int) -> String {
+    let n = j - i
+    guard n > 0 else { return "" }
+    return withUnsafeTemporaryAllocation(of: UInt8.self, capacity: n) { buf in
+        for k in 0..<n {
+            let c = b[i + k]
+            buf[k] = (c >= 0x41 && c <= 0x5A) ? c &+ 32 : c
+        }
+        return String(decoding: UnsafeBufferPointer(start: buf.baseAddress, count: n), as: UTF8.self)
+    }
+}
+
+/// Shared tail of both history formats: validate, filter, index one command.
+@inline(__always)
+func hxRecordCommand(
+    _ b: [UInt8],
+    _ cs: Int,
+    _ ce: Int,
+    ts: Date?,
+    index: inout HistoryIndex,
+    keep: Set<String>?
+) {
+    guard cs < ce, let (fs, fe) = hxFirstCommand(b, cs, ce), hxIsCommandToken(b, fs, fe) else { return }
+    if let keep, !keep.contains(String(decoding: b[fs..<fe], as: UTF8.self)) { return }
+    let lower = hxLowerToken(b, fs, fe)
+    index.everUsed.insert(lower)
+    if let ts {
+        if let prev = index.lastSeen[lower], prev >= ts { return }
+        index.lastSeen[lower] = ts
+    }
+}
+
+func parseHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Set<String>?) {
+    let count = bytes.count
+    var lineNo = 0
+    var pos = 0
+    while pos <= count {
+        if lineNo >= maxHistoryLines { break }
+        lineNo += 1
+        var end = pos
+        while end < count, bytes[end] != 0x0A { end += 1 }
+        var stop = end
+        if stop > pos, bytes[stop - 1] == 0x0D { stop -= 1 }
+
+        var trimmedStart = pos
+        while trimmedStart < stop, hxTrimEdge(bytes[trimmedStart]) { trimmedStart += 1 }
+        let blank = trimmedStart >= stop
+        let comment = !blank && bytes[pos] == 0x23
+        if !blank, !comment {
+            var tsStart = -1
+            var tsCount = 0
+            var cmdStart = -1
+            var cmdEnd = -1
+            if bytes[pos] == 0x3A {
+                var p = pos + 1
+                while p < stop, hxSpace(bytes[p]) { p += 1 }
+                if p > pos + 1 {
+                    let d0 = p
+                    while p < stop, hxDigit(bytes[p]) { p += 1 }
+                    tsCount = p - d0
+                    tsStart = d0
+                    if tsCount >= 9, tsCount <= 11, p < stop, bytes[p] == 0x3A {
+                        p += 1
+                        let d2 = p
+                        while p < stop, hxDigit(bytes[p]) { p += 1 }
+                        if p > d2, p < stop, bytes[p] == 0x3B {
+                            p += 1
+                            cmdStart = p
+                            cmdEnd = stop
+                        }
+                    }
+                }
+            }
+            var ts: Date?
+            if cmdStart < 0 {
+                cmdStart = trimmedStart
+                cmdEnd = stop
+            } else {
+                ts = dateFromUnixEpoch(hxDigitsValue(bytes, tsStart, tsStart + tsCount))
+            }
+            var cs = cmdStart
+            while cs < cmdEnd, hxTrimEdge(bytes[cs]) { cs += 1 }
+            var ce = cmdEnd
+            while ce > cs, hxTrimEdge(bytes[ce - 1]) { ce -= 1 }
+            noteHistoryTime(ts, index: &index)
+            if cs < ce {
+                hxRecordCommand(bytes, cs, ce, ts: ts, index: &index, keep: keep)
+            }
+        }
+        if end >= count { break }
+        pos = end + 1
+    }
+}
+
+public func parseFishHistory(_ path: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
+    guard let text = readUTF8File(path) else { return }
+    let bytes = Array(text.utf8)
+    if !historyBytesAreASCII(bytes) {
+        parseFishHistoryRegex(text, index: &index, keep: keep)
+        return
+    }
+    parseFishHistoryASCII(bytes, index: &index, keep: keep)
+}
+
+func parseFishHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Set<String>?) {
+    let count = bytes.count
+    var lineNo = 0
+    var pos = 0
+    var pending: (Int, Int)?
+    while pos <= count {
+        if lineNo >= maxHistoryLines { break }
+        lineNo += 1
+        var end = pos
+        while end < count, bytes[end] != 0x0A { end += 1 }
+        var stop = end
+        if stop > pos, bytes[stop - 1] == 0x0D { stop -= 1 }
+
+        var handledByCmd = false
+        if stop - pos >= 6,
+           bytes[pos] == 0x2D, bytes[pos + 1] == 0x20,
+           bytes[pos + 2] == 0x63, bytes[pos + 3] == 0x6D,
+           bytes[pos + 4] == 0x64, bytes[pos + 5] == 0x3A {
+            var p = pos + 6
+            while p < stop, hxSpace(bytes[p]) { p += 1 }
+            if p > pos + 6 {
+                var a = p
+                var bEnd = stop
+                while a < bEnd, hxTrimEdge(bytes[a]) { a += 1 }
+                while bEnd > a, hxTrimEdge(bytes[bEnd - 1]) { bEnd -= 1 }
+                pending = (a, bEnd)
+                handledByCmd = true
+            }
+        }
+        if !handledByCmd, let (ps, pe) = pending {
+            var p = pos
+            while p < stop, hxSpace(bytes[p]) { p += 1 }
+            if stop - p >= 5,
+               bytes[p] == 0x77, bytes[p + 1] == 0x68, bytes[p + 2] == 0x65,
+               bytes[p + 3] == 0x6E, bytes[p + 4] == 0x3A {
+                var q = p + 5
+                while q < stop, hxSpace(bytes[q]) { q += 1 }
+                if q > p + 5 {
+                    var d = q
+                    while d < stop, hxDigit(bytes[d]) { d += 1 }
+                    if d > q, d == stop {
+                        let ts = dateFromUnixEpoch(hxDigitsValue(bytes, q, d))
+                        noteHistoryTime(ts, index: &index)
+                        hxRecordCommand(bytes, ps, pe, ts: ts, index: &index, keep: keep)
+                        pending = nil
+                    }
+                }
+            }
+        }
+        if end >= count { break }
+        pos = end + 1
+    }
+}
+
+func parseHistoryFileRegex(_ text: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
+    // `components` splits CRLF: Swift treats "\r\n" as one grapheme cluster, so
+        // `split(separator: "\n")` never splits a CRLF history file at all.
+        for (n, raw) in text.components(separatedBy: "\n").enumerated() {
         if n >= maxHistoryLines { break }
-        var line = String(raw)
+        var line = raw
         if line.hasSuffix("\r") { line.removeLast() }
         if line.trimmingCharacters(in: .whitespaces).isEmpty || line.hasPrefix("#") { continue }
         let ns = line as NSString
@@ -217,12 +494,13 @@ public func parseHistoryFile(_ path: String, index: inout HistoryIndex, keep: Se
     }
 }
 
-public func parseFishHistory(_ path: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
-    guard let text = readUTF8File(path) else { return }
+func parseFishHistoryRegex(_ text: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
     var pending: String?
-    for (n, raw) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+    // `components` splits CRLF: Swift treats "\r\n" as one grapheme cluster, so
+        // `split(separator: "\n")` never splits a CRLF history file at all.
+        for (n, raw) in text.components(separatedBy: "\n").enumerated() {
         if n >= maxHistoryLines { break }
-        var line = String(raw)
+        var line = raw
         if line.hasSuffix("\r") { line.removeLast() }
         let ns = line as NSString
         let range = NSRange(location: 0, length: ns.length)

@@ -325,6 +325,9 @@ int appattic_host_in_flatpak(void) {
 #define USER_PATH_CAP 8192
 static int g_user_path_applied = 0;
 static char g_user_path[USER_PATH_CAP];
+/* PATH as it was before apply, so the effect has an inverse. */
+static char g_user_path_prev[USER_PATH_CAP];
+static int g_user_path_prev_valid = 0;
 
 static int dir_ok(const char *p) {
     struct stat st;
@@ -395,6 +398,8 @@ void appattic_host_apply_user_path(void) {
     old = getenv("PATH");
     if (!old || !old[0]) old = "/usr/bin:/bin";
     (void)snprintf(g_user_path, sizeof g_user_path, "%s", old);
+    g_user_path_prev_valid =
+        snprintf(g_user_path_prev, sizeof g_user_path_prev, "%s", old) < (int)sizeof g_user_path_prev;
     home = getenv("HOME");
     if (home && home[0]) {
         path_prepend_nvm(g_user_path, sizeof g_user_path, home);
@@ -421,6 +426,14 @@ void appattic_host_apply_user_path(void) {
     (void)setenv("PATH", g_user_path, 1);
 }
 
+void appattic_host_restore_user_path(void) {
+    if (!g_user_path_applied) return;
+    g_user_path_applied = 0;
+    if (!g_user_path_prev_valid) return;
+    g_user_path_prev_valid = 0;
+    (void)setenv("PATH", g_user_path_prev, 1);
+}
+
 static void rewrite_home_user_argv(char **argv) {
     static char storage[MAX_TOK][PATH_MAX];
     const char *home = getenv("HOME");
@@ -440,6 +453,7 @@ static void rewrite_home_user_argv(char **argv) {
 }
 #else
 void appattic_host_apply_user_path(void) {}
+void appattic_host_restore_user_path(void) {}
 #endif
 
 static int use_fixture(void) {

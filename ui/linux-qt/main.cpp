@@ -15,7 +15,6 @@
 #include <QColor>
 #include <QComboBox>
 #include <QCoreApplication>
-#include <QDate>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialog>
@@ -27,7 +26,6 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QFrame>
-#include <QGridLayout>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -310,13 +308,10 @@ public:
 public slots:
     void run(const QString &core, const QStringList &pluginSpecs, int token) {
         m_token = token;
-        if (isCancelled()) {
-            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
-            return;
-        }
+        /* Clear first so every exit path below leaves the process-global cancel
+           clear; the previous order left it armed when the run never started. */
         clearCoreWasmCancel();
         if (isCancelled()) {
-            requestCoreWasmCancel();
             emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
             return;
         }
@@ -618,8 +613,8 @@ public:
 
         m_stack = new QStackedWidget;
 
-        m_overview = buildOverview();
-        m_stack->addWidget(m_overview);
+        auto *overview = buildOverview();
+        m_stack->addWidget(overview);
 
         auto *listPage = new QWidget;
         auto *listSplit = new QSplitter(Qt::Horizontal, listPage);
@@ -699,8 +694,8 @@ public:
         listSplit->setSizes({760, 320});
         m_stack->addWidget(listPage);
 
-        m_settings = buildSettings();
-        m_stack->addWidget(m_settings);
+        auto *settingsPage = buildSettings();
+        m_stack->addWidget(settingsPage);
         m_diskPage = new DiskPage;
         m_stack->addWidget(m_diskPage);
         connect(m_diskPage, &DiskPage::statusMessage, this, [this](const QString &msg) {
@@ -778,7 +773,7 @@ public:
             QMessageBox::about(
                 this,
                 QStringLiteral("AppAttic"),
-                QStringLiteral("AppAttic 1.2.1\nLeftovers, stale apps, outdated packages, disk usage.")
+                QStringLiteral("AppAttic 1.3.0\nLeftovers, stale apps, outdated packages, disk usage.")
             );
         });
 
@@ -794,7 +789,16 @@ public:
             showPage();
         });
         connect(m_rescan, &QPushButton::clicked, this, &MainWindow::rescan);
-        connect(m_search, &QLineEdit::textChanged, this, [this] { fillCurrent(); });
+        connect(m_search, &QLineEdit::textChanged, this, [this] {
+            // Coalesce fast typing: one filter pass per pause, not per key.
+            if (!m_searchDebounce) {
+                m_searchDebounce = new QTimer(this);
+                m_searchDebounce->setSingleShot(true);
+                m_searchDebounce->setInterval(120);
+                connect(m_searchDebounce, &QTimer::timeout, this, [this] { fillCurrent(); });
+            }
+            m_searchDebounce->start();
+        });
         connect(m_filter, &QComboBox::currentIndexChanged, this, [this] { fillCurrent(); });
         connect(m_clearSearch, &QPushButton::clicked, this, [this] { m_search->clear(); });
         connect(m_emptyRetry, &QPushButton::clicked, this, &MainWindow::rescan);
@@ -905,6 +909,10 @@ public:
             m_scanThread->terminate();
             m_scanThread->wait(2000);
         }
+        /* Inverse of requestCancel above: leave the process-global cancel in
+           the state dispose found it, and drop the scan's PATH rewrite. */
+        clearCoreWasmCancel();
+        restoreCoreWasmPath();
         delete m_worker;
         m_worker = nullptr;
     }
@@ -1125,8 +1133,7 @@ private:
             connect(box, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
         } else {
             box->addButton(QStringLiteral("Cancel"), QDialogButtonBox::RejectRole);
-            auto *go = box->addButton(runLabel, QDialogButtonBox::AcceptRole);
-            Q_UNUSED(go);
+            box->addButton(runLabel, QDialogButtonBox::AcceptRole);
             connect(box, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
             connect(box, &QDialogButtonBox::accepted, dlg, &QDialog::accept);
         }
@@ -1350,7 +1357,7 @@ private:
         row->addWidget(ignCol.first, 1);
         v->addLayout(row);
         v->addStretch();
-        auto *ver = new QLabel(QStringLiteral("AppAttic 1.2.1"));
+        auto *ver = new QLabel(QStringLiteral("AppAttic 1.3.0"));
         ver->setFont(small);
         ver->setForegroundRole(QPalette::PlaceholderText);
         v->addWidget(ver);
@@ -1388,8 +1395,9 @@ private:
 
     QVector<Finding> visibleRows(Page page) const {
         QVector<Finding> rows;
-        const QString q = m_search->text().trimmed();
+        const QString q = m_search->text().trimmed().toLower();
         const QString filt = m_filter->currentData().toString();
+        const bool needQ = !q.isEmpty();
         for (const Finding &f : m_findings) {
             if (!matchPage(f, page)) continue;
             if (page == Page::Leftovers && leftoverIsIgnored(f, m_ignored)) continue;
@@ -1397,14 +1405,7 @@ private:
                 if (filt == QLatin1String("globals") && !isGlobalKind(f)) continue;
                 if (filt == QLatin1String("leaves") && isGlobalKind(f)) continue;
             }
-            if (!q.isEmpty()) {
-                const QString hay = (
-                    displayName(f) + f.path + f.kind + managerLabel(f)
-                    + f.status + f.packagedPath + f.summary + f.reason
-                    + f.extraPaths.join(QLatin1Char(' '))
-                ).toLower();
-                if (!hay.contains(q.toLower())) continue;
-            }
+            if (needQ && !searchHaystack(f).contains(q)) continue;
             rows.push_back(f);
         }
         std::sort(rows.begin(), rows.end(), [](const Finding &a, const Finding &b) {
@@ -1707,13 +1708,8 @@ private:
                 it->setForeground(4, t.dim);
                 break;
             case Page::Outdated: {
-                QString ver = QStringLiteral("-");
-                if (!f.currentVersion.isEmpty() || !f.latestVersion.isEmpty()) {
-                    ver = (f.currentVersion.isEmpty() ? QStringLiteral("-") : f.currentVersion)
-                        + QStringLiteral(" → ") + (f.latestVersion.isEmpty() ? QStringLiteral("?") : f.latestVersion);
-                }
                 it->setText(2, managerLabel(f));
-                it->setText(3, ver);
+                it->setText(3, outdatedVersionLabel(f));
                 it->setForeground(2, t.dim);
                 it->setForeground(3, t.amber);
                 break;
@@ -2299,10 +2295,13 @@ private:
         return (header + body).join(QLatin1Char('\n')) + QLatin1Char('\n');
     }
 
+    static QStringList scriptHeader() {
+        return {QStringLiteral("#!/bin/sh"), QStringLiteral("set -e"),
+                QStringLiteral("# AppAttic. Review before running.")};
+    }
+
     QString cleanupScript() const {
-        QStringList header;
-        header << QStringLiteral("#!/bin/sh") << QStringLiteral("set -e")
-               << QStringLiteral("# AppAttic. Review before running.");
+        QStringList header = scriptHeader();
         QStringList body;
         for (const Finding &f : m_findings) {
             if (isOutdated(f) && !isLeftover(f) && !isStale(f) && !isPackage(f)) continue;
@@ -2324,9 +2323,7 @@ private:
     }
 
     QString updateScript() const {
-        QStringList header;
-        header << QStringLiteral("#!/bin/sh") << QStringLiteral("set -e")
-               << QStringLiteral("# AppAttic. Review before running.");
+        QStringList header = scriptHeader();
         QStringList body;
         for (const Finding &f : m_findings) {
             if (!m_marked.contains(f.uid()) || !isOutdated(f)) continue;
@@ -2339,10 +2336,8 @@ private:
     }
 
     QString markManualScript() const {
-        QStringList header;
-        header << QStringLiteral("#!/bin/sh") << QStringLiteral("set -e")
-               << QStringLiteral("# AppAttic. Review before running.")
-               << QStringLiteral("# Mark as manually installed (keep)");
+        QStringList header = scriptHeader();
+        header << QStringLiteral("# Mark as manually installed (keep)");
         QStringList body;
         for (const Finding &f : m_findings) {
             if (!m_markedManual.contains(f.uid())) continue;
@@ -2531,10 +2526,6 @@ private:
             showError(settingsUnwritableMessage(path));
             return;
         }
-        if (QFileInfo(fi.absolutePath()).fileName().compare(
-                QStringLiteral("appattic"), Qt::CaseInsensitive) == 0) {
-            restrictOwnerOnlyDir(fi.absolutePath());
-        }
         QSaveFile f(path);
         if (!f.open(QIODevice::WriteOnly)) {
             showError(settingsUnwritableMessage(path));
@@ -2575,8 +2566,6 @@ private:
     QListWidget *m_settingsNav = nullptr;
     QLabel *m_pageTitle = nullptr;
     QStackedWidget *m_stack = nullptr;
-    QWidget *m_overview = nullptr;
-    QWidget *m_settings = nullptr;
     DiskPage *m_diskPage = nullptr;
     QTreeWidget *m_table = nullptr;
     QWidget *m_emptyPane = nullptr;
@@ -2598,6 +2587,7 @@ private:
     QAction *m_rescanAct = nullptr;
     QLabel *m_error = nullptr;
     QLineEdit *m_search = nullptr;
+    QTimer *m_searchDebounce = nullptr;
     QComboBox *m_filter = nullptr;
     QPushButton *m_selectAll = nullptr;
     QPushButton *m_rescan = nullptr;
@@ -2782,16 +2772,6 @@ int main(int argc, char **argv) {
     MainWindow w;
     if (!QApplication::windowIcon().isNull()) w.setWindowIcon(QApplication::windowIcon());
     w.show();
-    if (const QByteArray grab = qgetenv("APPATTIC_GRAB"); !grab.isEmpty()) {
-        auto *grabTimer = new QTimer(&w);
-        grabTimer->setSingleShot(true);
-        QObject::connect(grabTimer, &QTimer::timeout, &app, [&w, grab] {
-            const QString path = QString::fromLocal8Bit(grab);
-            const bool ok = w.grab().save(path);
-            QCoreApplication::exit(ok ? 0 : 1);
-        });
-        grabTimer->start(400);
-    }
     return app.exec();
 }
 

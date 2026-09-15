@@ -1,6 +1,9 @@
 import Foundation
 import SwiftCrossUI
 import AppAtticScan
+#if canImport(AppKit)
+import AppKit
+#endif
 
 private enum DateFmt {
     static let medium: DateFormatter = {
@@ -43,7 +46,7 @@ private enum Col {
     static let kind = 72
 }
 
-private struct HRule: View {
+struct HRule: View {
     var body: some View {
         Color.appHairline
             .frame(height: 1)
@@ -1042,7 +1045,7 @@ struct ContentView: View {
                 .font(.system(size: 13, weight: .semibold))
             infoBlock("What", leftoverWhat(item))
             infoBlock("Why", leftoverWhy(item))
-            inspectorFacts {
+            inspectorSection(topPad: 4) {
                 infoRow("Kind", item.kind)
                 infoRow("Status", displayTier(item.status), color: leftoverStatusColor(item))
                 infoRow("Size", leftoverSizeLabel(item), mono: true)
@@ -1060,7 +1063,7 @@ struct ContentView: View {
                 }
             }
             Spacer()
-            inspectorFooter {
+            inspectorSection {
                 HStack {
                     Text("Include in cleanup")
                         .font(.system(size: 13))
@@ -1084,7 +1087,7 @@ struct ContentView: View {
                 .font(.system(size: 13, weight: .semibold))
             infoBlock("What", staleWhat(item))
             infoBlock("Why", staleWhy(item))
-            inspectorFacts {
+            inspectorSection(topPad: 4) {
                 infoRow("Status", displayTier(item.tier), color: tierColor(item.tier))
                 infoRow("Source", item.source)
                 if let version = item.version, !version.isEmpty {
@@ -1105,7 +1108,7 @@ struct ContentView: View {
                 }
             }
             Spacer()
-            inspectorFooter {
+            inspectorSection {
                 if selectableCleanupTiers.contains(item.tier ?? "") {
                     HStack {
                         Text("Include in cleanup")
@@ -1131,7 +1134,7 @@ struct ContentView: View {
             }
             infoBlock("What", outdatedWhat(item))
             infoBlock("Why", outdatedWhy(item))
-            inspectorFacts {
+            inspectorSection(topPad: 4) {
                 infoRow("Manager", item.manager.replacingOccurrences(of: "-", with: " "))
                 if item.kind == "untrusted" {
                     infoRow("Status", "untrusted tap", color: Color.appYellow)
@@ -1141,7 +1144,7 @@ struct ContentView: View {
                 }
             }
             Spacer()
-            inspectorFooter {
+            inspectorSection {
                 if item.updatable {
                     HStack {
                         Text("Include in update")
@@ -1165,7 +1168,7 @@ struct ContentView: View {
                 .font(.system(size: 13, weight: .semibold))
             infoBlock("What", item.summary ?? packageWhatText(manager: item.manager, kind: item.kind))
             infoBlock("Why", item.reason ?? packageWhyText(manager: item.manager, kind: item.kind))
-            inspectorFacts {
+            inspectorSection(topPad: 4) {
                 infoRow("Manager", item.manager.replacingOccurrences(of: "-", with: " "))
                 infoRow(
                     "Kind",
@@ -1181,7 +1184,7 @@ struct ContentView: View {
                 }
             }
             Spacer()
-            inspectorFooter {
+            inspectorSection {
                 HStack {
                     Text("Include in remove")
                         .font(.system(size: 13))
@@ -1211,19 +1214,15 @@ struct ContentView: View {
         .background(Color.appBg)
     }
 
-    func inspectorFacts<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    func inspectorSection<Content: View>(
+        topPad: CGFloat = 0,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HRule()
             content()
         }
-        .padding(.top, 4)
-    }
-
-    func inspectorFooter<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HRule()
-            content()
-        }
+        .padding(.top, topPad)
     }
 
     func infoRow(_ label: String, _ value: String, color: Color = Color.appText, mono: Bool = false) -> some View {
@@ -1336,7 +1335,7 @@ struct ContentView: View {
             }
             .padding(16)
             Spacer()
-            Text("AppAttic 1.2.1")
+            Text("AppAttic 1.3.0")
                 .font(.system(size: 11))
                 .foregroundColor(Color.appDim)
                 .padding(.horizontal, 16)
@@ -1549,24 +1548,11 @@ struct ContentView: View {
     }
 
     func copyScriptToClipboard(_ text: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/pbcopy")
-        let pipe = Pipe()
-        process.standardInput = pipe
-        do {
-            try process.run()
-            pipe.fileHandleForWriting.write(Data(text.utf8))
-            try pipe.fileHandleForWriting.close()
-            process.waitUntilExit()
-            if process.terminationStatus != 0 {
-                vm.errorMessage = "Could not copy the script."
-                scriptCopied = false
-            } else {
-                scriptCopied = true
-            }
-        } catch {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        scriptCopied = pasteboard.setString(text, forType: .string)
+        if !scriptCopied {
             vm.errorMessage = "Could not copy the script."
-            scriptCopied = false
         }
     }
 
@@ -1714,15 +1700,6 @@ struct ContentView: View {
     }
 
     func revealPath(_ path: String) {
-        let process = Process()
-        #if os(macOS)
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-R", path]
-        #else
-        let folder = URL(fileURLWithPath: path).deletingLastPathComponent().path
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xdg-open")
-        process.arguments = [folder]
-        #endif
-        try? process.run()
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 }

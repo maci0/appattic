@@ -90,69 +90,38 @@ zig_wasm() {
         "$root/src/$1"
 }
 
-zig_wasm core.zig appattic_core.wasm
-zig_wasm container_runtime.zig container_runtime.wasm
-zig_wasm snapd.zig snapd.wasm
-zig_wasm path_xdg_config.zig path_xdg_config.wasm
-zig_wasm path_xdg_data.zig path_xdg_data.wasm
-zig_wasm path_xdg_cache.zig path_xdg_cache.wasm
-zig_wasm path_xdg_state.zig path_xdg_state.wasm
-zig_wasm path_xdg_lib.zig path_xdg_lib.wasm
-zig_wasm path_var_app.zig path_var_app.wasm
-zig_wasm path_user_bin.zig path_user_bin.wasm
-zig_wasm path_home_dot.zig path_home_dot.wasm
-zig_wasm path_shadow.zig path_shadow.wasm
-zig_wasm pacman.zig pacman.wasm
-zig_wasm aur.zig aur.wasm
-zig_wasm apt.zig apt.wasm
-zig_wasm dnf.zig dnf.wasm
-zig_wasm zypper.zig zypper.wasm
-zig_wasm flatpak.zig flatpak.wasm
-zig_wasm npm.zig npm.wasm
-zig_wasm pnpm.zig pnpm.wasm
-zig_wasm bun.zig bun.wasm
-zig_wasm pipx.zig pipx.wasm
-zig_wasm uv.zig uv.wasm
-zig_wasm brew.zig brew.wasm
-zig_wasm gem.zig gem.wasm
-zig_wasm composer.zig composer.wasm
-zig_wasm pip.zig pip.wasm
-zig_wasm deno.zig deno.wasm
+# One source per WASM artifact. core.zig is renamed appattic_core.wasm for the host.
+wasm_sources=(
+    core.zig
+    container_runtime.zig snapd.zig
+    path_xdg_config.zig path_xdg_data.zig path_xdg_cache.zig path_xdg_state.zig
+    path_xdg_lib.zig path_var_app.zig path_user_bin.zig path_home_dot.zig path_shadow.zig
+    pacman.zig aur.zig apt.zig dnf.zig zypper.zig flatpak.zig
+    npm.zig pnpm.zig bun.zig pipx.zig uv.zig brew.zig gem.zig composer.zig pip.zig deno.zig
+)
+for src in "${wasm_sources[@]}"; do
+    dst="${src%.zig}.wasm"
+    if [ "$dst" = "core.wasm" ]; then dst="appattic_core.wasm"; fi
+    zig_wasm "$src" "$dst"
+done
 
 zig_test() {
     zig test "$root/src/$1"
 }
-zig_test host_exec.zig
-zig_test jsonbuf.zig
-zig_test jsonscan.zig
-zig_test apt.zig
-zig_test pacman.zig
-zig_test aur.zig
-zig_test snapd.zig
-zig_test path_listing.zig
-zig_test path_xdg_config.zig
-zig_test path_xdg_data.zig
-zig_test path_xdg_cache.zig
-zig_test path_xdg_state.zig
-zig_test path_xdg_lib.zig
-zig_test path_var_app.zig
-zig_test path_user_bin.zig
-zig_test path_home_dot.zig
-zig_test path_shadow.zig
-zig_test dnf.zig
-zig_test zypper.zig
-zig_test flatpak.zig
-zig_test npm.zig
-zig_test pnpm.zig
-zig_test bun.zig
-zig_test pipx.zig
-zig_test uv.zig
-zig_test brew.zig
-zig_test gem.zig
-zig_test composer.zig
-zig_test pip.zig
-zig_test deno.zig
-zig_test container_runtime.zig
+test_modules=(
+    host_exec.zig jsonbuf.zig jsonscan.zig
+    apt.zig pacman.zig aur.zig snapd.zig
+    path_listing.zig path_xdg_config.zig path_xdg_data.zig path_xdg_cache.zig
+    path_xdg_state.zig path_xdg_lib.zig path_var_app.zig path_user_bin.zig
+    path_home_dot.zig path_shadow.zig
+    dnf.zig zypper.zig flatpak.zig
+    npm.zig pnpm.zig bun.zig pipx.zig uv.zig brew.zig gem.zig composer.zig pip.zig deno.zig
+    container_runtime.zig
+)
+for m in "${test_modules[@]}"; do
+    zig_test "$m"
+done
+
 
 wasmtime_libdir() {
     prefix=$1
@@ -242,7 +211,19 @@ cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
     "${wasmtime_libs[@]}" \
     -o "$out/host"
 
-echo "built $out/appattic_core.wasm $out/container_runtime.wasm $out/snapd.wasm $out/path_xdg_config.wasm $out/path_xdg_data.wasm $out/path_xdg_cache.wasm $out/path_xdg_state.wasm $out/path_xdg_lib.wasm $out/path_var_app.wasm $out/path_user_bin.wasm $out/path_home_dot.wasm $out/path_shadow.wasm $out/pacman.wasm $out/aur.wasm $out/apt.wasm $out/dnf.wasm $out/zypper.wasm $out/flatpak.wasm $out/npm.wasm $out/pnpm.wasm $out/bun.wasm $out/pipx.wasm $out/uv.wasm $out/brew.wasm $out/gem.wasm $out/composer.wasm $out/pip.wasm $out/deno.wasm $out/host"
-echo "try: $out/host $out/appattic_core.wasm $out/container_runtime.wasm=2 $out/snapd.wasm=1 $out/path_xdg_config.wasm=1 $out/path_xdg_data.wasm=1 $out/path_xdg_cache.wasm=1 $out/path_xdg_state.wasm=1 $out/path_xdg_lib.wasm=1 $out/path_var_app.wasm=1 $out/path_user_bin.wasm=1 $out/path_home_dot.wasm=1 $out/path_shadow.wasm=1 $out/pacman.wasm=1 $out/aur.wasm=1 $out/apt.wasm=1 $out/dnf.wasm=1 $out/zypper.wasm=1 $out/flatpak.wasm=1 $out/npm.wasm=1 $out/pnpm.wasm=1 $out/bun.wasm=1 $out/pipx.wasm=1 $out/uv.wasm=1 $out/brew.wasm=1 $out/gem.wasm=1 $out/composer.wasm=1 $out/pip.wasm=1 $out/deno.wasm=1"
+built="$out/host"
+try_line="$out/host $out/appattic_core.wasm"
+for src in "${wasm_sources[@]}"; do
+    dst="${src%.zig}.wasm"
+    if [ "$dst" = "core.wasm" ]; then dst="appattic_core.wasm"; fi
+    built="$built $out/$dst"
+    case "$dst" in
+        appattic_core.wasm) ;;
+        container_runtime.wasm) try_line="$try_line $out/$dst=2" ;;
+        *) try_line="$try_line $out/$dst=1" ;;
+    esac
+done
+echo "built $built"
+echo "try: $try_line"
 echo "tag 0 = missing coeffect. Darwin host.exec injects fixtures."
 echo "backlog (not loaded): chocolatey nuget appstore steam"

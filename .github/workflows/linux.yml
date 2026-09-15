@@ -136,10 +136,10 @@ jobs:
           echo /usr/local/bin >> "$GITHUB_PATH"
       - name: Test scan library
         run: swift test --filter AppAtticScanTests --disable-automatic-resolution
-        id: swift_test
+        id: swift_test_jammy
       - name: Build CLI
         run: swift build -c debug --product appattic --disable-automatic-resolution
-        if: steps.swift_test.outcome == 'success'
+        if: steps.swift_test_jammy.outcome == 'success'
       - name: Link Qt UI
         if: success() || failure()
         shell: bash

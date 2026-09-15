@@ -80,8 +80,6 @@ private let appCategories: [String: String] = [
     "public.app-category.weather": "Weather app",
 ]
 
-private let versionRE = try! NSRegularExpression(pattern: "^[\\d.]+$")
-
 public func isRealAppPath(_ path: String) -> Bool {
     let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     if real.isEmpty { return false }
@@ -183,8 +181,16 @@ public func plistDescription(_ info: [String: Any], appName: String) -> String? 
     }
     if text.isEmpty || isJunkAppBlurb(text) { return nil }
     func fullMatch(_ s: String) -> Bool {
-        versionRE.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
-            && versionRE.rangeOfFirstMatch(in: s, range: NSRange(s.startIndex..., in: s)).length == (s as NSString).length
+        // Was `versionRE` (`^[\d.]+$`) evaluated twice per call (firstMatch +
+        // rangeOfFirstMatch). Byte check: non-empty, digits and dots only.
+        s.utf8.withContiguousStorageIfAvailable { u -> Bool in
+            guard !u.isEmpty else { return false }
+            for k in 0..<u.count {
+                let c = u[k]
+                guard (c >= 0x30 && c <= 0x39) || c == 0x2E else { return false }
+            }
+            return true
+        } ?? false
     }
     if fullMatch(text) { return nil }
     if text.lowercased().contains("project group") { return nil }
@@ -263,7 +269,10 @@ public func hasMasReceipt(_ appPath: String) -> Bool {
 }
 
 func stripBidiControls(_ s: String) -> String {
-    String(s.unicodeScalars.filter { scalar in
+    // Every stripped scalar is non-ASCII: pure-ASCII names (the common case)
+    // return as-is without the filter/rebuild churn.
+    if s.utf8.allSatisfy({ $0 < 0x80 }) { return s }
+    return String(s.unicodeScalars.filter { scalar in
         switch scalar.value {
         case 0x00AD, 0x034F, 0x061C, 0x180E,
              0x200B...0x200F, 0x202A...0x202E, 0x2060...0x2064, 0x2066...0x206F,
@@ -317,49 +326,82 @@ public func makeApp(from appPath: String) -> AppRecord? {
 }
 
 /// Desktop Entry string escapes (`\s` `\n` `\t` `\r` `\\`). Not used on Exec.
+/// Byte walk: escapes are ASCII, and UTF-8 trail bytes never contain 0x5C,
+// so non-ASCII passes through untouched.
 func unescapeDesktopValue(_ raw: String) -> String {
-    var out = ""
-    out.reserveCapacity(raw.count)
-    var i = raw.startIndex
-    while i < raw.endIndex {
-        if raw[i] == "\\" {
-            let next = raw.index(after: i)
-            if next < raw.endIndex {
-                switch raw[next] {
-                case "s": out.append(" ")
-                case "n": out.append("\n")
-                case "t": out.append("\t")
-                case "r": out.append("\r")
-                case "\\": out.append("\\")
-                default:
-                    out.append(raw[i])
-                    out.append(raw[next])
-                }
-                i = raw.index(after: next)
-                continue
+    guard raw.contains("\\") else { return raw }
+    let bytes = Array(raw.utf8)
+    var out: [UInt8] = []
+    out.reserveCapacity(bytes.count)
+    var i = 0
+    while i < bytes.count {
+        if bytes[i] == 0x5C, i + 1 < bytes.count {
+            switch bytes[i + 1] {
+            case 0x73: out.append(0x20) // s
+            case 0x6E: out.append(0x0A) // n
+            case 0x74: out.append(0x09) // t
+            case 0x72: out.append(0x0D) // r
+            case 0x5C: out.append(0x5C)
+            default:
+                out.append(bytes[i])
+                out.append(bytes[i + 1])
             }
+            i += 2
+            continue
         }
-        out.append(raw[i])
-        i = raw.index(after: i)
+        out.append(bytes[i])
+        i += 1
     }
-    return out
+    return String(decoding: out, as: UTF8.self)
 }
 
 func readDesktop(_ path: String) -> [String: String] {
     guard let text = readUTF8File(path) else { return [:] }
+    // Byte scan: `trimmingCharacters` bridges to NSString (UTF-16 decode +
+    // retain churn, ~4% of a full scan in profiles). Keys are ASCII.
+    let bytes = Array(text.utf8)
+    let n = bytes.count
     var data: [String: String] = [:]
     var inEntry = false
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let line = raw.trimmingCharacters(in: .whitespaces)
-        if line.isEmpty || line.hasPrefix("#") { continue }
-        if line.hasPrefix("[") {
-            inEntry = line == "[Desktop Entry]"
+    var i = 0
+    func trim(_ s: Int, _ e: Int) -> (Int, Int) {
+        var a = s
+        var b = e
+        while a < b, bytes[a] == 0x20 || bytes[a] == 0x09 || bytes[a] == 0x0D { a += 1 }
+        while b > a, bytes[b - 1] == 0x20 || bytes[b - 1] == 0x09 || bytes[b - 1] == 0x0D { b -= 1 }
+        return (a, b)
+    }
+    func str(_ s: Int, _ e: Int) -> String {
+        String(decoding: bytes[s..<e], as: UTF8.self)
+    }
+    while i < n {
+        var j = i
+        while j < n, bytes[j] != 0x0A { j += 1 }
+        var (s, e) = trim(i, j)
+        // One CRLF (or run of breaks) is one boundary.
+        while j < n, bytes[j] == 0x0A || bytes[j] == 0x0D { j += 1 }
+        i = j
+        guard s < e, bytes[s] != 0x23 /* # */ else { continue }
+        if bytes[s] == 0x5B /* [ */ {
+            // "[Desktop Entry]", matched on the trimmed line like before.
+            inEntry = e - s == 15 &&
+                bytes[s + 1] == 0x44 && bytes[s + 2] == 0x65 && bytes[s + 3] == 0x73 &&
+                bytes[s + 4] == 0x6B && bytes[s + 5] == 0x74 && bytes[s + 6] == 0x6F &&
+                bytes[s + 7] == 0x70 && bytes[s + 8] == 0x20 && bytes[s + 9] == 0x45 &&
+                bytes[s + 10] == 0x6E && bytes[s + 11] == 0x74 && bytes[s + 12] == 0x72 &&
+                bytes[s + 13] == 0x79 && bytes[s + 14] == 0x5D
             continue
         }
-        guard inEntry, let eq = line.firstIndex(of: "=") else { continue }
-        let key = String(line[..<eq]).trimmingCharacters(in: .whitespaces)
+        guard inEntry else { continue }
+        var eq = s
+        while eq < e, bytes[eq] != 0x3D /* = */ { eq += 1 }
+        guard eq < e else { continue }
+        let (ks, ke) = trim(s, eq)
+        guard ks < ke else { continue }
+        let key = str(ks, ke)
         if data[key] != nil { continue }
-        var val = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+        let (vs, ve) = trim(eq + 1, e)
+        var val = str(vs, ve)
         if key != "Exec", key != "TryExec", key != "URL" {
             val = unescapeDesktopValue(val)
         }
@@ -514,13 +556,13 @@ func findLinuxApps(progress: (String) -> Void, desktopDirs: [String]? = nil) -> 
     appendSteamApps(&apps, seen: &seen)
     appendCrossOverBottles(&apps, seen: &seen)
     progress("  · measuring sizes for \(apps.count) apps…")
-    let sizes = pmap(apps, workers: 16) { a in
-        if skipLiveDu(a) { return (a.sizeBytes, a.sizeMeasured) }
-        return FileManager.default.fileExists(atPath: a.path) ? duSize(a.path) : (0, false)
-    }
+    let needSizes = apps.filter { !skipLiveDu($0) }.map(\.path)
+    let sizes = duSizes(needSizes)
     for i in apps.indices {
-        apps[i].sizeBytes = sizes[i].0
-        apps[i].sizeMeasured = sizes[i].1
+        if skipLiveDu(apps[i]) { continue }
+        let pair = sizes[apps[i].path] ?? (0, false)
+        apps[i].sizeBytes = pair.0
+        apps[i].sizeMeasured = pair.1
     }
     apps.sort { $0.displayName.lowercased() < $1.displayName.lowercased() }
     return apps
@@ -565,12 +607,13 @@ func findMacApps(progress: (String) -> Void) -> [AppRecord] {
     appendSteamApps(&apps, seen: &seen)
     appendCrossOverBottles(&apps, seen: &seen)
     progress("  · measuring sizes for \(apps.count) apps…")
-    let sizes = pmap(apps, workers: 16) { a in
-        skipLiveDu(a) ? (a.sizeBytes, a.sizeMeasured) : duSize(a.path)
-    }
+    let needSizes = apps.filter { !skipLiveDu($0) }.map(\.path)
+    let sizes = duSizes(needSizes)
     for i in apps.indices {
-        apps[i].sizeBytes = sizes[i].0
-        apps[i].sizeMeasured = sizes[i].1
+        if skipLiveDu(apps[i]) { continue }
+        let pair = sizes[apps[i].path] ?? (0, false)
+        apps[i].sizeBytes = pair.0
+        apps[i].sizeMeasured = pair.1
     }
     apps.sort { $0.displayName.lowercased() < $1.displayName.lowercased() }
     return apps

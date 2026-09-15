@@ -24,14 +24,7 @@ final class SettingsTests: XCTestCase {
         var settings = AppAtticSettings.default
         settings.includeSystem = true
         settings.confirmDelete = false
-        settings = addIgnoredLeftover("/tmp/Foo", to: settings)
-        settings = addIgnoredLeftover("/tmp/Foo", to: settings)
-        settings = addIgnoredLeftover("/tmp/Bar", to: settings)
-        try writeSettings(settings, to: url)
-        let viaRead = try readSettings(from: url)
-        XCTAssertTrue(viaRead.includeSystem)
-        XCTAssertFalse(viaRead.confirmDelete)
-        XCTAssertEqual(viaRead.ignoredLeftoverPaths, ["/tmp/Foo", "/tmp/Bar"])
+        settings.ignoredLeftoverPaths = ["/tmp/Foo", "/tmp/Bar"]
         try saveSettings(settings, to: url)
         let loaded = try loadSettings(from: url)
         XCTAssertTrue(loaded.includeSystem)
@@ -41,18 +34,10 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(text.contains("\n"), text)
         XCTAssertTrue(text.contains("/tmp/Foo"), text)
         XCTAssertFalse(text.contains("\\/"), text)
-        let mode = posixMode(url.path)
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        let mode = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? -1
         XCTAssertNotEqual(mode, -1)
         XCTAssertEqual(mode & 0o077, 0)
-    }
-
-    func testReadSettingsMissingFileIsIOError() {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-read-missing-\(UUID().uuidString).json")
-        XCTAssertThrowsError(try readSettings(from: url)) { error in
-            guard case AppAtticIOError.readFailed = error else {
-                return XCTFail("expected readFailed, got \(error)")
-            }
-        }
     }
 
     func testPartialSettingsJSONUsesDefaults() throws {
@@ -182,7 +167,7 @@ final class SettingsTests: XCTestCase {
             LeftoverItem(name: "Café", path: nfd, root: "Caches", kind: "dir", status: "orphaned", size_bytes: 10),
         ]
         XCTAssertTrue(visibleOrphanedLeftovers(leftovers, ignoring: [nfc]).isEmpty)
-        let settings = addIgnoredLeftover(nfd, to: .default)
+        let settings = AppAtticSettings(ignoredLeftoverPaths: [nfd]).normalized()
         XCTAssertEqual(settings.ignoredLeftoverPaths, [nfc.precomposedStringWithCanonicalMapping])
         let loaded = AppAtticSettings(ignoredLeftoverPaths: [nfc, nfd, nfc]).normalized()
         XCTAssertEqual(loaded.ignoredLeftoverPaths, [nfc.precomposedStringWithCanonicalMapping])
@@ -464,7 +449,7 @@ final class ResolveScanTests: XCTestCase {
         let cacheURL = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-resolve-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: cacheURL) }
         let cached = sampleScanData(scannedAt: "2026-08-17T12:00:00Z")
-        saveScanCache(ScanCacheFile(fingerprint: "fp", includeSystem: false, data: cached), to: cacheURL)
+        try writeScanCache(ScanCacheFile(fingerprint: "fp", includeSystem: false, data: cached), to: cacheURL)
         var liveCalls = 0
         let resolved = resolveScan(
             includeSystem: false,
@@ -487,7 +472,7 @@ final class ResolveScanTests: XCTestCase {
     func testFreshOrForceLiveSkipsCache() throws {
         let cacheURL = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-resolve-fresh-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: cacheURL) }
-        saveScanCache(
+        try writeScanCache(
             ScanCacheFile(fingerprint: "fp", includeSystem: false, data: sampleScanData(scannedAt: "2026-08-17T12:00:00Z")),
             to: cacheURL
         )
@@ -529,7 +514,7 @@ final class ResolveScanTests: XCTestCase {
     func testStaleCacheRunsLiveScanAndSaves() throws {
         let cacheURL = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-resolve-stale-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: cacheURL) }
-        saveScanCache(
+        try writeScanCache(
             ScanCacheFile(fingerprint: "old", includeSystem: false, data: sampleScanData(scannedAt: "2026-08-17T12:00:00Z")),
             to: cacheURL
         )
@@ -552,7 +537,7 @@ final class ResolveScanTests: XCTestCase {
     func testDoesNotOverwriteCacheWhenFingerprintMovesDuringScan() throws {
         let cacheURL = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-resolve-move-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: cacheURL) }
-        saveScanCache(
+        try writeScanCache(
             ScanCacheFile(fingerprint: "old", includeSystem: false, data: sampleScanData(scannedAt: "2026-08-17T12:00:00Z")),
             to: cacheURL
         )

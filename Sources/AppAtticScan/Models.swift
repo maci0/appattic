@@ -9,20 +9,6 @@ public enum LeftoverStatus: String, Codable, Sendable, Hashable, CaseIterable {
     case active
 }
 
-/// Stale-software recommendation stored as a string on JSON models so unknown values stay round-trippable.
-public enum SoftwareTier: String, Codable, Sendable, Hashable, CaseIterable {
-    case keep
-    case review
-    case remove
-    case system
-}
-
-/// Distro orphan vs user-global language tool.
-public enum PackageKind: String, Codable, Sendable, Hashable, CaseIterable {
-    case orphan
-    case global
-}
-
 public struct ScanTotals: Codable, Sendable {
     public let apps_installed: Int
     public let orphaned_items: Int
@@ -66,7 +52,6 @@ public struct LeftoverItem: Codable, Identifiable, Hashable, Sendable {
     public let extra_paths: [String]?
     public let shadows: String?
     public var id: String { path }
-    public var leftoverStatus: LeftoverStatus? { LeftoverStatus(rawValue: status) }
 
     public init(
         name: String,
@@ -150,7 +135,6 @@ public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
     public let bundle_id: String?
     public var id: String { path }
     public var totalBytes: Int { addBytes(size_bytes ?? 0, data_bytes ?? 0) }
-    public var softwareTier: SoftwareTier? { tier.flatMap { SoftwareTier(rawValue: $0) } }
 
     public init(
         name: String,
@@ -267,7 +251,6 @@ public struct PackageEntry: Codable, Identifiable, Hashable, Sendable {
     public let reason: String?
     public let children: [String]?
     public var id: String { manager + ":" + name }
-    public var packageKind: PackageKind? { PackageKind(rawValue: kind) }
     public var canMarkManual: Bool {
         kind == "orphan" && ["apt", "pacman", "dnf", "zypper"].contains(manager)
     }

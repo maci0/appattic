@@ -48,11 +48,6 @@ public func readScanCache(from url: URL = defaultScanCacheURL()) throws -> ScanC
     }
 }
 
-/// Swallow write errors. Prefer `writeScanCache` when failure must surface.
-public func saveScanCache(_ cache: ScanCacheFile, to url: URL = defaultScanCacheURL()) {
-    try? writeScanCache(cache, to: url)
-}
-
 public func writeScanCache(_ cache: ScanCacheFile, to url: URL = defaultScanCacheURL()) throws {
     let dir = url.deletingLastPathComponent()
     do {

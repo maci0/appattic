@@ -5,7 +5,6 @@
 #include "finding.h"
 #include "uistyle.h"
 
-#include <QAction>
 #include <QApplication>
 #include <QAtomicInteger>
 #include <QCheckBox>
@@ -28,7 +27,6 @@
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStackedWidget>
-#include <QStorageInfo>
 #include <QThread>
 #include <QTimer>
 #include <QToolBar>
@@ -413,10 +411,6 @@ DiskPage::~DiskPage() {
     delete d->root;
     delete d->worker;
     delete d;
-}
-
-void DiskPage::setSearch(const QString &text) {
-    d->search->setText(text);
 }
 
 void DiskPage::scanHome() { startScan(QDir::homePath()); }

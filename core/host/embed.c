@@ -297,6 +297,10 @@ static int run_plugin(
     char id[128];
     plugin_id_from_path(path, id, sizeof id);
     if (on_progress) on_progress(id, index, total, user);
+    /* A skipped plugin is not a failure, but the skip must not erase a fault an
+       earlier plugin already published on this accumulator: the two writes do
+       not commute, and the skip used to win, leaving rc=1 with an empty err. */
+    const int err_was_failed = e->failed;
     if (access(path, R_OK) != 0) {
         fprintf(stderr, "skip %s (missing coeffect/file)\n", path);
         return 0;
@@ -306,8 +310,10 @@ static int run_plugin(
     wasmtime_instance_t plug;
     if (instantiate(ctx, linker, engine, path, &mod, &plug, e) != 0) {
         fprintf(stderr, "skip %s (instantiate failed)\n", path);
-        e->failed = 0;
-        if (e->buf && e->len) e->buf[0] = '\0';
+        if (!err_was_failed) {
+            e->failed = 0;
+            if (e->buf && e->len) e->buf[0] = '\0';
+        }
         return 0;
     }
 
@@ -392,8 +398,10 @@ static int run_plugin(
 skip_plugin:
     drop_externs(slots, ngot);
     wasmtime_module_delete(mod);
-    e->failed = 0;
-    if (e->buf && e->len) e->buf[0] = '\0';
+    if (!err_was_failed) {
+        e->failed = 0;
+        if (e->buf && e->len) e->buf[0] = '\0';
+    }
     return 0;
 
 fail_plugin:

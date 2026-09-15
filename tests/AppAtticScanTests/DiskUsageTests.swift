@@ -56,6 +56,50 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertEqual(kids.first?["name"] as? String, "b")
     }
 
+    /// The streaming writer replaced a `[String: Any]` tree + `JSONSerialization`.
+    /// Same parsed value, including quoting, escapes, and awkward integers.
+    func testDiskUsageJSONMatchesJSONSerializationReference() throws {
+        func reference(_ n: DiskUsageNode) -> [String: Any] {
+            [
+                "name": n.name,
+                "path": n.path,
+                "apparent": n.apparent,
+                "allocated": n.allocated,
+                "items": n.items,
+                "isDir": n.isDir,
+                "unreadable": n.unreadable,
+                "mountPoint": n.mountPoint,
+                "children": n.children.map { reference($0) },
+            ]
+        }
+
+        let root = DiskUsageNode(
+            name: "od\"d\\name\nline\ttab",
+            path: "/tmp/\u{1F600}\u{7}bell",
+            apparent: Int.max,
+            allocated: 0,
+            items: 3,
+            mtime: nil,
+            isDir: true,
+            unreadable: true,
+            mountPoint: true
+        )
+        root.children = [
+            DiskUsageNode(name: "", path: "/tmp/empty", apparent: -5, allocated: 1024, items: -1),
+            DiskUsageNode(name: "\u{4}\u{8}\u{0C}\r", path: "/tmp/ctrl", apparent: 1, allocated: 2, isDir: true),
+            DiskUsageNode(name: "leaf", path: "/tmp/leaf", apparent: 7, allocated: 9),
+        ]
+
+        let got = try XCTUnwrap(JSONSerialization.jsonObject(with: diskUsageJSON(root)) as? [String: Any])
+        let want = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: JSONSerialization.data(withJSONObject: reference(root), options: [.prettyPrinted, .sortedKeys])
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(NSDictionary(dictionary: got), NSDictionary(dictionary: want))
+        XCTAssertEqual(got["apparent"] as? Int, Int.max, "Int.max must survive the digit buffer")
+    }
+
     func testListDiskVolumesSkipsProc() {
         let mounts = """
         /dev/sda1 / ext4 rw 0 0

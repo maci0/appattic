@@ -34,12 +34,6 @@ fn basenameOf(path: []const u8) []const u8 {
     return path;
 }
 
-fn usageTimingExtra(comptime spec: Spec, name: []const u8) []const u8 {
-    _ = spec;
-    _ = name;
-    return "";
-}
-
 fn nameInKeep(name: []const u8, keep: []const u8) bool {
     var lines = std.mem.splitScalar(u8, keep, '\n');
     while (lines.next()) |raw| {
@@ -52,15 +46,76 @@ fn nameInKeep(name: []const u8, keep: []const u8) bool {
 
 const linux_system_names = @embedFile("linux-system-names.txt");
 
-const snap_system_names =
-    \\bare
-    \\core
-    \\snapd
-    \\gtk-common-themes
-    \\gtk3-common-themes
-    \\cups
-    \\mesa-2404
-;
+/// Sorted table of the embedded names, stored lowered. Parsed once on first
+/// use into static storage (WASM plugins are single-threaded; no atomics).
+/// The old code re-split and re-trimmed the 137-line text per candidate with
+/// `eqlIgnoreCase` per entry: ~1.5 µs per miss. Binary search: ~8 probes.
+var sys_name_table: [256][]const u8 = undefined;
+var sys_name_count: usize = 0;
+var sys_table_low: [4096]u8 = undefined;
+var sys_table_ready: bool = false;
+
+fn ensureSysTable() void {
+    if (sys_table_ready) return;
+    var used: usize = 0;
+    var lines = std.mem.splitScalar(u8, linux_system_names, '\n');
+    while (lines.next()) |raw| {
+        const k = std.mem.trim(u8, raw, " \t\r");
+        if (k.len == 0) continue;
+        if (sys_name_count == sys_name_table.len) break;
+        if (used + k.len > sys_table_low.len) break;
+        for (k) |c| {
+            sys_table_low[used] = if (c >= 'A' and c <= 'Z') c + 32 else c;
+            used += 1;
+        }
+        sys_name_table[sys_name_count] = sys_table_low[used - k.len .. used];
+        sys_name_count += 1;
+    }
+    // Insertion sort: 137 entries, trivial.
+    var i: usize = 1;
+    while (i < sys_name_count) : (i += 1) {
+        const key = sys_name_table[i];
+        var j: usize = i;
+        while (j > 0 and std.mem.order(u8, key, sys_name_table[j - 1]) == .lt) {
+            sys_name_table[j] = sys_name_table[j - 1];
+            j -= 1;
+        }
+        sys_name_table[j] = key;
+    }
+    sys_table_ready = true;
+}
+
+/// Case-insensitive membership in the system-names table. The candidate is
+/// lowered once into a stack buffer; over-long names cannot match (longest
+/// entry is 23 bytes) and skip the search.
+fn nameInSysTable(name: []const u8) bool {
+    if (name.len == 0 or name.len > 64) return false;
+    ensureSysTable();
+    var low: [64]u8 = undefined;
+    for (name, 0..) |c, i| low[i] = if (c >= 'A' and c <= 'Z') c + 32 else c;
+    const key = low[0..name.len];
+    var lo: usize = 0;
+    var hi: usize = sys_name_count;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        switch (std.mem.order(u8, sys_name_table[mid], key)) {
+            .eq => return true,
+            .lt => lo = mid + 1,
+            .gt => hi = mid,
+        }
+    }
+    return false;
+}
+
+const snap_system_names = [_][]const u8{
+    "bare",
+    "core",
+    "snapd",
+    "gtk-common-themes",
+    "gtk3-common-themes",
+    "cups",
+    "mesa-2404",
+};
 
 fn nameInListIgnoreCase(name: []const u8, list: []const u8) bool {
     var lines = std.mem.splitScalar(u8, list, '\n');
@@ -85,15 +140,17 @@ pub fn isSystemLeftoverName(name: []const u8) bool {
     var n = name;
     while (n.len > 0 and n[0] == '.') n = n[1..];
     if (n.len == 0) return false;
-    if (nameInListIgnoreCase(n, linux_system_names)) return true;
-    if (nameInListIgnoreCase(n, snap_system_names)) return true;
+    if (nameInSysTable(n)) return true;
+    for (snap_system_names) |s| {
+        if (std.ascii.eqlIgnoreCase(s, n)) return true;
+    }
     if (n.len >= 4 and std.ascii.eqlIgnoreCase(n[0..4], "gtk-")) return true;
     if (n.len >= 3 and std.ascii.eqlIgnoreCase(n[0..3], "kde")) return true;
     if (n.len >= 4 and std.ascii.eqlIgnoreCase(n[0..4], "kwin")) return true;
     if (n.len >= 5 and std.ascii.eqlIgnoreCase(n[0..5], "baloo")) return true;
     if (n.len >= 6 and std.ascii.eqlIgnoreCase(n[0..6], "plasma")) return true;
     if (n.len > 2 and (n[n.len - 2] == 'r' or n[n.len - 2] == 'R') and (n[n.len - 1] == 'c' or n[n.len - 1] == 'C')) {
-        if (nameInListIgnoreCase(n[0 .. n.len - 2], linux_system_names)) return true;
+        if (nameInSysTable(n[0 .. n.len - 2])) return true;
     }
     if (n.len >= 3 and std.ascii.eqlIgnoreCase(n[0..3], "xdg")) return true;
     if (n.len >= 4 and std.ascii.eqlIgnoreCase(n[0..4], "core")) {
@@ -169,7 +226,6 @@ fn render(comptime spec: Spec, hits: []const Orphan) bool {
         w.str(h.path);
         w.raw(",\"rootLabel\":");
         w.str(spec.root_label);
-        w.raw(usageTimingExtra(spec, h.name));
         w.raw(",\"status\":\"orphaned\",\"command\":\"rm -rf ");
         w.raw(h.path);
         w.raw("\"}");

@@ -68,9 +68,6 @@ final class ModelTests: XCTestCase {
     }
 
     func testLeftoverAndSoftwareTypedEnums() {
-        XCTAssertEqual(LeftoverItem(name: "a", path: "/a", root: "Caches", kind: "dir", status: "orphaned").leftoverStatus, .orphaned)
-        XCTAssertEqual(LeftoverItem(name: "a", path: "/a", root: ".local/bin", kind: "file", status: "shadow").leftoverStatus, .shadow)
-        XCTAssertNil(LeftoverItem(name: "a", path: "/a", root: "Caches", kind: "dir", status: "future").leftoverStatus)
         XCTAssertTrue(isListedLeftoverStatus(LeftoverStatus.orphaned))
         XCTAssertTrue(isListedLeftoverStatus(LeftoverStatus.shadow))
         XCTAssertFalse(isListedLeftoverStatus(LeftoverStatus.owned))
@@ -89,9 +86,6 @@ final class ModelTests: XCTestCase {
         XCTAssertFalse(outdatedIsUpdatable(manager: "snap", kind: nil))
         XCTAssertFalse(outdatedIsUpdatable(manager: "pip", kind: nil))
         XCTAssertFalse(outdatedIsUpdatable(manager: "brew-cask", kind: "untrusted"))
-        XCTAssertEqual(SoftwareItem(name: "jq", kind: "formula", path: "/opt/jq", source: "brew-formula", tier: "remove").softwareTier, .remove)
-        XCTAssertEqual(PackageEntry(name: "libfoo", manager: "pacman", kind: "orphan").packageKind, .orphan)
-        XCTAssertEqual(PackageEntry(name: "tsc", manager: "npm", kind: "global").packageKind, .global)
     }
 
     func testScanResultRoundTripKeepsShadowsAndLinuxIds() {
@@ -127,7 +121,7 @@ final class ModelTests: XCTestCase {
         )
         let data = result.toScanData()
         XCTAssertEqual(data.leftovers[0].shadows, "/usr/bin/python3")
-        XCTAssertEqual(data.leftovers[0].leftoverStatus, .shadow)
+        XCTAssertEqual(data.leftovers[0].status, "shadow")
         XCTAssertEqual(data.software[0].pkg_id, "org.mozilla.Firefox")
         XCTAssertEqual(data.software[0].bundle_id, "org.mozilla.firefox")
         XCTAssertEqual(data.outdated?[0].bundle_id, "com.apple.iMovieApp")
@@ -136,7 +130,7 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(restored.software[0].pkgId, "org.mozilla.Firefox")
         XCTAssertEqual(restored.software[0].bundleId, "org.mozilla.firefox")
         XCTAssertEqual(restored.outdated[0].bundleId, "com.apple.iMovieApp")
-        XCTAssertEqual(restored.verdicts[0].softwareTier, .review)
+        XCTAssertEqual(restored.verdicts[0].tier, "review")
         XCTAssertTrue(leftoverMatchesCategory(data.leftovers[0], categories: ["/usr/bin/python3"]))
         XCTAssertEqual(
             uninstallCommand(for: data.software[0]),

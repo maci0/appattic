@@ -20,12 +20,10 @@ public:
     void goUp();
     void setAllocated(bool on);
     void setMode(Mode mode);
-    Mode mode() const { return m_mode; }
     DiskNode *viewRoot() const { return m_view; }
 
 signals:
     void nodeActivated(DiskNode *node);
-    void nodeHovered(DiskNode *node);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -53,7 +51,6 @@ private:
         const QRectF &bounds,
         QVector<QRectF> *out
     ) const;
-    QColor colorFor(const DiskNode *node, int index) const;
     DiskNode *hitAt(const QPoint &pos) const;
 
     DiskNode *m_root = nullptr;
@@ -63,7 +60,5 @@ private:
     Mode m_mode = Mode::Rings;
     QVector<Hit> m_hits;
 };
-
-QColor diskChartColor(int index);
 
 #endif

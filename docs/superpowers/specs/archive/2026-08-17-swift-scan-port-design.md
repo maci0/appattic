@@ -1,4 +1,8 @@
-# AppAttic Swift scan port
+# AppAttic Swift scan port (ARCHIVED)
+
+> Archived: implemented in full. The canonical architecture record is
+> [`2026-08-26-zig-wasm-core-design.md`](../2026-08-26-zig-wasm-core-design.md).
+> This file is kept for history; do not extend it.
 
 Date: 2026-08-17
 Updated: 2026-09-05
