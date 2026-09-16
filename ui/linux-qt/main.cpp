@@ -440,7 +440,9 @@ public:
             option->palette.setBrush(QPalette::WindowText, onAccent);
             option->palette.setBrush(QPalette::HighlightedText, onAccent);
         }
-        if (index.flags() & Qt::ItemIsUserCheckable) {
+        // Column 0 only: QTreeWidget flags are per item, so without this the
+        // overview tables drew a check box in every column of a checkable row.
+        if (index.column() == 0 && (index.flags() & Qt::ItemIsUserCheckable)) {
             option->features |= QStyleOptionViewItem::HasCheckIndicator;
             option->checkState = static_cast<Qt::CheckState>(
                 index.data(Qt::CheckStateRole).toInt()
@@ -1278,8 +1280,10 @@ private:
         t->setIndentation(0);
         t->setHeaderLabels({QStringLiteral("Name"), QStringLiteral("What"), trailing});
         t->header()->setStretchLastSection(false);
+        // Only the name takes the slack: "What" and the trailing column are
+        // short labels, and stretching them elided names that had room.
         t->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-        t->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+        t->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
         t->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
         t->setFrameShape(QFrame::NoFrame);
         t->setTextElideMode(Qt::ElideRight);
@@ -1538,10 +1542,20 @@ private:
                 it->setToolTip(0, displayName(f));
                 it->setToolTip(1, whatText(f, page));
                 if (!f.path.isEmpty()) it->setToolTip(2, f.path);
-                it->setFont(2, numericFont());
-                it->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+                if (page != Page::Outdated) {
+                    it->setFont(2, numericFont());
+                    it->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+                }
                 it->setForeground(1, t.dim);
                 it->setForeground(2, t.dim);
+            }
+            if (QTreeWidgetItem *head = tree->headerItem()) {
+                // The header has to agree with the cells below it.
+                head->setTextAlignment(
+                    2,
+                    page == Page::Outdated ? (Qt::AlignLeft | Qt::AlignVCenter)
+                                           : (Qt::AlignRight | Qt::AlignVCenter)
+                );
             }
             const QString text = settingsBlocked
                 ? QStringLiteral("Settings could not be loaded.")
@@ -1597,11 +1611,15 @@ private:
         m_table->header()->setResizeContentsPrecision(100);
         m_table->header()->setSectionResizeMode(0, QHeaderView::Fixed);
         m_table->setColumnWidth(0, page == Page::Leftovers ? 36 : 28);
-        m_table->header()->setSectionResizeMode(1, QHeaderView::Stretch);
-        for (int c = 2; c < headers.size(); ++c) {
+        for (int c = 1; c < headers.size(); ++c) {
             // Interactive here, sized once per fill: ResizeToContents re-measures
             // its columns on every insertion.
             m_table->header()->setSectionResizeMode(c, QHeaderView::Interactive);
+        }
+        // Only the last column takes the slack. Stretching Name instead left a
+        // wide hole between it and the values, which hugged the right edge.
+        if (headers.size() > 1) {
+            m_table->header()->setSectionResizeMode(headers.size() - 1, QHeaderView::Stretch);
         }
     }
 
@@ -1811,8 +1829,9 @@ private:
         // After the reset: the header has no sections to touch before the model
         // carries the columns, and Qt 6.4 crashes on setSectionResizeMode then.
         setupColumns(page, headers);
-        // Columns sized once now that the model holds every row.
-        for (int c = 2; c < headers.size(); ++c) m_table->resizeColumnToContents(c);
+        // Columns sized once now that the model holds every row. The stretched
+        // last column is left alone.
+        for (int c = 1; c + 1 < headers.size(); ++c) m_table->resizeColumnToContents(c);
         QModelIndex select = m_model->indexOfUid(m_selectedUid, m_selectedChild);
         if (!select.isValid() && !rows.isEmpty()) select = m_model->index(0, 0, QModelIndex());
         finishFill(page, rows, select);
