@@ -790,7 +790,7 @@ public:
             QMessageBox::about(
                 this,
                 QStringLiteral("AppAttic"),
-                QStringLiteral("AppAttic 1.3.0\nLeftovers, stale apps, outdated packages, disk usage.")
+                QStringLiteral("AppAttic " APPATTIC_VERSION "\nLeftovers, stale apps, outdated packages, disk usage.")
             );
         });
 
@@ -1377,7 +1377,7 @@ private:
         row->addWidget(ignCol.first, 1);
         v->addLayout(row);
         v->addStretch();
-        auto *ver = new QLabel(QStringLiteral("AppAttic 1.3.0"));
+        auto *ver = new QLabel(QStringLiteral("AppAttic " APPATTIC_VERSION));
         ver->setFont(small);
         ver->setForegroundRole(QPalette::PlaceholderText);
         v->addWidget(ver);

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(appattic-qt LANGUAGES C CXX)
 
+set(APPATTIC_VERSION "1.3.1")
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
@@ -91,6 +93,9 @@ target_include_directories(appattic-qt PRIVATE
 # Do not bake the configure-time source path into the binary. Runtime uses
 # APPATTIC_CORE_OUT, then paths relative to the executable (see coreOutDir).
 target_link_libraries(appattic-qt PRIVATE Qt6::Widgets wasmtime Threads::Threads)
+# The Qt shell's copy of the version. The CLI and the macOS UI read
+# `appAtticVersion` in AppAtticScan; this is the C++ side of the same value.
+target_compile_definitions(appattic-qt PRIVATE APPATTIC_VERSION="${APPATTIC_VERSION}")
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(appattic-qt PRIVATE
         -fstack-protector-strong

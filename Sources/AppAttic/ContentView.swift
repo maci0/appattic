@@ -1335,7 +1335,7 @@ struct ContentView: View {
             }
             .padding(16)
             Spacer()
-            Text("AppAttic 1.3.0")
+            Text("AppAttic \(appAtticVersion)")
                 .font(.system(size: 11))
                 .foregroundColor(Color.appDim)
                 .padding(.horizontal, 16)
