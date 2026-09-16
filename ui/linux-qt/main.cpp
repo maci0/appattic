@@ -218,7 +218,9 @@ static QString outdatedVersionLabel(const Finding &f) {
     if (f.kind.contains(QLatin1String("untrusted")) || f.status == QLatin1String("untrusted")) {
         return QStringLiteral("untrusted tap");
     }
-    if (f.currentVersion.isEmpty() && f.latestVersion.isEmpty()) return QStringLiteral("-");
+    // Same word the size column uses when a value is missing, instead of a bare
+    // dash next to real versions.
+    if (f.currentVersion.isEmpty() && f.latestVersion.isEmpty()) return QStringLiteral("unknown");
     return (f.currentVersion.isEmpty() ? QStringLiteral("-") : f.currentVersion)
         + QStringLiteral(" → ")
         + (f.latestVersion.isEmpty() ? QStringLiteral("?") : f.latestVersion);
