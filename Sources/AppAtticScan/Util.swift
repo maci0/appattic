@@ -322,60 +322,31 @@ public func redactHomePaths(
 }
 
 /// Replace every `homePath` occurrence in `text` that ends on a path boundary
-/// with `~`. Nil when there is none. Byte scan: the old NSRegularExpression +
-/// NSString round-trip cost ~11 µs per call, and this runs on every log line.
+/// with `~`. Nil when there is none. `range(of:)` works on any String, so the
+/// Darwin bridged-NSString case needs no byte-scan fallback.
 private func redactHomePrefix(_ text: String, homePath: String) -> String? {
-    // One of the two can be bridged from NSString on Darwin (see
-    // `standardizedHome`), where its UTF-8 is not contiguous. Falling back to
-    // the copies keeps redaction working there instead of leaking the account
-    // path into logs and error dialogs.
-    let fast = text.utf8.withContiguousStorageIfAvailable { tu -> [(Int, Int)]? in
-        homePath.utf8.withContiguousStorageIfAvailable { hu -> [(Int, Int)]? in
-            homePrefixHits(tu, hu)
-        } ?? nil
-    } ?? nil
-    guard let hits = fast ?? homePrefixHits(Array(text.utf8), Array(homePath.utf8)) else {
-        return nil
+    var ranges: [Range<String.Index>] = []
+    var search = text.startIndex
+    while let r = text.range(of: homePath, range: search..<text.endIndex) {
+        if r.upperBound == text.endIndex || isHomeBoundary(text[r.upperBound]) {
+            ranges.append(r)
+        }
+        search = text.index(after: r.lowerBound)
     }
+    guard !ranges.isEmpty else { return nil }
     var out = text
     // Replace back to front so earlier indices stay valid.
-    for (s, e) in hits.reversed() {
-        let rs = text.utf8.index(text.utf8.startIndex, offsetBy: s)
-        let re = text.utf8.index(rs, offsetBy: e - s)
-        out.replaceSubrange(rs..<re, with: "~")
+    for r in ranges.reversed() {
+        out.replaceSubrange(r, with: "~")
     }
     return out
 }
 
-/// Byte offsets of every `home` occurrence in `text` that ends on a path
-/// boundary (`/`, end of text, or one of `[\s:"',;]`). Nil when none.
-private func homePrefixHits<T: RandomAccessCollection, H: RandomAccessCollection>(
-    _ text: T,
-    _ home: H
-) -> [(Int, Int)]? where T.Element == UInt8, T.Index == Int, H.Element == UInt8, H.Index == Int {
-    let tn = text.count
-    let hn = home.count
-    guard hn > 0, tn >= hn else { return nil }
-    var hits: [(Int, Int)] = []
-    var i = 0
-    outer: while i + hn <= tn {
-        for k in 0..<hn where text[i + k] != home[k] {
-            i += 1
-            continue outer
-        }
-        // Boundary after the prefix: `/`, end, or one of `[\s:"',;]`.
-        let a = i + hn
-        let ok: Bool
-        if a >= tn {
-            ok = true
-        } else {
-            let c = text[a]
-            ok = c == 0x2F || c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D ||
-                c == 0x3A || c == 0x22 || c == 0x27 || c == 0x2C || c == 0x3B
-        }
-        if ok { hits.append((i, a)); i = a } else { i += 1 }
-    }
-    return hits.isEmpty ? nil : hits
+/// A path prefix may only be redacted when it ends here: end of text, a
+/// separator, or one of `[\s:"',;]`.
+private func isHomeBoundary(_ c: Character) -> Bool {
+    c == "/" || c == " " || c == "\t" || c == "\n" || c == "\r"
+        || c == ":" || c == "\"" || c == "'" || c == "," || c == ";"
 }
 
 public func restrictOwnerOnlyFile(at url: URL) throws {
@@ -744,10 +715,8 @@ public func shellQuote(_ value: String) -> String {
     // assuming "needs quoting": values bridged from NSString (Darwin) are not
     // contiguous, and guessing there made the same command quote differently
     // per platform.
-    let needsQuote = value.utf8.withContiguousStorageIfAvailable { u -> Bool in
-        for c in u where !isSafeShellByte(c) { return true }
-        return false
-    } ?? value.utf8.contains { !isSafeShellByte($0) }
+    // Cold path (one call per script line): plain stdlib iteration.
+    let needsQuote = value.utf8.contains { !isSafeShellByte($0) }
     if !needsQuote { return value }
     // Only `'` needs escaping inside single quotes.
     if !value.contains("'") { return "'" + value + "'" }

@@ -310,6 +310,18 @@ try_smoke_xvfb() {
     return 1
 }
 
+run_helper_tests() {
+    local tests="$ROOT/ui/linux-qt/build/appattic-qt-helper-tests"
+    if [[ ! -x "$tests" ]]; then
+        echo "error: helper tests not built ($tests); run without --smoke" >&2
+        exit 1
+    fi
+    if ! "$tests"; then
+        echo "error: finding/diskusage helper tests failed" >&2
+        exit 1
+    fi
+}
+
 run_smoke() {
     ensure_qt_platform_plugins
     wasmtime_ldpath
@@ -376,6 +388,7 @@ if command -v ldd >/dev/null 2>&1; then
     else
         echo "note: libwasmtime not in ldd (may be static)"
     fi
+    run_helper_tests
     run_smoke
     pass_link ldd "$deps"
     exit 0
@@ -389,6 +402,7 @@ if command -v readelf >/dev/null 2>&1; then
     fi
     if echo "$needed" | grep -q 'libQt6Widgets'; then
         echo "linked: Qt 6 Widgets (readelf)"
+        run_helper_tests
         run_smoke
         pass_link readelf "$needed"
         exit 0

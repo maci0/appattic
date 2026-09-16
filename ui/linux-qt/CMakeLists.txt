@@ -166,6 +166,27 @@ install(DIRECTORY "${APPATTIC_ROOT}/core/out/"
     FILES_MATCHING PATTERN "*.wasm"
 )
 
+# Helper coverage for finding.cpp and diskusage.cpp. It needs no scan and no
+# wasm host, so it lives in its own binary instead of the shipped app.
+add_executable(appattic-qt-helper-tests
+    tests/helper_tests.cpp
+    finding.cpp
+    diskusage.cpp
+    appattic.qrc
+)
+target_include_directories(appattic-qt-helper-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${APPATTIC_ROOT}/core/host"
+)
+target_link_libraries(appattic-qt-helper-tests PRIVATE Qt6::Widgets Threads::Threads)
+target_compile_definitions(appattic-qt-helper-tests PRIVATE APPATTIC_VERSION="${APPATTIC_VERSION}")
+# Same flags as the app, so the tests cannot compile under a looser policy.
+get_target_property(_appattic_compile_options appattic-qt COMPILE_OPTIONS)
+if(_appattic_compile_options)
+    target_compile_options(appattic-qt-helper-tests PRIVATE ${_appattic_compile_options})
+endif()
+set_property(SOURCE tests/helper_tests.cpp APPEND PROPERTY COMPILE_OPTIONS -Werror)
+
 if(EXISTS "${APPATTIC_ROOT}/packaging/appattic.desktop")
     install(FILES "${APPATTIC_ROOT}/packaging/appattic.desktop"
         DESTINATION share/applications)

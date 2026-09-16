@@ -122,6 +122,25 @@ static wasm_engine_t *shared_engine(void) {
     return engine;
 }
 
+/* Remember a compiled module for `path`. The cache owns it; slots are bounded
+   and never freed (a scan may still be running when the next one starts). */
+static void cache_put(const char *path, const struct stat *st, wasmtime_module_t *module) {
+    char *copy = strdup(path);
+    if (!copy) return;
+    pthread_mutex_lock(&g_mod_lock);
+    if (g_mod_count < MOD_CACHE_MAX) {
+        ModSlot *s = &g_mods[g_mod_count++];
+        s->path = copy;
+        s->size = (long)st->st_size;
+        s->mtime_s = (long)st->st_mtim.tv_sec;
+        s->mtime_ns = (long)st->st_mtim.tv_nsec;
+        s->module = module;
+    } else {
+        free(copy);
+    }
+    pthread_mutex_unlock(&g_mod_lock);
+}
+
 /* Compiled module for `path`, from the cache or freshly compiled. NULL on
    error, with `e` set. The caller borrows it; the cache owns it. */
 static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *path, Err *e) {
@@ -154,19 +173,7 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
             wasmtime_module_t *pre = NULL;
             wasmtime_error_t *perr = wasmtime_module_deserialize_file(engine, cwasm, &pre);
             if (!perr && pre) {
-                pthread_mutex_lock(&g_mod_lock);
-                if (g_mod_count < MOD_CACHE_MAX) {
-                    char *pcopy = strdup(path);
-                    if (pcopy) {
-                        ModSlot *s = &g_mods[g_mod_count++];
-                        s->path = pcopy;
-                        s->size = (long)st.st_size;
-                        s->mtime_s = (long)st.st_mtim.tv_sec;
-                        s->mtime_ns = (long)st.st_mtim.tv_nsec;
-                        s->module = pre;
-                    }
-                }
-                pthread_mutex_unlock(&g_mod_lock);
+                cache_put(path, &st, pre);
                 return pre;
             }
             if (perr) wasmtime_error_delete(perr);
@@ -183,21 +190,7 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
         fail_error(e, path, err);
         return NULL;
     }
-    char *copy = strdup(path);
-    if (copy) {
-        pthread_mutex_lock(&g_mod_lock);
-        if (g_mod_count < MOD_CACHE_MAX) {
-            ModSlot *s = &g_mods[g_mod_count++];
-            s->path = copy;
-            s->size = (long)st.st_size;
-            s->mtime_s = (long)st.st_mtim.tv_sec;
-            s->mtime_ns = (long)st.st_mtim.tv_nsec;
-            s->module = module;
-        } else {
-            free(copy);
-        }
-        pthread_mutex_unlock(&g_mod_lock);
-    }
+    cache_put(path, &st, module);
     return module;
 }
 

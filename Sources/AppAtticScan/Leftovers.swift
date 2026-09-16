@@ -1182,8 +1182,7 @@ public final class Identity {
     private var stemIndex: [UInt8: [(stem: String, dash: String, under: String, dot: String)]] = [:]
     /// `brewRaw` minus generic tokens. The old loop re-checked
     /// `isGenericOwnerToken` (lowercase + trim) per package per entry.
-    private var brewKeys: [String] = []
-    /// The same keys as a set, and only the hyphenated ones: the unscoped
+    /// The brew keys as sets, and only the hyphenated ones: the unscoped
     /// ownership test requires a hyphen. Looking the *query's* prefixes up in a
     /// set replaces a scan of every installed formula for every name (200 keys x
     /// 5000 names in the bench) with one hash lookup per prefix length.
@@ -1258,7 +1257,7 @@ public final class Identity {
             index[f, default: []].append(t)
         }
         stemIndex = index
-        brewKeys = brewRaw.filter { !isGenericOwnerToken($0) }
+        let brewKeys = brewRaw.filter { !isGenericOwnerToken($0) }
         brewKeySet = Set(brewKeys.map { Substring($0) })
         brewKeyHyphenSet = Set(brewKeys.filter { $0.contains("-") }.map { Substring($0) })
     }
