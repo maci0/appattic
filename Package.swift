@@ -1,4 +1,5 @@
 // swift-tools-version: 5.10
+import Foundation
 import PackageDescription
 
 #if os(Linux)
@@ -7,11 +8,17 @@ let uiProducts: [Product] = []
 let uiTargets: [Target] = []
 let uiDeps: [Package.Dependency] = []
 #else
-let uiProducts: [Product] = [
+// `swift test` builds every target in the package, so CI that verifies only the
+// scan library and CLI (the parts the pinned Swift 5.10.1 can build) drops the
+// UI here. AppAtticUI needs swift-cross-ui 0.2.1, which needs a Swift 6
+// compiler, and Swift 6.1's SIL lifetime pass crashes on swift-mutex 0.0.6
+// (fixed only on swift main). Leave the variable unset to build the UI.
+let macUI = ProcessInfo.processInfo.environment["APPATTIC_NO_MAC_UI"] != "1"
+let uiProducts: [Product] = macUI ? [
     // AppAtticUI, not AppAttic: APFS is case-insensitive, so AppAttic and appattic are the same file.
     .executable(name: "AppAtticUI", targets: ["AppAttic"]),
-]
-let uiTargets: [Target] = [
+] : []
+let uiTargets: [Target] = macUI ? [
     .executableTarget(
         name: "AppAttic",
         dependencies: [
@@ -20,10 +27,10 @@ let uiTargets: [Target] = [
             .product(name: "DefaultBackend", package: "swift-cross-ui"),
         ]
     ),
-]
-let uiDeps: [Package.Dependency] = [
+] : []
+let uiDeps: [Package.Dependency] = macUI ? [
     .package(url: "https://github.com/moreSwift/swift-cross-ui", .exact("0.2.1")),
-]
+] : []
 #endif
 
 let package = Package(

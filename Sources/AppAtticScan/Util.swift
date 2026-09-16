@@ -422,26 +422,20 @@ public func pmap<T, R>(_ items: [T], workers: Int = 16, _ fn: (T) -> R) -> [R] {
     if items.count == 1 || workers <= 1 { return items.map(fn) }
     var results = [R?](repeating: nil, count: items.count)
     let lock = NSLock()
-    let group = DispatchGroup()
-    let queue = DispatchQueue(label: "appattic.pmap", attributes: .concurrent)
     let sem = DispatchSemaphore(value: max(workers, 1))
-    return withoutActuallyEscaping(fn) { escapingFn in
-        for (i, item) in items.enumerated() {
-            // Slot is taken here so GCD is not filled with tasks blocked on this semaphore.
-            sem.wait()
-            group.enter()
-            queue.async {
-                let value = escapingFn(item)
-                lock.lock()
-                results[i] = value
-                lock.unlock()
-                sem.signal()
-                group.leave()
-            }
-        }
-        group.wait()
-        return results.map { $0! }
+    // `concurrentPerform` keeps `fn` non-escaping end to end. Handing it to
+    // `queue.async` needs `withoutActuallyEscaping`, whose runtime check is
+    // racy: a dispatched block can outlive the join, so the check aborts the
+    // process with "non-escaping closure has escaped" mid-scan.
+    DispatchQueue.concurrentPerform(iterations: items.count) { i in
+        sem.wait()
+        let value = fn(items[i])
+        lock.lock()
+        results[i] = value
+        lock.unlock()
+        sem.signal()
     }
+    return results.map { $0! }
 }
 
 /// Truncate ISO-8601 fractional seconds so `ISO8601DateFormatter` can parse

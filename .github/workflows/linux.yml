@@ -22,16 +22,20 @@ jobs:
           persist-credentials: false
       - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
-          # Not .swift-version: swift-cross-ui 0.2.1 uses BitwiseCopyable and
-          # swift-syntax 601, both Swift 6.1. AppAtticScan itself still builds
-          # with 5.10.1 (the Linux pin).
-          swift-version: "6.1.3"
+          swift-version: "5.10.1"
+      # .swift-version, but without AppAtticUI: swift-cross-ui 0.2.1 needs a
+      # Swift 6 compiler, and Swift 6.1's SIL lifetime pass crashes on
+      # swift-mutex 0.0.6 (fixed on swift main only, not in 6.2). The macOS UI
+      # build stays in release.yml (macos-ui), which is disabled until it is
+      # stable again.
       - name: Test scan library
+        env:
+          APPATTIC_NO_MAC_UI: "1"
         run: swift test --filter AppAtticScanTests --disable-automatic-resolution
-      - name: Build CLI and macOS UI
-        run: |
-          swift build -c debug --product appattic --disable-automatic-resolution
-          swift build -c debug --product AppAtticUI --disable-automatic-resolution
+      - name: Build CLI
+        env:
+          APPATTIC_NO_MAC_UI: "1"
+        run: swift build -c debug --product appattic --disable-automatic-resolution
 
   lint:
     runs-on: ubuntu-24.04

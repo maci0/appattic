@@ -1060,42 +1060,34 @@ public func queryFlatpak(
     guard let path = which("flatpak") else { return [] }
     progress?("  · checking Flatpak updates…")
     // `remote-ls` (network) and `list` (local metadata walk, ~2.4 s itself)
-    // are independent: overlap them. WithoutActuallyEscaping is sound: the
-    // group joins before return.
-    return withoutActuallyEscaping(run) { run in
-        func pair(withMeta: Bool) -> (rc: Int32, updates: String, installed: String) {
-            let group = DispatchGroup()
-            let r1 = LockBox<(Int32, String)>((127, ""))
-            let r2 = LockBox<(Int32, String)>((127, ""))
-            group.enter()
-            DispatchQueue.global().async {
-                let (rc, out, _) = run(flatpakColumns(path: path, kind: "updates", withMeta: withMeta), 60)
-                r1.value = (rc, out)
-                group.leave()
-            }
-            group.enter()
-            DispatchQueue.global().async {
-                let (rc, out, _) = run(flatpakColumns(path: path, kind: "list", withMeta: withMeta), 60)
-                r2.value = (rc, out)
-                group.leave()
-            }
-            group.wait()
-            let (rc1, updates) = r1.value
-            let (rc2, installed) = r2.value
-            return (rc1, updates, rc2 == 0 ? installed : "")
+    // are independent: overlap them. `concurrentPerform` keeps `run`
+    // non-escaping, so no `withoutActuallyEscaping` check can abort the scan.
+    func pair(withMeta: Bool) -> (rc: Int32, updates: String, installed: String) {
+        let r1 = LockBox<(Int32, String)>((127, ""))
+        let r2 = LockBox<(Int32, String)>((127, ""))
+        let args = [
+            flatpakColumns(path: path, kind: "updates", withMeta: withMeta),
+            flatpakColumns(path: path, kind: "list", withMeta: withMeta),
+        ]
+        DispatchQueue.concurrentPerform(iterations: 2) { i in
+            let (rc, out, _) = run(args[i], 60)
+            if i == 0 { r1.value = (rc, out) } else { r2.value = (rc, out) }
         }
-        var (rc, updates, installed) = pair(withMeta: true)
-        // A failing remote (GPG error on stderr) still prints other remotes'
-        // rows on stdout: use them instead of discarding and repaying the
-        // full `remote-ls` cost with plain columns. Retry plain only when BOTH
-        // outputs parse to nothing: that means old flatpak without --columns,
-        // not a flaky remote (local `list` still succeeds then).
-        if rc != 0, parseFlatpakUpdates(updates).isEmpty, installed.isEmpty {
-            (rc, updates, installed) = pair(withMeta: false)
-            if rc != 0, parseFlatpakUpdates(updates).isEmpty { return [] }
-        }
-        return parseFlatpakUpdates(updates, installedText: installed)
+        let (rc1, updates) = r1.value
+        let (rc2, installed) = r2.value
+        return (rc1, updates, rc2 == 0 ? installed : "")
     }
+    var (rc, updates, installed) = pair(withMeta: true)
+    // A failing remote (GPG error on stderr) still prints other remotes'
+    // rows on stdout: use them instead of discarding and repaying the
+    // full `remote-ls` cost with plain columns. Retry plain only when BOTH
+    // outputs parse to nothing: that means old flatpak without --columns,
+    // not a flaky remote (local `list` still succeeds then).
+    if rc != 0, parseFlatpakUpdates(updates).isEmpty, installed.isEmpty {
+        (rc, updates, installed) = pair(withMeta: false)
+        if rc != 0, parseFlatpakUpdates(updates).isEmpty { return [] }
+    }
+    return parseFlatpakUpdates(updates, installedText: installed)
 }
 
 public func querySnap(
@@ -1106,28 +1098,19 @@ public func querySnap(
     guard let path = which("snap") else { return [] }
     progress?("  · checking Snap updates…")
     // `refresh --list` and `list` are independent: overlap them.
-    return withoutActuallyEscaping(run) { run in
-        let group = DispatchGroup()
-        let r1 = LockBox<(Int32, String)>((127, ""))
-        let r2 = LockBox<(Int32, String)>((127, ""))
-        group.enter()
-        DispatchQueue.global().async {
-            let (rc, out, _) = run([path, "refresh", "--list"], 60)
-            r1.value = (rc, out)
-            group.leave()
-        }
-        group.enter()
-        DispatchQueue.global().async {
-            let (rc, out, _) = run([path, "list"], 60)
-            r2.value = (rc, out)
-            group.leave()
-        }
-        group.wait()
-        let (rc, refresh) = r1.value
-        if rc != 0 { return [] }
-        let (rc2, listed) = r2.value
-        return parseSnapRefreshList(refresh, installedText: rc2 == 0 ? listed : "")
+    // `concurrentPerform` keeps `run` non-escaping (see `pmap`).
+    let r1 = LockBox<(Int32, String)>((127, ""))
+    let r2 = LockBox<(Int32, String)>((127, ""))
+    let refreshArgs = [path, "refresh", "--list"]
+    let listArgs = [path, "list"]
+    DispatchQueue.concurrentPerform(iterations: 2) { i in
+        let (rc, out, _) = run(i == 0 ? refreshArgs : listArgs, 60)
+        if i == 0 { r1.value = (rc, out) } else { r2.value = (rc, out) }
     }
+    let (rc, refresh) = r1.value
+    if rc != 0 { return [] }
+    let (rc2, listed) = r2.value
+    return parseSnapRefreshList(refresh, installedText: rc2 == 0 ? listed : "")
 }
 
 public func queryApt(
