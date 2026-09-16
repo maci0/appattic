@@ -1645,15 +1645,55 @@ private:
         }
     }
 
+    /// FNV-1a over the fields the table renders. A rescan that returns the same
+    /// findings must not rebuild every item: 39 ms on a 2000 row page.
+    quint64 rowFingerprint(const QVector<Finding> &rows) const {
+        quint64 h = 1469598103934665603ULL;
+        const auto mixText = [&h](const QString &s) {
+            for (const QChar c : s) {
+                h ^= quint64(c.unicode());
+                h *= 1099511628211ULL;
+            }
+        };
+        for (const Finding &f : rows) {
+            const QString uid = f.uid();
+            mixText(uid);
+            mixText(f.status);
+            mixText(f.mtime);
+            mixText(f.currentVersion);
+            mixText(f.latestVersion);
+            // Mark state too: "clear selection" must reset the rows it changed.
+            h ^= quint64(m_marked.contains(uid)) | (quint64(m_markedManual.contains(uid)) << 1);
+            h *= 1099511628211ULL;
+            int markedChildren = 0;
+            for (const QString &child : f.children) {
+                if (m_marked.contains(packageChildMarkKey(uid, child))) ++markedChildren;
+            }
+            h ^= quint64(f.children.size()) | (quint64(markedChildren) << 16);
+            h *= 1099511628211ULL;
+        }
+        return h;
+    }
+
     void fillTable(Page page, bool viewOnly = false) {
         setupColumns(page);
         const Tone t = toneFrom(palette());
         const QVector<Finding> rows = visibleRows(page);
-        if (viewOnly && page == m_builtPage && m_table->topLevelItemCount() > 0) {
+        const quint64 fingerprint = rowFingerprint(rows);
+        if (fingerprint == m_builtRows && fingerprint == m_shownRows
+            && page == m_builtPage && m_table->topLevelItemCount() > 0) {
+            // Same rows as the last fill: only the chrome can differ.
+            QTreeWidgetItem *sel = m_table->currentItem();
+            finishFill(page, rows, sel);
+            return;
+        }
+        if ((viewOnly || fingerprint == m_builtRows) && page == m_builtPage
+            && m_table->topLevelItemCount() > 0) {
             applyRowFilter(rows);
             QTreeWidgetItem *sel = m_table->currentItem();
             if (sel && sel->isHidden()) sel = nullptr;
             finishFill(page, rows, sel);
+            m_shownRows = fingerprint;
             return;
         }
         const QSignalBlocker block(m_table);
@@ -1798,6 +1838,8 @@ private:
         m_table->setUpdatesEnabled(true);
         finishFill(page, rows, select);
         m_builtPage = page;
+        m_builtRows = fingerprint;
+        m_shownRows = fingerprint;
     }
 
     /// Hide or show the existing rows to match `rows`. A search or filter change
@@ -2647,7 +2689,11 @@ private:
     QTreeWidget *m_table = nullptr;
     /// Page currently built into `m_table`; a search or filter change for the
     /// same page only toggles row visibility instead of rebuilding the items.
+    /// `m_builtRows` is what the items were built from, `m_shownRows` what the
+    /// filter currently shows: equal to both means there is nothing to do.
     Page m_builtPage = Page::Settings;
+    quint64 m_builtRows = 0;
+    quint64 m_shownRows = 0;
     QWidget *m_emptyPane = nullptr;
     QLabel *m_emptyTitle = nullptr;
     QLabel *m_emptyDetail = nullptr;
