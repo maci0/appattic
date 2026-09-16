@@ -1183,6 +1183,12 @@ public final class Identity {
     /// `brewRaw` minus generic tokens. The old loop re-checked
     /// `isGenericOwnerToken` (lowercase + trim) per package per entry.
     private var brewKeys: [String] = []
+    /// The same keys as a set, and only the hyphenated ones: the unscoped
+    /// ownership test requires a hyphen. Looking the *query's* prefixes up in a
+    /// set replaces a scan of every installed formula for every name (200 keys x
+    /// 5000 names in the bench) with one hash lookup per prefix length.
+    private var brewKeySet: Set<Substring> = []
+    private var brewKeyHyphenSet: Set<Substring> = []
 
     public init(apps: [AppRecord], brew: BrewSnapshot, toolNames: [String] = []) {
         for a in apps {
@@ -1253,6 +1259,8 @@ public final class Identity {
         }
         stemIndex = index
         brewKeys = brewRaw.filter { !isGenericOwnerToken($0) }
+        brewKeySet = Set(brewKeys.map { Substring($0) })
+        brewKeyHyphenSet = Set(brewKeys.filter { $0.contains("-") }.map { Substring($0) })
     }
 
     func addStem(_ raw: String) {
@@ -1348,13 +1356,17 @@ public final class Identity {
         if scoped {
             brewKey = String(brewKey.dropFirst())
         }
-        for b in brewKeys {
-            if !scoped, !asciiHasByte(b, 0x2D) { continue }
-            if b.count >= 2, brewKey.hasPrefix(b) {
-                let rest = brewKey.dropFirst(b.count)
-                if rest.isEmpty || !(rest.first?.isLetter == true || rest.first?.isNumber == true) {
-                    return ("owned", nil)
+        let pool = scoped ? brewKeySet : brewKeyHyphenSet
+        if !pool.isEmpty {
+            var end = brewKey.count
+            while end >= 2 {
+                if pool.contains(brewKey.prefix(end)) {
+                    let rest = brewKey.dropFirst(end)
+                    if rest.isEmpty || !(rest.first?.isLetter == true || rest.first?.isNumber == true) {
+                        return ("owned", nil)
+                    }
                 }
+                end -= 1
             }
         }
         if isUUID(core) { return ("system", nil) }
