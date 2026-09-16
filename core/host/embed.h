@@ -39,6 +39,10 @@ int appattic_wasm_run(
     size_t errlen
 );
 
+/* Drop the cached engine and compiled modules. Call at teardown; the next
+   appattic_wasm_run builds them again. */
+void appattic_wasm_shutdown(void);
+
 /* Write a precompiled image of `wasm_path` to `out_path` (wasmtime
    serialization). Used by core/build.sh; a stale image is ignored at runtime. */
 int appattic_precompile(const char *wasm_path, const char *out_path, char *err, size_t errlen);

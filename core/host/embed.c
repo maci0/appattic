@@ -518,6 +518,25 @@ fail_plugin:
     return 1;
 }
 
+/* Inverse of the engine and module cache above: drop every compiled module and
+   the shared engine. The UI calls this from its own teardown, so the process
+   singleton has an owner and a dispose instead of living until exit. */
+void appattic_wasm_shutdown(void) {
+    pthread_mutex_lock(&g_mod_lock);
+    for (int i = 0; i < g_mod_count; i++) {
+        wasmtime_module_delete(g_mods[i].module);
+        free(g_mods[i].path);
+        g_mods[i].module = NULL;
+        g_mods[i].path = NULL;
+    }
+    g_mod_count = 0;
+    if (g_engine) {
+        wasm_engine_delete(g_engine);
+        g_engine = NULL;
+    }
+    pthread_mutex_unlock(&g_mod_lock);
+}
+
 /* Compile `wasm_path` and write the serialized image to `out_path`, so
    core/build.sh can ship a precompiled module beside the wasm. */
 int appattic_precompile(const char *wasm_path, const char *out_path, char *err, size_t errlen) {

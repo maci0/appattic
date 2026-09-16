@@ -253,6 +253,10 @@ int runCoreWasm(
     return rc;
 }
 
+void shutdownCoreWasm() {
+    appattic_wasm_shutdown();
+}
+
 void requestCoreWasmCancel() {
     appattic_host_exec_request_cancel();
 }

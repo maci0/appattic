@@ -932,6 +932,9 @@ public:
         restoreCoreWasmPath();
         delete m_worker;
         m_worker = nullptr;
+        /* Inverse of the host's engine/module registry: the scans are gone, so
+           the compiled modules they built do not outlive this window. */
+        shutdownCoreWasm();
     }
 
 signals:
@@ -2458,6 +2461,11 @@ private:
         m_rescan->setEnabled(false);
         statusBar()->showMessage(progress);
         refreshActionBar();
+        /* cordis-boundary: emission. The script mutates packages and files in
+           other processes; it cannot be reverted, so it is withheld until the
+           user confirms the preview (the commit point). A failure mid-run is
+           reported as "commands before the failure may have already run"
+           rather than faked as restored. */
         auto *proc = new QProcess(this);
         m_scriptProc = proc;
         proc->setProcessChannelMode(QProcess::MergedChannels);

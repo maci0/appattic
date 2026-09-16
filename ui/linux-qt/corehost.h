@@ -21,6 +21,9 @@ int runCoreWasm(
 );
 
 void requestCoreWasmCancel();
+/* Inverse of the engine/module cache the host keeps: call when the owner of the
+   scans is disposed. */
+void shutdownCoreWasm();
 void clearCoreWasmCancel();
 
 /* Inverse of the PATH rewrite taggedPluginSpecs makes. runCoreWasm already

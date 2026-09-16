@@ -987,6 +987,35 @@ int runSmoke(int argc, char **argv) {
     if (smokeVerifyTables(st) != 0) {
         return 1;
     }
+    /* Dispose test for the host's engine/module registry: shutdownCoreWasm must
+       drop every compiled module and the engine, and the next run must build
+       them again with the same plugins. */
+    shutdownCoreWasm();
+    shutdownCoreWasm();  /* the inverse must be safe to run twice */
+    SmokeState st2;
+    err[0] = '\0';
+    const int rc2 = runCoreWasm(
+        core,
+        taggedPluginSpecs(out),
+        smokeCollectJson,
+        &st2,
+        err,
+        sizeof err,
+        smokeProgress
+    );
+    if (rc2 != 0) {
+        std::fprintf(stderr, "wasm query after shutdown failed: %s\n", err[0] ? err : "(no detail)");
+        return 1;
+    }
+    if (st2.plugins != st.plugins || st2.plugins < 1) {
+        std::fprintf(
+            stderr,
+            "wasm: %d plugins after shutdownCoreWasm, %d before\n",
+            st2.plugins,
+            st.plugins
+        );
+        return 1;
+    }
     std::fprintf(stdout, "plugin:path-shadow\n");
     std::fprintf(stdout, "wasm: ok (%d plugins)\n", st.plugins);
     std::fprintf(stdout, "SMOKE=ok\n");
