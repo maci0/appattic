@@ -36,121 +36,86 @@ fn isSafeBrewName(s: []const u8) bool {
     return true;
 }
 
-fn firstStringInArray(s: []const u8, i: *usize) []const u8 {
+/// First string element of an array whose `[` was already consumed. The rest
+/// of the array is consumed too, so the caller's cursor stays in step.
+fn firstStringInArray(cur: *jsonscan.Cursor) []const u8 {
     var first: []const u8 = "";
-    if (i.* >= s.len or s[i.*] != '[') return first;
-    i.* += 1;
-    while (i.* < s.len) {
-        i.* = jsonscan.skipWs(s, i.*);
-        if (i.* >= s.len) break;
-        if (s[i.*] == ']') {
-            i.* += 1;
-            break;
-        }
-        if (s[i.*] == ',') {
-            i.* += 1;
+    while (true) {
+        const t = cur.next();
+        if (t == .array_end or t == .end) return first;
+        if (t == .string) {
+            if (first.len == 0) first = cur.value();
             continue;
         }
-        if (s[i.*] == '"' and first.len == 0) {
-            first = jsonscan.parseJsonString(s, i) orelse "";
-        } else {
-            if (!jsonscan.skipJsonValue(s, i)) break;
-        }
+        if (t == .object_begin or t == .array_begin) _ = cur.skipAfter(t);
     }
-    return first;
 }
 
-fn parseItem(s: []const u8, i: *usize, out: *BrewOutdated, cask: bool) bool {
-    if (i.* >= s.len or s[i.*] != '{') {
-        _ = jsonscan.skipJsonValue(s, i);
-        return false;
-    }
-    i.* += 1;
-    var name: []const u8 = "";
-    var current: []const u8 = "";
-    var latest: []const u8 = "";
-    while (i.* < s.len) {
-        i.* = jsonscan.skipWs(s, i.*);
-        if (i.* >= s.len) break;
-        if (s[i.*] == '}') {
-            i.* += 1;
-            break;
+/// One element of `formulae` or `casks`.
+const ItemCtx = struct {
+    out: []BrewOutdated,
+    n: *usize,
+    cask: bool,
+    name: []const u8 = "",
+    current: []const u8 = "",
+    latest: []const u8 = "",
+
+    pub fn onPair(self: *ItemCtx, cur: *jsonscan.Cursor, key: []const u8, vt: jsonscan.Cursor.Tok) jsonscan.Action {
+        if (std.mem.eql(u8, key, "name") and vt == .string) {
+            self.name = cur.value();
+            return .took;
         }
-        if (s[i.*] == ',') {
-            i.* += 1;
-            continue;
+        if (std.mem.eql(u8, key, "current_version") and vt == .string) {
+            self.latest = cur.value();
+            return .took;
         }
-        const key = jsonscan.parseJsonString(s, i) orelse break;
-        i.* = jsonscan.skipWs(s, i.*);
-        if (i.* >= s.len or s[i.*] != ':') break;
-        i.* += 1;
-        i.* = jsonscan.skipWs(s, i.*);
-        if (std.mem.eql(u8, key, "name") and i.* < s.len and s[i.*] == '"') {
-            name = jsonscan.parseJsonString(s, i) orelse "";
-        } else if (std.mem.eql(u8, key, "current_version") and i.* < s.len and s[i.*] == '"') {
-            latest = jsonscan.parseJsonString(s, i) orelse "";
-        } else if (std.mem.eql(u8, key, "installed_versions")) {
-            if (i.* < s.len and s[i.*] == '"') {
-                current = jsonscan.parseJsonString(s, i) orelse "";
-            } else if (i.* < s.len and s[i.*] == '[') {
-                current = firstStringInArray(s, i);
-            } else {
-                if (!jsonscan.skipJsonValue(s, i)) break;
+        if (std.mem.eql(u8, key, "installed_versions")) {
+            if (vt == .string) {
+                self.current = cur.value();
+                return .took;
             }
-        } else {
-            if (!jsonscan.skipJsonValue(s, i)) break;
+            if (vt == .array_begin) {
+                self.current = firstStringInArray(cur);
+                return .took;
+            }
         }
+        return .skip;
     }
-    if (!isSafeBrewName(name)) return false;
-    out.* = .{ .name = name, .current = current, .latest = latest, .cask = cask };
-    return true;
-}
 
-fn parseItems(s: []const u8, i: *usize, out: []BrewOutdated, cask: bool) usize {
-    var n: usize = 0;
-    if (i.* >= s.len or s[i.*] != '[') return 0;
-    i.* += 1;
-    while (i.* < s.len) {
-        i.* = jsonscan.skipWs(s, i.*);
-        if (i.* >= s.len) break;
-        if (s[i.*] == ']') {
-            i.* += 1;
-            break;
-        }
-        if (s[i.*] == ',') {
-            i.* += 1;
-            continue;
-        }
-        if (n >= out.len) {
-            if (!jsonscan.skipJsonValue(s, i)) break;
-            continue;
-        }
-        if (parseItem(s, i, &out[n], cask)) n += 1;
+    pub fn finish(self: *ItemCtx) void {
+        if (self.n.* >= self.out.len) return;
+        if (!isSafeBrewName(self.name)) return;
+        self.out[self.n.*] = .{
+            .name = self.name,
+            .current = self.current,
+            .latest = self.latest,
+            .cask = self.cask,
+        };
+        self.n.* += 1;
     }
-    return n;
-}
+};
+
+const OutdatedCtx = struct {
+    out: []BrewOutdated,
+    n: usize = 0,
+
+    pub fn onPair(self: *OutdatedCtx, cur: *jsonscan.Cursor, key: []const u8, vt: jsonscan.Cursor.Tok) jsonscan.Action {
+        const cask = std.mem.eql(u8, key, "casks");
+        if (!cask and !std.mem.eql(u8, key, "formulae")) return .skip;
+        if (vt != .array_begin) return .skip;
+        var item = ItemCtx{ .out = self.out, .n = &self.n, .cask = cask };
+        jsonscan.eachObjectInArray(cur, ItemCtx, &item);
+        return .took;
+    }
+};
 
 /// Parse `brew outdated --json=v2`. Formulae then casks. Matches Swift `parseBrewOutdatedJSON`.
 pub fn parseBrewOutdatedJSON(text: []const u8, out: []BrewOutdated) usize {
-    var n: usize = 0;
-    var i: usize = 0;
-    while (i < text.len and n < out.len) {
-        if (text[i] != '"') {
-            i += 1;
-            continue;
-        }
-        const key = jsonscan.parseJsonString(text, &i) orelse break;
-        i = jsonscan.skipWs(text, i);
-        if (i >= text.len or text[i] != ':') continue;
-        i += 1;
-        i = jsonscan.skipWs(text, i);
-        const is_formulae = std.mem.eql(u8, key, "formulae");
-        const is_casks = std.mem.eql(u8, key, "casks");
-        if ((is_formulae or is_casks) and i < text.len and text[i] == '[') {
-            n += parseItems(text, &i, out[n..], is_casks);
-        }
-    }
-    return n;
+    var cur: jsonscan.Cursor = undefined;
+    jsonscan.Cursor.init(&cur, text);
+    var ctx = OutdatedCtx{ .out = out };
+    jsonscan.walkDocument(&cur, OutdatedCtx, &ctx);
+    return ctx.n;
 }
 
 fn writeUpgrade(w: *jsonbuf.W, h: BrewOutdated) void {

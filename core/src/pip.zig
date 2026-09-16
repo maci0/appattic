@@ -31,67 +31,40 @@ pub const PipOutdated = struct {
     latest: []const u8,
 };
 
-fn parseItem(s: []const u8, i: *usize, out: *PipOutdated) bool {
-    if (i.* >= s.len or s[i.*] != '{') {
-        _ = jsonscan.skipJsonValue(s, i);
-        return false;
+/// One element of `pip list --user --outdated --format=json`.
+const ItemCtx = struct {
+    out: []PipOutdated,
+    n: usize = 0,
+    name: []const u8 = "",
+    current: []const u8 = "",
+    latest: []const u8 = "",
+
+    pub fn onPair(self: *ItemCtx, cur: *jsonscan.Cursor, key: []const u8, vt: jsonscan.Cursor.Tok) jsonscan.Action {
+        if (vt == .string) {
+            if (std.mem.eql(u8, key, "name")) self.name = cur.value();
+            if (std.mem.eql(u8, key, "version")) self.current = cur.value();
+            if (std.mem.eql(u8, key, "latest_version")) self.latest = cur.value();
+            return .took;
+        }
+        return .skip;
     }
-    i.* += 1;
-    var name: []const u8 = "";
-    var current: []const u8 = "";
-    var latest: []const u8 = "";
-    while (i.* < s.len) {
-        i.* = jsonscan.skipWs(s, i.*);
-        if (i.* >= s.len) break;
-        if (s[i.*] == '}') {
-            i.* += 1;
-            break;
-        }
-        if (s[i.*] == ',') {
-            i.* += 1;
-            continue;
-        }
-        const key = jsonscan.parseJsonString(s, i) orelse break;
-        i.* = jsonscan.skipWs(s, i.*);
-        if (i.* >= s.len or s[i.*] != ':') break;
-        i.* += 1;
-        i.* = jsonscan.skipWs(s, i.*);
-        if (std.mem.eql(u8, key, "name") and i.* < s.len and s[i.*] == '"') {
-            name = jsonscan.parseJsonString(s, i) orelse "";
-        } else if (std.mem.eql(u8, key, "version") and i.* < s.len and s[i.*] == '"') {
-            current = jsonscan.parseJsonString(s, i) orelse "";
-        } else if (std.mem.eql(u8, key, "latest_version") and i.* < s.len and s[i.*] == '"') {
-            latest = jsonscan.parseJsonString(s, i) orelse "";
-        } else {
-            if (!jsonscan.skipJsonValue(s, i)) break;
-        }
+
+    pub fn finish(self: *ItemCtx) void {
+        if (self.n >= self.out.len) return;
+        if (!jsonbuf.isSafeIdent(self.name)) return;
+        self.out[self.n] = .{ .name = self.name, .current = self.current, .latest = self.latest };
+        self.n += 1;
     }
-    if (!jsonbuf.isSafeIdent(name)) return false;
-    out.* = .{ .name = name, .current = current, .latest = latest };
-    return true;
-}
+};
 
 /// Parse `pip list --user --outdated --format=json`. Array of {name, version, latest_version}.
 pub fn parsePipOutdatedJSON(text: []const u8, out: []PipOutdated) usize {
-    var n: usize = 0;
-    var i: usize = jsonscan.skipWs(text, 0);
-    if (i >= text.len or text[i] != '[') return 0;
-    i += 1;
-    while (i < text.len) {
-        i = jsonscan.skipWs(text, i);
-        if (i >= text.len) break;
-        if (text[i] == ']') break;
-        if (text[i] == ',') {
-            i += 1;
-            continue;
-        }
-        if (n >= out.len) {
-            if (!jsonscan.skipJsonValue(text, &i)) break;
-            continue;
-        }
-        if (parseItem(text, &i, &out[n])) n += 1;
-    }
-    return n;
+    var cur: jsonscan.Cursor = undefined;
+    jsonscan.Cursor.init(&cur, text);
+    if (cur.next() != .array_begin) return 0;
+    var ctx = ItemCtx{ .out = out };
+    jsonscan.eachObjectInArray(&cur, ItemCtx, &ctx);
+    return ctx.n;
 }
 
 fn nameIn(hits: []const PipOutdated, name: []const u8) bool {
@@ -165,8 +138,8 @@ fn runQuery(cmds: []const []const u8, buf: []u8) i32 {
     for (cmds) |cmd| {
         const n = host_exec.run(cmd, buf);
         if (n <= 0) continue;
-        const i = jsonscan.skipWs(buf[0..@intCast(n)], 0);
-        if (i < @as(usize, @intCast(n)) and buf[i] == '[') return n;
+        const body = std.mem.trimStart(u8, buf[0..@intCast(n)], " \t\r\n");
+        if (body.len > 0 and body[0] == '[') return n;
     }
     return host_exec.fail;
 }

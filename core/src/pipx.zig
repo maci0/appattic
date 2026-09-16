@@ -23,54 +23,47 @@ pub const PipxTool = struct {
     version: []const u8,
 };
 
+const FieldsCtx = struct {
+    name: *[]const u8,
+    version: *[]const u8,
+
+    pub fn onPair(self: *FieldsCtx, cur: *jsonscan.Cursor, key: []const u8, vt: jsonscan.Cursor.Tok) jsonscan.Action {
+        if (vt != .string) return .walk;
+        if (std.mem.eql(u8, key, "package")) self.name.* = cur.value();
+        if (std.mem.eql(u8, key, "package_version")) self.version.* = cur.value();
+        return .took;
+    }
+};
+
+/// `pipx list --json`: `{"venvs":{"<name>":{"package":"x","package_version":"1"}}}`.
+/// The venv name is the fallback when the object names no package.
 fn parsePipxJson(text: []const u8, out: []PipxTool) usize {
+    var cur: jsonscan.Cursor = undefined;
+    jsonscan.Cursor.init(&cur, text);
+    if (cur.next() != .object_begin) return 0;
     var n: usize = 0;
-    var i: usize = 0;
-    while (i < text.len) {
-        if (text[i] != '"') {
-            i += 1;
+    while (true) {
+        const kt = cur.next();
+        if (kt == .object_end or kt == .end) return n;
+        if (kt != .string) {
+            _ = cur.skipAfter(kt);
             continue;
         }
-        const key = jsonscan.parseJsonString(text, &i) orelse break;
-        i = jsonscan.skipWs(text, i);
-        if (i >= text.len or text[i] != ':') continue;
-        i += 1;
-        i = jsonscan.skipWs(text, i);
-        if (!std.mem.eql(u8, key, "venvs")) continue;
-        if (i >= text.len or text[i] != '{') return n;
-        i += 1;
-        while (i < text.len and n < out.len) {
-            i = jsonscan.skipWs(text, i);
-            if (i >= text.len) break;
-            if (text[i] == '}') {
-                i += 1;
-                break;
-            }
-            if (text[i] == ',') {
-                i += 1;
-                continue;
-            }
-            const fallback = jsonscan.parseJsonString(text, &i) orelse break;
-            i = jsonscan.skipWs(text, i);
-            if (i >= text.len or text[i] != ':') break;
-            i += 1;
-            i = jsonscan.skipWs(text, i);
-            var name = fallback;
-            var version: []const u8 = "";
-            if (i < text.len and text[i] == '{') {
-                const start = i;
-                if (!jsonscan.skipJsonValue(text, &i)) break;
-                const slice = text[start..i];
-                if (jsonscan.findJsonStringField(slice, "package")) |p| name = p;
-                if (jsonscan.findJsonStringField(slice, "package_version")) |v| version = v;
-            } else {
-                if (!jsonscan.skipJsonValue(text, &i)) break;
-            }
-            if (!jsonbuf.isSafePkgName(name)) continue;
+        const fallback = cur.value();
+        const vt = cur.next();
+        if (vt == .end) return n;
+        if (vt != .object_begin) {
+            _ = cur.skipAfter(vt);
+            continue;
+        }
+        var name = fallback;
+        var version: []const u8 = "";
+        var fields = FieldsCtx{ .name = &name, .version = &version };
+        jsonscan.walkObject(&cur, FieldsCtx, &fields);
+        if (n < out.len and jsonbuf.isSafePkgName(name)) {
             out[n] = .{ .name = name, .version = version };
             n += 1;
         }
-        return n;
     }
     return n;
 }

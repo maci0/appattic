@@ -1,3 +1,20 @@
+//! JSON reading for the plugins, on top of `std.json.Scanner`.
+//!
+//! The plugins used to carry a hand-written scanner: whitespace skipping,
+//! string slicing, delimiter matching, escape handling. The standard library
+//! owns that now; what is left here is a cursor over `std.json.Scanner` plus
+//! the three shapes the plugins ask for.
+//!
+//! Two properties keep every plugin simple:
+//! * the scanner needs an allocator for its nesting stack, so a cursor runs it
+//!   on a fixed buffer: std.json reserves 129 bytes for that stack, whatever
+//!   the input size, so 256 bytes leave room;
+//! * every returned slice points into the input, never into the stack, so a
+//!   plugin can keep the strings after the cursor is gone. Strings that arrive
+//!   in pieces (the ones that contain escapes) are dropped instead: they would
+//!   have to be assembled somewhere, and no package name or version in these
+//!   manifests contains an escape.
+
 const std = @import("std");
 const jsonbuf = @import("jsonbuf.zig");
 
@@ -6,273 +23,336 @@ pub const Dep = struct {
     version: []const u8,
 };
 
-pub fn skipWs(s: []const u8, i: usize) usize {
-    var j = i;
-    while (j < s.len) : (j += 1) {
-        const c = s[j];
-        if (c != ' ' and c != '\t' and c != '\n' and c != '\r') break;
-    }
-    return j;
-}
-
-pub fn parseJsonString(s: []const u8, i: *usize) ?[]const u8 {
-    if (i.* >= s.len or s[i.*] != '"') return null;
-    i.* += 1;
-    const start = i.*;
-    while (i.* < s.len) {
-        const c = s[i.*];
-        if (c == '\\') {
-            i.* += 1;
-            if (i.* < s.len) i.* += 1;
-            continue;
-        }
-        if (c == '"') {
-            const inner = s[start..i.*];
-            i.* += 1;
-            return inner;
-        }
-        i.* += 1;
-    }
-    return null;
-}
-
-fn skipDelim(s: []const u8, i: *usize, open: u8, close: u8) bool {
-    std.debug.assert(open != close);
-    if (i.* >= s.len or s[i.*] != open) return false;
-    var depth: u32 = 0;
-    var in_str = false;
-    var esc = false;
-    while (i.* < s.len) {
-        const c = s[i.*];
-        i.* += 1;
-        if (in_str) {
-            if (esc) {
-                esc = false;
-                continue;
-            }
-            if (c == '\\') {
-                esc = true;
-                continue;
-            }
-            if (c == '"') in_str = false;
-            continue;
-        }
-        if (c == '"') {
-            in_str = true;
-            continue;
-        }
-        if (c == open) depth += 1;
-        if (c == close) {
-            if (depth == 0) return false;
-            depth -= 1;
-            if (depth == 0) return true;
-        }
-    }
-    return false;
-}
-
-pub fn skipJsonValue(s: []const u8, i: *usize) bool {
-    i.* = skipWs(s, i.*);
-    if (i.* >= s.len) return false;
-    const c = s[i.*];
-    if (c == '"') return parseJsonString(s, i) != null;
-    if (c == '{') return skipDelim(s, i, '{', '}');
-    if (c == '[') return skipDelim(s, i, '[', ']');
-    while (i.* < s.len) {
-        const d = s[i.*];
-        if (d == ',' or d == '}' or d == ']' or d == ' ' or d == '\n' or d == '\t' or d == '\r') break;
-        i.* += 1;
-    }
-    return true;
-}
-
-fn takeVersionSkipObject(s: []const u8, i: *usize) []const u8 {
-    var version: []const u8 = "";
-    if (i.* >= s.len or s[i.*] != '{') {
-        _ = skipJsonValue(s, i);
-        return version;
-    }
-    i.* += 1;
-    while (i.* < s.len) {
-        i.* = skipWs(s, i.*);
-        if (i.* >= s.len) break;
-        if (s[i.*] == '}') {
-            i.* += 1;
-            break;
-        }
-        if (s[i.*] == ',') {
-            i.* += 1;
-            continue;
-        }
-        const key = parseJsonString(s, i) orelse break;
-        i.* = skipWs(s, i.*);
-        if (i.* >= s.len or s[i.*] != ':') break;
-        i.* += 1;
-        i.* = skipWs(s, i.*);
-        if (std.mem.eql(u8, key, "version") and i.* < s.len and s[i.*] == '"') {
-            if (parseJsonString(s, i)) |v| {
-                if (version.len == 0) version = v;
-            }
-        } else {
-            if (!skipJsonValue(s, i)) break;
-        }
-    }
-    return version;
-}
-
-fn parseDepsObject(s: []const u8, i: *usize, out: []Dep) usize {
-    var n: usize = 0;
-    if (i.* >= s.len or s[i.*] != '{') return 0;
-    i.* += 1;
-    while (i.* < s.len) {
-        i.* = skipWs(s, i.*);
-        if (i.* >= s.len) break;
-        if (s[i.*] == '}') {
-            i.* += 1;
-            break;
-        }
-        if (s[i.*] == ',') {
-            i.* += 1;
-            continue;
-        }
-        const name = parseJsonString(s, i) orelse break;
-        i.* = skipWs(s, i.*);
-        if (i.* >= s.len or s[i.*] != ':') break;
-        i.* += 1;
-        i.* = skipWs(s, i.*);
-        var version: []const u8 = "";
-        if (i.* < s.len and s[i.*] == '{') {
-            version = takeVersionSkipObject(s, i);
-        } else if (i.* < s.len and s[i.*] == '"') {
-            version = parseJsonString(s, i) orelse "";
-        } else {
-            if (!skipJsonValue(s, i)) break;
-        }
-        if (n < out.len and jsonbuf.isSafePkgName(name)) {
-            out[n] = .{ .name = name, .version = version };
-            n += 1;
-        }
-    }
-    return n;
-}
-
 pub const NamedVer = struct {
     name: []const u8,
     current: []const u8,
     latest: []const u8,
 };
 
-fn takeCurrentLatest(s: []const u8, i: *usize, current: *[]const u8, latest: *[]const u8) void {
-    if (i.* >= s.len or s[i.*] != '{') {
-        _ = skipJsonValue(s, i);
-        return;
+/// What the walk should do with a key's value once `onPair` has seen it.
+pub const Action = enum {
+    /// The callback consumed the value.
+    took,
+    /// Skip the value without looking inside it.
+    skip,
+    /// Descend into the value.
+    walk,
+    /// Stop walking.
+    stop,
+};
+
+pub const Cursor = struct {
+    pub const Tok = enum {
+        object_begin,
+        object_end,
+        array_begin,
+        array_end,
+        string,
+        number,
+        other,
+        end,
+    };
+
+    depth_mem: [256]u8 = undefined,
+    fba: std.heap.FixedBufferAllocator = undefined,
+    scanner: std.json.Scanner = undefined,
+    /// Set while a string that contains escapes is being consumed. Such a
+    /// string is reported as `.string` with an empty value.
+    dropping: bool = false,
+    last: []const u8 = "",
+
+    /// Initialise through a pointer: the scanner keeps the allocator, which
+    /// points into this struct.
+    pub fn init(self: *Cursor, text: []const u8) void {
+        self.depth_mem = undefined;
+        self.fba = std.heap.FixedBufferAllocator.init(&self.depth_mem);
+        self.scanner = std.json.Scanner.initCompleteInput(self.fba.allocator(), text);
+        self.dropping = false;
+        self.last = "";
     }
-    i.* += 1;
-    var wanted: []const u8 = "";
-    while (i.* < s.len) {
-        i.* = skipWs(s, i.*);
-        if (i.* >= s.len) break;
-        if (s[i.*] == '}') {
-            i.* += 1;
-            break;
+
+    /// The value of the last `.string` token. Empty for a dropped string.
+    pub fn value(self: *const Cursor) []const u8 {
+        return self.last;
+    }
+
+    pub fn peek(self: *Cursor) Tok {
+        return map(self.scanner.peekNextTokenType() catch return .end);
+    }
+
+    pub fn next(self: *Cursor) Tok {
+        while (true) {
+            const tok = self.scanner.next() catch {
+                self.last = "";
+                return .end;
+            };
+            switch (tok) {
+                .object_begin => return .object_begin,
+                .object_end => return .object_end,
+                .array_begin => return .array_begin,
+                .array_end => return .array_end,
+                .number, .partial_number, .allocated_number => return .number,
+                .true, .false, .null => return .other,
+                .end_of_document => return .end,
+                .string => |s| {
+                    self.last = if (self.dropping) "" else s;
+                    self.dropping = false;
+                    return .string;
+                },
+                .allocated_string => |s| {
+                    self.last = if (self.dropping) "" else s;
+                    self.dropping = false;
+                    return .string;
+                },
+                .partial_string,
+                .partial_string_escaped_1,
+                .partial_string_escaped_2,
+                .partial_string_escaped_3,
+                .partial_string_escaped_4,
+                => self.dropping = true,
+            }
         }
-        if (s[i.*] == ',') {
-            i.* += 1;
+    }
+
+    fn map(t: std.json.TokenType) Tok {
+        return switch (t) {
+            .object_begin => .object_begin,
+            .object_end => .object_end,
+            .array_begin => .array_begin,
+            .array_end => .array_end,
+            .string => .string,
+            .number => .number,
+            .true, .false, .null => .other,
+            .end_of_document => .end,
+        };
+    }
+
+    /// Consume the rest of the value whose first token was `first`.
+    pub fn skipAfter(self: *Cursor, first: Tok) bool {
+        switch (first) {
+            .object_begin, .array_begin => {
+                var depth: usize = 1;
+                while (depth > 0) {
+                    const t = self.next();
+                    switch (t) {
+                        .end => return false,
+                        .object_begin, .array_begin => depth += 1,
+                        .object_end, .array_end => depth -= 1,
+                        else => {},
+                    }
+                }
+                return true;
+            },
+            .end => return false,
+            else => return true,
+        }
+    }
+
+    /// Skip the next value.
+    pub fn skipValue(self: *Cursor) bool {
+        return self.skipAfter(self.next());
+    }
+};
+
+/// Walk every object key the linear scan reaches: keys of the document, of
+/// nested values the callback asked to descend into, and of objects inside
+/// arrays. `Ctx` needs `onPair(ctx, cur, key, value_first) Action`.
+pub fn walkValue(cur: *Cursor, comptime Ctx: type, ctx: *Ctx, first: Cursor.Tok) void {
+    switch (first) {
+        .object_begin => walkObject(cur, Ctx, ctx),
+        .array_begin => {
+            while (true) {
+                const t = cur.next();
+                if (t == .array_end or t == .end) return;
+                walkValue(cur, Ctx, ctx, t);
+            }
+        },
+        else => {},
+    }
+}
+
+/// Walk the whole document, arrays included.
+pub fn walkDocument(cur: *Cursor, comptime Ctx: type, ctx: *Ctx) void {
+    walkValue(cur, Ctx, ctx, cur.next());
+}
+
+/// Walk the keys of one object whose `{` was already consumed.
+pub fn walkObject(cur: *Cursor, comptime Ctx: type, ctx: *Ctx) void {
+    while (true) {
+        const kt = cur.next();
+        if (kt == .object_end or kt == .end) return;
+        if (kt != .string) {
+            // Malformed: treat the stray token as a value.
+            _ = cur.skipAfter(kt);
             continue;
         }
-        const key = parseJsonString(s, i) orelse break;
-        i.* = skipWs(s, i.*);
-        if (i.* >= s.len or s[i.*] != ':') break;
-        i.* += 1;
-        i.* = skipWs(s, i.*);
-        if (std.mem.eql(u8, key, "current") and i.* < s.len and s[i.*] == '"') {
-            current.* = parseJsonString(s, i) orelse "";
-        } else if (std.mem.eql(u8, key, "latest") and i.* < s.len and s[i.*] == '"') {
-            latest.* = parseJsonString(s, i) orelse "";
-        } else if (std.mem.eql(u8, key, "wanted") and i.* < s.len and s[i.*] == '"') {
-            wanted = parseJsonString(s, i) orelse "";
-        } else {
-            if (!skipJsonValue(s, i)) break;
+        const key = cur.value();
+        const vt = cur.next();
+        if (vt == .end) return;
+        switch (Ctx.onPair(ctx, cur, key, vt)) {
+            .took => {},
+            .skip => _ = cur.skipAfter(vt),
+            .walk => walkValue(cur, Ctx, ctx, vt),
+            .stop => return,
         }
     }
-    if (latest.*.len == 0) latest.* = wanted;
 }
+
+/// Run `Item` over every object element of an array whose `[` was already
+/// consumed, calling `Item.finish` after each element. A non-object element is
+/// skipped. `Item` needs `onPair` and `finish`.
+pub fn eachObjectInArray(cur: *Cursor, comptime Item: type, item: *Item) void {
+    while (true) {
+        const t = cur.next();
+        if (t == .array_end or t == .end) return;
+        if (t == .object_begin) {
+            walkObject(cur, Item, item);
+            Item.finish(item);
+        } else {
+            _ = cur.skipAfter(t);
+        }
+    }
+}
+
+const VersionCtx = struct {
+    version: []const u8 = "",
+
+    fn onPair(self: *VersionCtx, cur: *Cursor, key: []const u8, vt: Cursor.Tok) Action {
+        if (std.mem.eql(u8, key, "version") and vt == .string) {
+            if (self.version.len == 0) self.version = cur.value();
+        }
+        // Nested values are skipped, so a dependency tree inside a dependency
+        // does not leak into the parent's version.
+        return .skip;
+    }
+};
+
+fn takeVersion(cur: *Cursor, vt: Cursor.Tok) []const u8 {
+    if (vt == .string) return cur.value();
+    if (vt != .object_begin) return "";
+    var ctx = VersionCtx{};
+    walkObject(cur, VersionCtx, &ctx);
+    return ctx.version;
+}
+
+const DepsCtx = struct {
+    out: []Dep,
+    n: usize = 0,
+
+    fn onPair(self: *DepsCtx, cur: *Cursor, key: []const u8, vt: Cursor.Tok) Action {
+        if (std.mem.eql(u8, key, "dependencies") and vt == .object_begin) {
+            self.takeAll(cur);
+            return .took;
+        }
+        // Anything else is skipped without descending, so a nested dependency
+        // tree is not reported as a top-level one.
+        return .skip;
+    }
+
+    /// Keys of a `dependencies` object: name -> version (string or object).
+    fn takeAll(self: *DepsCtx, cur: *Cursor) void {
+        while (true) {
+            const kt = cur.next();
+            if (kt == .object_end or kt == .end) return;
+            if (kt != .string) {
+                _ = cur.skipAfter(kt);
+                continue;
+            }
+            const name = cur.value();
+            const vt = cur.next();
+            if (vt == .end) return;
+            const version = takeVersion(cur, vt);
+            if (self.n < self.out.len and jsonbuf.isSafePkgName(name)) {
+                self.out[self.n] = .{ .name = name, .version = version };
+                self.n += 1;
+            }
+        }
+    }
+};
+
+/// `{"dependencies":{"name":{"version":"1.2.3"}}}` in any manifest shape: the
+/// key is looked for at the document level and inside arrays.
+pub fn parseJsonDependencies(text: []const u8, out: []Dep) usize {
+    var cur: Cursor = undefined;
+    Cursor.init(&cur, text);
+    var ctx = DepsCtx{ .out = out };
+    walkDocument(&cur, DepsCtx, &ctx);
+    return ctx.n;
+}
+
+const OutdatedCtx = struct {
+    out: []NamedVer,
+    n: usize = 0,
+
+    fn onPair(self: *OutdatedCtx, cur: *Cursor, key: []const u8, vt: Cursor.Tok) Action {
+        if (vt != .object_begin) return .skip;
+        var current: []const u8 = "";
+        var latest: []const u8 = "";
+        var wanted: []const u8 = "";
+        // `npm outdated -g --json` keys its object by package name.
+        takeVersions(cur, &current, &latest, &wanted);
+        if (self.n < self.out.len and jsonbuf.isSafePkgName(key) and (current.len > 0 or latest.len > 0)) {
+            self.out[self.n] = .{
+                .name = key,
+                .current = current,
+                .latest = if (latest.len > 0) latest else wanted,
+            };
+            self.n += 1;
+        }
+        return .took;
+    }
+
+    fn takeVersions(cur: *Cursor, current: *[]const u8, latest: *[]const u8, wanted: *[]const u8) void {
+        while (true) {
+            const kt = cur.next();
+            if (kt == .object_end or kt == .end) return;
+            if (kt != .string) {
+                _ = cur.skipAfter(kt);
+                continue;
+            }
+            const key = cur.value();
+            const vt = cur.next();
+            if (vt == .end) return;
+            if (vt == .string) {
+                if (std.mem.eql(u8, key, "current")) current.* = cur.value();
+                if (std.mem.eql(u8, key, "latest")) latest.* = cur.value();
+                if (std.mem.eql(u8, key, "wanted")) wanted.* = cur.value();
+            } else {
+                _ = cur.skipAfter(vt);
+            }
+        }
+    }
+};
 
 /// `npm outdated -g --json`: top-level object keyed by package name.
 pub fn parseJsonNamedOutdated(text: []const u8, out: []NamedVer) usize {
-    var n: usize = 0;
-    var i: usize = skipWs(text, 0);
-    if (i >= text.len or text[i] != '{') return 0;
-    i += 1;
-    while (i < text.len) {
-        i = skipWs(text, i);
-        if (i >= text.len) break;
-        if (text[i] == '}') break;
-        if (text[i] == ',') {
-            i += 1;
-            continue;
-        }
-        const name = parseJsonString(text, &i) orelse break;
-        i = skipWs(text, i);
-        if (i >= text.len or text[i] != ':') break;
-        i += 1;
-        i = skipWs(text, i);
-        var current: []const u8 = "";
-        var latest: []const u8 = "";
-        if (i < text.len and text[i] == '{') {
-            takeCurrentLatest(text, &i, &current, &latest);
-        } else {
-            if (!skipJsonValue(text, &i)) break;
-        }
-        if (n < out.len and jsonbuf.isSafePkgName(name) and (current.len > 0 or latest.len > 0)) {
-            out[n] = .{ .name = name, .current = current, .latest = latest };
-            n += 1;
-        }
-    }
-    return n;
+    var cur: Cursor = undefined;
+    Cursor.init(&cur, text);
+    if (cur.next() != .object_begin) return 0;
+    var ctx = OutdatedCtx{ .out = out };
+    walkObject(&cur, OutdatedCtx, &ctx);
+    return ctx.n;
 }
 
-/// Top-level (and sibling) `"dependencies"` objects. Does not walk nested dep trees.
-pub fn parseJsonDependencies(text: []const u8, out: []Dep) usize {
-    var n: usize = 0;
-    var i: usize = 0;
-    while (i < text.len and n < out.len) {
-        if (text[i] != '"') {
-            i += 1;
-            continue;
-        }
-        const key = parseJsonString(text, &i) orelse break;
-        i = skipWs(text, i);
-        if (i >= text.len or text[i] != ':') continue;
-        i += 1;
-        i = skipWs(text, i);
-        if (std.mem.eql(u8, key, "dependencies") and i < text.len and text[i] == '{') {
-            n += parseDepsObject(text, &i, out[n..]);
-        } else {
-            if (!skipJsonValue(text, &i)) break;
-        }
-    }
-    return n;
-}
+const FieldCtx = struct {
+    field: []const u8,
+    found: ?[]const u8 = null,
 
+    fn onPair(self: *FieldCtx, cur: *Cursor, key: []const u8, vt: Cursor.Tok) Action {
+        if (!std.mem.eql(u8, key, self.field)) return .walk;
+        if (vt == .string) self.found = cur.value();
+        // The first matching key decides, as before.
+        return .stop;
+    }
+};
+
+/// The value of the first `"field"` key whose value is a string, at any depth.
 pub fn findJsonStringField(text: []const u8, field: []const u8) ?[]const u8 {
-    var i: usize = 0;
-    while (i < text.len) {
-        if (text[i] != '"') {
-            i += 1;
-            continue;
-        }
-        const key = parseJsonString(text, &i) orelse return null;
-        i = skipWs(text, i);
-        if (i >= text.len or text[i] != ':') continue;
-        i += 1;
-        i = skipWs(text, i);
-        if (std.mem.eql(u8, key, field)) {
-            if (i < text.len and text[i] == '"') return parseJsonString(text, &i);
-            return null;
-        }
-    }
-    return null;
+    var cur: Cursor = undefined;
+    Cursor.init(&cur, text);
+    var ctx = FieldCtx{ .field = field };
+    walkDocument(&cur, FieldCtx, &ctx);
+    return ctx.found;
 }
 
 test "parseJsonDependencies object and array" {
@@ -313,6 +393,14 @@ test "parseJsonDependencies scoped and skips nested trees" {
     try std.testing.expectEqual(@as(usize, 1), n2);
     try std.testing.expectEqualStrings("typescript", buf[0].name);
     try std.testing.expectEqualStrings("5.4.5", buf[0].version);
+
+    const string_ver =
+        \\{"dependencies":{"leftpad":"1.3.0","@scope/pkg":{"version":"0.1.0"}}}
+    ;
+    const n3 = parseJsonDependencies(string_ver, &buf);
+    try std.testing.expectEqual(@as(usize, 2), n3);
+    try std.testing.expectEqualStrings("leftpad", buf[0].name);
+    try std.testing.expectEqualStrings("1.3.0", buf[0].version);
 }
 
 test "parseJsonNamedOutdated npm outdated JSON" {
@@ -336,6 +424,21 @@ test "parseJsonDependencies empty junk" {
     try std.testing.expectEqual(@as(usize, 0), parseJsonDependencies("", &buf));
     try std.testing.expectEqual(@as(usize, 0), parseJsonDependencies("{}", &buf));
     try std.testing.expectEqual(@as(usize, 0), parseJsonDependencies("not json", &buf));
+    try std.testing.expectEqual(@as(usize, 0), parseJsonDependencies("{\"dependencies\":{\"x\":", &buf));
+}
+
+test "findJsonStringField any depth" {
+    try std.testing.expectEqualStrings(
+        "1.2.3",
+        findJsonStringField("{\"a\":{\"b\":{\"version\":\"1.2.3\"}}}", "version").?,
+    );
+    try std.testing.expectEqualStrings(
+        "npm",
+        findJsonStringField("{\"name\":\"npm\",\"version\":\"1\"}", "name").?,
+    );
+    try std.testing.expect(findJsonStringField("{\"a\":1}", "a") == null);
+    try std.testing.expect(findJsonStringField("{}", "a") == null);
+    try std.testing.expect(findJsonStringField("not json", "a") == null);
 }
 
 test "isSafePkgName scoped" {
@@ -388,7 +491,7 @@ const fuzz_not_json = packFuzzSlice("not json {{{");
 const fuzz_empty_obj = packFuzzSlice("{}");
 const fuzz_deep = packFuzzSlice("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<{{{{{{{{{{{{{{{{}}}}}}}}}}}}}}}}");
 
-test "fuzz jsonscan parsers" {
+test "fuzz json parsers" {
     try std.testing.fuzz({}, fuzzJsonScan, .{ .corpus = &.{
         &fuzz_npm_obj,
         &fuzz_npm_arr,
@@ -421,17 +524,14 @@ fn fuzzJsonScan(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(jsonbuf.isSafePkgName(d.name));
     }
 
-    var i: usize = 0;
-    _ = skipJsonValue(text, &i);
-    try std.testing.expect(i <= text.len);
-
-    var j: usize = 0;
-    if (parseJsonString(text, &j)) |s| {
-        try std.testing.expect(sliceInside(text, s));
-        try std.testing.expect(j <= text.len);
-        try std.testing.expect(j >= 2);
-    } else {
-        try std.testing.expect(j <= text.len);
+    var named: [32]NamedVer = undefined;
+    const nout = parseJsonNamedOutdated(text, &named);
+    try std.testing.expect(nout <= named.len);
+    for (named[0..nout]) |d| {
+        try std.testing.expect(sliceInside(text, d.name));
+        try std.testing.expect(jsonbuf.isSafePkgName(d.name));
+        try std.testing.expect(d.current.len == 0 or sliceInside(text, d.current));
+        try std.testing.expect(d.latest.len == 0 or sliceInside(text, d.latest));
     }
 
     if (findJsonStringField(text, "version")) |v| {
@@ -441,20 +541,12 @@ fn fuzzJsonScan(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(sliceInside(text, v));
     }
 
-    var k: usize = 0;
+    // The cursor must consume bounded input: a truncated document cannot spin.
+    var cur: Cursor = undefined;
+    Cursor.init(&cur, text);
     var steps: usize = 0;
-    while (k < text.len) {
+    while (cur.next() != .end) {
         steps += 1;
         try std.testing.expect(steps <= text.len + 2);
-        const before = k;
-        k = skipWs(text, k);
-        if (k >= text.len) break;
-        switch (text[k]) {
-            ',', ':', '}', ']' => k += 1,
-            else => {
-                if (!skipJsonValue(text, &k)) break;
-                if (k <= before) k += 1;
-            },
-        }
     }
 }
