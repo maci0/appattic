@@ -142,6 +142,35 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
     }
     pthread_mutex_unlock(&g_mod_lock);
 
+    /* Precompiled sibling written by `core/build.sh` (host --precompile):
+       deserializing is far cheaper than compiling. A stale or mismatched image
+       fails here, and we fall through to compiling the wasm. */
+    char cwasm[4096];
+    if (snprintf(cwasm, sizeof cwasm, "%s.cwasm", path) < (int)sizeof cwasm) {
+        struct stat cs;
+        if (stat(cwasm, &cs) == 0 && cs.st_mtime >= st.st_mtime) {
+            wasmtime_module_t *pre = NULL;
+            wasmtime_error_t *perr = wasmtime_module_deserialize_file(engine, cwasm, &pre);
+            if (!perr && pre) {
+                pthread_mutex_lock(&g_mod_lock);
+                if (g_mod_count < MOD_CACHE_MAX) {
+                    char *pcopy = strdup(path);
+                    if (pcopy) {
+                        ModSlot *s = &g_mods[g_mod_count++];
+                        s->path = pcopy;
+                        s->size = (long)st.st_size;
+                        s->mtime_s = (long)st.st_mtim.tv_sec;
+                        s->mtime_ns = (long)st.st_mtim.tv_nsec;
+                        s->module = pre;
+                    }
+                }
+                pthread_mutex_unlock(&g_mod_lock);
+                return pre;
+            }
+            if (perr) wasmtime_error_delete(perr);
+        }
+    }
+
     size_t len = 0;
     unsigned char *bytes = read_file(path, &len, e);
     if (!bytes) return NULL;
@@ -487,6 +516,49 @@ skip_plugin:
 fail_plugin:
     drop_externs(slots, ngot);
     return 1;
+}
+
+/* Compile `wasm_path` and write the serialized image to `out_path`, so
+   core/build.sh can ship a precompiled module beside the wasm. */
+int appattic_precompile(const char *wasm_path, const char *out_path, char *err, size_t errlen) {
+    Err e = {err, errlen, 0};
+    wasm_engine_t *engine = shared_engine();
+    if (!engine) {
+        fail_msg(&e, "wasm_engine_new failed");
+        return 1;
+    }
+    size_t len = 0;
+    unsigned char *bytes = read_file(wasm_path, &len, &e);
+    if (!bytes) return 1;
+    wasmtime_module_t *module = NULL;
+    wasmtime_error_t *cerr = wasmtime_module_new(engine, bytes, len, &module);
+    free(bytes);
+    if (cerr) {
+        fail_error(&e, wasm_path, cerr);
+        return 1;
+    }
+    wasm_byte_vec_t image;
+    wasmtime_error_t *serr = wasmtime_module_serialize(module, &image);
+    wasmtime_module_delete(module);
+    if (serr) {
+        fail_error(&e, "serialize", serr);
+        return 1;
+    }
+    const size_t n = image.size;
+    FILE *f = fopen(out_path, "wb");
+    if (!f) {
+        fail_msg(&e, "cannot write precompiled module");
+        wasm_byte_vec_delete(&image);
+        return 1;
+    }
+    const size_t wrote = fwrite(image.data, 1, n, f);
+    fclose(f);
+    wasm_byte_vec_delete(&image);
+    if (wrote != n) {
+        fail_msg(&e, "short write");
+        return 1;
+    }
+    return 0;
 }
 
 int appattic_wasm_run(

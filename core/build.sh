@@ -209,6 +209,13 @@ cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
     "${wasmtime_libs[@]}" \
     -o "$out/host"
 
+# Ship precompiled images beside the wasm: a fresh process then deserializes
+# instead of compiling the whole set (~65 ms -> ~3 ms). A failure here only
+# costs that speedup, so it warns instead of failing the build.
+if ! "$out/host" --precompile "$out"/*.wasm; then
+    echo "warning: precompiled images not written; first scan will compile" >&2
+fi
+
 built="$out/host"
 try_line="$out/host $out/appattic_core.wasm"
 for src in "${wasm_sources[@]}"; do

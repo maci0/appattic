@@ -39,6 +39,10 @@ int appattic_wasm_run(
     size_t errlen
 );
 
+/* Write a precompiled image of `wasm_path` to `out_path` (wasmtime
+   serialization). Used by core/build.sh; a stale image is ignored at runtime. */
+int appattic_precompile(const char *wasm_path, const char *out_path, char *err, size_t errlen);
+
 #ifdef __cplusplus
 }
 #endif
