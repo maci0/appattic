@@ -82,11 +82,11 @@ static unsigned char *read_file(const char *path, size_t *len, Err *e) {
 }
 
 /* One engine and one compiled module per (path, size, mtime), reused across
-   scans. Compiling is the single biggest cost of a scan: re-JITting the core and
-   all plugins took ~30 ms of a ~58 ms scan, and every scan paid it again.
-   wasmtime 28's C API exposes no compilation cache and no engine config, so the
-   compiled modules are kept alive here instead. Slots are bounded and never
-   freed: a scan may still be running when the next one starts. */
+   scans, on top of wasmtime's on-disk compilation cache. Compiling is the
+   single biggest cost of a scan: re-JITting the core and all 27 plugins costs
+   ~60 ms, and every scan in every process paid it (the CLI pays it once per
+   invocation, the UI on launch and again on each scan). Slots are bounded and
+   never freed: a scan may still be running when the next one starts. */
 #define MOD_CACHE_MAX 64
 typedef struct {
     char *path;
@@ -104,7 +104,17 @@ static int g_mod_count;
 static wasm_engine_t *shared_engine(void) {
     wasm_engine_t *engine;
     pthread_mutex_lock(&g_mod_lock);
-    if (!g_engine) g_engine = wasm_engine_new();
+    if (!g_engine) {
+        /* Default cache dir (WASMTIME_CACHE_HOME or the platform cache dir).
+           A read-only or missing HOME only costs compilation, never a scan. */
+        wasm_config_t *cfg = wasm_config_new();
+        if (cfg) {
+            wasmtime_error_t *cerr = wasmtime_config_cache_config_load(cfg, NULL);
+            if (cerr) wasmtime_error_delete(cerr);
+            g_engine = wasm_engine_new_with_config(cfg);
+        }
+        if (!g_engine) g_engine = wasm_engine_new();
+    }
     engine = g_engine;
     pthread_mutex_unlock(&g_mod_lock);
     return engine;
