@@ -100,6 +100,9 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertEqual(got["apparent"] as? Int, Int.max, "Int.max must survive the digit buffer")
     }
 
+    #if os(Linux)
+    // `mountsText` is the /proc/mounts reader's injection point; the macOS
+    // branch lists mounted volumes through FileManager and ignores it.
     func testListDiskVolumesSkipsProc() {
         let mounts = """
         /dev/sda1 / ext4 rw 0 0
@@ -111,4 +114,5 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertFalse(vols.contains { $0.rootPath == "/proc" })
         XCTAssertTrue(vols.contains { $0.rootPath == "/home" && $0.isHome })
     }
+    #endif
 }

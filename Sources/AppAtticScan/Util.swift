@@ -302,51 +302,80 @@ public func redactHomePaths(
     // No path separator, no home prefix.
     guard text.contains("/") else { return text }
     let homePath: String
+    var rawHome: String?
     if let home {
         homePath = standardizedHome(home)
+        // `standardizingPath` resolves symlinks on Darwin (/home, /tmp, /var),
+        // so a subprocess error can carry either spelling. Try both.
+        if home != homePath { rawHome = home }
     } else {
         homePath = processHome()
     }
-    guard homePath.count > 1 else { return text }
-    guard text.contains(homePath) else { return text }
-    // Byte scan: the old NSRegularExpression + NSString round-trip cost ~11 µs
-    // per call, and this runs on every error/log line.
-    guard let t = text.utf8.withContiguousStorageIfAvailable({ tu -> String? in
-        homePath.utf8.withContiguousStorageIfAvailable { hu -> String? in
-            let tn = tu.count
-            let hn = hu.count
-            guard hn > 0, tn >= hn else { return nil }
-            var hits: [(Int, Int)] = []
-            var i = 0
-            outer: while i + hn <= tn {
-                for k in 0..<hn where tu[i + k] != hu[k] {
-                    i += 1
-                    continue outer
-                }
-                // Boundary after the prefix: `/`, end, or one of `[\s:"',;]`.
-                let a = i + hn
-                let ok: Bool
-                if a >= tn {
-                    ok = true
-                } else {
-                    let c = tu[a]
-                    ok = c == 0x2F || c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D ||
-                        c == 0x3A || c == 0x22 || c == 0x27 || c == 0x2C || c == 0x3B
-                }
-                if ok { hits.append((i, a)); i = a } else { i += 1 }
-            }
-            guard !hits.isEmpty else { return nil }
-            var out = text
-            // Replace back to front so earlier indices stay valid.
-            for (s, e) in hits.reversed() {
-                let rs = text.utf8.index(text.utf8.startIndex, offsetBy: s)
-                let re = text.utf8.index(rs, offsetBy: e - s)
-                out.replaceSubrange(rs..<re, with: "~")
-            }
-            return out
+    if homePath.count > 1, text.contains(homePath), let redacted = redactHomePrefix(text, homePath: homePath) {
+        return redacted
+    }
+    if let rawHome, rawHome.count > 1, text.contains(rawHome),
+       let redacted = redactHomePrefix(text, homePath: rawHome) {
+        return redacted
+    }
+    return text
+}
+
+/// Replace every `homePath` occurrence in `text` that ends on a path boundary
+/// with `~`. Nil when there is none. Byte scan: the old NSRegularExpression +
+/// NSString round-trip cost ~11 µs per call, and this runs on every log line.
+private func redactHomePrefix(_ text: String, homePath: String) -> String? {
+    // One of the two can be bridged from NSString on Darwin (see
+    // `standardizedHome`), where its UTF-8 is not contiguous. Falling back to
+    // the copies keeps redaction working there instead of leaking the account
+    // path into logs and error dialogs.
+    let fast = text.utf8.withContiguousStorageIfAvailable { tu -> [(Int, Int)]? in
+        homePath.utf8.withContiguousStorageIfAvailable { hu -> [(Int, Int)]? in
+            homePrefixHits(tu, hu)
         } ?? nil
-    }) ?? nil else { return text }
-    return t
+    } ?? nil
+    guard let hits = fast ?? homePrefixHits(Array(text.utf8), Array(homePath.utf8)) else {
+        return nil
+    }
+    var out = text
+    // Replace back to front so earlier indices stay valid.
+    for (s, e) in hits.reversed() {
+        let rs = text.utf8.index(text.utf8.startIndex, offsetBy: s)
+        let re = text.utf8.index(rs, offsetBy: e - s)
+        out.replaceSubrange(rs..<re, with: "~")
+    }
+    return out
+}
+
+/// Byte offsets of every `home` occurrence in `text` that ends on a path
+/// boundary (`/`, end of text, or one of `[\s:"',;]`). Nil when none.
+private func homePrefixHits<T: RandomAccessCollection, H: RandomAccessCollection>(
+    _ text: T,
+    _ home: H
+) -> [(Int, Int)]? where T.Element == UInt8, T.Index == Int, H.Element == UInt8, H.Index == Int {
+    let tn = text.count
+    let hn = home.count
+    guard hn > 0, tn >= hn else { return nil }
+    var hits: [(Int, Int)] = []
+    var i = 0
+    outer: while i + hn <= tn {
+        for k in 0..<hn where text[i + k] != home[k] {
+            i += 1
+            continue outer
+        }
+        // Boundary after the prefix: `/`, end, or one of `[\s:"',;]`.
+        let a = i + hn
+        let ok: Bool
+        if a >= tn {
+            ok = true
+        } else {
+            let c = text[a]
+            ok = c == 0x2F || c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D ||
+                c == 0x3A || c == 0x22 || c == 0x27 || c == 0x2C || c == 0x3B
+        }
+        if ok { hits.append((i, a)); i = a } else { i += 1 }
+    }
+    return hits.isEmpty ? nil : hits
 }
 
 public func restrictOwnerOnlyFile(at url: URL) throws {
@@ -697,21 +726,28 @@ public func calendarDaysSince(
     return calendar.dateComponents([.day], from: from, to: to).day
 }
 
+/// Bytes that need no quoting in a POSIX shell word.
+@inline(__always)
+func isSafeShellByte(_ c: UInt8) -> Bool {
+    (c >= 0x61 && c <= 0x7A) || (c >= 0x41 && c <= 0x5A) ||
+        (c >= 0x30 && c <= 0x39) ||
+        c == 0x5F || c == 0x40 || c == 0x25 || c == 0x2B || c == 0x3D ||
+        c == 0x3A || c == 0x2C || c == 0x2E || c == 0x2F || c == 0x2D
+}
+
 public func shellQuote(_ value: String) -> String {
     if value.isEmpty { return "''" }
     // Byte scan: `CharacterSet.inverted` + `rangeOfCharacter` cost ~2.9 µs per
     // call, and this runs on every scripted path.
+    //
+    // The non-contiguous fallback applies the same predicate instead of
+    // assuming "needs quoting": values bridged from NSString (Darwin) are not
+    // contiguous, and guessing there made the same command quote differently
+    // per platform.
     let needsQuote = value.utf8.withContiguousStorageIfAvailable { u -> Bool in
-        for k in 0..<u.count {
-            let c = u[k]
-            let safe = (c >= 0x61 && c <= 0x7A) || (c >= 0x41 && c <= 0x5A) ||
-                (c >= 0x30 && c <= 0x39) ||
-                c == 0x5F || c == 0x40 || c == 0x25 || c == 0x2B || c == 0x3D ||
-                c == 0x3A || c == 0x2C || c == 0x2E || c == 0x2F || c == 0x2D
-            if !safe { return true }
-        }
+        for c in u where !isSafeShellByte(c) { return true }
         return false
-    } ?? true
+    } ?? value.utf8.contains { !isSafeShellByte($0) }
     if !needsQuote { return value }
     // Only `'` needs escaping inside single quotes.
     if !value.contains("'") { return "'" + value + "'" }

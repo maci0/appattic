@@ -297,7 +297,8 @@ final class UtilTests: XCTestCase {
 
     func testRunCommandReturnsPromptlyWhenChildExits() {
         let start = monotonicSeconds()
-        let (rc, _, err) = runCommand(["/bin/true"], timeout: 5)
+        // `/usr/bin/true`: macOS has no /bin/true.
+        let (rc, _, err) = runCommand(["/usr/bin/true"], timeout: 5)
         XCTAssertEqual(rc, 0, err)
         XCTAssertLessThan(monotonicSeconds() - start, 1.5)
     }
