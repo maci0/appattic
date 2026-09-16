@@ -172,8 +172,8 @@ public func performScan(
     appStoreOutdated: [OutdatedPkg]? = nil,
     packages: [PackageEntry]? = nil,
     history: HistoryIndex? = nil,
-    which: WhichFn = whichCommand,
-    run: CommandRun = runCommand,
+    which: @escaping WhichFn = whichCommand,
+    run: @escaping CommandRun = runCommand,
     skipLiveUsage: Bool = false,
     now: Date = Date(),
     progress: @escaping (String) -> Void = { _ in }

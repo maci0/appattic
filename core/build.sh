@@ -109,15 +109,13 @@ zig_test() {
     zig test "$root/src/$1"
 }
 test_modules=(
-    host_exec.zig jsonbuf.zig jsonscan.zig
-    apt.zig pacman.zig aur.zig snapd.zig
-    path_listing.zig path_xdg_config.zig path_xdg_data.zig path_xdg_cache.zig
-    path_xdg_state.zig path_xdg_lib.zig path_var_app.zig path_user_bin.zig
-    path_home_dot.zig path_shadow.zig
-    dnf.zig zypper.zig flatpak.zig
-    npm.zig pnpm.zig bun.zig pipx.zig uv.zig brew.zig gem.zig composer.zig pip.zig deno.zig
-    container_runtime.zig
+    host_exec.zig jsonbuf.zig jsonscan.zig path_listing.zig
 )
+# Every WASM artifact is unit-tested too, derived from wasm_sources so adding a
+# plugin cannot silently skip its tests.
+for src in "${wasm_sources[@]}"; do
+    if [ "$src" != "core.zig" ]; then test_modules+=("$src"); fi
+done
 for m in "${test_modules[@]}"; do
     zig_test "$m"
 done

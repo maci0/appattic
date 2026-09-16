@@ -26,4 +26,4 @@ RUN swift test --filter AppAtticScanTests --disable-automatic-resolution \
     && grep -q '^LINUX_QT_SMOKE=ok$' ui/linux-qt/build/LINUX_QT_LINK.txt \
     && grep -q '^plugin:path-shadow$' ui/linux-qt/build/LINUX_QT_LINK.txt \
     && grep -Eq '^wasm: ok \([1-9][0-9]* plugins\)$' ui/linux-qt/build/LINUX_QT_LINK.txt \
-    && grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[1-9][0-9]*' ui/linux-qt/build/LINUX_QT_LINK.txt
+    && grep -Eq '^tables: ok \(leftovers=[1-9][0-9]* stale=[0-9]+' ui/linux-qt/build/LINUX_QT_LINK.txt

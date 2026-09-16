@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <sys/stat.h>
 #include <wasm.h>
 #include <wasmtime.h>
 
@@ -79,6 +81,85 @@ static unsigned char *read_file(const char *path, size_t *len, Err *e) {
     return buf;
 }
 
+/* One engine and one compiled module per (path, size, mtime), reused across
+   scans. Compiling is the single biggest cost of a scan: re-JITting the core and
+   all plugins took ~30 ms of a ~58 ms scan, and every scan paid it again.
+   wasmtime 28's C API exposes no compilation cache and no engine config, so the
+   compiled modules are kept alive here instead. Slots are bounded and never
+   freed: a scan may still be running when the next one starts. */
+#define MOD_CACHE_MAX 64
+typedef struct {
+    char *path;
+    long size;
+    long mtime_s;
+    long mtime_ns;
+    wasmtime_module_t *module;
+} ModSlot;
+
+static pthread_mutex_t g_mod_lock = PTHREAD_MUTEX_INITIALIZER;
+static wasm_engine_t *g_engine;
+static ModSlot g_mods[MOD_CACHE_MAX];
+static int g_mod_count;
+
+static wasm_engine_t *shared_engine(void) {
+    wasm_engine_t *engine;
+    pthread_mutex_lock(&g_mod_lock);
+    if (!g_engine) g_engine = wasm_engine_new();
+    engine = g_engine;
+    pthread_mutex_unlock(&g_mod_lock);
+    return engine;
+}
+
+/* Compiled module for `path`, from the cache or freshly compiled. NULL on
+   error, with `e` set. The caller borrows it; the cache owns it. */
+static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *path, Err *e) {
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        size_t len = 0;
+        unsigned char *bytes = read_file(path, &len, e);
+        free(bytes);
+        return NULL;
+    }
+    pthread_mutex_lock(&g_mod_lock);
+    for (int i = 0; i < g_mod_count; i++) {
+        ModSlot *s = &g_mods[i];
+        if (s->size == (long)st.st_size && s->mtime_s == (long)st.st_mtim.tv_sec
+            && s->mtime_ns == (long)st.st_mtim.tv_nsec && strcmp(s->path, path) == 0) {
+            wasmtime_module_t *hit = s->module;
+            pthread_mutex_unlock(&g_mod_lock);
+            return hit;
+        }
+    }
+    pthread_mutex_unlock(&g_mod_lock);
+
+    size_t len = 0;
+    unsigned char *bytes = read_file(path, &len, e);
+    if (!bytes) return NULL;
+    wasmtime_module_t *module = NULL;
+    wasmtime_error_t *err = wasmtime_module_new(engine, bytes, len, &module);
+    free(bytes);
+    if (err) {
+        fail_error(e, path, err);
+        return NULL;
+    }
+    char *copy = strdup(path);
+    if (copy) {
+        pthread_mutex_lock(&g_mod_lock);
+        if (g_mod_count < MOD_CACHE_MAX) {
+            ModSlot *s = &g_mods[g_mod_count++];
+            s->path = copy;
+            s->size = (long)st.st_size;
+            s->mtime_s = (long)st.st_mtim.tv_sec;
+            s->mtime_ns = (long)st.st_mtim.tv_nsec;
+            s->module = module;
+        } else {
+            free(copy);
+        }
+        pthread_mutex_unlock(&g_mod_lock);
+    }
+    return module;
+}
+
 static int instantiate(
     wasmtime_context_t *ctx,
     wasmtime_linker_t *linker,
@@ -88,25 +169,16 @@ static int instantiate(
     wasmtime_instance_t *out_instance,
     Err *e
 ) {
-    size_t len = 0;
-    unsigned char *bytes = read_file(path, &len, e);
-    if (!bytes) return 1;
-    wasmtime_module_t *module = NULL;
-    wasmtime_error_t *err = wasmtime_module_new(engine, bytes, len, &module);
-    free(bytes);
-    if (err) {
-        fail_error(e, path, err);
-        return 1;
-    }
+    wasmtime_error_t *err;
+    wasmtime_module_t *module = module_for_path(engine, path, e);
+    if (!module) return 1;
     wasm_trap_t *trap = NULL;
     err = wasmtime_linker_instantiate(linker, ctx, module, out_instance, &trap);
     if (err) {
-        wasmtime_module_delete(module);
         fail_error(e, "instantiate", err);
         return 1;
     }
     if (trap) {
-        wasmtime_module_delete(module);
         fail_trap(e, "instantiate", trap);
         return 1;
     }
@@ -392,12 +464,10 @@ static int run_plugin(
 
     if (on_json) on_json((const char *)json, (size_t)rl, user);
     drop_externs(slots, ngot);
-    wasmtime_module_delete(mod);
     return 0;
 
 skip_plugin:
     drop_externs(slots, ngot);
-    wasmtime_module_delete(mod);
     if (!err_was_failed) {
         e->failed = 0;
         if (e->buf && e->len) e->buf[0] = '\0';
@@ -406,7 +476,6 @@ skip_plugin:
 
 fail_plugin:
     drop_externs(slots, ngot);
-    wasmtime_module_delete(mod);
     return 1;
 }
 
@@ -426,7 +495,7 @@ int appattic_wasm_run(
         return 2;
     }
 
-    wasm_engine_t *engine_rt = wasm_engine_new();
+    wasm_engine_t *engine_rt = shared_engine();
     if (!engine_rt) {
         fail_msg(&e, "wasm_engine_new failed");
         return 1;
@@ -434,7 +503,6 @@ int appattic_wasm_run(
     wasmtime_linker_t *linker = wasmtime_linker_new(engine_rt);
     if (!linker) {
         fail_msg(&e, "wasmtime_linker_new failed");
-        wasm_engine_delete(engine_rt);
         return 1;
     }
     wasm_functype_t *exec_ty = functype_i32x4_i32();
@@ -445,7 +513,6 @@ int appattic_wasm_run(
     if (link_err) {
         fail_error(&e, "define host.exec", link_err);
         wasmtime_linker_delete(linker);
-        wasm_engine_delete(engine_rt);
         return 1;
     }
 
@@ -457,41 +524,32 @@ int appattic_wasm_run(
     if (instantiate(ctx, linker, engine_rt, core_wasm, &core_mod, &core, &e) != 0) {
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
-        wasm_engine_delete(engine_rt);
         return 1;
     }
     wasmtime_extern_t core_abi, core_pabi;
     if (must_export(ctx, &core, "core_abi_version", &core_abi, &e) ||
         must_export(ctx, &core, "core_plugin_abi_version", &core_pabi, &e)) {
-        wasmtime_module_delete(core_mod);
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
-        wasm_engine_delete(engine_rt);
         return 1;
     }
     if (core_abi.kind != WASMTIME_EXTERN_FUNC || core_pabi.kind != WASMTIME_EXTERN_FUNC) {
         fail_msg(&e, "core exports must be functions");
-        wasmtime_module_delete(core_mod);
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
-        wasm_engine_delete(engine_rt);
         return 1;
     }
     int32_t abi = 0, pabi = 0;
     if (call_i32(ctx, &core_abi.of.func, &abi, &e) != 0 ||
         call_i32(ctx, &core_pabi.of.func, &pabi, &e) != 0) {
-        wasmtime_module_delete(core_mod);
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
-        wasm_engine_delete(engine_rt);
         return 1;
     }
     if (abi != 1 || pabi != 1) {
         fail_msg(&e, "unsupported core abi");
-        wasmtime_module_delete(core_mod);
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
-        wasm_engine_delete(engine_rt);
         return 1;
     }
 
@@ -516,9 +574,7 @@ int appattic_wasm_run(
 
     wasmtime_extern_delete(&core_abi);
     wasmtime_extern_delete(&core_pabi);
-    wasmtime_module_delete(core_mod);
     wasmtime_store_delete(store);
     wasmtime_linker_delete(linker);
-    wasm_engine_delete(engine_rt);
     return rc;
 }

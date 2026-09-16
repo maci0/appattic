@@ -1194,40 +1194,34 @@ public func queryZypper(
 
 public func collectLinux(
     progress: ((String) -> Void)? = nil,
-    which: WhichFn = whichCommand,
-    run: CommandRun = runCommand,
+    which: @escaping WhichFn = whichCommand,
+    run: @escaping CommandRun = runCommand,
     osRelease: String? = nil
 ) -> [OutdatedPkg] {
     // Manager queries are independent subprocess waits: run them concurrently
     // (flatpak + AUR alone cost ~3 s sequential on this box). One summary
     // progress line: per-manager lines would interleave across threads.
-    // The query closures never outlive this call (pmap joins), so rebinding
-    // the non-escaping params is sound.
     progress?("  · checking Linux updates (flatpak, snap, AUR, distro)…")
     let family = linuxDistroFamily(osRelease: osRelease ?? linuxOsReleaseText())
     let distro = resolveDistroPackageManager(family: family, which: which)
-    return withoutActuallyEscaping(which) { which in
-        withoutActuallyEscaping(run) { run in
-            var queries: [() -> [OutdatedPkg]] = [
-                { queryFlatpak(which: which, run: run) },
-                { querySnap(which: which, run: run) },
-                { queryAur(which: which, run: run) },
-            ]
-            switch distro {
-            case .pacman:
-                queries.append { queryPacman(which: which, run: run) }
-            case .dnf:
-                queries.append { queryDnf(which: which, run: run) }
-            case .zypper:
-                queries.append { queryZypper(which: which, run: run) }
-            case .apt:
-                queries.append { queryApt(which: which, run: run) }
-            case nil:
-                break
-            }
-            return pmap(queries, workers: 4) { $0() }.flatMap { $0 }
-        }
+    var queries: [() -> [OutdatedPkg]] = [
+        { queryFlatpak(which: which, run: run) },
+        { querySnap(which: which, run: run) },
+        { queryAur(which: which, run: run) },
+    ]
+    switch distro {
+    case .pacman:
+        queries.append { queryPacman(which: which, run: run) }
+    case .dnf:
+        queries.append { queryDnf(which: which, run: run) }
+    case .zypper:
+        queries.append { queryZypper(which: which, run: run) }
+    case .apt:
+        queries.append { queryApt(which: which, run: run) }
+    case nil:
+        break
     }
+    return pmap(queries, workers: 4) { $0() }.flatMap { $0 }
 }
 
 func softwareKeys(_ sw: Software) -> Set<String> {

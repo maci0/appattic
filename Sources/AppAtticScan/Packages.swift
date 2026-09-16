@@ -523,8 +523,8 @@ func runPackageQuery(
 
 public func collectPackages(
     progress: ((String) -> Void)? = nil,
-    which: WhichFn = whichCommand,
-    run: CommandRun = runCommand,
+    which: @escaping WhichFn = whichCommand,
+    run: @escaping CommandRun = runCommand,
     osRelease: String? = nil
 ) -> [PackageEntry] {
     let family = linuxDistroFamily(osRelease: osRelease ?? linuxOsReleaseText())
@@ -532,56 +532,53 @@ public func collectPackages(
     // One closure per independent query; subprocess waits overlap via pmap.
     // Order is preserved (distro, npm, pnpm, bun, pipx, uv, pip, deno).
     // One summary progress line: per-query lines would interleave threads.
-    // Closures never outlive this call (pmap joins), so rebinding is sound.
     progress?("  · listing distro orphans and language globals…")
-    return withoutActuallyEscaping(which) { which in
-        withoutActuallyEscaping(run) { run in
-            var queries: [() -> [PackageEntry]] = []
-            switch distro {
-    case .pacman:
-        queries.append {
-            guard let text = runPackageQuery(
-                which: which, run: run, names: ["pacman"], args: ["-Qdt"],
-                ok: { $0 == 0 || $0 == 1 }
-            ) else { return [] }
-            return parsePacmanOrphans(text)
-        }
-    case .apt:
-        queries.append {
-            var result: [PackageEntry] = []
-            if let text = runPackageQuery(
-                which: which, run: run, names: ["apt-get", "apt"],
-                args: ["-s", "autoremove"]
-            ) {
-                result.append(contentsOf: parseAptAutoremove(text))
+    var queries: [() -> [PackageEntry]] = []
+    switch distro {
+        case .pacman:
+            queries.append {
+                guard let text = runPackageQuery(
+                    which: which, run: run, names: ["pacman"], args: ["-Qdt"],
+                    ok: { $0 == 0 || $0 == 1 }
+                ) else { return [] }
+                return parsePacmanOrphans(text)
             }
-            if let text = runPackageQuery(
-                which: which, run: run, names: ["dpkg"],
-                args: ["-l"],
-                ok: { $0 == 0 }
-            ) {
-                result.append(contentsOf: parseDpkgRc(text))
+        case .apt:
+            queries.append {
+                var result: [PackageEntry] = []
+                if let text = runPackageQuery(
+                    which: which, run: run, names: ["apt-get", "apt"],
+                    args: ["-s", "autoremove"]
+                ) {
+                    result.append(contentsOf: parseAptAutoremove(text))
+                }
+                if let text = runPackageQuery(
+                    which: which, run: run, names: ["dpkg"],
+                    args: ["-l"],
+                    ok: { $0 == 0 }
+                ) {
+                    result.append(contentsOf: parseDpkgRc(text))
+                }
+                return result
             }
-            return result
-        }
-    case .dnf:
-        queries.append {
-            guard let text = runPackageQuery(
-                which: which, run: run, names: ["dnf5", "dnf", "yum"],
-                args: ["repoquery", "--unneeded", "--qf", "%{name}"]
-            ) else { return [] }
-            return parseDnfUnneeded(text)
-        }
-    case .zypper:
-        queries.append {
-            guard let text = runPackageQuery(
-                which: which, run: run, names: ["zypper"],
-                args: ["--non-interactive", "packages", "--unneeded"]
-            ) else { return [] }
-            return parseZypperUnneeded(text)
-        }
-    case nil:
-        queries.append { [] }
+        case .dnf:
+            queries.append {
+                guard let text = runPackageQuery(
+                    which: which, run: run, names: ["dnf5", "dnf", "yum"],
+                    args: ["repoquery", "--unneeded", "--qf", "%{name}"]
+                ) else { return [] }
+                return parseDnfUnneeded(text)
+            }
+        case .zypper:
+            queries.append {
+                guard let text = runPackageQuery(
+                    which: which, run: run, names: ["zypper"],
+                    args: ["--non-interactive", "packages", "--unneeded"]
+                ) else { return [] }
+                return parseZypperUnneeded(text)
+            }
+        case nil:
+            queries.append { [] }
     }
     queries.append {
         guard let text = runPackageQuery(
@@ -644,8 +641,6 @@ public func collectPackages(
     var out = pmap(queries, workers: 4) { $0() }.flatMap { $0 }
     out.append(contentsOf: listDenoGlobals())
     return out
-        }
-    }
 }
 
 public func parsePipUserList(_ text: String) -> [PackageEntry] {
