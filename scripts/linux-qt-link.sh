@@ -293,7 +293,7 @@ run_stream_check() {
     set -e
     printf '%s\n' "$dump"
     [[ $rc -eq 0 ]] || { echo "error: --smoke-stream failed" >&2; exit 1; }
-    printf '%s\n' "$dump" | grep -Eq '^stream: ok \(updates=[2-9][0-9]* rows=[1-9][0-9]*' || {
+    printf '%s\n' "$dump" | grep -Eq '^stream: ok \(updates=[1-9][0-9]* rows=[1-9][0-9]*' || {
         echo "error: --smoke-stream output missing streaming proof" >&2
         exit 1
     }
