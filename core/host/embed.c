@@ -541,19 +541,10 @@ int appattic_precompile(const char *wasm_path, const char *out_path, char *err, 
         fail_msg(&e, "wasm_engine_new failed");
         return 1;
     }
-    size_t len = 0;
-    unsigned char *bytes = read_file(wasm_path, &len, &e);
-    if (!bytes) return 1;
-    wasmtime_module_t *module = NULL;
-    wasmtime_error_t *cerr = wasmtime_module_new(engine, bytes, len, &module);
-    free(bytes);
-    if (cerr) {
-        fail_error(&e, wasm_path, cerr);
-        return 1;
-    }
+    wasmtime_module_t *module = module_for_path(engine, wasm_path, &e);
+    if (!module) return 1;
     wasm_byte_vec_t image;
     wasmtime_error_t *serr = wasmtime_module_serialize(module, &image);
-    wasmtime_module_delete(module);
     if (serr) {
         fail_error(&e, "serialize", serr);
         return 1;

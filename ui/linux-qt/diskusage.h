@@ -54,6 +54,5 @@ qint64 measurePathBytes(const QString &path, const DiskScanOptions &opts = DiskS
 QVector<DiskVolume> listDiskVolumes();
 QString diskContentsLabel(qint64 items, bool isDir);
 QString diskModifiedLabel(qint64 mtime);
-int smokeDiskUsage();
 
 #endif

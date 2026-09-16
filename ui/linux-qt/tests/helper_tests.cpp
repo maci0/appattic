@@ -483,9 +483,337 @@ static int verifyHelpers() {
     return 0;
 }
 
+static int checkTiming() {
+    const QDateTime z = parseIsoInstant(QStringLiteral("2026-08-17T12:30:00Z"));
+    const QDateTime offset = parseIsoInstant(QStringLiteral("2026-08-17T12:30:00+00:00"));
+    if (!z.isValid() || !offset.isValid()
+        || qAbs(z.toUTC().toSecsSinceEpoch() - offset.toUTC().toSecsSinceEpoch()) > 0) {
+        std::fprintf(stderr, "timing: Z and +00:00 must be the same instant\n");
+        return 1;
+    }
+    const QDateTime naive = parseIsoInstant(QStringLiteral("2026-04-01T15:00:00"));
+    const QDateTime naiveZ = parseIsoInstant(QStringLiteral("2026-04-01T15:00:00Z"));
+    if (!naive.isValid() || naive.toUTC().toSecsSinceEpoch() != naiveZ.toUTC().toSecsSinceEpoch()) {
+        std::fprintf(stderr, "timing: timezone-less ISO must be UTC\n");
+        return 1;
+    }
+    const QDateTime micro = parseIsoInstant(QStringLiteral("2026-04-01T15:00:00.123456Z"));
+    if (!micro.isValid()
+        || qAbs(micro.toMSecsSinceEpoch() - naiveZ.toMSecsSinceEpoch() - 123) > 1) {
+        std::fprintf(stderr, "timing: XBEL microseconds truncated to millis\n");
+        return 1;
+    }
+
+    Finding idle;
+    idle.idleDays = 120;
+    if (modifiedLabel(idle) != QLatin1String("120 days ago")) {
+        std::fprintf(stderr, "timing: idleDays label\n");
+        return 1;
+    }
+    Finding today;
+    today.mtime = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    if (modifiedLabel(today) != QLatin1String("Today")) {
+        std::fprintf(stderr, "timing: current UTC mtime should be Today (%s)\n",
+            modifiedLabel(today).toUtf8().constData());
+        return 1;
+    }
+
+    const QTimeZone ny(QByteArray("America/New_York"));
+    if (ny.isValid()) {
+        // 2026-03-08 04:30 UTC is 2026-03-07 23:30 EST (spring-forward is 07:00 UTC).
+        const QDateTime utc = parseIsoInstant(QStringLiteral("2026-03-08T04:30:00Z"));
+        if (!utc.isValid() || utc.toTimeZone(ny).date() != QDate(2026, 3, 7)) {
+            std::fprintf(stderr, "timing: UTC instant must be previous local day in New York\n");
+            return 1;
+        }
+        Finding crossed;
+        crossed.mtime = QStringLiteral("2026-03-08T04:30:00Z");
+        const QDateTime nyNow(QDate(2026, 9, 2), QTime(12, 0), ny);
+        if (modifiedLabel(crossed, nyNow) != QLatin1String("2026-03-07")) {
+            std::fprintf(stderr,
+                "timing: UTC prefix must not win over local date (%s)\n",
+                modifiedLabel(crossed, nyNow).toUtf8().constData());
+            return 1;
+        }
+        const QDateTime saturday(QDate(2026, 3, 7), QTime(23, 30), ny);
+        const QDateTime sunday(QDate(2026, 3, 8), QTime(22, 30), ny);
+        if (saturday.secsTo(sunday) >= 86400) {
+            std::fprintf(stderr, "timing: expected spring-forward elapsed < 24h\n");
+            return 1;
+        }
+        if (saturday.toTimeZone(ny).date().daysTo(sunday.toTimeZone(ny).date()) != 1) {
+            std::fprintf(stderr, "timing: spring-forward must still be one local calendar day\n");
+            return 1;
+        }
+        const QDateTime morning(QDate(2026, 11, 1), QTime(0, 0), ny);
+        const QDateTime evening(QDate(2026, 11, 1), QTime(23, 30), ny);
+        if (morning.secsTo(evening) <= 86400) {
+            std::fprintf(stderr, "timing: expected fall-back elapsed > 24h\n");
+            return 1;
+        }
+        if (morning.toTimeZone(ny).date().daysTo(evening.toTimeZone(ny).date()) != 0) {
+            std::fprintf(stderr, "timing: fall-back same local day must stay today\n");
+            return 1;
+        }
+    }
+
+    Finding dateOnly;
+    dateOnly.mtime = QStringLiteral("2026-08-17");
+    const QString dateLabel = modifiedLabel(dateOnly);
+    if (dateLabel == QLatin1String("-")) {
+        std::fprintf(stderr, "timing: date-only mtime must parse\n");
+        return 1;
+    }
+
+    std::fprintf(stdout, "timing: ok\n");
+    return 0;
+}
+
+static int checkPrivacy() {
+    const QString home = QStringLiteral("/home/alice");
+    const QString redacted = redactHomePaths(
+        QStringLiteral("rm: cannot remove '/home/alice/Library/Caches/Foo': Permission denied"),
+        home);
+    if (redacted.contains(QLatin1String("/home/alice"))) {
+        std::fprintf(stderr, "redact: home path remains (%s)\n", redacted.toUtf8().constData());
+        return 1;
+    }
+    if (!redacted.contains(QLatin1String("~/Library/Caches/Foo"))) {
+        std::fprintf(stderr, "redact: expected tilde path (%s)\n", redacted.toUtf8().constData());
+        return 1;
+    }
+    const QString neighbor = redactHomePaths(QStringLiteral("/home/alice2/secret"), home);
+    if (!neighbor.contains(QLatin1String("/home/alice2"))) {
+        std::fprintf(stderr, "redact: over-redacted neighbor home\n");
+        return 1;
+    }
+    if (expandHomeUserPlaceholder(
+            QStringLiteral("/home/user/.config/gone-app"), home)
+        != QStringLiteral("/home/alice/.config/gone-app")) {
+        std::fprintf(stderr, "expand: /home/user path\n");
+        return 1;
+    }
+    if (expandHomeUserPlaceholder(
+            QStringLiteral("rm -rf /home/user/.config/gone-app"), home)
+        != QStringLiteral("rm -rf /home/alice/.config/gone-app")) {
+        std::fprintf(stderr, "expand: /home/user command\n");
+        return 1;
+    }
+    if (expandHomeUserPlaceholder(QStringLiteral("/home/username/foo"), home)
+        != QStringLiteral("/home/username/foo")) {
+        std::fprintf(stderr, "expand: over-replaced username\n");
+        return 1;
+    }
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "redact: temp dir failed\n");
+        return 1;
+    }
+    const QString dir = tmp.filePath(QStringLiteral("appattic"));
+    if (!QDir().mkpath(dir)) {
+        std::fprintf(stderr, "redact: mkpath failed\n");
+        return 1;
+    }
+    const QString path = dir + QStringLiteral("/settings.json");
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly) || f.write("{}") != 2) {
+        std::fprintf(stderr, "redact: write failed\n");
+        return 1;
+    }
+    f.close();
+    restrictPrivateDataFile(path);
+    const QFile::Permissions filePerms = QFileInfo(path).permissions();
+    const QFile::Permissions dirPerms = QFileInfo(dir).permissions();
+    if (filePerms & (QFileDevice::ReadGroup | QFileDevice::ReadOther
+            | QFileDevice::WriteGroup | QFileDevice::WriteOther)) {
+        std::fprintf(stderr, "redact: settings file is group/other readable\n");
+        return 1;
+    }
+    if (dirPerms & (QFileDevice::ReadGroup | QFileDevice::ReadOther
+            | QFileDevice::ExeGroup | QFileDevice::ExeOther)) {
+        std::fprintf(stderr, "redact: appattic dir is group/other accessible\n");
+        return 1;
+    }
+    std::fprintf(stdout, "redact: ok\n");
+    return 0;
+}
+
+static int writeFile(const QString &path, const QByteArray &body) {
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return 1;
+    if (f.write(body) != body.size()) return 1;
+    return 0;
+}
+
+static int checkDiskUsage() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "disk: temp dir failed\n");
+        return 1;
+    }
+    const QString root = tmp.path();
+    const QString sub = root + QStringLiteral("/big");
+    if (!QDir().mkpath(sub)) {
+        std::fprintf(stderr, "disk: mkpath failed\n");
+        return 1;
+    }
+    const QByteArray payload(4096, 'x');
+    if (writeFile(sub + QStringLiteral("/a.bin"), payload)
+        || writeFile(root + QStringLiteral("/small.txt"), QByteArray("hi\n"))) {
+        std::fprintf(stderr, "disk: write failed\n");
+        return 1;
+    }
+    const QString linkDir = root + QStringLiteral("/linkdir");
+    if (!QFile::link(sub, linkDir)) {
+        std::fprintf(stderr, "disk: symlink failed\n");
+        return 1;
+    }
+
+    DiskScanOptions opts;
+    opts.oneFileSystem = true;
+    DiskNode *tree = scanDiskTree(root, opts);
+    if (!tree || tree->unreadable || tree->children.size() < 2) {
+        std::fprintf(stderr, "disk: scan produced no children\n");
+        delete tree;
+        return 1;
+    }
+    const DiskNode *big = nullptr;
+    const DiskNode *small = nullptr;
+    const DiskNode *link = nullptr;
+    for (const DiskNode *c : tree->children) {
+        if (c->name == QLatin1String("big")) big = c;
+        if (c->name == QLatin1String("small.txt")) small = c;
+        if (c->name == QLatin1String("linkdir")) link = c;
+    }
+    if (!big || !big->isDir || big->apparent < 4096) {
+        std::fprintf(stderr, "disk: big dir apparent size missing\n");
+        delete tree;
+        return 1;
+    }
+    if (!small || small->isDir || small->apparent < 3) {
+        std::fprintf(stderr, "disk: small file missing\n");
+        delete tree;
+        return 1;
+    }
+    if (measurePathBytes(sub) < 4096) {
+        std::fprintf(stderr, "disk: measurePathBytes missed the 4096-byte file\n");
+        delete tree;
+        return 1;
+    }
+    if (!link || link->isDir) {
+        std::fprintf(stderr, "disk: directory symlink was followed\n");
+        delete tree;
+        return 1;
+    }
+    if (tree->apparent < big->apparent || tree->items < 3) {
+        std::fprintf(stderr, "disk: root totals too small\n");
+        delete tree;
+        return 1;
+    }
+    tree->sortChildren(false);
+    if (tree->children.isEmpty() || tree->children[0]->name != QLatin1String("big")) {
+        std::fprintf(stderr, "disk: sort by apparent did not put big first\n");
+        delete tree;
+        return 1;
+    }
+    delete tree;
+    tree = nullptr;
+
+    const QString many = root + QStringLiteral("/many");
+    if (!QDir().mkpath(many)) {
+        std::fprintf(stderr, "disk: many mkpath failed\n");
+        return 1;
+    }
+    for (int i = 0; i < 200; ++i) {
+        const QString n = QStringLiteral("%1/f%2.txt").arg(many).arg(i);
+        if (writeFile(n, QByteArray("x\n"))) {
+            std::fprintf(stderr, "disk: many write failed\n");
+            return 1;
+        }
+    }
+    tree = scanDiskTree(root, opts);
+    if (!tree || tree->unreadable) {
+        std::fprintf(stderr, "disk: rescan after many files failed\n");
+        delete tree;
+        return 1;
+    }
+    const DiskNode *manyNode = nullptr;
+    for (const DiskNode *c : tree->children) {
+        if (c->name == QLatin1String("many")) manyNode = c;
+    }
+    if (!manyNode || !manyNode->isDir || manyNode->children.size() < 200) {
+        std::fprintf(stderr, "disk: getdents listing missed files (%d)\n",
+            manyNode ? int(manyNode->children.size()) : -1);
+        delete tree;
+        return 1;
+    }
+    const QString linkRoot = root + QStringLiteral("/rootlink");
+    if (!QFile::link(sub, linkRoot)) {
+        std::fprintf(stderr, "disk: root symlink failed\n");
+        delete tree;
+        return 1;
+    }
+    delete tree;
+    tree = scanDiskTree(linkRoot, opts);
+    if (!tree || tree->unreadable || tree->children.isEmpty()) {
+        std::fprintf(stderr, "disk: scan of directory symlink root failed\n");
+        delete tree;
+        return 1;
+    }
+    bool sawBin = false;
+    for (const DiskNode *c : tree->children) {
+        if (c->name == QLatin1String("a.bin")) sawBin = true;
+    }
+    if (!sawBin) {
+        std::fprintf(stderr, "disk: symlink root did not follow to contents\n");
+        delete tree;
+        return 1;
+    }
+    delete tree;
+
+    const QVector<DiskVolume> vols = listDiskVolumes();
+    bool hasRoot = false;
+    for (const DiskVolume &v : vols) {
+        if (v.isRoot && v.bytesTotal > 0) hasRoot = true;
+        if (v.rootPath == QLatin1String("/proc")) {
+            std::fprintf(stderr, "disk: listed virtual /proc\n");
+            return 1;
+        }
+        if (v.fileSystem.toLower() == QLatin1String("tmpfs")
+            && v.rootPath != QLatin1String("/")
+            && !v.isHome) {
+            std::fprintf(stderr, "disk: listed tmpfs %s\n", v.rootPath.toUtf8().constData());
+            return 1;
+        }
+        if (v.rootPath == QLatin1String("/run")
+            || v.rootPath.startsWith(QLatin1String("/run/"))) {
+            std::fprintf(stderr, "disk: listed /run mount %s\n", v.rootPath.toUtf8().constData());
+            return 1;
+        }
+    }
+    if (!hasRoot) {
+        std::fprintf(stderr, "disk: file system volume missing\n");
+        return 1;
+    }
+    if (diskContentsLabel(1, true) != QLatin1String("Empty")) {
+        std::fprintf(stderr, "disk: empty contents label\n");
+        return 1;
+    }
+    if (diskContentsLabel(5, true) != QLatin1String("4 items")) {
+        std::fprintf(stderr, "disk: items label\n");
+        return 1;
+    }
+    std::fprintf(stdout, "disk: ok\n");
+    return 0;
+}
+
 int main() {
-    const int rc = verifyHelpers();
-    if (rc != 0) return rc;
+    const int checks[] = {
+        verifyHelpers(), checkPrivacy(), checkTiming(), checkDiskUsage(),
+    };
+    for (const int rc : checks) {
+        if (rc != 0) return rc;
+    }
     std::fprintf(stdout, "helpers: ok\n");
     return 0;
 }

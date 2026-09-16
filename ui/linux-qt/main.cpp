@@ -1680,16 +1680,11 @@ private:
         const Tone t = toneFrom(palette());
         const QVector<Finding> rows = visibleRows(page);
         const quint64 fingerprint = rowFingerprint(rows);
-        if (fingerprint == m_builtRows && fingerprint == m_shownRows
-            && page == m_builtPage && m_table->topLevelItemCount() > 0) {
-            // Same rows as the last fill: only the chrome can differ.
-            QTreeWidgetItem *sel = m_table->currentItem();
-            finishFill(page, rows, sel);
-            return;
-        }
         if ((viewOnly || fingerprint == m_builtRows) && page == m_builtPage
             && m_table->topLevelItemCount() > 0) {
-            applyRowFilter(rows);
+            // The items stand; hide only the rows this fill dropped. Identical
+            // rows mean the hide pass is already correct, so skip it.
+            if (fingerprint != m_shownRows) applyRowFilter(rows);
             QTreeWidgetItem *sel = m_table->currentItem();
             if (sel && sel->isHidden()) sel = nullptr;
             finishFill(page, rows, sel);
@@ -2886,8 +2881,8 @@ int main(int argc, char **argv) {
         return runVersion(argc, argv);
     }
     if (argvHas(argc, argv, "--smoke")) {
-        const int timing = smokeTiming();
-        if (timing != 0) return timing;
+        /* Date parsing and disk usage checks run in appattic-qt-helper-tests;
+           this gate proves the linked binary scans. */
         const int rc = runSmoke(argc, argv);
         if (rc != 0) return rc;
         return smokeUiCopy();
