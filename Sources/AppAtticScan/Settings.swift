@@ -145,6 +145,9 @@ public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSett
         throw SettingsError.unwritable(path: url.path, reason: error.localizedDescription)
     }
     do {
+        // cordis-boundary: emission. settings.json is the app's own state file
+        // and its sole writer; the atomic overwrite is the commit. No inverse is
+        // held because the file is the state, not a cached copy of it.
         try raw.write(to: url, options: .atomic)
         try restrictPrivateDataFile(at: url)
     } catch {

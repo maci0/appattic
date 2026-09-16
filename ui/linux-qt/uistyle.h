@@ -17,10 +17,9 @@
 // page titles, tabular figures on sizes, desktop fixed font on paths.
 // No VFD digits or bloom.
 
+// Called once from the composition root (applyAppIdentity). The font database
+// is process-global; there is no second caller to keep idempotent for.
 inline void aaLoadAppFonts() {
-    static bool once = false;
-    if (once) return;
-    once = true;
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Michroma-Regular.ttf"));
     const QStringList wanted = {
         QStringLiteral("Selawik"),

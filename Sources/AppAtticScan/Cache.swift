@@ -69,6 +69,9 @@ public func writeScanCache(_ cache: ScanCacheFile, to url: URL = defaultScanCach
         throw AppAtticIOError.encodeFailed(message: error.localizedDescription)
     }
     do {
+        // cordis-boundary: emission. The scan cache is the app's own state file
+        // and the sole writer, so an atomic overwrite is the commit; there is no
+        // inverse to hold (a stale cache only costs a rescan).
         try raw.write(to: url, options: .atomic)
         try restrictPrivateDataFile(at: url)
     } catch {

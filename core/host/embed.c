@@ -106,7 +106,9 @@ static wasm_engine_t *shared_engine(void) {
     pthread_mutex_lock(&g_mod_lock);
     if (!g_engine) {
         /* Default cache dir (WASMTIME_CACHE_HOME or the platform cache dir).
-           A read-only or missing HOME only costs compilation, never a scan. */
+           A read-only or missing HOME only costs compilation, never a scan.
+           cordis-boundary: emission. The cache directory outlives this process
+           and is not ours to revert; a failed load is dropped, not compensated. */
         wasm_config_t *cfg = wasm_config_new();
         if (cfg) {
             wasmtime_error_t *cerr = wasmtime_config_cache_config_load(cfg, NULL);
