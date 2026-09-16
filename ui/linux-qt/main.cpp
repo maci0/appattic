@@ -1,6 +1,7 @@
 #include "corehost.h"
 #include "diskpage.h"
 #include "finding.h"
+#include "findingmodel.h"
 #include "settings.h"
 #include "smoke.h"
 #include "uistyle.h"
@@ -645,7 +646,9 @@ public:
         auto *lpv = new QVBoxLayout(listPane);
         lpv->setContentsMargins(0, 0, 0, 0);
         lpv->setSpacing(0);
-        m_table = new QTreeWidget;
+        m_table = new QTreeView;
+        m_model = new FindingModel(this);
+        m_table->setModel(m_model);
         m_table->setRootIsDecorated(false);
         m_table->setUniformRowHeights(true);
         m_table->setItemsExpandable(true);
@@ -820,31 +823,26 @@ public:
         connect(m_clearSearch, &QPushButton::clicked, this, [this] { m_search->clear(); });
         connect(m_emptyRetry, &QPushButton::clicked, this, &MainWindow::rescan);
         connect(m_selectAll, &QPushButton::clicked, this, &MainWindow::toggleSelectAll);
-        connect(m_table, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *cur, QTreeWidgetItem *) {
-            m_selectedUid = cur ? cur->data(0, Qt::UserRole).toString() : QString();
-            m_selectedChild = cur ? cur->data(0, Qt::UserRole + 1).toString() : QString();
-            rebuildInspector();
-        });
-        connect(m_table, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int col) {
-            if (!it || col != 0) return;
+        connect(m_table->selectionModel(), &QItemSelectionModel::currentChanged, this,
+                [this](const QModelIndex &cur, const QModelIndex &) {
+                    m_selectedUid = cur.isValid() ? m_model->data(cur, Qt::UserRole).toString() : QString();
+                    m_selectedChild =
+                        cur.isValid() ? m_model->data(cur, Qt::UserRole + 1).toString() : QString();
+                    rebuildInspector();
+                });
+        connect(m_table, &QTreeView::clicked, this, [this](const QModelIndex &idx) {
+            if (!idx.isValid() || idx.column() != 0) return;
             if (currentPage() == Page::Leftovers) return;
-            const QString uid = it->data(0, Qt::UserRole).toString();
+            const QString uid = m_model->data(idx, Qt::UserRole).toString();
             if (uid.isEmpty()) return;
-            const QString child = it->data(0, Qt::UserRole + 1).toString();
+            const Finding *f = findingByUid(uid);
+            if (!f) return;
+            const QString child = m_model->data(idx, Qt::UserRole + 1).toString();
             if (!child.isEmpty()) {
-                if (currentPage() != Page::Packages) return;
-                const Finding *parent = findingByUid(uid);
-                if (!parent || packageChildCommand(*parent, child).isEmpty()) return;
-                const QString key = packageChildMarkKey(uid, child);
-                if (m_marked.contains(key)) m_marked.remove(key);
-                else m_marked.insert(key);
-                it->setText(0, m_marked.contains(key) ? QStringLiteral("in") : QString());
-                refreshMarkChrome();
+                toggleRowMark(*f, child, !m_marked.contains(packageChildMarkKey(uid, child)));
                 rebuildInspector();
                 return;
             }
-            const Finding *f = findingByUid(uid);
-            if (!f) return;
             if (m_markedManual.contains(uid)) {
                 m_markedManual.remove(uid);
             } else if (m_marked.contains(uid) && !canMarkCleanup(*f, currentPage())) {
@@ -858,30 +856,7 @@ public:
             } else {
                 return;
             }
-            applyListMarkVisual(it, uid);
-            refreshMarkChrome();
-            rebuildInspector();
-        });
-        connect(m_table, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *it, int col) {
-            if (!it || col != 0 || currentPage() != Page::Leftovers) return;
-            if (!(it->flags() & Qt::ItemIsUserCheckable)) return;
-            if (it->data(0, Qt::UserRole + 1).isValid()) return;
-            const QString uid = it->data(0, Qt::UserRole).toString();
-            if (uid.isEmpty()) return;
-            const Finding *f = findingByUid(uid);
-            if (!f || !canMarkCleanup(*f, Page::Leftovers)) {
-                QSignalBlocker block(m_table);
-                it->setCheckState(0, Qt::Unchecked);
-                return;
-            }
-            const bool on = it->checkState(0) == Qt::Checked;
-            if (on == m_marked.contains(uid)) return;
-            if (on) {
-                m_marked.insert(uid);
-                m_markedManual.remove(uid);
-            } else {
-                m_marked.remove(uid);
-            }
+            m_model->refreshUid(uid);
             refreshMarkChrome();
             rebuildInspector();
         });
@@ -1596,40 +1571,30 @@ private:
         m_count->setText(m_scanning ? scanStatusText() : QString());
     }
 
-    void setupColumns(Page page) {
-        m_table->setSortingEnabled(false);
-        QStringList headers;
+    QStringList pageHeaders(Page page) const {
         switch (page) {
         case Page::Leftovers:
-            headers = {QString(), QStringLiteral("Name"), QStringLiteral("Location"),
-                       QStringLiteral("Modified"), QStringLiteral("Size")};
-            break;
+            return {QString(), QStringLiteral("Name"), QStringLiteral("Location"),
+                    QStringLiteral("Modified"), QStringLiteral("Size")};
         case Page::Stale:
-            headers = {QString(), QStringLiteral("Name"), QStringLiteral("Status"),
-                       QStringLiteral("Last used"), QStringLiteral("Size")};
-            break;
+            return {QString(), QStringLiteral("Name"), QStringLiteral("Status"),
+                    QStringLiteral("Last used"), QStringLiteral("Size")};
         case Page::Outdated:
-            headers = {QString(), QStringLiteral("Name"), QStringLiteral("Manager"),
-                       QStringLiteral("Current → Latest")};
-            break;
+            return {QString(), QStringLiteral("Name"), QStringLiteral("Manager"),
+                    QStringLiteral("Current \u2192 Latest")};
         case Page::Packages:
-            headers = {QString(), QStringLiteral("Name"), QStringLiteral("Manager"),
-                       QStringLiteral("Kind"), QStringLiteral("Size")};
-            break;
+            return {QString(), QStringLiteral("Name"), QStringLiteral("Manager"),
+                    QStringLiteral("Kind"), QStringLiteral("Size")};
         default:
-            headers = {QString(), QStringLiteral("Name")};
-            break;
+            return {QString(), QStringLiteral("Name")};
         }
-        m_table->setColumnCount(headers.size());
-        m_table->setHeaderLabels(headers);
-        if (QTreeWidgetItem *head = m_table->headerItem()) {
-            head->setToolTip(
-                0,
-                page == Page::Leftovers
-                    ? QStringLiteral("Tick to include the leftover in cleanup")
-                    : QStringLiteral("Click to include the item in cleanup, update, or remove")
-            );
-        }
+    }
+
+    void setupColumns(Page page, const QStringList &headers) {
+        // Qt samples this many rows per column when sizing; 1000 (the default)
+        // cost 17 ms of a 2000 row fill, 100 costs 1 ms. The auto-sized columns
+        // hold short labels, so a sampled maximum is enough.
+        m_table->header()->setResizeContentsPrecision(100);
         m_table->header()->setSectionResizeMode(0, QHeaderView::Fixed);
         m_table->setColumnWidth(0, page == Page::Leftovers ? 36 : 28);
         m_table->header()->setSectionResizeMode(1, QHeaderView::Stretch);
@@ -1638,68 +1603,178 @@ private:
             // its columns on every insertion.
             m_table->header()->setSectionResizeMode(c, QHeaderView::Interactive);
         }
-        if (QTreeWidgetItem *head = m_table->headerItem()) {
-            if (page != Page::Outdated && headers.size() > 1) {
-                head->setTextAlignment(headers.size() - 1, Qt::AlignRight | Qt::AlignVCenter);
-            }
-        }
     }
 
-    /// FNV-1a over the fields the table renders. A rescan that returns the same
-    /// findings must not rebuild every item: 39 ms on a 2000 row page.
-    quint64 rowFingerprint(const QVector<Finding> &rows) const {
-        quint64 h = 1469598103934665603ULL;
-        const auto mixText = [&h](const QString &s) {
-            for (const QChar c : s) {
-                h ^= quint64(c.unicode());
-                h *= 1099511628211ULL;
+    /// Per-fill constants for `cellData`: font, colours and page never change
+    /// between rows, so they are built once and captured by the model.
+    struct CellCtx {
+        Page page;
+        Tone tone;
+        QFont nums;
+        QColor dim;
+        QColor amber;
+        QColor highlight;
+    };
+
+    /// One cell of the findings table. The model asks for painted rows only, so
+    /// this is not the per-row loop it replaced.
+    QVariant cellData(const CellCtx &ctx, const Finding &f, const QString &child, int column,
+                      int role) const {
+        const Page page = ctx.page;
+        const QString uid = f.uid();
+        const bool markedCleanup = m_marked.contains(uid);
+        const bool markedKeep = m_markedManual.contains(uid);
+        if (!child.isEmpty()) {
+            const bool childMarked = m_marked.contains(packageChildMarkKey(uid, child));
+            if (column == 0) {
+                if (role == Qt::DisplayRole) return childMarked ? QStringLiteral("in") : QString();
+                if (role == Qt::ForegroundRole) return ctx.highlight;
+                if (role == Qt::SizeHintRole) return QSize(28, 0);
+                if (role == Qt::ToolTipRole) {
+                    return childMarked
+                               ? QStringLiteral("Included. Click to remove from the selection.")
+                               : QStringLiteral("Click to include this dependency in remove.");
+                }
+                return {};
             }
-        };
-        for (const Finding &f : rows) {
-            const QString uid = f.uid();
-            mixText(uid);
-            mixText(f.status);
-            mixText(f.mtime);
-            mixText(f.currentVersion);
-            mixText(f.latestVersion);
-            // Mark state too: "clear selection" must reset the rows it changed.
-            h ^= quint64(m_marked.contains(uid)) | (quint64(m_markedManual.contains(uid)) << 1);
-            h *= 1099511628211ULL;
-            int markedChildren = 0;
-            for (const QString &child : f.children) {
-                if (m_marked.contains(packageChildMarkKey(uid, child))) ++markedChildren;
+            if (column == 1) {
+                if (role == Qt::DisplayRole) return child;
+                if (role == Qt::ForegroundRole) return ctx.dim;
             }
-            h ^= quint64(f.children.size()) | (quint64(markedChildren) << 16);
-            h *= 1099511628211ULL;
+            return {};
         }
-        return h;
+        const QString name = displayName(f);
+        if (column == 0) {
+            const bool checkable = page == Page::Leftovers && canMarkCleanup(f, page);
+            switch (role) {
+            case Qt::DisplayRole:
+                if (checkable) return QString();
+                return (markedCleanup || markedKeep) ? QStringLiteral("in") : QString();
+            case Qt::CheckStateRole:
+                if (!checkable) return {};
+                return int(markedCleanup ? Qt::Checked : Qt::Unchecked);
+            case Qt::ForegroundRole:
+                return ctx.highlight;
+            case Qt::SizeHintRole:
+                return QSize(page == Page::Leftovers ? 36 : 28, 0);
+            case Qt::ToolTipRole:
+                if (markedCleanup) {
+                    return page == Page::Leftovers
+                               ? QStringLiteral("Included. Untick to remove from the selection.")
+                               : QStringLiteral("Included. Click to remove from the selection.");
+                }
+                if (markedKeep) {
+                    return QStringLiteral(
+                        "Marked as manually installed. Click to remove from the selection."
+                    );
+                }
+                if (canMarkCleanup(f, page)) {
+                    return page == Page::Leftovers
+                               ? QStringLiteral("Tick to include in cleanup.")
+                               : QStringLiteral("Click to include in cleanup, update, or remove.");
+                }
+                return QString();
+            default:
+                return {};
+            }
+        }
+        if (column == 1) {
+            if (role == Qt::DisplayRole) return name;
+            if (role == Qt::ToolTipRole) {
+                return f.path.isEmpty() ? QVariant(name)
+                                        : QVariant(name + QLatin1Char('\n') + f.path);
+            }
+            if (role == Qt::ForegroundRole && page == Page::Leftovers && isShadowFinding(f)) {
+                return ctx.amber;
+            }
+            return {};
+        }
+        const QVariant size = f.bytes >= 0 ? QVariant(humanSize(f.bytes))
+                                           : QVariant(QStringLiteral("unknown"));
+        switch (page) {
+        case Page::Leftovers:
+            if (role == Qt::DisplayRole) {
+                if (column == 2) return locationLabel(f);
+                if (column == 3) return modifiedLabel(f);
+                if (column == 4) return size;
+            }
+            if (role == Qt::ForegroundRole) {
+                if (column == 2 && isShadowFinding(f)) return ctx.amber;
+                if (column >= 2) return ctx.dim;
+            }
+            break;
+        case Page::Stale:
+            if (role == Qt::DisplayRole) {
+                if (column == 2) return statusLabel(f);
+                if (column == 3) return modifiedLabel(f);
+                if (column == 4) return size;
+            }
+            if (role == Qt::ForegroundRole) {
+                if (column == 2) return statusColor(f, ctx.tone, page);
+                if (column >= 3) return ctx.dim;
+            }
+            break;
+        case Page::Outdated:
+            if (role == Qt::DisplayRole) {
+                if (column == 2) return managerLabel(f);
+                if (column == 3) return outdatedVersionLabel(f);
+            }
+            if (role == Qt::ForegroundRole) {
+                if (column == 2) return ctx.dim;
+                if (column == 3) return ctx.amber;
+            }
+            break;
+        case Page::Packages:
+            if (role == Qt::DisplayRole) {
+                if (column == 2) return managerLabel(f);
+                if (column == 3) return humanKind(f.kind);
+                if (column == 4) return size;
+            }
+            if (role == Qt::ForegroundRole) {
+                if (column == 2) return ctx.dim;
+                if (column == 3) return statusColor(f, ctx.tone, page);
+                if (column == 4) return ctx.dim;
+            }
+            break;
+        default:
+            break;
+        }
+        if (role == Qt::FontRole && column == 4) return ctx.nums;
+        if (role == Qt::TextAlignmentRole && column == 4) return int(Qt::AlignRight | Qt::AlignVCenter);
+        return {};
     }
 
-    void fillTable(Page page, bool viewOnly = false) {
-        setupColumns(page);
-        const Tone t = toneFrom(palette());
-        const QVector<Finding> rows = visibleRows(page);
-        const quint64 fingerprint = rowFingerprint(rows);
-        if ((viewOnly || fingerprint == m_builtRows) && page == m_builtPage
-            && m_table->topLevelItemCount() > 0) {
-            // The items stand; hide only the rows this fill dropped. Identical
-            // rows mean the hide pass is already correct, so skip it.
-            if (fingerprint != m_shownRows) applyRowFilter(rows);
-            QTreeWidgetItem *sel = m_table->currentItem();
-            if (sel && sel->isHidden()) sel = nullptr;
-            finishFill(page, rows, sel);
-            m_shownRows = fingerprint;
+    /// Flip a row's check state from the view. The inspector checkbox and a
+    /// click in column 0 both land here.
+    void toggleRowMark(const Finding &f, const QString &child, bool on) {
+        const Page page = currentPage();
+        const QString uid = f.uid();
+        if (!child.isEmpty()) {
+            if (page != Page::Packages) return;
+            if (packageChildCommand(f, child).isEmpty()) return;
+            const QString key = packageChildMarkKey(uid, child);
+            if (on) m_marked.insert(key);
+            else m_marked.remove(key);
+            m_model->refreshUid(uid, child);
+            refreshMarkChrome();
             return;
         }
-        const QSignalBlocker block(m_table);
-        // Per-fill invariants: `rowPx` runs a style query and each `setForeground`
-        // from a QColor builds a QBrush. Both were per row.
-        const int rowH = rowPx(m_table);
-        const QBrush dimBrush(t.dim);
-        const QBrush amberBrush(t.amber);
-        const QBrush highlightBrush(palette().color(QPalette::Highlight));
-        m_table->setUpdatesEnabled(false);
-        m_table->clear();
+        if (on) {
+            if (!canMarkCleanup(f, page)) return;
+            m_marked.insert(uid);
+            m_markedManual.remove(uid);
+        } else {
+            m_marked.remove(uid);
+        }
+        m_model->refreshUid(uid);
+        refreshMarkChrome();
+        if (uid == m_selectedUid) rebuildInspector();
+    }
+
+    void fillTable(Page page, bool = false) {
+        const Tone tone = toneFrom(palette());
+        const QVector<Finding> rows = visibleRows(page);
+        const QStringList headers = pageHeaders(page);
         bool hasKids = false;
         for (const Finding &f : rows) {
             if (!f.children.isEmpty()) {
@@ -1707,171 +1782,47 @@ private:
                 break;
             }
         }
+        setupColumns(page, headers);
         m_table->setRootIsDecorated(hasKids && page == Page::Packages);
         m_table->setIndentation(hasKids && page == Page::Packages ? 18 : 0);
-        QFont nums = numericFont();
-        QTreeWidgetItem *select = nullptr;
-        for (const Finding &f : rows) {
-            auto *it = new QTreeWidgetItem(m_table);
-            const QString uid = f.uid();
-            it->setData(0, Qt::UserRole, uid);
-            const bool markedCleanup = m_marked.contains(uid);
-            const bool markedKeep = m_markedManual.contains(uid);
-            it->setForeground(0, highlightBrush);
-            const QString name = displayName(f);
-            it->setText(1, name);
-            it->setSizeHint(0, QSize(page == Page::Leftovers ? 36 : 28, rowH));
-            if (page == Page::Leftovers && canMarkCleanup(f, page)) {
-                it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
-                it->setCheckState(0, markedCleanup ? Qt::Checked : Qt::Unchecked);
-                it->setText(0, QString());
-            } else {
-                it->setFlags(it->flags() & ~Qt::ItemIsUserCheckable);
-                it->setData(0, Qt::CheckStateRole, QVariant());
-                it->setText(0, (markedCleanup || markedKeep) ? QStringLiteral("in") : QString());
+        const CellCtx ctx{
+            page,
+            tone,
+            numericFont(),
+            tone.dim,
+            tone.amber,
+            palette().color(QPalette::Highlight),
+        };
+        const bool checkboxColumn = page == Page::Leftovers;
+        m_model->setContent(
+            headers,
+            page == Page::Outdated ? -1 : headers.size() - 1,
+            checkboxColumn
+                ? QStringLiteral("Tick to include the leftover in cleanup")
+                : QStringLiteral("Click to include the item in cleanup, update, or remove"),
+            hasKids && page == Page::Packages,
+            rows,
+            [this, ctx](const Finding &f, const QString &child, int column, int role) {
+                return cellData(ctx, f, child, column, role);
+            },
+            [this](const Finding &f, const QString &child, bool on) {
+                toggleRowMark(f, child, on);
             }
-            if (markedCleanup) {
-                it->setToolTip(
-                    0,
-                    page == Page::Leftovers
-                        ? QStringLiteral("Included. Untick to remove from the selection.")
-                        : QStringLiteral("Included. Click to remove from the selection.")
-                );
-            } else if (markedKeep) {
-                it->setToolTip(
-                    0,
-                    QStringLiteral("Marked as manually installed. Click to remove from the selection.")
-                );
-            } else if (canMarkCleanup(f, page)) {
-                it->setToolTip(
-                    0,
-                    page == Page::Leftovers
-                        ? QStringLiteral("Tick to include in cleanup.")
-                        : QStringLiteral("Click to include in cleanup, update, or remove.")
-                );
-            } else {
-                it->setToolTip(0, QString());
-            }
-            it->setToolTip(1, name);
-            if (!f.path.isEmpty()) it->setToolTip(1, name + QLatin1Char('\n') + f.path);
-            switch (page) {
-            case Page::Leftovers:
-                it->setText(2, locationLabel(f));
-                it->setText(3, modifiedLabel(f));
-                it->setText(4, f.bytes >= 0 ? humanSize(f.bytes) : QStringLiteral("unknown"));
-                it->setFont(4, nums);
-                it->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
-                it->setForeground(2, dimBrush);
-                it->setForeground(3, dimBrush);
-                it->setForeground(4, dimBrush);
-                if (isShadowFinding(f)) {
-                    it->setForeground(1, amberBrush);
-                    it->setForeground(2, amberBrush);
-                }
-                break;
-            case Page::Stale:
-                it->setText(2, statusLabel(f));
-                it->setText(3, modifiedLabel(f));
-                it->setText(4, f.bytes >= 0 ? humanSize(f.bytes) : QStringLiteral("unknown"));
-                it->setFont(4, nums);
-                it->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
-                it->setForeground(2, statusColor(f, t, page));
-                it->setForeground(3, dimBrush);
-                it->setForeground(4, dimBrush);
-                break;
-            case Page::Outdated: {
-                it->setText(2, managerLabel(f));
-                it->setText(3, outdatedVersionLabel(f));
-                it->setForeground(2, dimBrush);
-                it->setForeground(3, amberBrush);
-                break;
-            }
-            case Page::Packages:
-                it->setText(2, managerLabel(f));
-                it->setText(3, humanKind(f.kind));
-                it->setText(4, f.bytes >= 0 ? humanSize(f.bytes) : QStringLiteral("unknown"));
-                it->setFont(4, nums);
-                it->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
-                it->setForeground(2, dimBrush);
-                it->setForeground(3, statusColor(f, t, page));
-                it->setForeground(4, dimBrush);
-                for (const QString &child : f.children) {
-                    auto *kid = new QTreeWidgetItem(it);
-                    kid->setText(1, child);
-                    kid->setForeground(1, dimBrush);
-                    kid->setData(0, Qt::UserRole, uid);
-                    kid->setData(0, Qt::UserRole + 1, child);
-                    kid->setSizeHint(0, QSize(28, rowH));
-                    const QString childKey = packageChildMarkKey(uid, child);
-                    kid->setText(0, m_marked.contains(childKey) ? QStringLiteral("in") : QString());
-                    kid->setForeground(0, highlightBrush);
-                    kid->setToolTip(
-                        0,
-                        m_marked.contains(childKey)
-                            ? QStringLiteral("Included. Click to remove from the selection.")
-                            : QStringLiteral("Click to include this dependency in remove.")
-                    );
-                }
-                break;
-            default:
-                break;
-            }
-            if (uid == m_selectedUid) {
-                select = it;
-                if (!m_selectedChild.isEmpty()) {
-                    for (int k = 0; k < it->childCount(); ++k) {
-                        if (it->child(k)->data(0, Qt::UserRole + 1).toString() == m_selectedChild) {
-                            select = it->child(k);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        // Columns sized once now that every row exists, instead of on each insert.
-        for (int c = 2; c < m_table->columnCount(); ++c) m_table->resizeColumnToContents(c);
-        m_table->setUpdatesEnabled(true);
+        );
+        // Columns sized once now that the model holds every row.
+        for (int c = 2; c < headers.size(); ++c) m_table->resizeColumnToContents(c);
+        QModelIndex select = m_model->indexOfUid(m_selectedUid, m_selectedChild);
+        if (!select.isValid() && !rows.isEmpty()) select = m_model->index(0, 0, QModelIndex());
         finishFill(page, rows, select);
-        m_builtPage = page;
-        m_builtRows = fingerprint;
-        m_shownRows = fingerprint;
-    }
-
-    /// Hide or show the existing rows to match `rows`. A search or filter change
-    /// keeps the same findings; rebuilding every item cost 40 ms on a 2000 row
-    /// page where toggling visibility costs 5 ms.
-    void applyRowFilter(const QVector<Finding> &rows) {
-        QSet<QString> keep;
-        keep.reserve(rows.size());
-        for (const Finding &f : rows) keep.insert(f.uid());
-        const QSignalBlocker block(m_table);
-        m_table->setUpdatesEnabled(false);
-        for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
-            QTreeWidgetItem *it = m_table->topLevelItem(i);
-            const bool hide = !keep.contains(it->data(0, Qt::UserRole).toString());
-            // setHidden() is what costs here, so only touch rows that changed.
-            if (it->isHidden() != hide) it->setHidden(hide);
-        }
-        m_table->setUpdatesEnabled(true);
     }
 
     /// Shared tail of both fill paths: keep the selection on a visible row, then
     /// refresh the counters, the empty pane, the select-all label and the inspector.
-    void finishFill(Page page, const QVector<Finding> &rows, QTreeWidgetItem *select) {
-        if (!select) {
-            for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
-                if (!m_table->topLevelItem(i)->isHidden()) {
-                    select = m_table->topLevelItem(i);
-                    break;
-                }
-            }
-        }
-        if (select) {
-            m_selectedUid = select->data(0, Qt::UserRole).toString();
-        }
-        if (select) {
-            if (select->parent()) select->parent()->setExpanded(true);
-            m_table->setCurrentItem(select);
+    void finishFill(Page page, const QVector<Finding> &rows, const QModelIndex &select) {
+        if (select.isValid()) {
+            m_selectedUid = m_model->data(select, Qt::UserRole).toString();
+            if (select.parent().isValid()) m_table->expand(select.parent());
+            m_table->setCurrentIndex(select);
         } else {
             m_selectedUid.clear();
             m_selectedChild.clear();
@@ -1945,6 +1896,101 @@ private:
         else clearInspector();
     }
 
+public:
+    /// Widget-level check of the model-backed table. main.cpp owns the window,
+    /// so this lives here instead of smoke.cpp: page switch, search, the mark
+    /// toggle, selection restore and dependency rows all run through the model.
+    int smokeTableChecks() {
+        const auto fail = [](const char *what) {
+            std::fprintf(stderr, "tables-ui: %s\n", what);
+            return 1;
+        };
+        m_findings.clear();
+        for (int i = 0; i < 200; ++i) {
+            Finding f;
+            f.plugin = QStringLiteral("path-xdg-config");
+            f.kind = QStringLiteral("orphan-dir");
+            f.id = QStringLiteral("table-%1").arg(i);
+            f.status = QStringLiteral("orphaned");
+            f.name = QStringLiteral("table-app-%1").arg(i);
+            f.path = QStringLiteral("/home/user/.config/table-app-%1").arg(i);
+            f.bytes = 1024 * (i + 1);
+            f.mtime = QStringLiteral("2026-01-01T00:00:00Z");
+            m_findings.push_back(f);
+        }
+        Finding pkg;
+        pkg.plugin = QStringLiteral("flatpak");
+        pkg.kind = QStringLiteral("app");
+        pkg.id = QStringLiteral("pkg-1");
+        pkg.name = QStringLiteral("pkg-app");
+        pkg.status = QStringLiteral("installed");
+        pkg.bytes = 4096;
+        pkg.command = QStringLiteral("flatpak remove pkg-app");
+        pkg.children = {QStringLiteral("libone"), QStringLiteral("libtwo")};
+        m_findings.push_back(pkg);
+        m_hasScanned = true;
+        m_scanning = false;
+        m_scanOk = true;
+
+        selectPage(Page::Leftovers);
+        if (m_model->rowCount() != 200) return fail("leftovers rows");
+        if (m_model->columnCount() != 5) return fail("leftovers columns");
+        // Sorted by size descending.
+        const Finding biggest = m_model->rows().value(0);
+        if (m_model->data(m_model->index(0, 1), Qt::DisplayRole).toString() != displayName(biggest)) {
+            return fail("name cell");
+        }
+        if (m_model->data(m_model->index(0, 4), Qt::DisplayRole).toString()
+            != humanSize(biggest.bytes)) {
+            return fail("size cell");
+        }
+        const QModelIndex first = m_model->index(0, 0);
+        if (!(m_model->flags(first) & Qt::ItemIsUserCheckable)) return fail("checkbox flag");
+        if (!m_model->setData(first, int(Qt::Checked), Qt::CheckStateRole)) {
+            return fail("toggle refused");
+        }
+        if (!m_marked.contains(biggest.uid())) return fail("toggle did not mark");
+        if (m_model->data(first, Qt::CheckStateRole).toInt() != int(Qt::Checked)) {
+            return fail("check state not painted");
+        }
+        m_search->setText(QStringLiteral("table-app-1"));
+        fillCurrent(true);
+        if (m_model->rowCount() != 111) return fail("search rows");
+        m_search->clear();
+        fillCurrent();
+        if (m_model->rowCount() != 200) return fail("rows after clearing search");
+        m_table->setCurrentIndex(m_model->index(3, 0));
+        const QString selected = m_selectedUid;
+        if (selected.isEmpty()) return fail("no selection");
+        fillCurrent();
+        if (m_selectedUid != selected) return fail("selection lost on refill");
+        selectPage(Page::Packages);
+        if (m_model->rowCount() != 1) return fail("packages rows");
+        const QModelIndex pkgRow = m_model->indexOfUid(pkg.uid());
+        if (!pkgRow.isValid()) return fail("package row missing");
+        if (m_model->rowCount(pkgRow) != 2) return fail("child rows");
+        const QModelIndex kid = m_model->index(0, 1, pkgRow);
+        if (m_model->data(kid, Qt::DisplayRole).toString() != QLatin1String("libone")) {
+            return fail("child name");
+        }
+        if (m_model->data(kid, Qt::UserRole + 1).toString() != QLatin1String("libone")) {
+            return fail("child role");
+        }
+        if (m_model->parent(kid) != pkgRow) return fail("child parent");
+        if (m_model->setData(kid, int(Qt::Checked), Qt::CheckStateRole)) {
+            return fail("child row accepts a check state");
+        }
+        std::fprintf(
+            stdout,
+            "tables-ui: ok (rows=%d cols=%d children=%d)\n",
+            m_model->rowCount(),
+            m_model->columnCount(),
+            m_model->rowCount(pkgRow)
+        );
+        return 0;
+    }
+
+private:
     void pruneStaleMarks() {
         QSet<QString> live;
         for (const Finding &f : m_findings) {
@@ -1962,23 +2008,6 @@ private:
         }
         m_marked.intersect(live);
         m_markedManual.intersect(live);
-    }
-
-    void applyListMarkVisual(QTreeWidgetItem *it, const QString &uid) {
-        const Page page = currentPage();
-        const bool on = m_marked.contains(uid) || m_markedManual.contains(uid);
-        QSignalBlocker block(m_table);
-        if (page == Page::Leftovers && (it->flags() & Qt::ItemIsUserCheckable)) {
-            it->setCheckState(0, on ? Qt::Checked : Qt::Unchecked);
-            it->setText(0, QString());
-            it->setToolTip(
-                0,
-                on ? QStringLiteral("Included. Untick to remove from the selection.")
-                   : QStringLiteral("Tick to include in cleanup.")
-            );
-        } else {
-            it->setText(0, on ? QStringLiteral("in") : QString());
-        }
     }
 
     void refreshMarkChrome() {
@@ -2250,17 +2279,7 @@ private:
             connect(inc, &QCheckBox::toggled, this, [this, uid, child, key](bool on) {
                 if (on) m_marked.insert(key);
                 else m_marked.remove(key);
-                for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
-                    QTreeWidgetItem *parent = m_table->topLevelItem(i);
-                    if (parent->data(0, Qt::UserRole).toString() != uid) continue;
-                    for (int k = 0; k < parent->childCount(); ++k) {
-                        QTreeWidgetItem *kid = parent->child(k);
-                        if (kid->data(0, Qt::UserRole + 1).toString() != child) continue;
-                        kid->setText(0, on ? QStringLiteral("in") : QString());
-                        break;
-                    }
-                    break;
-                }
+                m_model->refreshUid(uid, child);
                 refreshMarkChrome();
             });
             m_inspectorLay->addWidget(inc);
@@ -2279,12 +2298,7 @@ private:
                 } else {
                     m_marked.remove(uid);
                 }
-                for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
-                    QTreeWidgetItem *it = m_table->topLevelItem(i);
-                    if (it->data(0, Qt::UserRole).toString() != uid) continue;
-                    applyListMarkVisual(it, uid);
-                    break;
-                }
+                m_model->refreshUid(uid);
                 refreshMarkChrome();
             });
             m_inspectorLay->addWidget(inc);
@@ -2300,12 +2314,7 @@ private:
                 } else {
                     m_markedManual.remove(uid);
                 }
-                for (int i = 0; i < m_table->topLevelItemCount(); ++i) {
-                    QTreeWidgetItem *it = m_table->topLevelItem(i);
-                    if (it->data(0, Qt::UserRole).toString() != uid) continue;
-                    applyListMarkVisual(it, uid);
-                    break;
-                }
+                m_model->refreshUid(uid);
                 refreshMarkChrome();
             });
             m_inspectorLay->addWidget(keep);
@@ -2681,14 +2690,10 @@ private:
     QLabel *m_pageTitle = nullptr;
     QStackedWidget *m_stack = nullptr;
     DiskPage *m_diskPage = nullptr;
-    QTreeWidget *m_table = nullptr;
-    /// Page currently built into `m_table`; a search or filter change for the
-    /// same page only toggles row visibility instead of rebuilding the items.
-    /// `m_builtRows` is what the items were built from, `m_shownRows` what the
-    /// filter currently shows: equal to both means there is nothing to do.
-    Page m_builtPage = Page::Settings;
-    quint64 m_builtRows = 0;
-    quint64 m_shownRows = 0;
+    QTreeView *m_table = nullptr;
+    /// Rows are handed to the model, which paints them on demand; a fill is a
+    /// vector swap, not one heap item per row.
+    FindingModel *m_model = nullptr;
     QWidget *m_emptyPane = nullptr;
     QLabel *m_emptyTitle = nullptr;
     QLabel *m_emptyDetail = nullptr;
@@ -2879,6 +2884,20 @@ int main(int argc, char **argv) {
     }
     if (argvHas(argc, argv, "--version")) {
         return runVersion(argc, argv);
+    }
+    if (argvHas(argc, argv, "--smoke-table")) {
+        /* The findings table is model-backed now; this drives it offscreen. */
+        if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
+            && qEnvironmentVariableIsEmpty("DISPLAY")
+            && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
+            qputenv("QT_QPA_PLATFORM", "offscreen");
+        }
+        QApplication app(argc, argv);
+        QApplication::setApplicationName(QStringLiteral("AppAttic"));
+        applyAppIdentity();
+        MainWindow w;
+        w.resize(1400, 900);
+        return w.smokeTableChecks();
     }
     if (argvHas(argc, argv, "--smoke")) {
         /* Date parsing and disk usage checks run in appattic-qt-helper-tests;

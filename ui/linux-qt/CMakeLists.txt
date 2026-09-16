@@ -75,6 +75,7 @@ set_target_properties(wasmtime PROPERTIES
 
 add_executable(appattic-qt
     main.cpp
+    findingmodel.h
     finding.cpp
     settings.cpp
     corehost.cpp

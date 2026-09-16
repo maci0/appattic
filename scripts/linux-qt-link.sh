@@ -265,6 +265,23 @@ mkdir -p "$(dirname "$proof")"
 smoke_plat=""
 smoke_dump=""
 
+# The findings table is a lazy model now; this drives it offscreen (page switch,
+# search, mark toggle, selection restore, dependency rows) without a display.
+run_table_check() {
+    local dump rc
+    echo "table: QT_QPA_PLATFORM=offscreen $bin --smoke-table"
+    set +e
+    dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --smoke-table 2>&1)"
+    rc=$?
+    set -e
+    printf '%s\n' "$dump"
+    [[ $rc -eq 0 ]] || { echo "error: --smoke-table failed" >&2; exit 1; }
+    printf '%s\n' "$dump" | grep -Eq '^tables-ui: ok \(rows=[1-9][0-9]* cols=[0-9]+ children=[0-9]+\)$' || {
+        echo "error: --smoke-table output missing model proof" >&2
+        exit 1
+    }
+}
+
 smoke_output_ok() {
     local dump="$1"
     printf '%s\n' "$dump" | grep -q '^SMOKE=ok$' || return 1
@@ -332,6 +349,7 @@ run_smoke() {
         mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}" 2>/dev/null || true
     fi
     if try_smoke offscreen; then
+        run_table_check
         echo "smoke: ok (offscreen)"
         return 0
     fi
