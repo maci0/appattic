@@ -181,8 +181,10 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->volumes->setUniformRowHeights(true);
     d->volumes->setSelectionMode(QAbstractItemView::SingleSelection);
     d->volumes->header()->setStretchLastSection(false);
+    // Name takes the slack, like the overview panels: stretching Location too
+    // left a wide hole between the two.
     d->volumes->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    d->volumes->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    d->volumes->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     for (int c = 2; c < 6; ++c) {
         d->volumes->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
     }

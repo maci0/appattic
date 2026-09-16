@@ -1191,6 +1191,9 @@ private:
 
     void selectPage(Page page) {
         if (page == Page::Settings) {
+            // clearSelection() leaves the old row as the *current* row, and the
+            // sidebar paints that as a second highlight next to Settings.
+            m_sidebar->setCurrentRow(-1);
             m_sidebar->clearSelection();
             if (m_settingsNav) m_settingsNav->setCurrentRow(0);
         } else {
