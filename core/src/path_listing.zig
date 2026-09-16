@@ -22,6 +22,78 @@ pub const Spec = struct {
     allow: []const u8 = "",
 };
 
+/// Every spec-only path plugin in one table: the roots differ, the code does
+/// not. Each root module names its spec here and binds it, so adding a path
+/// root is a table entry instead of another copy of the plugin.
+pub const spec_table = [_]Spec{
+    .{
+        .id = "path-home-dot",
+        .root_label = "home",
+        .root = "/home/user",
+        .keep = "dconf\n",
+        .missing_note = "$HOME is missing. Plugin inactive.",
+        .dialog_title = "Remove leftover home dirs?",
+        .query_cmd = "ls -1A",
+        .allow = ".mozilla\n.thunderbird\n.steam\n.wine\n.java\n.gradle\n.android\n.m2\n",
+    },
+    .{
+        .id = "path-var-app",
+        .root_label = ".var/app",
+        .root = "/home/user/.var/app",
+        .keep = "dconf\n",
+        .missing_note = "~/.var/app is missing. Plugin inactive.",
+        .dialog_title = "Remove leftover Flatpak data?",
+    },
+    .{
+        .id = "path-xdg-cache",
+        .root_label = ".cache",
+        .root = "/home/user/.cache",
+        .keep = "fontconfig\nthumbnails\nmesa_shader_cache\ndconf\n",
+        .missing_note = "~/.cache is missing. Plugin inactive.",
+        .dialog_title = "Remove leftover cache?",
+    },
+    .{
+        .id = "path-xdg-config",
+        .root_label = ".config",
+        .root = "/home/user/.config",
+        .keep = "dconf\n",
+        .missing_note = "~/.config is missing. Plugin inactive.",
+        .dialog_title = "Remove leftover config?",
+    },
+    .{
+        .id = "path-xdg-data",
+        .root_label = ".local/share",
+        .root = "/home/user/.local/share",
+        .keep = "applications\nicons\nthemes\nflatpak\nmime\ndconf\n",
+        .missing_note = "~/.local/share is missing. Plugin inactive.",
+        .dialog_title = "Remove leftover data?",
+    },
+    .{
+        .id = "path-xdg-lib",
+        .root_label = ".local/lib",
+        .root = "/home/user/.local/lib",
+        .keep = "dconf\n",
+        .missing_note = "~/.local/lib is missing. Plugin inactive.",
+        .dialog_title = "Remove leftover libraries?",
+    },
+    .{
+        .id = "path-xdg-state",
+        .root_label = ".local/state",
+        .root = "/home/user/.local/state",
+        .keep = "dconf\n",
+        .missing_note = "~/.local/state is missing. Plugin inactive.",
+        .dialog_title = "Remove leftover state?",
+    },
+};
+
+/// The spec a root module binds, checked at compile time.
+pub fn specById(comptime id: []const u8) Spec {
+    inline for (spec_table) |spec| {
+        if (comptime std.mem.eql(u8, spec.id, id)) return spec;
+    }
+    @compileError("no path plugin spec named " ++ id);
+}
+
 /// `ls` the leftover root. Roots with spaces stay as `query_cmd` only:
 /// host.exec splits on whitespace and cannot take `Application Support`.
 pub fn queryCommand(comptime spec: Spec) []const u8 {
@@ -506,4 +578,31 @@ test "parseListing home-dot allowlist skips .config and shell rc" {
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqualStrings(".mozilla", hits[0].name);
     try std.testing.expectEqualStrings(".wine", hits[1].name);
+}
+
+/// Runtime check for one table spec, so the inline loop below can pass the
+/// spec into a comptime parameter.
+pub fn expectSpecBinds(comptime spec: Spec) !void {
+    try std.testing.expectEqual(@as(i32, 0), query(spec, 1));
+    const json = resultSlice();
+    try std.testing.expect(std.mem.indexOf(u8, json, spec.id) != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, spec.root) != null);
+    // The fixture feeds `ls -1` or `ls -1A` per spec; both list leftovers.
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") == null);
+    // `keep` names are not leftovers for any of these roots.
+    try std.testing.expect(std.mem.indexOf(u8, json, "dconf") == null);
+    try std.testing.expectEqual(@as(i32, 0), query(spec, 0));
+    try std.testing.expect(std.mem.indexOf(u8, resultSlice(), "\"findings\":[]") != null);
+}
+
+test "every spec-only path plugin binds, filters and reports" {
+    inline for (spec_table) |spec| try expectSpecBinds(spec);
+    // Home-dot is the one whitelist root: shell rc files stay.
+    const dot = comptime specById("path-home-dot");
+    try std.testing.expectEqual(@as(i32, 0), query(dot, 1));
+    const json = resultSlice();
+    try std.testing.expect(std.mem.indexOf(u8, json, "/home/user/.mozilla") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "/home/user/.wine") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, ".bashrc") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, ".config") == null);
 }
