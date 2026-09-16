@@ -20,6 +20,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QElapsedTimer>
 #include <QDir>
 #include <QEvent>
 #include <QFile>
@@ -294,7 +295,6 @@ class ScanWorker;
 
 struct ScanAccum {
     ScanWorker *worker = nullptr;
-    QByteArray blobs;
 };
 
 class ScanWorker : public QObject {
@@ -318,6 +318,7 @@ public slots:
         }
         ScanAccum acc;
         acc.worker = this;
+        m_partial.clear();
         char err[1024];
         err[0] = '\0';
         const int rc = runCoreWasm(
@@ -333,35 +334,53 @@ public slots:
             emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
             return;
         }
-        QVector<Finding> findings;
-        for (const QByteArray &line : acc.blobs.split('\n')) {
-            if (line.isEmpty()) continue;
-            appendFindingsFromBlob(findings, line);
-        }
-        enrichFindingsUsageTiming(findings);
-        markOwnedPathLeftovers(findings);
-        groupLinuxLeftovers(findings);
-        emit progress(QStringLiteral("leftover-sizes"), 1, 1);
-        auto cancelled = [](void *user) -> bool {
-            return static_cast<ScanWorker *>(user)->isCancelled();
-        };
-        enrichLeftoverSizes(findings, cancelled, this);
         if (isCancelled()) {
             emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
             return;
         }
-        emit finished(findings, QString::fromUtf8(err), rc);
+        emit finished(m_partial, QString::fromUtf8(err), rc);
     }
 signals:
     void progress(const QString &pluginId, int index, int total);
+    /// The rows that exist so far, after every plugin that just reported. The
+    /// window draws them while the rest of the plugins are still running.
+    void partial(const QVector<Finding> &findings);
     void finished(const QVector<Finding> &findings, const QString &err, int rc);
 
 private:
+    /// Enrich one plugin's findings and publish the running total. Order
+    /// matches the old single pass at the end: timing, then owned-path status,
+    /// then sibling grouping, so a partial list never disagrees with the final
+    /// one on the rows it already has.
+    void ingestBlob(const char *json, size_t len) {
+        QVector<Finding> batch;
+        appendFindingsFromBlob(batch, QByteArray(json, int(len)));
+        if (batch.isEmpty()) return;
+        enrichFindingsUsageTiming(batch);
+        bool anyLeftover = false;
+        for (const Finding &f : batch) {
+            if (isLeftover(f)) {
+                anyLeftover = true;
+                break;
+            }
+        }
+        if (anyLeftover) {
+            auto cancelled = [](void *user) -> bool {
+                return static_cast<ScanWorker *>(user)->isCancelled();
+            };
+            enrichLeftoverSizes(batch, cancelled, this);
+            if (isCancelled()) return;
+        }
+        m_partial += batch;
+        if (anyLeftover) markOwnedPathLeftovers(m_partial);
+        groupLinuxLeftovers(m_partial);
+        emit partial(m_partial);
+    }
+
     static void scanOnJson(const char *json, size_t len, void *user) {
         auto *acc = static_cast<ScanAccum *>(user);
-        if (!acc || !json) return;
-        acc->blobs.append(json, int(len));
-        acc->blobs.append('\n');
+        if (!acc || !json || !acc->worker) return;
+        acc->worker->ingestBlob(json, len);
     }
 
     static void scanOnProgress(const char *pluginId, int index, int total, void *user) {
@@ -372,6 +391,7 @@ private:
 
     QAtomicInteger<int> m_wanted{0};
     int m_token = 0;
+    QVector<Finding> m_partial;
 };
 
 class SidebarDelegate : public QStyledItemDelegate {
@@ -488,6 +508,7 @@ public:
         m_scanThread->start();
         connect(this, &MainWindow::requestScan, m_worker, &ScanWorker::run);
         connect(m_worker, &ScanWorker::progress, this, &MainWindow::scanProgress);
+        connect(m_worker, &ScanWorker::partial, this, &MainWindow::scanPartial);
         connect(m_worker, &ScanWorker::finished, this, &MainWindow::scanFinished);
 
         auto *outer = new QSplitter(Qt::Horizontal, this);
@@ -966,6 +987,17 @@ private slots:
             m_scanBar->show();
         }
         applyScanProgressUi();
+    }
+
+    /// Rows from the plugins that have reported so far: draw them now instead
+    /// of waiting for the slowest plugin. The final list replaces this one.
+    void scanPartial(const QVector<Finding> &findings) {
+        if (!m_scanning) return;
+        m_partialSeen += 1;
+        if (m_partialRowsFirst < 0) m_partialRowsFirst = findings.size();
+        for (const Finding &f : findings) m_partialUids.insert(f.uid());
+        m_findings = findings;
+        fillCurrent();
     }
 
     void scanFinished(const QVector<Finding> &findings, const QString &err, int rc) {
@@ -1918,6 +1950,50 @@ private:
     }
 
 public:
+    /// Streaming gate: a fixture scan must publish rows more than once, and
+    /// every row published early must still be in the final list.
+    int smokeStreamChecks() {
+        qputenv("APPATTIC_HOST_EXEC_FIXTURE", "1");
+        m_hasScanned = false;
+        m_partialSeen = 0;
+        m_partialRowsFirst = -1;
+        m_partialUids.clear();
+        rescan();
+        QElapsedTimer timer;
+        timer.start();
+        while (m_scanning && timer.elapsed() < 120000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        }
+        if (m_scanning) {
+            std::fprintf(stderr, "stream: scan did not finish\n");
+            return 1;
+        }
+        if (m_partialSeen < 2) {
+            std::fprintf(stderr, "stream: rows arrived in %d update(s)\n", m_partialSeen);
+            return 1;
+        }
+        QSet<QString> final_uids;
+        for (const Finding &f : m_findings) final_uids.insert(f.uid());
+        for (const QString &uid : m_partialUids) {
+            if (!final_uids.contains(uid)) {
+                std::fprintf(
+                    stderr,
+                    "stream: row %s vanished from the final list\n",
+                    uid.toUtf8().constData()
+                );
+                return 1;
+            }
+        }
+        std::fprintf(
+            stdout,
+            "stream: ok (updates=%d rows=%d first=%d)\n",
+            m_partialSeen,
+            int(m_findings.size()),
+            m_partialRowsFirst
+        );
+        return 0;
+    }
+
     /// Widget-level check of the model-backed table. main.cpp owns the window,
     /// so this lives here instead of smoke.cpp: page switch, search, the mark
     /// toggle, selection restore and dependency rows all run through the model.
@@ -2767,6 +2843,11 @@ private:
     QProcess *m_scriptProc = nullptr;
     QByteArray m_scriptOutput;
     QVector<Finding> m_findings;
+    /// Streaming gate bookkeeping: how many times rows arrived, and which of
+    /// them the final list still has.
+    int m_partialSeen = 0;
+    int m_partialRowsFirst = -1;
+    QSet<QString> m_partialUids;
     QSet<QString> m_marked;
     QSet<QString> m_markedManual;
     QSet<QString> m_ignored;
@@ -2919,6 +3000,21 @@ int main(int argc, char **argv) {
         MainWindow w;
         w.resize(1400, 900);
         return w.smokeTableChecks();
+    }
+    if (argvHas(argc, argv, "--smoke-stream")) {
+        /* A real fixture scan, drawn as the plugins report. */
+        if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
+            && qEnvironmentVariableIsEmpty("DISPLAY")
+            && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
+            qputenv("QT_QPA_PLATFORM", "offscreen");
+        }
+        QApplication app(argc, argv);
+        QApplication::setApplicationName(QStringLiteral("AppAttic"));
+        applyAppIdentity();
+        MainWindow w;
+        w.resize(1400, 900);
+        w.show();
+        return w.smokeStreamChecks();
     }
     if (argvHas(argc, argv, "--smoke")) {
         /* Date parsing and disk usage checks run in appattic-qt-helper-tests;

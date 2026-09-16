@@ -282,6 +282,23 @@ run_table_check() {
     }
 }
 
+# Rows must be drawn while the scan runs, not only when it ends: a fixture scan
+# has to publish them more than once, and keep every row it published.
+run_stream_check() {
+    local dump rc
+    echo "stream: QT_QPA_PLATFORM=offscreen $bin --smoke-stream"
+    set +e
+    dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --smoke-stream 2>&1)"
+    rc=$?
+    set -e
+    printf '%s\n' "$dump"
+    [[ $rc -eq 0 ]] || { echo "error: --smoke-stream failed" >&2; exit 1; }
+    printf '%s\n' "$dump" | grep -Eq '^stream: ok \(updates=[2-9][0-9]* rows=[1-9][0-9]*' || {
+        echo "error: --smoke-stream output missing streaming proof" >&2
+        exit 1
+    }
+}
+
 smoke_output_ok() {
     local dump="$1"
     printf '%s\n' "$dump" | grep -q '^SMOKE=ok$' || return 1
@@ -350,6 +367,7 @@ run_smoke() {
     fi
     if try_smoke offscreen; then
         run_table_check
+        run_stream_check
         echo "smoke: ok (offscreen)"
         return 0
     fi
