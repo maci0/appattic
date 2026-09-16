@@ -313,6 +313,12 @@ try_smoke_xvfb() {
 run_smoke() {
     ensure_qt_platform_plugins
     wasmtime_ldpath
+    # corehost tags path-xdg-config active only when the host dir exists, and the
+    # smoke requires one finding from it. A bare container HOME has no ~/.config,
+    # which would tag the plugin inactive and fail an otherwise good link.
+    if [[ -n "${HOME:-}" ]]; then
+        mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}" 2>/dev/null || true
+    fi
     if try_smoke offscreen; then
         echo "smoke: ok (offscreen)"
         return 0

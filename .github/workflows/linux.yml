@@ -22,7 +22,10 @@ jobs:
           persist-credentials: false
       - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
-          swift-version: "5.10.1"
+          # Not .swift-version: swift-cross-ui 0.2.1 uses BitwiseCopyable and
+          # swift-syntax 601, both Swift 6.1. AppAtticScan itself still builds
+          # with 5.10.1 (the Linux pin).
+          swift-version: "6.1.3"
       - name: Test scan library
         run: swift test --filter AppAtticScanTests --disable-automatic-resolution
       - name: Build CLI and macOS UI

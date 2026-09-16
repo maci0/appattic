@@ -23,8 +23,9 @@ checksum_for() {
         echo "error: missing checksums file $sums" >&2
         return 1
     fi
+    # No interval expressions ({64}): mawk 1.3.4 on Ubuntu 22.04 (jammy) rejects them.
     awk -v n="$name" '
-        $1 ~ /^[0-9a-f]{64}$/ && $2 == n { print $1; found=1 }
+        length($1) == 64 && $1 ~ /^[0-9a-f]+$/ && $2 == n { print $1; found=1 }
         END { exit !found }
     ' "$sums"
 }

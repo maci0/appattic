@@ -303,7 +303,8 @@ final class UtilTests: XCTestCase {
     }
 
     func testRunCommandDecodesInvalidUTF8() {
-        let (rc, out, err) = runCommand(["/bin/sh", "-c", "printf '\\xff'"], timeout: 5)
+        // Octal, not `\xff`: `\x` is a bash printf extension, dash prints it literally.
+        let (rc, out, err) = runCommand(["/bin/sh", "-c", "printf '\\377'"], timeout: 5)
         XCTAssertEqual(rc, 0, err)
         XCTAssertEqual(out, "\u{FFFD}", "invalid UTF-8 must become a replacement character, not empty (brew JSON would look like a failed command)")
     }

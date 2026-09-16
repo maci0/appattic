@@ -3,7 +3,7 @@
 
 #include <QWidget>
 
-class DiskNode;
+struct DiskNode;
 class QLineEdit;
 
 class DiskPage : public QWidget {

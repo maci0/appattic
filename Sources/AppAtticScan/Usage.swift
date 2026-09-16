@@ -459,10 +459,16 @@ func parseFishHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Se
     }
 }
 
+/// Split history text on LF the way `parseHistoryASCII` splits bytes. CRLF is
+/// normalized first: `components(separatedBy: "\n")` is grapheme-aware on some
+/// Foundations, where "\r\n" is a single cluster and the LF is never found, so
+/// two history lines read as one.
+func historyLines(_ text: String) -> [String] {
+    text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+}
+
 func parseHistoryFileRegex(_ text: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
-    // `components` splits CRLF: Swift treats "\r\n" as one grapheme cluster, so
-        // `split(separator: "\n")` never splits a CRLF history file at all.
-        for (n, raw) in text.components(separatedBy: "\n").enumerated() {
+    for (n, raw) in historyLines(text).enumerated() {
         if n >= maxHistoryLines { break }
         var line = raw
         if line.hasSuffix("\r") { line.removeLast() }
@@ -496,9 +502,7 @@ func parseHistoryFileRegex(_ text: String, index: inout HistoryIndex, keep: Set<
 
 func parseFishHistoryRegex(_ text: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
     var pending: String?
-    // `components` splits CRLF: Swift treats "\r\n" as one grapheme cluster, so
-        // `split(separator: "\n")` never splits a CRLF history file at all.
-        for (n, raw) in text.components(separatedBy: "\n").enumerated() {
+    for (n, raw) in historyLines(text).enumerated() {
         if n >= maxHistoryLines { break }
         var line = raw
         if line.hasSuffix("\r") { line.removeLast() }
