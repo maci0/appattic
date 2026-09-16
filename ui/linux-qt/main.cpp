@@ -1782,7 +1782,6 @@ private:
                 break;
             }
         }
-        setupColumns(page, headers);
         m_table->setRootIsDecorated(hasKids && page == Page::Packages);
         m_table->setIndentation(hasKids && page == Page::Packages ? 18 : 0);
         const CellCtx ctx{
@@ -1809,6 +1808,9 @@ private:
                 toggleRowMark(f, child, on);
             }
         );
+        // After the reset: the header has no sections to touch before the model
+        // carries the columns, and Qt 6.4 crashes on setSectionResizeMode then.
+        setupColumns(page, headers);
         // Columns sized once now that the model holds every row.
         for (int c = 2; c < headers.size(); ++c) m_table->resizeColumnToContents(c);
         QModelIndex select = m_model->indexOfUid(m_selectedUid, m_selectedChild);
