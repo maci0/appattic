@@ -608,9 +608,9 @@ QString diskContentsLabel(qint64 items, bool isDir) {
 }
 
 QString diskModifiedLabel(qint64 mtime) {
-    if (mtime <= 0) return QStringLiteral("-");
+    if (mtime <= 0) return QStringLiteral("unknown");
     const QDateTime dt = QDateTime::fromSecsSinceEpoch(mtime, QTimeZone::systemTimeZone());
-    if (!dt.isValid()) return QStringLiteral("-");
+    if (!dt.isValid()) return QStringLiteral("unknown");
     return dt.toString(QStringLiteral("yyyy-MM-dd"));
 }
 

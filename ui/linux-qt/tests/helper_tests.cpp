@@ -560,7 +560,7 @@ static int checkTiming() {
     Finding dateOnly;
     dateOnly.mtime = QStringLiteral("2026-08-17");
     const QString dateLabel = modifiedLabel(dateOnly);
-    if (dateLabel == QLatin1String("-")) {
+    if (dateLabel == QLatin1String("unknown")) {
         std::fprintf(stderr, "timing: date-only mtime must parse\n");
         return 1;
     }

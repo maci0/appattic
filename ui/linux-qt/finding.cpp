@@ -356,7 +356,9 @@ QString modifiedLabel(const Finding &f, const QDateTime &now) {
         if (!rel.isEmpty()) return rel;
         return QString::number(f.idleDays) + QStringLiteral(" days ago");
     }
-    return QStringLiteral("-");
+    // "unknown" for a value that exists but could not be read, "-" for nothing
+    // to show: the same words the size and version columns use.
+    return QStringLiteral("unknown");
 }
 
 QString displayName(const Finding &f) {
