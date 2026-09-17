@@ -111,7 +111,7 @@ bash scripts/lint.sh
 
 `swift test` and `swift build` need unrestricted permissions in sandboxed environments.
 
-`scripts/lint.sh` runs shellcheck on the build scripts, compiles `hostexec` with warnings as errors, and runs `zig fmt --check` when `zig` is on PATH. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the fast lint + test + CLI loop; `scripts/check.sh --qt` reproduces the full Linux CI verification.
+`scripts/lint.sh` runs shellcheck on the build scripts, compiles `hostexec` with warnings as errors, runs `zig fmt --check` when `zig` is on PATH, and rejects any commit message that credits an AI tool (`Co-authored-by: Cursor` and friends): commit messages carry no tool attribution, and that check is what keeps it that way. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the fast lint + test + CLI loop; `scripts/check.sh --qt` reproduces the full Linux CI verification.
 
 ## Native UI
 
