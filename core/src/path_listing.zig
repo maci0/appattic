@@ -189,16 +189,6 @@ const snap_system_names = [_][]const u8{
     "mesa-2404",
 };
 
-fn nameInListIgnoreCase(name: []const u8, list: []const u8) bool {
-    var lines = std.mem.splitScalar(u8, list, '\n');
-    while (lines.next()) |raw| {
-        const k = std.mem.trim(u8, raw, " \t\r");
-        if (k.len == 0) continue;
-        if (std.ascii.eqlIgnoreCase(k, name)) return true;
-    }
-    return false;
-}
-
 fn isAllDigits(s: []const u8) bool {
     if (s.len == 0) return false;
     for (s) |c| {

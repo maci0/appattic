@@ -212,7 +212,7 @@ static int smokeVerifyTables(const SmokeState &st) {
         timedLeftover.plugin = QStringLiteral("path-home-dot");
         timedLeftover.kind = QStringLiteral("orphan-dir");
         timedLeftover.idleDays = 120;
-        if (isStaleFromLeftoverUsage(timedLeftover) || isStale(timedLeftover)) {
+        if (isStale(timedLeftover)) {
             std::fprintf(stderr, "tables: leftover dirs must not classify as stale apps\n");
             return 1;
         }

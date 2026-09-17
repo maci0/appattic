@@ -259,7 +259,6 @@ void visitEntry(
     pathPop(path, pathLen, saved);
 }
 
-#ifdef __linux__
 struct AppDirent64 {
     uint64_t d_ino;
     int64_t d_off;
@@ -304,43 +303,6 @@ void walkDirFd(
     }
     if (ctx->opts->dirDone) ctx->opts->dirDone(*node, ctx->opts->user);
 }
-#else
-void walkDirFd(
-    DiskNode *node,
-    int fd,
-    char *path,
-    size_t *pathLen,
-    size_t pathCap,
-    WalkShared *ctx,
-    std::vector<WalkJob> *defer
-) {
-    if (isCancelled(*ctx->opts)) return;
-    const int dupfd = dup(fd);
-    if (dupfd < 0) {
-        node->unreadable = true;
-        return;
-    }
-    DIR *dir = fdopendir(dupfd);
-    if (!dir) {
-        close(dupfd);
-        node->unreadable = true;
-        return;
-    }
-    const qint64 dircount = ctx->dirs.fetch_add(1) + 1;
-    if (ctx->opts->progress && (dircount % 64 == 0)) {
-        std::lock_guard<std::mutex> lock(ctx->progressMu);
-        ctx->opts->progress(dircount, node->path, ctx->opts->user);
-    }
-    while (dirent *ent = readdir(dir)) {
-        if (isCancelled(*ctx->opts)) break;
-        visitEntry(node, fd, ent->d_name, path, pathLen, pathCap, ctx, defer);
-    }
-    closedir(dir);
-    if (!isCancelled(*ctx->opts) && ctx->opts->dirDone) {
-        ctx->opts->dirDone(*node, ctx->opts->user);
-    }
-}
-#endif
 
 void measureWalkFd(
     int fd,

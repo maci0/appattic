@@ -76,10 +76,6 @@ pub const Cursor = struct {
         return self.last;
     }
 
-    pub fn peek(self: *Cursor) Tok {
-        return map(self.scanner.peekNextTokenType() catch return .end);
-    }
-
     pub fn next(self: *Cursor) Tok {
         while (true) {
             const tok = self.scanner.next() catch {
@@ -114,19 +110,6 @@ pub const Cursor = struct {
         }
     }
 
-    fn map(t: std.json.TokenType) Tok {
-        return switch (t) {
-            .object_begin => .object_begin,
-            .object_end => .object_end,
-            .array_begin => .array_begin,
-            .array_end => .array_end,
-            .string => .string,
-            .number => .number,
-            .true, .false, .null => .other,
-            .end_of_document => .end,
-        };
-    }
-
     /// Consume the rest of the value whose first token was `first`.
     pub fn skipAfter(self: *Cursor, first: Tok) bool {
         switch (first) {
@@ -146,11 +129,6 @@ pub const Cursor = struct {
             .end => return false,
             else => return true,
         }
-    }
-
-    /// Skip the next value.
-    pub fn skipValue(self: *Cursor) bool {
-        return self.skipAfter(self.next());
     }
 };
 
@@ -334,27 +312,6 @@ pub fn parseJsonNamedOutdated(text: []const u8, out: []NamedVer) usize {
     return ctx.n;
 }
 
-const FieldCtx = struct {
-    field: []const u8,
-    found: ?[]const u8 = null,
-
-    fn onPair(self: *FieldCtx, cur: *Cursor, key: []const u8, vt: Cursor.Tok) Action {
-        if (!std.mem.eql(u8, key, self.field)) return .walk;
-        if (vt == .string) self.found = cur.value();
-        // The first matching key decides, as before.
-        return .stop;
-    }
-};
-
-/// The value of the first `"field"` key whose value is a string, at any depth.
-pub fn findJsonStringField(text: []const u8, field: []const u8) ?[]const u8 {
-    var cur: Cursor = undefined;
-    Cursor.init(&cur, text);
-    var ctx = FieldCtx{ .field = field };
-    walkDocument(&cur, FieldCtx, &ctx);
-    return ctx.found;
-}
-
 test "parseJsonDependencies object and array" {
     var buf: [8]Dep = undefined;
     const obj =
@@ -425,20 +382,6 @@ test "parseJsonDependencies empty junk" {
     try std.testing.expectEqual(@as(usize, 0), parseJsonDependencies("{}", &buf));
     try std.testing.expectEqual(@as(usize, 0), parseJsonDependencies("not json", &buf));
     try std.testing.expectEqual(@as(usize, 0), parseJsonDependencies("{\"dependencies\":{\"x\":", &buf));
-}
-
-test "findJsonStringField any depth" {
-    try std.testing.expectEqualStrings(
-        "1.2.3",
-        findJsonStringField("{\"a\":{\"b\":{\"version\":\"1.2.3\"}}}", "version").?,
-    );
-    try std.testing.expectEqualStrings(
-        "npm",
-        findJsonStringField("{\"name\":\"npm\",\"version\":\"1\"}", "name").?,
-    );
-    try std.testing.expect(findJsonStringField("{\"a\":1}", "a") == null);
-    try std.testing.expect(findJsonStringField("{}", "a") == null);
-    try std.testing.expect(findJsonStringField("not json", "a") == null);
 }
 
 test "isSafePkgName scoped" {
@@ -532,13 +475,6 @@ fn fuzzJsonScan(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(jsonbuf.isSafePkgName(d.name));
         try std.testing.expect(d.current.len == 0 or sliceInside(text, d.current));
         try std.testing.expect(d.latest.len == 0 or sliceInside(text, d.latest));
-    }
-
-    if (findJsonStringField(text, "version")) |v| {
-        try std.testing.expect(sliceInside(text, v));
-    }
-    if (findJsonStringField(text, "name")) |v| {
-        try std.testing.expect(sliceInside(text, v));
     }
 
     // The cursor must consume bounded input: a truncated document cannot spin.

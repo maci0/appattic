@@ -611,10 +611,6 @@ bool isStaleTierStatus(const QString &status) {
 }
 
 /// Leftover dirs are not unused apps. Stale stays empty on Linux until a stale plugin ships.
-bool isStaleFromLeftoverUsage(const Finding &f) {
-    (void)f;
-    return false;
-}
 
 bool isStale(const Finding &f) {
     if (f.kind.contains(QLatin1String("stale")) || f.kind.contains(QLatin1String("unused-app"))
@@ -626,7 +622,7 @@ bool isStale(const Finding &f) {
     if (isStaleTierStatus(f.status) && hasUsageTiming(f) && !isLeftover(f) && !isOutdated(f)) {
         return true;
     }
-    return isStaleFromLeftoverUsage(f);
+    return false;
 }
 
 void enrichLeftoverUsageTiming(Finding &f) {

@@ -91,7 +91,6 @@ bool isOutdated(const Finding &f);
 bool outdatedIsUpdatable(const QString &manager, const QString &kind);
 bool hasUsageTiming(const Finding &f);
 bool isStaleTierStatus(const QString &status);
-bool isStaleFromLeftoverUsage(const Finding &f);
 bool isStale(const Finding &f);
 void enrichLeftoverUsageTiming(Finding &f);
 void enrichFindingsUsageTiming(QVector<Finding> &findings);

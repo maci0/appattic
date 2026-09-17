@@ -3,6 +3,5 @@
 
 int runVersion(int argc, char **argv);
 int runSmoke(int argc, char **argv);
-int smokeTiming();
 
 #endif
