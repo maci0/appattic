@@ -315,6 +315,25 @@ run_disk_stream_check() {
     }
 }
 
+# Paint every page offscreen: the other checks fill widgets, this renders them.
+# The PNGs land next to the proof so CI can show them.
+run_shot_check() {
+    local dump rc dir
+    dir="$ROOT/ui/linux-qt/build/shots"
+    rm -rf "$dir"
+    echo "shot: QT_QPA_PLATFORM=offscreen $bin --shot $dir"
+    set +e
+    dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --shot "$dir" 2>&1)"
+    rc=$?
+    set -e
+    printf '%s\n' "$dump"
+    [[ $rc -eq 0 ]] || { echo "error: --shot failed" >&2; exit 1; }
+    printf '%s\n' "$dump" | grep -Eq '^shot: ok \(pages=[1-9][0-9]* ' || {
+        echo "error: --shot output missing render proof" >&2
+        exit 1
+    }
+}
+
 smoke_output_ok() {
     local dump="$1"
     printf '%s\n' "$dump" | grep -q '^SMOKE=ok$' || return 1
@@ -385,6 +404,7 @@ run_smoke() {
         run_table_check
         run_stream_check
         run_disk_stream_check
+        run_shot_check
         echo "smoke: ok (offscreen)"
         return 0
     fi

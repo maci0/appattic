@@ -1956,6 +1956,83 @@ private:
     }
 
 public:
+    /// Render every page offscreen and save it next to the link proof. The
+    /// smoke checks fill widgets; only this paints them, and the PNGs are what
+    /// layout review looks at.
+    void startShots(const QString &dir) {
+        QDir().mkpath(dir);
+        m_shotDir = dir;
+        m_shotExit = 0;
+        m_shotPages = 0;
+        qputenv("APPATTIC_HOST_EXEC_FIXTURE", "1");
+        m_hasScanned = false;
+        rescan();
+        QElapsedTimer timer;
+        timer.start();
+        while (m_scanning && timer.elapsed() < 120000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        m_shotQueue = {
+            {Page::Overview, QStringLiteral("overview.png")},
+            {Page::Leftovers, QStringLiteral("leftovers.png")},
+            {Page::Stale, QStringLiteral("stale.png")},
+            {Page::Outdated, QStringLiteral("outdated.png")},
+            {Page::Packages, QStringLiteral("packages.png")},
+            {Page::Settings, QStringLiteral("settings.png")},
+            {Page::DiskUsage, QStringLiteral("disk.png")},
+        };
+        m_shotIndex = 0;
+        shotNext();
+    }
+
+    int shotExitCode() const { return m_shotExit; }
+
+    int shotPagesTaken() const { return m_shotPages; }
+
+    void shotNext() {
+        if (m_shotIndex >= m_shotQueue.size()) {
+            std::fprintf(
+                stdout,
+                "shot: ok (pages=%d dir=%s)\n",
+                m_shotPages,
+                m_shotDir.toUtf8().constData()
+            );
+            std::fflush(stdout);
+            QCoreApplication::exit(m_shotExit);
+            return;
+        }
+        const QPair<Page, QString> shot = m_shotQueue.at(m_shotIndex);
+        selectPage(shot.first);
+        QTimer::singleShot(120, this, [this, shot] {
+            repaint();
+            QCoreApplication::processEvents();
+            const QPixmap image = grab();
+            m_shotIndex += 1;
+            if (image.isNull() || image.size() != size()) {
+                std::fprintf(
+                    stderr,
+                    "shot: %s painted %dx%d, window is %dx%d\n",
+                    shot.second.toUtf8().constData(),
+                    image.width(),
+                    image.height(),
+                    width(),
+                    height()
+                );
+                m_shotExit = 1;
+                QCoreApplication::exit(1);
+                return;
+            }
+            if (!image.save(m_shotDir + QLatin1Char('/') + shot.second)) {
+                std::fprintf(stderr, "shot: cannot write %s\n", shot.second.toUtf8().constData());
+                m_shotExit = 1;
+                QCoreApplication::exit(1);
+                return;
+            }
+            m_shotPages += 1;
+            shotNext();
+        });
+    }
+
     /// Disk gate: a folder scan must draw its finished folders as it goes, and
     /// must have drawn some before the final tree filled in.
     int smokeDiskStreamChecks() {
@@ -2900,6 +2977,11 @@ private:
     QProcess *m_scriptProc = nullptr;
     QByteArray m_scriptOutput;
     QVector<Finding> m_findings;
+    QString m_shotDir;
+    QVector<QPair<Page, QString>> m_shotQueue;
+    int m_shotIndex = 0;
+    int m_shotExit = 0;
+    int m_shotPages = 0;
     /// Streaming gate bookkeeping: how many times rows arrived, and which of
     /// them the final list still has.
     int m_partialSeen = 0;
@@ -3057,6 +3139,25 @@ int main(int argc, char **argv) {
         MainWindow w;
         w.resize(1400, 900);
         return w.smokeTableChecks();
+    }
+    if (argvHas(argc, argv, "--shot")) {
+        QString dir = QStringLiteral("/tmp/appattic-shots");
+        for (int i = 1; i + 1 < argc; ++i) {
+            if (!std::strcmp(argv[i], "--shot")) dir = QString::fromUtf8(argv[i + 1]);
+        }
+        if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
+            && qEnvironmentVariableIsEmpty("DISPLAY")
+            && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
+            qputenv("QT_QPA_PLATFORM", "offscreen");
+        }
+        QApplication app(argc, argv);
+        QApplication::setApplicationName(QStringLiteral("AppAttic"));
+        applyAppIdentity();
+        MainWindow w;
+        w.resize(1400, 900);
+        w.show();
+        QTimer::singleShot(50, [&w, dir] { w.startShots(dir); });
+        return app.exec();
     }
     if (argvHas(argc, argv, "--smoke-disk")) {
         if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
