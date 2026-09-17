@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(appattic-qt LANGUAGES C CXX)
 
-set(APPATTIC_VERSION "1.3.3")
+set(APPATTIC_VERSION "1.3.4")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
@@ -71,6 +71,10 @@ add_library(wasmtime SHARED IMPORTED GLOBAL)
 set_target_properties(wasmtime PROPERTIES
     IMPORTED_LOCATION "${WASMTIME_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${WASMTIME_INCLUDE_DIR}"
+    # The C API tarball ships no SONAME, so ld otherwise records the absolute
+    # build path as DT_NEEDED and the installed or bundled binary only runs on
+    # the machine that built it.
+    IMPORTED_NO_SONAME TRUE
 )
 
 # Shared by the app and the helper tests, so they compile it once.
