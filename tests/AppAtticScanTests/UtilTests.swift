@@ -88,8 +88,10 @@ final class UtilTests: XCTestCase {
     }
 
     func testPosixLowercasedDoesNotUseTurkishI() {
-        let turkish = Locale(identifier: "tr_TR")
-        XCTAssertEqual("IINA".lowercased(with: turkish), "ıına")
+        // Deliberately not compared against Foundation's tr_TR casing: that is
+        // ICU data, and the jammy container has answered both "ıına" (correct)
+        // and "iina" for it across runs, which made this test flaky. What the
+        // helper promises is that it lowercases ASCII and asks no locale.
         XCTAssertEqual(posixLowercased("IINA"), "iina")
         XCTAssertEqual(posixLowercased("I"), "i")
         XCTAssertEqual(posixLowercased("Straße"), "straße")

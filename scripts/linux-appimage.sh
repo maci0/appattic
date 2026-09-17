@@ -103,6 +103,7 @@ if [[ -z "${WASMTIME_DIR:-}" ]] || [[ ! -f "${WASMTIME_DIR}/include/wasmtime.h" 
 fi
 
 command -v cmake >/dev/null 2>&1 || fail_dep "cmake missing" "bash scripts/linux-deps.sh --install"
+command -v patchelf >/dev/null 2>&1 || fail_dep "patchelf missing" "bash scripts/linux-deps.sh --install"
 command -v curl >/dev/null 2>&1 || fail_dep "curl missing" "install curl"
 
 if ! command -v zig >/dev/null 2>&1; then
@@ -198,7 +199,10 @@ if command -v ldd >/dev/null 2>&1; then
     fi
 fi
 
-cp -L "$WASMTIME_SO" "$APPDIR/usr/bin/libwasmtime.so"
+# Where the binary's RUNPATH ($ORIGIN/../lib, and linuxdeploy keeps that shape)
+# looks. In usr/bin it would not be found at all.
+mkdir -p "$APPDIR/usr/lib"
+cp -L "$WASMTIME_SO" "$APPDIR/usr/lib/libwasmtime.so"
 
 META_DEST="$APPDIR/usr/share/metainfo"
 mkdir -p "$META_DEST"
@@ -292,6 +296,27 @@ run_appimage_tool "$LINUXDEPLOY" --appdir "$APPDIR" \
     --icon-file "$ICON" \
     --plugin qt
 
+# A DT_NEEDED with an absolute path, or a RUNPATH without $ORIGIN, means the
+# AppImage only starts on the machine that built it. The --smoke below cannot
+# catch that in CI, because the build path exists there.
+absolute="$(patchelf --print-needed "$BIN" | grep -E '^/' || true)"
+if [[ -n "$absolute" ]]; then
+    echo "error: $BIN needs libraries by absolute path:" >&2
+    printf '  %s\n' "$absolute" >&2
+    echo "       the AppImage would only run where those paths exist" >&2
+    exit 1
+fi
+# shellcheck disable=SC2016  # the literal, not an expansion
+origin='$ORIGIN'
+if ! patchelf --print-rpath "$BIN" | grep -qF "$origin"; then
+    echo "error: $BIN RUNPATH has no $origin: $(patchelf --print-rpath "$BIN")" >&2
+    exit 1
+fi
+if [[ ! -f "$APPDIR/usr/lib/libwasmtime.so" ]]; then
+    echo "error: libwasmtime.so is not at usr/lib, where RUNPATH looks" >&2
+    exit 1
+fi
+
 offscreen="$APPDIR/usr/plugins/platforms/libqoffscreen.so"
 if [[ ! -f "$offscreen" ]]; then
     echo "error: linuxdeploy did not deploy libqoffscreen.so" >&2
@@ -376,5 +401,5 @@ echo "buildinfo: ${OUT}.buildinfo"
 echo "run:    $OUT"
 echo "bundled:"
 echo "  - appattic-qt + Qt 6 (linuxdeploy-plugin-qt)"
-echo "  - libwasmtime.so (usr/bin, RPATH \$ORIGIN)"
+echo "  - libwasmtime.so (usr/lib, reached by \$ORIGIN/../lib)"
 echo "  - $wasm_count WASM modules (usr/share/appattic, APPATTIC_CORE_OUT in AppRun)"

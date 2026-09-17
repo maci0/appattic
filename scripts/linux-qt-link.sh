@@ -259,6 +259,15 @@ fi
 
 find_binary
 echo "binary: $bin"
+# A DT_NEEDED with an absolute path (what a soname-less lib produces) makes the
+# installed and bundled binary run only where it was built. The AppImage script
+# checks the bundle; this catches it in the normal build.
+if absolute="$(readelf -d "$bin" | grep NEEDED | grep -o '\[/[^]]*\]' || true)"     && [[ -n "$absolute" ]]; then
+    echo "error: $bin needs libraries by absolute path:" >&2
+    printf '  %s\n' "$absolute" >&2
+    echo "       a soname-less dependency is linked by full path; give it a soname" >&2
+    exit 1
+fi
 wasmtime_ldpath
 proof="$ROOT/ui/linux-qt/build/LINUX_QT_LINK.txt"
 mkdir -p "$(dirname "$proof")"

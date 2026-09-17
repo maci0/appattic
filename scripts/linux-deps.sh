@@ -91,16 +91,16 @@ fi
 # Dev headers + tools for cmake link; runtime QPA/OpenGL/xcb for headless --smoke (no Gtk).
 debian_qt_pkgs=(
     ca-certificates curl xz-utils
-    qt6-base-dev cmake ninja-build pkg-config clang libgl1-mesa-dev
+    qt6-base-dev cmake ninja-build pkg-config patchelf clang libgl1-mesa-dev
     qt6-qpa-plugins libgl1 libxkbcommon0 libxcb1 libxcb-cursor0 libxcb-xinerama0 xvfb
 )
-arch_qt_pkgs=(qt6-base cmake ninja pkgconf clang curl xz zig libglvnd xorg-server-xvfb)
+arch_qt_pkgs=(qt6-base cmake ninja pkgconf patchelf clang curl xz zig libglvnd xorg-server-xvfb)
 fedora_qt_pkgs=(
-    qt6-qtbase-devel cmake ninja-build pkgconf-pkg-config clang curl xz zig
+    qt6-qtbase-devel cmake ninja-build pkgconf-pkg-config patchelf clang curl xz zig
     qt6-qtbase qt6-qtbase-gui mesa-libGL xorg-x11-server-Xvfb
 )
 suse_qt_pkgs=(
-    qt6-base-devel cmake ninja pkgconf-pkg-config clang curl xz zig
+    qt6-base-devel cmake ninja pkgconf-pkg-config patchelf clang curl xz zig
     libQt6Widgets6 libQt6Gui6 libqt6-qpa-plugins libGL1 libxkbcommon0 libxcb1 xorg-xserver
 )
 
