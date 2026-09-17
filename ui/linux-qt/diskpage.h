@@ -22,6 +22,8 @@ public:
     /// Rows the running scan drew before it finished, and whether any of them
     /// arrived before the final fill. The gate in main.cpp checks both.
     int streamedRows() const;
+    /// Ring segments the running scan drew: one per finished folder.
+    int streamedSegments() const;
     bool streamedBeforeFinish() const;
     bool isScanning() const { return m_scanning; }
 

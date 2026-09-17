@@ -154,6 +154,17 @@ public:
     int scanToken = 0;
     int streamedRows = 0;
     bool streamedBeforeFinish = false;
+    /// The ring chart paints from a DiskNode tree, and the real one only exists
+    /// when the walk ends, so the page keeps its own from the folders that have
+    /// finished. Freed with `delete`, which takes the children.
+    DiskNode *streamRoot = nullptr;
+    int streamedSegments = 0;
+
+    /// Frees the placeholder tree; the segment count stays for the gate.
+    void dropStreamRoot() {
+        delete streamRoot;
+        streamRoot = nullptr;
+    }
 
     DiskNode *nodeFromItem(QTreeWidgetItem *it) const {
         if (!it) return nullptr;
@@ -448,6 +459,38 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 top->setText(1, humanSize(sumApparent));
                 top->setText(2, humanSize(sumAllocated));
                 top->setText(3, diskContentsLabel(dirs, true));
+                // Ring chart: one segment per finished folder, live.
+                if (!d->streamRoot) {
+                    d->streamRoot = new DiskNode;
+                    QString label = QFileInfo(d->scanPath).fileName();
+                    if (label.isEmpty()) label = d->scanPath;
+                    d->streamRoot->name = label;
+                    d->streamRoot->path = d->scanPath;
+                    d->streamRoot->isDir = true;
+                }
+                DiskNode *kid = nullptr;
+                for (DiskNode *existing : d->streamRoot->children) {
+                    if (existing->path == path) {
+                        kid = existing;
+                        break;
+                    }
+                }
+                if (!kid) {
+                    kid = new DiskNode;
+                    kid->path = path;
+                    kid->isDir = true;
+                    d->streamRoot->children.append(kid);
+                }
+                kid->name = name;
+                kid->apparent = apparent;
+                kid->allocated = allocated;
+                kid->items = items;
+                kid->mtime = mtime;
+                d->streamRoot->apparent = sumApparent;
+                d->streamRoot->allocated = sumAllocated;
+                d->streamRoot->sortChildren(d->allocated);
+                d->streamedSegments = d->streamRoot->children.size();
+                d->chart->setRoot(d->streamRoot);
                 updateChrome();
             });
     connect(d->worker, &DiskScanWorker::finished, this, [this](int token) {
@@ -455,6 +498,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         DiskNode *tree = d->worker->takeRoot();
         m_scanning = false;
         d->streamedBeforeFinish = d->streamedRows > 0;
+        d->dropStreamRoot();
         d->chart->setRoot(nullptr);
         d->tree->clear();
         delete d->root;
@@ -562,7 +606,9 @@ void DiskPage::startScan(const QString &path) {
     d->scanPath = path;
     m_scanning = true;
     d->streamedRows = 0;
+    d->streamedSegments = 0;
     d->streamedBeforeFinish = false;
+    d->dropStreamRoot();
     showScan();
     d->progress->show();
     d->progressLabel->show();
@@ -780,5 +826,7 @@ void DiskPage::updateChrome() {
 #include "diskpage.moc"
 
 int DiskPage::streamedRows() const { return d->streamedRows; }
+
+int DiskPage::streamedSegments() const { return d->streamedSegments; }
 
 bool DiskPage::streamedBeforeFinish() const { return d->streamedBeforeFinish; }

@@ -353,7 +353,7 @@ run_smoke() {
     if try_smoke offscreen; then
         run_ui_check table '^tables-ui: ok \(rows=[1-9][0-9]* cols=[0-9]+ children=[0-9]+\)$'
         run_ui_check stream '^stream: ok \(updates=[1-9][0-9]* rows=[1-9][0-9]*'
-        run_ui_check disk '^disk-stream: ok \(rows=[1-9][0-9]*\)$'
+        run_ui_check disk '^disk-stream: ok \(rows=[1-9][0-9]* segments=[1-9][0-9]*\)$'
         run_ui_check shot '^shot: ok \(pages=[1-9][0-9]* ' "$ROOT/ui/linux-qt/build/shots"
         echo "smoke: ok (offscreen)"
         return 0

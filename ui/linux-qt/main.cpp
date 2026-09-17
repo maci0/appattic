@@ -2089,10 +2089,19 @@ public:
             std::fprintf(stderr, "disk-stream: rows arrived only after the scan\n");
             return 1;
         }
+        if (m_diskPage->streamedSegments() != 3) {
+            std::fprintf(
+                stderr,
+                "disk-stream: ring drew %d segments, expected 3\n",
+                m_diskPage->streamedSegments()
+            );
+            return 1;
+        }
         std::fprintf(
             stdout,
-            "disk-stream: ok (rows=%d)\n",
-            m_diskPage->streamedRows()
+            "disk-stream: ok (rows=%d segments=%d)\n",
+            m_diskPage->streamedRows(),
+            m_diskPage->streamedSegments()
         );
         return 0;
     }
