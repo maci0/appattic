@@ -264,72 +264,22 @@ proof="$ROOT/ui/linux-qt/build/LINUX_QT_LINK.txt"
 mkdir -p "$(dirname "$proof")"
 smoke_plat=""
 smoke_dump=""
+rm -rf "$ROOT/ui/linux-qt/build/shots"
 
-# The findings table is a lazy model now; this drives it offscreen (page switch,
-# search, mark toggle, selection restore, dependency rows) without a display.
-run_table_check() {
-    local dump rc
-    echo "table: QT_QPA_PLATFORM=offscreen $bin --smoke-table"
+# One driver for the dev gates: run the binary with a gate name, require the
+# proof line it prints.
+run_ui_check() {
+    local name="$1" proof="$2" extra="${3:-}" dump rc
+    echo "check: QT_QPA_PLATFORM=offscreen $bin --dev-check $name $extra"
     set +e
-    dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --smoke-table 2>&1)"
+    # shellcheck disable=SC2086
+    dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --dev-check $name $extra 2>&1)"
     rc=$?
     set -e
     printf '%s\n' "$dump"
-    [[ $rc -eq 0 ]] || { echo "error: --smoke-table failed" >&2; exit 1; }
-    printf '%s\n' "$dump" | grep -Eq '^tables-ui: ok \(rows=[1-9][0-9]* cols=[0-9]+ children=[0-9]+\)$' || {
-        echo "error: --smoke-table output missing model proof" >&2
-        exit 1
-    }
-}
-
-# Rows must be drawn while the scan runs, not only when it ends: a fixture scan
-# has to publish them more than once, and keep every row it published.
-run_stream_check() {
-    local dump rc
-    echo "stream: QT_QPA_PLATFORM=offscreen $bin --smoke-stream"
-    set +e
-    dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --smoke-stream 2>&1)"
-    rc=$?
-    set -e
-    printf '%s\n' "$dump"
-    [[ $rc -eq 0 ]] || { echo "error: --smoke-stream failed" >&2; exit 1; }
-    printf '%s\n' "$dump" | grep -Eq '^stream: ok \(updates=[1-9][0-9]* rows=[1-9][0-9]*' || {
-        echo "error: --smoke-stream output missing streaming proof" >&2
-        exit 1
-    }
-}
-
-# The disk page draws folders as they finish, not only when the walk ends.
-run_disk_stream_check() {
-    local dump rc
-    echo "disk-stream: QT_QPA_PLATFORM=offscreen $bin --smoke-disk"
-    set +e
-    dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --smoke-disk 2>&1)"
-    rc=$?
-    set -e
-    printf '%s\n' "$dump"
-    [[ $rc -eq 0 ]] || { echo "error: --smoke-disk failed" >&2; exit 1; }
-    printf '%s\n' "$dump" | grep -Eq '^disk-stream: ok \(rows=[1-9][0-9]*\)$' || {
-        echo "error: --smoke-disk output missing streaming proof" >&2
-        exit 1
-    }
-}
-
-# Paint every page offscreen: the other checks fill widgets, this renders them.
-# The PNGs land next to the proof so CI can show them.
-run_shot_check() {
-    local dump rc dir
-    dir="$ROOT/ui/linux-qt/build/shots"
-    rm -rf "$dir"
-    echo "shot: QT_QPA_PLATFORM=offscreen $bin --shot $dir"
-    set +e
-    dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --shot "$dir" 2>&1)"
-    rc=$?
-    set -e
-    printf '%s\n' "$dump"
-    [[ $rc -eq 0 ]] || { echo "error: --shot failed" >&2; exit 1; }
-    printf '%s\n' "$dump" | grep -Eq '^shot: ok \(pages=[1-9][0-9]* ' || {
-        echo "error: --shot output missing render proof" >&2
+    [[ $rc -eq 0 ]] || { echo "error: --dev-check $name failed" >&2; exit 1; }
+    printf '%s\n' "$dump" | grep -Eq "$proof" || {
+        echo "error: --dev-check $name output missing its proof line" >&2
         exit 1
     }
 }
@@ -401,10 +351,10 @@ run_smoke() {
         mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}" 2>/dev/null || true
     fi
     if try_smoke offscreen; then
-        run_table_check
-        run_stream_check
-        run_disk_stream_check
-        run_shot_check
+        run_ui_check table '^tables-ui: ok \(rows=[1-9][0-9]* cols=[0-9]+ children=[0-9]+\)$'
+        run_ui_check stream '^stream: ok \(updates=[1-9][0-9]* rows=[1-9][0-9]*'
+        run_ui_check disk '^disk-stream: ok \(rows=[1-9][0-9]*\)$'
+        run_ui_check shot '^shot: ok \(pages=[1-9][0-9]* ' "$ROOT/ui/linux-qt/build/shots"
         echo "smoke: ok (offscreen)"
         return 0
     fi

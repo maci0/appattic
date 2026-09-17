@@ -996,9 +996,11 @@ private slots:
     /// of waiting for the slowest plugin. The final list replaces this one.
     void scanPartial(const QVector<Finding> &findings) {
         if (!m_scanning) return;
+#ifndef NDEBUG
         m_partialSeen += 1;
         if (m_partialRowsFirst < 0) m_partialRowsFirst = findings.size();
         for (const Finding &f : findings) m_partialUids.insert(f.uid());
+#endif
         m_findings = findings;
         fillCurrent();
     }
@@ -1959,11 +1961,9 @@ public:
     /// Render every page offscreen and save it next to the link proof. The
     /// smoke checks fill widgets; only this paints them, and the PNGs are what
     /// layout review looks at.
-    void startShots(const QString &dir) {
-        QDir().mkpath(dir);
-        m_shotDir = dir;
-        m_shotExit = 0;
-        m_shotPages = 0;
+    /// One scan against the host.exec fixtures, pumped to completion. The
+    /// gates below all need exactly this.
+    bool runFixtureScan() {
         qputenv("APPATTIC_HOST_EXEC_FIXTURE", "1");
         m_hasScanned = false;
         rescan();
@@ -1971,6 +1971,19 @@ public:
         timer.start();
         while (m_scanning && timer.elapsed() < 120000) {
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        return !m_scanning;
+    }
+
+#ifndef NDEBUG
+    void startShots(const QString &dir) {
+        QDir().mkpath(dir);
+        m_shotDir = dir;
+        m_shotExit = 0;
+        m_shotPages = 0;
+        if (!runFixtureScan()) {
+            std::fprintf(stderr, "shot: scan did not finish\n");
+            m_shotExit = 1;
         }
         m_shotQueue = {
             {Page::Overview, QStringLiteral("overview.png")},
@@ -2087,18 +2100,10 @@ public:
     /// Streaming gate: a fixture scan must publish rows more than once, and
     /// every row published early must still be in the final list.
     int smokeStreamChecks() {
-        qputenv("APPATTIC_HOST_EXEC_FIXTURE", "1");
-        m_hasScanned = false;
         m_partialSeen = 0;
         m_partialRowsFirst = -1;
         m_partialUids.clear();
-        rescan();
-        QElapsedTimer timer;
-        timer.start();
-        while (m_scanning && timer.elapsed() < 120000) {
-            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        }
-        if (m_scanning) {
+        if (!runFixtureScan()) {
             std::fprintf(stderr, "stream: scan did not finish\n");
             return 1;
         }
@@ -2222,6 +2227,8 @@ public:
     }
 
 private:
+#endif
+
     void pruneStaleMarks() {
         QSet<QString> live;
         for (const Finding &f : m_findings) {
@@ -2977,6 +2984,7 @@ private:
     QProcess *m_scriptProc = nullptr;
     QByteArray m_scriptOutput;
     QVector<Finding> m_findings;
+#ifndef NDEBUG
     QString m_shotDir;
     QVector<QPair<Page, QString>> m_shotQueue;
     int m_shotIndex = 0;
@@ -2987,6 +2995,7 @@ private:
     int m_partialSeen = 0;
     int m_partialRowsFirst = -1;
     QSet<QString> m_partialUids;
+#endif
     QSet<QString> m_marked;
     QSet<QString> m_markedManual;
     QSet<QString> m_ignored;
@@ -3005,6 +3014,15 @@ private:
     bool m_applyingAppearance = false;
     bool m_settingsError = false;
 };
+
+#ifndef NDEBUG
+static const char *argvValue(int argc, char **argv, const char *flag) {
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::strcmp(argv[i], flag) == 0) return argv[i + 1];
+    }
+    return nullptr;
+}
+#endif
 
 static bool argvHas(int argc, char **argv, const char *flag) {
     for (int i = 1; i < argc; ++i) {
@@ -3126,25 +3144,10 @@ int main(int argc, char **argv) {
     if (argvHas(argc, argv, "--version")) {
         return runVersion(argc, argv);
     }
-    if (argvHas(argc, argv, "--smoke-table")) {
-        /* The findings table is model-backed now; this drives it offscreen. */
-        if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
-            && qEnvironmentVariableIsEmpty("DISPLAY")
-            && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
-            qputenv("QT_QPA_PLATFORM", "offscreen");
-        }
-        QApplication app(argc, argv);
-        QApplication::setApplicationName(QStringLiteral("AppAttic"));
-        applyAppIdentity();
-        MainWindow w;
-        w.resize(1400, 900);
-        return w.smokeTableChecks();
-    }
-    if (argvHas(argc, argv, "--shot")) {
-        QString dir = QStringLiteral("/tmp/appattic-shots");
-        for (int i = 1; i + 1 < argc; ++i) {
-            if (!std::strcmp(argv[i], "--shot")) dir = QString::fromUtf8(argv[i + 1]);
-        }
+#ifndef NDEBUG
+    /* Dev-only gates: table model, streaming rows, disk streaming, renders.
+       Release ships only --smoke, which the AppImage step self-checks with. */
+    if (const char *which = argvValue(argc, argv, "--dev-check")) {
         if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
             && qEnvironmentVariableIsEmpty("DISPLAY")
             && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
@@ -3156,38 +3159,22 @@ int main(int argc, char **argv) {
         MainWindow w;
         w.resize(1400, 900);
         w.show();
-        QTimer::singleShot(50, [&w, dir] { w.startShots(dir); });
-        return app.exec();
-    }
-    if (argvHas(argc, argv, "--smoke-disk")) {
-        if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
-            && qEnvironmentVariableIsEmpty("DISPLAY")
-            && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
-            qputenv("QT_QPA_PLATFORM", "offscreen");
+        const QLatin1String name(which);
+        if (name == QLatin1String("table")) return w.smokeTableChecks();
+        if (name == QLatin1String("stream")) return w.smokeStreamChecks();
+        if (name == QLatin1String("disk")) return w.smokeDiskStreamChecks();
+        if (name == QLatin1String("shot")) {
+            const char *dir = nullptr;
+            for (int i = 1; i + 2 < argc; ++i) {
+                if (std::strcmp(argv[i], "--dev-check") == 0) dir = argv[i + 2];
+            }
+            w.startShots(dir ? QString::fromUtf8(dir) : QStringLiteral("/tmp/appattic-shots"));
+            return app.exec();
         }
-        QApplication app(argc, argv);
-        QApplication::setApplicationName(QStringLiteral("AppAttic"));
-        applyAppIdentity();
-        MainWindow w;
-        w.resize(1400, 900);
-        w.show();
-        return w.smokeDiskStreamChecks();
+        std::fprintf(stderr, "usage: --dev-check <table|stream|disk|shot> [dir]\n");
+        return 2;
     }
-    if (argvHas(argc, argv, "--smoke-stream")) {
-        /* A real fixture scan, drawn as the plugins report. */
-        if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
-            && qEnvironmentVariableIsEmpty("DISPLAY")
-            && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
-            qputenv("QT_QPA_PLATFORM", "offscreen");
-        }
-        QApplication app(argc, argv);
-        QApplication::setApplicationName(QStringLiteral("AppAttic"));
-        applyAppIdentity();
-        MainWindow w;
-        w.resize(1400, 900);
-        w.show();
-        return w.smokeStreamChecks();
-    }
+#endif
     if (argvHas(argc, argv, "--smoke")) {
         /* Date parsing and disk usage checks run in appattic-qt-helper-tests;
            this gate proves the linked binary scans. */

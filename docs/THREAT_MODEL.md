@@ -26,7 +26,7 @@ No TCP/HTTP listener, webhook, or `serve` command. `parseCLIArguments(["serve"])
 | Entry | Where | What it accepts |
 |---|---|---|
 | CLI argv | `Sources/AppAtticCLI/main.swift`, `Sources/AppAtticScan/CLIParse.swift` | Commands `report`, `leftovers`, `stale`, `outdated`, `packages`, `update`. Flags `--json FILE`, `--include-system`, `--fresh`, `--dry-run`, `--top N`, `--category`, `--leftovers-only`, `--stale-only`, `--no-color`, `--version`, `--help`. |
-| Linux Qt argv | `ui/linux-qt/main.cpp` | `--version`, `--help`, `--smoke`, then `QApplication`. |
+| Linux Qt argv | `ui/linux-qt/main.cpp` | `--version`, `--help`, `--smoke`, then `QApplication`. Debug builds also take `--dev-check <table|stream|disk|shot>` for CI gates and offscreen renders; `NDEBUG` drops it. |
 | WASM host stub | `core/host/stub.c` | Paths to `core.wasm` and plugin `.wasm[=tag]`. |
 | macOS UI | `Sources/AppAttic/App.swift`, `ContentView.swift` | Clicks, search, selection, Settings toggles, Preview/Delete/Update. |
 | Linux Qt UI | `ui/linux-qt/main.cpp` | Same jobs as macOS UI against WASM findings. |

@@ -73,14 +73,24 @@ set_target_properties(wasmtime PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${WASMTIME_INCLUDE_DIR}"
 )
 
+# Shared by the app and the helper tests, so they compile it once.
+add_library(appattic-qt-core OBJECT
+    finding.cpp
+    findingmodel.h
+    diskusage.cpp
+)
+target_include_directories(appattic-qt-core PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${APPATTIC_ROOT}/core/host"
+)
+target_link_libraries(appattic-qt-core PRIVATE Qt6::Widgets Threads::Threads)
+
 add_executable(appattic-qt
     main.cpp
-    findingmodel.h
-    finding.cpp
+    $<TARGET_OBJECTS:appattic-qt-core>
     settings.cpp
     corehost.cpp
     smoke.cpp
-    diskusage.cpp
     diskchart.cpp
     diskpage.cpp
     appattic.qrc
@@ -140,6 +150,11 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference)
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(appattic-qt-core PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-D_GLIBCXX_ASSERTIONS>
+    )
     target_compile_options(appattic-qt PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-Wall>
         $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
@@ -149,6 +164,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_property(SOURCE main.cpp finding.cpp settings.cpp smoke.cpp
         diskusage.cpp diskchart.cpp diskpage.cpp
         APPEND PROPERTY COMPILE_OPTIONS -Werror)
+    # -Werror lives on the source, so the object library gets it too.
 endif()
 if(UNIX AND NOT APPLE)
     get_filename_component(_wasmtime_libdir "${WASMTIME_LIBRARY}" DIRECTORY)
@@ -171,8 +187,7 @@ install(DIRECTORY "${APPATTIC_ROOT}/core/out/"
 # wasm host, so it lives in its own binary instead of the shipped app.
 add_executable(appattic-qt-helper-tests
     tests/helper_tests.cpp
-    finding.cpp
-    diskusage.cpp
+    $<TARGET_OBJECTS:appattic-qt-core>
     appattic.qrc
 )
 target_include_directories(appattic-qt-helper-tests PRIVATE
