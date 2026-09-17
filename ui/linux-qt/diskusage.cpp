@@ -302,6 +302,7 @@ void walkDirFd(
             visitEntry(node, fd, d->d_name, path, pathLen, pathCap, ctx, defer);
         }
     }
+    if (ctx->opts->dirDone) ctx->opts->dirDone(*node, ctx->opts->user);
 }
 #else
 void walkDirFd(
@@ -335,6 +336,9 @@ void walkDirFd(
         visitEntry(node, fd, ent->d_name, path, pathLen, pathCap, ctx, defer);
     }
     closedir(dir);
+    if (!isCancelled(*ctx->opts) && ctx->opts->dirDone) {
+        ctx->opts->dirDone(*node, ctx->opts->user);
+    }
 }
 #endif
 

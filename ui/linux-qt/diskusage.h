@@ -45,6 +45,10 @@ struct DiskScanOptions {
     bool oneFileSystem = true;
     bool (*cancelled)(void *user) = nullptr;
     void (*progress)(qint64 dirs, const QString &path, void *user) = nullptr;
+    /// Called on the scanning thread when a directory's walk ends, so its
+    /// subtree is complete. The reference only lives for the call: copy what
+    /// you need. Deferred hard-link totals can still be added to it.
+    void (*dirDone)(const DiskNode &node, void *user) = nullptr;
     void *user = nullptr;
 };
 

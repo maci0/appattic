@@ -38,6 +38,17 @@
 #include <utility>
 
 static QTreeWidgetItem *makeItem(DiskNode *n);
+static QTreeWidgetItem *makeValueItem(
+    const QString &name,
+    const QString &path,
+    qint64 apparent,
+    qint64 allocated,
+    qint64 items,
+    qint64 mtime,
+    bool isDir,
+    bool unreadable,
+    bool mountPoint
+);
 static void appendChildren(QTreeWidgetItem *parent, DiskNode *node, int depth);
 
 class DiskScanWorker : public QObject {
@@ -66,6 +77,16 @@ public slots:
         opts.progress = [](qint64 dirs, const QString &p, void *user) {
             emit static_cast<DiskScanWorker *>(user)->progress(dirs, p);
         };
+        opts.dirDone = [](const DiskNode &n, void *user) {
+            emit static_cast<DiskScanWorker *>(user)->dirDone(
+                n.path,
+                n.name,
+                n.apparent,
+                n.allocated,
+                n.items,
+                n.mtime
+            );
+        };
         if (isCancelled()) {
             emit scanStopped(token);
             return;
@@ -82,6 +103,16 @@ public slots:
 
 signals:
     void progress(qint64 dirs, const QString &path);
+    /// One finished directory, as values: the tree it came from is owned by the
+    /// scanning thread. Built-in types only, so the signal needs no metatype.
+    void dirDone(
+        const QString &path,
+        const QString &name,
+        qint64 apparent,
+        qint64 allocated,
+        qint64 items,
+        qint64 mtime
+    );
     void finished(int token);
     void scanStopped(int token);
 
@@ -121,6 +152,8 @@ public:
     QString filter;
     bool allocated = true;
     int scanToken = 0;
+    int streamedRows = 0;
+    bool streamedBeforeFinish = false;
 
     DiskNode *nodeFromItem(QTreeWidgetItem *it) const {
         if (!it) return nullptr;
@@ -367,10 +400,61 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         d->status->setText(label);
         emit statusMessage(QStringLiteral("Scanning disk usage · ") + label);
     });
+    connect(d->worker, &DiskScanWorker::dirDone, this,
+            [this](const QString &path, const QString &name, qint64 apparent, qint64 allocated,
+                   qint64 items, qint64 mtime) {
+                if (!m_scanning || d->root) return;
+                // Only the rows the finished tree shows directly under the root.
+                const int slash = path.lastIndexOf(QLatin1Char('/'));
+                const QString parent = slash > 0 ? path.left(slash) : QStringLiteral("/");
+                if (parent != d->scanPath) return;
+                QTreeWidgetItem *top = d->tree->topLevelItem(0);
+                if (!top) {
+                    QString label = QFileInfo(d->scanPath).fileName();
+                    if (label.isEmpty()) label = d->scanPath;
+                    top = new QTreeWidgetItem(d->tree);
+                    top->setText(0, label);
+                    top->setToolTip(0, d->scanPath);
+                    top->setExpanded(true);
+                }
+                QTreeWidgetItem *item = makeValueItem(
+                    name, path, apparent, allocated, items, mtime, true, false, false
+                );
+                item->setFont(1, aaNumericFont());
+                item->setFont(2, aaNumericFont());
+                item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
+                item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+                item->setData(1, Qt::UserRole, apparent);
+                item->setData(2, Qt::UserRole, allocated);
+                // Inserted where the finished tree will put it: by size.
+                int at = top->childCount();
+                for (int i = 0; i < top->childCount(); ++i) {
+                    if (apparent > top->child(i)->data(1, Qt::UserRole).toLongLong()) {
+                        at = i;
+                        break;
+                    }
+                }
+                top->insertChild(at, item);
+                d->streamedRows += 1;
+                qint64 sumApparent = 0;
+                qint64 sumAllocated = 0;
+                int dirs = 0;
+                for (int i = 0; i < top->childCount(); ++i) {
+                    sumApparent += top->child(i)->data(1, Qt::UserRole).toLongLong();
+                    sumAllocated += top->child(i)->data(2, Qt::UserRole).toLongLong();
+                    ++dirs;
+                }
+                // Placeholder root row: the totals of what has arrived so far.
+                top->setText(1, humanSize(sumApparent));
+                top->setText(2, humanSize(sumAllocated));
+                top->setText(3, diskContentsLabel(dirs, true));
+                updateChrome();
+            });
     connect(d->worker, &DiskScanWorker::finished, this, [this](int token) {
         if (token != d->scanToken) return;
         DiskNode *tree = d->worker->takeRoot();
         m_scanning = false;
+        d->streamedBeforeFinish = d->streamedRows > 0;
         d->chart->setRoot(nullptr);
         d->tree->clear();
         delete d->root;
@@ -477,6 +561,8 @@ void DiskPage::startScan(const QString &path) {
     d->worker->setWanted(d->scanToken);
     d->scanPath = path;
     m_scanning = true;
+    d->streamedRows = 0;
+    d->streamedBeforeFinish = false;
     showScan();
     d->progress->show();
     d->progressLabel->show();
@@ -520,18 +606,29 @@ void DiskPage::showLocations() {
 
 void DiskPage::showScan() { d->stack->setCurrentWidget(d->scanPage); }
 
-static QTreeWidgetItem *makeItem(DiskNode *n) {
+/// The same row the finished tree draws, from values alone: the streaming path
+/// cannot touch the DiskNode, which the scanning thread owns.
+static QTreeWidgetItem *makeValueItem(
+    const QString &name,
+    const QString &path,
+    qint64 apparent,
+    qint64 allocated,
+    qint64 items,
+    qint64 mtime,
+    bool isDir,
+    bool unreadable,
+    bool mountPoint
+) {
     auto *it = new QTreeWidgetItem;
-    QString name = n->name;
-    if (n->unreadable) name += QStringLiteral(" (unreadable)");
-    if (n->mountPoint) name += QStringLiteral(" (other file system)");
-    it->setText(0, name);
-    it->setText(1, humanSize(n->apparent));
-    it->setText(2, humanSize(n->allocated));
-    it->setText(3, diskContentsLabel(n->items, n->isDir));
-    it->setText(4, diskModifiedLabel(n->mtime));
-    it->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void *>(n)));
-    it->setToolTip(0, n->path);
+    QString label = name;
+    if (unreadable) label += QStringLiteral(" (unreadable)");
+    if (mountPoint) label += QStringLiteral(" (other file system)");
+    it->setText(0, label);
+    it->setText(1, humanSize(apparent));
+    it->setText(2, humanSize(allocated));
+    it->setText(3, diskContentsLabel(items, isDir));
+    it->setText(4, diskModifiedLabel(mtime));
+    it->setToolTip(0, path);
     const QFont nums = aaNumericFont();
     it->setFont(1, nums);
     it->setFont(2, nums);
@@ -540,6 +637,22 @@ static QTreeWidgetItem *makeItem(DiskNode *n) {
     const QColor dim = QApplication::palette().color(QPalette::PlaceholderText);
     it->setForeground(3, dim);
     it->setForeground(4, dim);
+    return it;
+}
+
+static QTreeWidgetItem *makeItem(DiskNode *n) {
+    QTreeWidgetItem *it = makeValueItem(
+        n->name,
+        n->path,
+        n->apparent,
+        n->allocated,
+        n->items,
+        n->mtime,
+        n->isDir,
+        n->unreadable,
+        n->mountPoint
+    );
+    it->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void *>(n)));
     return it;
 }
 
@@ -665,3 +778,7 @@ void DiskPage::updateChrome() {
 }
 
 #include "diskpage.moc"
+
+int DiskPage::streamedRows() const { return d->streamedRows; }
+
+bool DiskPage::streamedBeforeFinish() const { return d->streamedBeforeFinish; }

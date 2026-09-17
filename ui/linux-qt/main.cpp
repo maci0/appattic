@@ -77,6 +77,7 @@
 #include <QVBoxLayout>
 #include <QVector>
 #include <QWidget>
+#include <QTemporaryDir>
 
 #include <cstdio>
 #include <cstring>
@@ -1955,6 +1956,57 @@ private:
     }
 
 public:
+    /// Disk gate: a folder scan must draw its finished folders as it goes, and
+    /// must have drawn some before the final tree filled in.
+    int smokeDiskStreamChecks() {
+        QTemporaryDir dir;
+        if (!dir.isValid()) {
+            std::fprintf(stderr, "disk-stream: no temp dir\n");
+            return 1;
+        }
+        for (int i = 0; i < 3; ++i) {
+            const QString sub = dir.path() + QStringLiteral("/folder-%1").arg(i);
+            if (!QDir().mkpath(sub)) {
+                std::fprintf(stderr, "disk-stream: cannot create %s\n", sub.toUtf8().constData());
+                return 1;
+            }
+            for (int k = 0; k < 2; ++k) {
+                QFile f(sub + QStringLiteral("/file-%1.bin").arg(k));
+                if (!f.open(QIODevice::WriteOnly)) return 1;
+                f.write(QByteArray(8192 * (i + 1), 'x'));
+            }
+        }
+        selectPage(Page::DiskUsage);
+        m_diskPage->startScan(dir.path());
+        QElapsedTimer timer;
+        timer.start();
+        while (m_diskPage->isScanning() && timer.elapsed() < 60000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        if (m_diskPage->isScanning()) {
+            std::fprintf(stderr, "disk-stream: scan did not finish\n");
+            return 1;
+        }
+        if (m_diskPage->streamedRows() != 3) {
+            std::fprintf(
+                stderr,
+                "disk-stream: %d rows streamed, expected 3\n",
+                m_diskPage->streamedRows()
+            );
+            return 1;
+        }
+        if (!m_diskPage->streamedBeforeFinish()) {
+            std::fprintf(stderr, "disk-stream: rows arrived only after the scan\n");
+            return 1;
+        }
+        std::fprintf(
+            stdout,
+            "disk-stream: ok (rows=%d)\n",
+            m_diskPage->streamedRows()
+        );
+        return 0;
+    }
+
     /// Streaming gate: a fixture scan must publish rows more than once, and
     /// every row published early must still be in the final list.
     int smokeStreamChecks() {
@@ -3005,6 +3057,20 @@ int main(int argc, char **argv) {
         MainWindow w;
         w.resize(1400, 900);
         return w.smokeTableChecks();
+    }
+    if (argvHas(argc, argv, "--smoke-disk")) {
+        if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
+            && qEnvironmentVariableIsEmpty("DISPLAY")
+            && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
+            qputenv("QT_QPA_PLATFORM", "offscreen");
+        }
+        QApplication app(argc, argv);
+        QApplication::setApplicationName(QStringLiteral("AppAttic"));
+        applyAppIdentity();
+        MainWindow w;
+        w.resize(1400, 900);
+        w.show();
+        return w.smokeDiskStreamChecks();
     }
     if (argvHas(argc, argv, "--smoke-stream")) {
         /* A real fixture scan, drawn as the plugins report. */

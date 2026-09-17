@@ -16,13 +16,20 @@ public:
     void scanFolder();
     void scanFilesystem();
     void scanRemote();
+    /// Scan one path. Called by the buttons above and by the smoke checks.
+    void startScan(const QString &path);
+
+    /// Rows the running scan drew before it finished, and whether any of them
+    /// arrived before the final fill. The gate in main.cpp checks both.
+    int streamedRows() const;
+    bool streamedBeforeFinish() const;
+    bool isScanning() const { return m_scanning; }
 
 signals:
     void statusMessage(const QString &text);
 
 private:
     void refreshVolumes();
-    void startScan(const QString &path);
     void stopScan();
     void rescan();
     void fillTree();

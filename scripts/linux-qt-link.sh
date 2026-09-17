@@ -299,6 +299,22 @@ run_stream_check() {
     }
 }
 
+# The disk page draws folders as they finish, not only when the walk ends.
+run_disk_stream_check() {
+    local dump rc
+    echo "disk-stream: QT_QPA_PLATFORM=offscreen $bin --smoke-disk"
+    set +e
+    dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --smoke-disk 2>&1)"
+    rc=$?
+    set -e
+    printf '%s\n' "$dump"
+    [[ $rc -eq 0 ]] || { echo "error: --smoke-disk failed" >&2; exit 1; }
+    printf '%s\n' "$dump" | grep -Eq '^disk-stream: ok \(rows=[1-9][0-9]*\)$' || {
+        echo "error: --smoke-disk output missing streaming proof" >&2
+        exit 1
+    }
+}
+
 smoke_output_ok() {
     local dump="$1"
     printf '%s\n' "$dump" | grep -q '^SMOKE=ok$' || return 1
@@ -368,6 +384,7 @@ run_smoke() {
     if try_smoke offscreen; then
         run_table_check
         run_stream_check
+        run_disk_stream_check
         echo "smoke: ok (offscreen)"
         return 0
     fi
