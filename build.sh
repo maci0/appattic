@@ -47,6 +47,7 @@ appattic_require_swift
 
 OS="$(uname -s)"
 HAVE_QT=0
+HAVE_MAC_UI=0
 if command -v pkg-config >/dev/null 2>&1 && { pkg-config --exists Qt6Widgets || pkg-config --exists Qt6Core; }; then
     HAVE_QT=1
 fi
@@ -70,8 +71,17 @@ resolve_bin() {
 if [[ "$OS" == Darwin ]]; then
     echo "Building AppAttic (CLI + UI, ${CONFIG})…"
     # Product-by-product: a full-package build also compiles Gtk/WinSDK extras from swift-cross-ui.
-    swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
-    swift build -c "$CONFIG" --product AppAtticUI --disable-automatic-resolution
+    if swift build -c "$CONFIG" --product appattic --disable-automatic-resolution \
+        && swift build -c "$CONFIG" --product AppAtticUI --disable-automatic-resolution; then
+        HAVE_MAC_UI=1
+    else
+        # AppAtticUI needs swift-cross-ui 0.2.1, which needs a Swift 6 compiler;
+        # --disable-automatic-resolution cannot fetch the package either. Build
+        # the CLI alone rather than failing the whole build.
+        export APPATTIC_NO_MAC_UI=1
+        echo "note: AppAtticUI needs a Swift 6 compiler (swift-cross-ui 0.2.1); building the CLI only" >&2
+        swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
+    fi
 elif [[ "$OS" == Linux ]]; then
     echo "Building AppAttic CLI (${CONFIG})…"
     swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
@@ -97,7 +107,7 @@ CLI="$(resolve_bin appattic)" || {
     exit 1
 }
 
-if [[ "$OS" == Darwin ]]; then
+if [[ "$OS" == Darwin && "$HAVE_MAC_UI" -eq 1 ]]; then
     BIN="$(resolve_bin AppAtticUI)" || {
         echo "error: AppAtticUI binary not found after swift build -c ${CONFIG}" >&2
         exit 1
@@ -114,6 +124,10 @@ if [[ "$OS" == Darwin ]]; then
     echo "Launch: open AppAttic.app"
     echo "CLI:    ./run.sh report"
     echo "        ${CLI}"
+elif [[ "$OS" == Darwin ]]; then
+    echo "macOS CLI: ${CLI}"
+    echo "Launch CLI: ./run.sh report"
+    echo "UI skipped (AppAtticUI needs a Swift 6 compiler; see .swift-version and the macos CI job)."
 elif [[ "$OS" == Linux && "$HAVE_QT" -eq 1 ]]; then
     echo "Linux UI: ui/linux-qt/build/appattic-qt"
     echo "CLI:      ${CLI}"

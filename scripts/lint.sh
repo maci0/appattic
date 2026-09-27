@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Shellcheck, yamllint, host C warnings-as-errors, and zig fmt when zig is on PATH.
+# Shellcheck, yamllint, host C warnings-as-errors, zig fmt when zig is on PATH,
+# and commit messages that credit an AI tool.
 # Usage: bash scripts/lint.sh
 set -euo pipefail
 
@@ -15,7 +16,8 @@ case "${1:-}" in
 Usage: bash scripts/lint.sh
 
   shellcheck on the shell scripts, yamllint on the YAML,
-  host C warnings-as-errors, zig fmt --check
+  host C warnings-as-errors, zig fmt --check,
+  no AI tool credit in commit messages
 EOF
         exit 0
         ;;
@@ -30,6 +32,8 @@ esac
 
 if ! command -v shellcheck >/dev/null 2>&1; then
     echo "error: shellcheck missing" >&2
+    echo "Linux: bash scripts/linux-deps.sh --install-shellcheck" >&2
+    echo "macOS: xcode-select --install, then bash scripts/lint.sh again" >&2
     exit 1
 fi
 shellcheck -x -P SCRIPTDIR "$ROOT/build.sh" "$ROOT/run.sh" "$ROOT/core/build.sh" \
@@ -62,6 +66,26 @@ case "$(uname -s)" in
     Linux) APPATTIC_HOST_EXEC_FIXTURE=1 "$tmp/hostexec_test" ;;
     *) "$tmp/hostexec_test" ;;
 esac
+
+check_commit_messages() {
+    local pattern
+    pattern='^(co-authored-by|generated-by|built-with|assisted-by|helped-by):.*(claude|anthropic|copilot|codex|chatgpt|openai|gpt-[0-9]|gemini|cursor|codeium|windsurf|devin|qwen|llama|grok|perplexity)'
+    if ! command -v git >/dev/null 2>&1 || ! git rev-parse --git-dir >/dev/null 2>&1; then
+        echo "note: not a git checkout, skip commit-message check" >&2
+        return 0
+    fi
+    local seen bad
+    seen="$(git rev-list --count HEAD 2>/dev/null || printf '0')"
+    bad="$(git log --format='%s%n%b' | grep -Ei "$pattern" || true)"
+    if [[ -n "$bad" ]]; then
+        echo "error: commit message credits an AI tool:" >&2
+        printf '%s\n' "$bad" >&2
+        echo "fix: reword that commit (git rebase -i, reword) and drop the trailer" >&2
+        exit 1
+    fi
+    echo "commit messages: ok ($seen commits)"
+}
+check_commit_messages
 
 if ! command -v zig >/dev/null 2>&1; then
     if [[ -x /opt/zig/zig ]]; then

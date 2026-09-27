@@ -35,6 +35,14 @@ done
 . "$ROOT/scripts/find-swift.sh"
 appattic_require_swift
 
+# The macOS CI job builds only the scan library and CLI: AppAtticUI needs
+# swift-cross-ui 0.2.1, which needs a Swift 6 compiler, and Swift 6.1's SIL
+# lifetime pass crashes on swift-mutex 0.0.6. Match that flag so the same
+# command passes here and there. build.sh keeps the UI on macOS.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    export APPATTIC_NO_MAC_UI=1
+fi
+
 echo "== lint =="
 bash "$ROOT/scripts/lint.sh"
 

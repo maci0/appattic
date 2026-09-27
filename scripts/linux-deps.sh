@@ -29,13 +29,15 @@ fi
 usage() {
     cat <<'EOF'
 Usage: scripts/linux-deps.sh [--install] [--install-swift] [--install-wasmtime] [--install-zig]
+                              [--install-shellcheck]
 
-  (no flags)           Print Qt 6, Wasmtime, and Swift notes for this distro.
+  (no flags)           Print Qt 6, Wasmtime, Swift, and shellcheck notes for this distro.
   --install            Install Qt 6 Widgets headers, cmake, ninja, pkg-config, clang (needs root).
   --install-swift      Install Swift 5.10.1 (official Ubuntu 22.04 tarball)
                        to /opt/swift, or .deps/swift without root.
   --install-wasmtime   Install Wasmtime C API headers/libs (needed to embed appattic_core.wasm).
   --install-zig        Install the .zig-version toolchain only (no Qt, no wasmtime).
+  --install-shellcheck  Install shellcheck (scripts/lint.sh needs it).
 
 Then run: bash scripts/linux-qt-link.sh
 
@@ -49,12 +51,14 @@ INSTALL_PKGS=0
 INSTALL_SWIFT=0
 INSTALL_WASMTIME=0
 INSTALL_ZIG=0
+INSTALL_SHELLCHECK=0
 for arg in "$@"; do
     case "$arg" in
         --install) INSTALL_PKGS=1 ;;
         --install-swift) INSTALL_SWIFT=1 ;;
         --install-wasmtime) INSTALL_WASMTIME=1 ;;
         --install-zig) INSTALL_ZIG=1 ;;
+        --install-shellcheck) INSTALL_SHELLCHECK=1 ;;
         -h|--help) usage; exit 0 ;;
         *)
             echo "unknown argument: $arg" >&2
@@ -241,6 +245,7 @@ else
 fi
 
 echo "Zig ${ZIG_VER}: official tarball on Debian/Ubuntu (no apt zig on jammy/noble); distro pkg elsewhere if >= ${ZIG_VER}"
+echo "shellcheck: needed by scripts/lint.sh. bash $0 --install-shellcheck"
 echo "Wasmtime C API ${WASMTIME_VER}: bash $0 --install-wasmtime"
 echo "Swift 5.10: needed to compile the CLI and tests. Not shipped as a universal Linux binary."
 case "$family" in
@@ -570,4 +575,35 @@ if [[ "$INSTALL_ZIG" -eq 1 ]]; then
     fi
     echo "zig: $(zig version | head -n 1)"
     emit_ci_path
+fi
+
+install_shellcheck() {
+    if command -v shellcheck >/dev/null 2>&1; then
+        echo "shellcheck already on PATH: $(command -v shellcheck)"
+        return 0
+    fi
+    case "$family" in
+        arch) run_as_root pacman -S --needed --noconfirm shellcheck ;;
+        fedora) run_as_root dnf install -y ShellCheck ;;
+        suse) run_as_root zypper --non-interactive install shellcheck ;;
+        debian)
+            debian_enable_universe
+            run_as_root apt-get update
+            run_as_root apt-get install -y --no-install-recommends shellcheck
+            ;;
+        *)
+            echo "error: cannot install shellcheck on unrecognized distro" >&2
+            echo "Debian/Ubuntu: apt install shellcheck" >&2
+            echo "Fedora:        dnf install ShellCheck" >&2
+            echo "Arch:          pacman -S shellcheck" >&2
+            echo "openSUSE:      zypper install shellcheck" >&2
+            return 1
+            ;;
+    esac
+    echo "shellcheck: $(command -v shellcheck || printf 'not on PATH')"
+}
+
+if [[ "$INSTALL_SHELLCHECK" -eq 1 ]]; then
+    install_shellcheck
+    echo "Then: bash scripts/lint.sh"
 fi

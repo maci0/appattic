@@ -44,6 +44,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+          # scripts/lint.sh rejects AI tool credits in commit messages: full
+          # history, or the check only ever sees the tip.
+          fetch-depth: 0
       - name: Install shellcheck
         run: sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends shellcheck
       - name: Install yamllint

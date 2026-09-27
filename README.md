@@ -121,7 +121,7 @@ bash scripts/lint.sh
 ./run.sh --ui
 ```
 
-macOS: builds `AppAttic.app` (ad-hoc codesign). Launch with `open AppAttic.app` or `swift run AppAtticUI`.
+macOS: builds `AppAttic.app` (ad-hoc codesign) when `AppAtticUI` compiles, otherwise the CLI only and says so. `AppAtticUI` needs swift-cross-ui 0.2.1, which needs a Swift 6 compiler, and `.swift-version` pins 5.10.1. Launch with `open AppAttic.app` or `swift run AppAtticUI`.
 SwiftPM names the UI product `AppAtticUI` so it does not collide with `appattic` on a case-insensitive volume.
 
 Linux: UI is Qt 6 Widgets. Install headers with `./scripts/linux-deps.sh` (optional `--install` and `--install-wasmtime`). Debian/Ubuntu: `qt6-base-dev`. Fedora: `qt6-qtbase-devel`. Arch: `qt6-base`. openSUSE: `qt6-base-devel`. No `.app` bundle. `./build.sh` still builds the CLI if Qt is missing. Launch the window with `./run.sh --ui`.
@@ -129,9 +129,10 @@ Linux: UI is Qt 6 Widgets. Install headers with `./scripts/linux-deps.sh` (optio
 You cannot cross-compile the Qt UI from macOS and call that a Linux link. Build on the Linux machine you will run, matching that distro. An Ubuntu-built binary is not assumed to start on Arch (glibc differs). Homebrew Qt on macOS is not Linux.
 
 ```bash
-./scripts/linux-deps.sh              # print Qt 6 + Wasmtime + Swift notes
+./scripts/linux-deps.sh              # print Qt 6 + Wasmtime + Swift + shellcheck notes
 ./scripts/linux-deps.sh --install    # Qt 6 headers, cmake, ninja, clang (root)
 ./scripts/linux-deps.sh --install-wasmtime
+./scripts/linux-deps.sh --install-shellcheck   # needed by scripts/lint.sh
 # Arch has no Swift in extra. AUR: swift-bin. Or:
 ./scripts/linux-deps.sh --install-swift   # Swift 5.10.1 into /opt/swift (or .deps/swift without root)
 export PATH="/opt/swift/usr/bin:$PATH"    # or: export PATH="$PWD/.deps/swift/usr/bin:$PATH"
