@@ -19,10 +19,11 @@ if [[ -n "${ZIG_VERSION:-}" ]]; then
 elif [[ -f "$ROOT/.zig-version" ]]; then
     ZIG_VER="$(tr -d '[:space:]' < "$ROOT/.zig-version")"
 else
-    ZIG_VER="0.16.0"
+    echo "error: missing $ROOT/.zig-version; the required Zig version is declared there" >&2
+    exit 1
 fi
 if [[ -z "$ZIG_VER" ]]; then
-    echo "error: empty zig version (.zig-version or ZIG_VERSION)" >&2
+    echo "error: empty .zig-version" >&2
     exit 1
 fi
 
@@ -483,12 +484,15 @@ if [[ "$INSTALL_WASMTIME" -eq 1 ]]; then
 fi
 
 install_swift_tarball() {
-    local ver="5.10.1"
-    if [[ -f "$ROOT/.swift-version" ]]; then
-        ver="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
-        if [[ -z "$ver" ]]; then
-            ver="5.10.1"
-        fi
+    local ver
+    if [[ ! -f "$ROOT/.swift-version" ]]; then
+        echo "error: missing $ROOT/.swift-version; the required Swift version is declared there" >&2
+        exit 1
+    fi
+    ver="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
+    if [[ -z "$ver" ]]; then
+        echo "error: empty .swift-version" >&2
+        exit 1
     fi
     local dest=""
     if [[ -w /opt ]] || [[ "$(id -u)" -eq 0 ]]; then

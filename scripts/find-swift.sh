@@ -18,9 +18,14 @@ appattic_find_swift() {
 
 appattic_require_swift() {
     local want
-    want="$(tr -d '[:space:]' < "$ROOT/.swift-version" 2>/dev/null || true)"
+    if [[ ! -r "$ROOT/.swift-version" ]]; then
+        echo "error: missing $ROOT/.swift-version; the required Swift version is declared there" >&2
+        exit 1
+    fi
+    want="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
     if [[ -z "$want" ]]; then
-        want="5.10.1"
+        echo "error: empty $ROOT/.swift-version" >&2
+        exit 1
     fi
     if ! appattic_find_swift; then
         echo "error: swift missing (need $want, see .swift-version)" >&2

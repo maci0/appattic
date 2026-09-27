@@ -20,12 +20,16 @@ export ZIG_LOCAL_CACHE_DIR="${ZIG_LOCAL_CACHE_DIR:-$root/../.zig-cache-local}"
 mkdir -p "$ZIG_GLOBAL_CACHE_DIR" "$ZIG_LOCAL_CACHE_DIR"
 zig fmt --check "$root/bench"
 # Zig 0.16 has no main-pkg-path: sibling imports resolve from the root file's
-# directory, so build a copy placed next to src and remove it afterwards.
-tmp="$root/src/zz_bench_tmp.zig"
-cp "$root/bench/bench.zig" "$tmp"
-trap 'rm -f "$tmp"' EXIT
-out="$(mktemp -d)/zigbench"
-zig build-exe -OReleaseFast "$tmp" -femit-bin="$out"
+# directory, so stage the bench beside a copy of src in a scratch dir rather
+# than writing a temporary source file into the tree.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+cp -R "$root"/src/. "$tmp/"
+cp "$root/bench/bench.zig" "$tmp/bench.zig"
+out="$tmp/zigbench"
+# zig 0.16 writes -femit-bin relative to the working directory; an absolute
+# path outside it fails in the linker, so link from inside the scratch dir.
+(cd "$tmp" && zig build-exe -OReleaseFast bench.zig -femit-bin=zigbench)
 if [ -n "${1:-}" ]; then
     "$out" | grep -F -- "${1}" || true
 else

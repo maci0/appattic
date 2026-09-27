@@ -52,12 +52,14 @@ if ! command -v zig >/dev/null 2>&1; then
     echo "Then re-run $0" >&2
     exit 1
 fi
-zig_need="0.16.0"
-if [ -f "$root/../.zig-version" ]; then
-    zig_need="$(tr -d '[:space:]' < "$root/../.zig-version")"
+if [ ! -f "$root/../.zig-version" ]; then
+    echo "error: missing $root/../.zig-version; the required Zig version is declared there, not guessed here" >&2
+    exit 1
 fi
+zig_need="$(tr -d '[:space:]' < "$root/../.zig-version")"
 if [ -z "$zig_need" ]; then
-    zig_need="0.16.0"
+    echo "error: empty $root/../.zig-version" >&2
+    exit 1
 fi
 zig_ver="$(zig version)"
 if [ "$zig_ver" != "$zig_need" ]; then
