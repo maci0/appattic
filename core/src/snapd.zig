@@ -80,15 +80,23 @@ pub fn parseInstalledSnapNames(text: []const u8, out: [][]const u8) usize {
     return n;
 }
 
-fn keepFromNames(names: []const []const u8, buf: []u8) []const u8 {
+/// Join `names` into `buf` as one newline-separated keep list.
+///
+/// A partial list is worse than none: the list is what tells the snap-home
+/// probe which `~/snap/<name>` directories belong to a snap that is still
+/// installed, and a name that fell off the end makes an installed snap's
+/// data directory an orphan with an `rm -rf` line for it. So a buffer that
+/// cannot hold every name returns null and the caller reports the loss
+/// instead of scanning with a keep list missing names.
+fn keepFromNames(names: []const []const u8, buf: []u8) ?[]const u8 {
     var used: usize = 0;
     for (names) |name| {
+        const need = if (used != 0) 1 + name.len else name.len;
+        if (used + need > buf.len) return null;
         if (used != 0) {
-            if (used >= buf.len) break;
             buf[used] = '\n';
             used += 1;
         }
-        if (used + name.len > buf.len) break;
         @memcpy(buf[used..][0..name.len], name);
         used += name.len;
     }
@@ -251,7 +259,10 @@ fn query_impl(present: i32) i32 {
     var installed_names: [64][]const u8 = undefined;
     const n_installed = parseInstalledSnapNames(snap_text, installed_names[0..]);
     note.addTruncatedRows(n_installed, installed_names.len);
-    var keep_buf: [512]u8 = undefined;
+    // Room for every name the array above can hold at the length a name in
+    // `~/snap` can have (`NAME_MAX` is 255), plus its separator. An install
+    // with names longer than that cannot make the join run out.
+    var keep_buf: [64 * (255 + 1)]u8 = undefined;
     const keep = keepFromNames(installed_names[0..n_installed], &keep_buf);
 
     var orphans: [32]listing.Orphan = undefined;
@@ -259,19 +270,25 @@ fn query_impl(present: i32) i32 {
     var n_orphans: usize = 0;
     const nls = host_exec.run(snap_home_cmd, &snap_home_exec_buf);
     note.add(snap_home_cmd, nls);
-    if (nls >= 0) {
-        var store_dropped: usize = 0;
-        n_orphans = listing.parseListing(
-            snap_home_exec_buf[0..@intCast(nls)],
-            keep,
-            snap_home_root,
-            &orphans,
-            &paths,
-            "",
-            &store_dropped,
-        );
-        note.addTruncatedRows(n_orphans, orphans.len);
-        note.addDroppedRows(store_dropped);
+    if (keep) |keep_list| {
+        if (nls >= 0) {
+            var store_dropped: usize = 0;
+            n_orphans = listing.parseListing(
+                snap_home_exec_buf[0..@intCast(nls)],
+                keep_list,
+                snap_home_root,
+                &orphans,
+                &paths,
+                "",
+                &store_dropped,
+            );
+            note.addTruncatedRows(n_orphans, orphans.len);
+            note.addDroppedRows(store_dropped);
+        }
+    } else {
+        // No complete keep list, so no orphan list: the snap-home probe
+        // cannot tell an installed snap's directory from a leftover one.
+        note.addDroppedRows(n_installed);
     }
 
     return note.renderShrinkingPair(renderSnapd, &disabled, &n_disabled, &orphans, &n_orphans);
@@ -300,6 +317,20 @@ test "parseInstalledSnapNames keeps active snaps only" {
     try std.testing.expectEqualStrings("bare", buf[0]);
     try std.testing.expectEqualStrings("core22", buf[1]);
     try std.testing.expectEqualStrings("firefox", buf[2]);
+}
+
+test "keepFromNames refuses a store that cannot hold every name" {
+    // A store too small for the whole list is refused rather than filled to
+    // its last byte, because a short list reads as a complete one and turns
+    // an installed snap's `~/snap/<name>` into an `rm -rf` line.
+    const names = [_][]const u8{ "a", "bb", "ccc", "dddd" };
+    var exact: [13]u8 = undefined;
+    try std.testing.expectEqualStrings("a\nbb\nccc\ndddd", keepFromNames(&names, &exact).?);
+    var short: [12]u8 = undefined;
+    try std.testing.expect(keepFromNames(&names, &short) == null);
+    var empty: [0]u8 = undefined;
+    try std.testing.expect(keepFromNames(&names, &empty) == null);
+    try std.testing.expectEqualStrings("", keepFromNames(&.{}, &empty).?);
 }
 
 test "parseSnapListAll empty and header-only" {
@@ -440,29 +471,40 @@ fn fuzzSnapList(_: void, smith: *std.testing.Smith) !void {
     // must always be whole names joined by single newlines: no leading,
     // trailing, or doubled separator, and nothing truncated mid-name.
     var store: [64]u8 = undefined;
-    const kept = keepFromNames(names[0..nn], &store);
-    try std.testing.expect(sliceInside(&store, kept));
-    try std.testing.expect(kept.len == 0 or kept[kept.len - 1] != '\n');
-    if (nn != 0 and kept.len != 0) try std.testing.expect(kept[0] != '\n');
-    try std.testing.expect(std.mem.indexOf(u8, kept, "\n\n") == null);
-    var lines = std.mem.splitScalar(u8, kept, '\n');
-    var seen: usize = 0;
-    while (lines.next()) |line| {
-        if (line.len == 0) continue;
-        seen += 1;
-        try std.testing.expect(jsonbuf.isSafeIdent(line));
-        // A name is dropped whole or kept whole, never clipped to the store.
-        try std.testing.expect(std.mem.indexOf(u8, text, line) != null);
+    if (keepFromNames(names[0..nn], &store)) |kept| {
+        try std.testing.expect(sliceInside(&store, kept));
+        try std.testing.expect(kept.len == 0 or kept[kept.len - 1] != '\n');
+        if (nn != 0 and kept.len != 0) try std.testing.expect(kept[0] != '\n');
+        try std.testing.expect(std.mem.indexOf(u8, kept, "\n\n") == null);
+        var lines = std.mem.splitScalar(u8, kept, '\n');
+        var seen: usize = 0;
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            seen += 1;
+            try std.testing.expect(jsonbuf.isSafeIdent(line));
+            // A name is dropped whole or kept whole, never clipped to the store.
+            try std.testing.expect(std.mem.indexOf(u8, text, line) != null);
+        }
+        try std.testing.expect(seen <= nn);
+    } else {
+        // A store too small for the whole list yields nothing at all: a
+        // partial keep list would read as a complete one and put an
+        // `rm -rf` line on an installed snap's data directory.
+        try std.testing.expect(nn > 0);
     }
-    try std.testing.expect(seen <= nn);
 
     // The store is the only bound on the join, so a store of any size can
     // never yield more bytes than it holds. A zero-byte store is the branch
     // where an off-by-one would write the separator alone.
     inline for (.{ 0, 1, 2, 3, 8, 33 }) |cap| {
         var buf: [cap]u8 = undefined;
-        const joined = keepFromNames(names[0..nn], &buf);
-        try std.testing.expect(joined.len <= cap);
-        try std.testing.expect(sliceInside(&buf, joined));
+        if (keepFromNames(names[0..nn], &buf)) |joined| {
+            try std.testing.expect(joined.len <= cap);
+            try std.testing.expect(sliceInside(&buf, joined));
+        } else {
+            // Refused rather than short: the list never holds fewer names
+            // than were handed to it.
+            try std.testing.expect(nn != 0);
+        }
     }
 }

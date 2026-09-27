@@ -495,6 +495,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 item->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
                 item->setData(1, Qt::UserRole, apparent);
                 item->setData(2, Qt::UserRole, allocated);
+                item->setData(3, Qt::UserRole, items);
                 // Inserted by apparent size, the column the tree sorts on by
                 // default. The ring chart below sorts on the selected metric,
                 // so its order can differ from the streaming rows.
@@ -509,16 +510,20 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 d->streamedRows += 1;
                 qint64 sumApparent = 0;
                 qint64 sumAllocated = 0;
-                int dirs = 0;
+                qint64 sumItems = 0;
                 for (int i = 0; i < top->childCount(); ++i) {
                     sumApparent = addSatBytes(sumApparent, top->child(i)->data(1, Qt::UserRole).toLongLong());
                     sumAllocated = addSatBytes(sumAllocated, top->child(i)->data(2, Qt::UserRole).toLongLong());
-                    ++dirs;
+                    sumItems = addSatBytes(sumItems, top->child(i)->data(3, Qt::UserRole).toLongLong());
                 }
                 // Placeholder root row: the totals of what has arrived so far.
+                // `diskContentsLabel` counts the node itself, and the walk
+                // counts the scan root as one entry, so the streamed total
+                // needs that one: without it a folder whose first finished
+                // child has arrived reads "Empty" until the scan ends.
                 top->setText(1, humanSize(sumApparent));
                 top->setText(2, humanSize(sumAllocated));
-                top->setText(3, diskContentsLabel(dirs, true));
+                top->setText(3, diskContentsLabel(sumItems + 1, true));
                 // Ring chart: one segment per finished folder, live.
                 if (!d->streamRoot) {
                     d->streamRoot = new DiskNode;
