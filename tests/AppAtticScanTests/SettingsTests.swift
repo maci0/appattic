@@ -304,6 +304,36 @@ final class SettingsTests: XCTestCase {
         )
     }
 
+    /// These errors name the settings and cache files, which live under the
+    /// account home, so their text reaches the terminal, the error bar, and
+    /// any pasted bug report with the account name in it.
+    func testPersistenceErrorsDoNotCarryTheAccountPath() {
+        // redactHomePaths matches the standardized home, so build the input
+        // from that form or the comparison is between two spellings.
+        let home = (FileManager.default.homeDirectoryForCurrentUser.path as NSString).standardizingPath
+        guard home.count > 1, home.contains("/") else { return }
+
+        let settings = SettingsError.unreadable(
+            path: home + "/.local/share/appattic/settings.json",
+            reason: "permission denied"
+        )
+        XCTAssertEqual(
+            settings.description,
+            "cannot read settings ~/.local/share/appattic/settings.json: permission denied"
+        )
+        XCTAssertFalse(settingsErrorUserMessage(settings).contains(home), settingsErrorUserMessage(settings))
+
+        let io = AppAtticIOError.readFailed(
+            path: home + "/.local/share/appattic/last-scan.json",
+            message: "The file could not be opened because it is not readable."
+        )
+        XCTAssertEqual(
+            io.errorDescription,
+            "Could not read ~/.local/share/appattic/last-scan.json: "
+                + "The file could not be opened because it is not readable."
+        )
+    }
+
     func testSaveSettingsRestrictsPermissions() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("settings-perm-\(UUID().uuidString)")
         let dir = root.appendingPathComponent("appattic")

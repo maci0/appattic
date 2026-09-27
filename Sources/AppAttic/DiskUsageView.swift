@@ -163,7 +163,7 @@ struct DiskUsageView: View {
         let ticket = ScanTicket()
         activeScan = ticket
         scanning = true
-        status = "Scanning \(rootPath)"
+        status = "Scanning \(redactHomePaths(rootPath))"
         path = rootPath
         let one = oneFileSystem
         DispatchQueue.global(qos: .userInitiated).async {
@@ -184,7 +184,7 @@ struct DiskUsageView: View {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
             if let p = root?.path { scan(p) }
         } catch {
-            status = error.localizedDescription
+            status = redactHomePaths(error.localizedDescription)
         }
     }
 }

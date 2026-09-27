@@ -161,7 +161,13 @@ public enum DiskRootError: Error, Equatable, CustomStringConvertible, LocalizedE
     case missing(path: String)
     case notADirectory(path: String)
 
+    /// `disk` defaults to the account home, so the raw path carries the
+    /// account name into the terminal. `~/...` still names the bad root.
     public var description: String {
+        redactHomePaths(rawDescription)
+    }
+
+    private var rawDescription: String {
         switch self {
         case .missing(let path):
             return "no such directory: \(path)"

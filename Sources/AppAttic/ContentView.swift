@@ -170,7 +170,7 @@ struct ContentView: View {
                 vm.start(includeSystem: includeSystem)
             } catch {
                 settingsLoadFailed = true
-                settingsLoadError = error.localizedDescription
+                settingsLoadError = redactHomePaths(error.localizedDescription)
                 vm.errorMessage = settingsErrorUserMessage(error)
                 vm.holdsSettingsError = true
             }

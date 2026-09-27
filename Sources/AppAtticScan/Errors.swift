@@ -1,14 +1,21 @@
 import Foundation
 
 /// Recoverable I/O failures from cache and settings persistence.
-public enum AppAtticIOError: Error, Equatable, LocalizedError, Sendable {
+public enum AppAtticIOError: Error, Equatable, LocalizedError, CustomStringConvertible, Sendable {
     case createDirectoryFailed(path: String, message: String)
     case encodeFailed(message: String)
     case writeFailed(path: String, message: String)
     case readFailed(path: String, message: String)
     case decodeFailed(path: String, message: String)
 
+    /// The cache and settings paths sit under the account home, so the account
+    /// name is in them. Foundation's `localizedDescription` carries the same
+    /// path, so the composed line is redacted whole rather than per field.
     public var errorDescription: String? {
+        description
+    }
+
+    public var description: String {
         switch self {
         case .createDirectoryFailed(let path, let message):
             return "Could not create directory \(path): \(message)"

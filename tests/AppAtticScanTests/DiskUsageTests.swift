@@ -142,6 +142,16 @@ final class DiskUsageTests: XCTestCase {
         }
     }
 
+    /// `appattic disk` defaults to the account home, so a typo there printed
+    /// the account name to stderr before the message was redacted.
+    func testDiskRootErrorRedactsTheAccountHome() {
+        let home = (FileManager.default.homeDirectoryForCurrentUser.path as NSString).standardizingPath
+        guard home.count > 1, home.contains("/") else { return }
+        let missing = DiskRootError.missing(path: home + "/nope")
+        XCTAssertEqual(missing.description, "no such directory: ~/nope")
+        XCTAssertFalse(missing.description.contains(home), missing.description)
+    }
+
     #if os(Linux)
     // `mountsText` is the /proc/mounts reader's injection point; the macOS
     // branch lists mounted volumes through FileManager and ignores it.

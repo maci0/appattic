@@ -237,20 +237,23 @@ static QString scanSummaryMessage(int leftovers, int stale, int outdated, int pa
         .arg(packages);
 }
 
+/* The settings path is under the account home, so the account name is in it.
+   Redact before it reaches the error bar, where it is copied into bug
+   reports and screenshots. `~/...` still names the file to fix. */
 static QString settingsUnreadableMessage(const QString &path) {
-    return QStringLiteral(
+    return redactHomePaths(QStringLiteral(
         "Could not read settings at %1. AppAttic will not overwrite that file until you save settings."
-    ).arg(path);
+    ).arg(path));
 }
 
 static QString settingsInvalidMessage(const QString &path, const QString &err) {
-    return QStringLiteral(
+    return redactHomePaths(QStringLiteral(
         "Settings at %1 are not valid (%2). AppAttic will not overwrite that file until you save settings."
-    ).arg(path, err);
+    ).arg(path, err));
 }
 
 static QString settingsUnwritableMessage(const QString &path) {
-    return QStringLiteral("Could not save settings to %1.").arg(path);
+    return redactHomePaths(QStringLiteral("Could not save settings to %1.").arg(path));
 }
 
 static QString ignoredPathLabel(const QString &path) {
@@ -1021,7 +1024,10 @@ private slots:
         m_scanOk = (rc == 0);
         m_scanAt = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"));
         if (rc != 0) {
-            showError(err.isEmpty() ? QStringLiteral("Scan failed. Click Rescan to try again.") : err);
+            /* Core stderr carries absolute paths, so the account name in the
+               home prefix reaches the error bar without this. */
+            showError(err.isEmpty() ? QStringLiteral("Scan failed. Click Rescan to try again.")
+                                    : redactHomePaths(err.trimmed()));
         } else if (!m_settingsError) {
             m_errorBar->hide();
             m_error->clear();

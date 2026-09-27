@@ -31,7 +31,7 @@ enum AppAtticCLI {
         do {
             settings = try loadSettings()
         } catch {
-            fputs("error: \(error.localizedDescription)\n", stderr)
+            fputs("error: \(redactHomePaths(error.localizedDescription))\n", stderr)
             Foundation.exit(2)
         }
         let includeSystem = effectiveIncludeSystem(cliFlag: opts.includeSystem, settings: settings)
@@ -65,9 +65,9 @@ enum AppAtticCLI {
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let pretty = try encoder.encode(payload)
                 try writeOwnerOnlyFile(pretty, to: URL(fileURLWithPath: jsonPath))
-                fputs("JSON written to \(jsonPath)\n", stderr)
+                fputs("JSON written to \(redactHomePaths(jsonPath))\n", stderr)
             } catch {
-                fputs("error writing JSON: \(error.localizedDescription)\n", stderr)
+                fputs("error writing JSON: \(redactHomePaths(error.localizedDescription))\n", stderr)
                 Foundation.exit(1)
             }
         }
@@ -134,9 +134,9 @@ func runDiskCommand(_ opts: CLIOptions) {
     do {
         try validateDiskRoot(root)
     } catch {
-        failUsage(error.localizedDescription)
+        failUsage(redactHomePaths(error.localizedDescription))
     }
-    fputs("scanning \(root)\n", stderr)
+    fputs("scanning \(redactHomePaths(root))\n", stderr)
     fflush(stderr)
     let tree = scanDiskUsage(root: root, oneFileSystem: !opts.allFileSystems)
     // `scanDiskUsage` ranks by allocated blocks; the default report prints
@@ -148,9 +148,9 @@ func runDiskCommand(_ opts: CLIOptions) {
         do {
             let data = try diskUsageJSON(tree)
             try writeOwnerOnlyFile(data, to: URL(fileURLWithPath: jsonPath))
-            fputs("JSON written to \(jsonPath)\n", stderr)
+            fputs("JSON written to \(redactHomePaths(jsonPath))\n", stderr)
         } catch {
-            fputs("error writing JSON: \(error.localizedDescription)\n", stderr)
+            fputs("error writing JSON: \(redactHomePaths(error.localizedDescription))\n", stderr)
             Foundation.exit(1)
         }
     }
@@ -422,7 +422,7 @@ func runShellScript(_ script: String) -> Int32 {
         process.waitUntilExit()
         return process.terminationStatus
     } catch {
-        fputs("error: \(error.localizedDescription)\n", stderr)
+        fputs("error: \(redactHomePaths(error.localizedDescription))\n", stderr)
         return 1
     }
 }

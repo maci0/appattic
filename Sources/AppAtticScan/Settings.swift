@@ -44,7 +44,14 @@ public enum SettingsError: Error, Equatable, LocalizedError, CustomStringConvert
     case invalid(path: String, reason: String)
     case unwritable(path: String, reason: String)
 
+    /// The settings path sits under the account home, so the composed line is
+    /// redacted whole: `~/...` still names the file, the account name does not
+    /// reach the terminal or a pasted bug report.
     public var description: String {
+        redactHomePaths(rawDescription)
+    }
+
+    private var rawDescription: String {
         switch self {
         case .unreadable(let path, let reason):
             return "cannot read settings \(path): \(reason)"
@@ -65,11 +72,11 @@ public func settingsErrorUserMessage(_ error: Error) -> String {
     }
     switch error {
     case .unreadable(let path, let reason):
-        return "Could not read settings at \(path) (\(reason)). AppAttic will not overwrite that file until you save settings."
+        return redactHomePaths("Could not read settings at \(path) (\(reason)). AppAttic will not overwrite that file until you save settings.")
     case .invalid(let path, let reason):
-        return "Settings at \(path) are not valid (\(reason)). AppAttic will not overwrite that file until you save settings."
+        return redactHomePaths("Settings at \(path) are not valid (\(reason)). AppAttic will not overwrite that file until you save settings.")
     case .unwritable(let path, let reason):
-        return "Could not save settings to \(path) (\(reason))."
+        return redactHomePaths("Could not save settings to \(path) (\(reason)).")
     }
 }
 
