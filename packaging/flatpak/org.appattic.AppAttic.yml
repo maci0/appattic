@@ -10,9 +10,11 @@ finish-args:
   - --socket=fallback-x11
   - --socket=wayland
   - --device=dri
+  # Leftover and disk scans walk real paths; every package-manager query runs
+  # on the host through flatpak-spawn, so no in-sandbox network is needed.
   - --filesystem=host
-  - --share=network
   - --talk-name=org.freedesktop.Flatpak
+  # QFile::moveToTrash goes through the file manager portal.
   - --talk-name=org.freedesktop.FileManager1
 rename-desktop-file: appattic.desktop
 rename-icon: appattic
@@ -72,3 +74,16 @@ modules:
     sources:
       - type: dir
         path: ../..
+        skip:
+          - .build
+          - .deps
+          - .gauntlet
+          - .zig-cache
+          - .zig-cache-local
+          - .github
+          - benchmarks
+          - dist
+          - docs
+          - tests
+          - ui/linux-qt/build
+          - ui/linux-qt/build-release

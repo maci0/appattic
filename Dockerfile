@@ -11,9 +11,9 @@ COPY scripts/linux-deps.sh \
      /tmp/appattic/scripts/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/* \
     && bash /tmp/appattic/scripts/linux-deps.sh --install \
-    && bash /tmp/appattic/scripts/linux-deps.sh --install-wasmtime
+    && bash /tmp/appattic/scripts/linux-deps.sh --install-wasmtime \
+    && rm -rf /var/lib/apt/lists/*
 ENV WASMTIME_DIR=/opt/wasmtime-c-api
 
 WORKDIR /src

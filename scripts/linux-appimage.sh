@@ -208,9 +208,12 @@ cp -L "$WASMTIME_SO" "$APPDIR/usr/lib/libwasmtime.so"
 
 META_DEST="$APPDIR/usr/share/metainfo"
 mkdir -p "$META_DEST"
+# Software centres look metainfo up by the component id, which is the
+# filename minus .metainfo.xml. Renaming it to appattic.metainfo.xml hid the
+# metadata from every AppStream consumer.
 if [[ -f "$ROOT/packaging/org.appattic.AppAttic.metainfo.xml" ]]; then
     cp -f "$ROOT/packaging/org.appattic.AppAttic.metainfo.xml" \
-        "$META_DEST/appattic.metainfo.xml"
+        "$META_DEST/org.appattic.AppAttic.metainfo.xml"
 fi
 
 WASM_DEST="$APPDIR/usr/share/appattic"
