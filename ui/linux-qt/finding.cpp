@@ -198,7 +198,10 @@ QString localeDateTimeLabel(const QDateTime &dt) {
 QString humanSize(qint64 bytes) {
     if (bytes < 0) return QStringLiteral("unknown");
     double n = double(bytes);
-    static const char *units[] = {"B", "KB", "MB", "GB", "TB", "PB"};
+    // The list has to reach the unit a qint64 saturates at (8 EiB), so a size
+    // past PB prints as "8.0 EB" and not "8192.0 PB". Same list as the Swift
+    // `humanSize`, so both windows label the same value the same way.
+    static const char *units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB"};
     const int last = int(sizeof(units) / sizeof(units[0])) - 1;
     int unit = 0;
     while (unit < last) {

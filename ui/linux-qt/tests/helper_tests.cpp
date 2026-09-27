@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 static int verifyHelpers() {
     // Sizes print the locale's decimal separator, so the expected string is
@@ -45,6 +46,11 @@ static int verifyHelpers() {
     }
     if (humanSize(1023 * 1024) != QStringLiteral("1023") + dot + QLatin1String("0 KB")) {
         std::fprintf(stderr, "humanSize(1023 KiB) mismatch\n");
+        return 1;
+    }
+    if (humanSize(std::numeric_limits<qint64>::max())
+        != QStringLiteral("8") + dot + QLatin1String("0 EB")) {
+        std::fprintf(stderr, "humanSize(qint64 max) should read as 8.0 EB, not 8192.0 PB\n");
         return 1;
     }
     QVector<Finding> largeSize;
