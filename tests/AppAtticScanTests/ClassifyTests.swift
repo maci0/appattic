@@ -1140,6 +1140,17 @@ final class ClassifyTests: XCTestCase {
         )
     }
 
+    func testLeftoverAppBlurbDoesNotAnswerForNamesThatFoldToNothing() {
+        // A cask titled 微信 has no `norm` key, so indexing it under "" would
+        // make every other non-Latin leftover read as WeChat.
+        let catalog = leftoverBlurbsFromSnapshot(
+            BrewSnapshot(available: false, casks: [Cask(name: "wechat", desc: "Messaging app", titles: ["微信"])])
+        )
+        XCTAssertNil(catalog[""])
+        XCTAssertEqual(leftoverAppBlurb(name: "微信", catalog: catalog), "Messaging app")
+        XCTAssertNil(leftoverAppBlurb(name: "日本語データ", catalog: catalog))
+    }
+
     func testLeftoverWhatTextRefreshesOldNamedCopy() {
         let refreshed = leftoverWhatText(
             rootLabel: "Application Support",

@@ -956,11 +956,19 @@ public func leftoverLookupTokens(name: String, extraPaths: [String] = []) -> [St
     return out
 }
 
+/// The blurb a lookup token already resolves to, or nil when no table has
+/// it. `normKey` is nil for a name that folds to "", so a name written in
+/// another script never matches the first such entry that was indexed.
+func leftoverBlurbLookup(token: String, catalog: [String: String]) -> String? {
+    if let key = normKey(token), let blurb = leftoverProductBlurbs[key] { return blurb }
+    if let blurb = catalog[token] { return blurb }
+    if let key = normKey(token), let blurb = catalog[key] { return blurb }
+    return nil
+}
+
 public func leftoverAppBlurb(name: String, extraPaths: [String] = [], catalog: [String: String] = [:]) -> String? {
     for token in leftoverLookupTokens(name: name, extraPaths: extraPaths) {
-        if let blurb = leftoverProductBlurbs[norm(token)] { return shortDesc(blurb) }
-        if let blurb = catalog[token] { return shortDesc(blurb) }
-        if let blurb = catalog[norm(token)] { return shortDesc(blurb) }
+        if let blurb = leftoverBlurbLookup(token: token, catalog: catalog) { return shortDesc(blurb) }
     }
     return nil
 }
@@ -970,7 +978,7 @@ public func leftoverBlurbsFromSnapshot(_ brew: BrewSnapshot) -> [String: String]
     func put(_ key: String, _ desc: String?) {
         guard let desc, !desc.isEmpty else { return }
         catalog[key.posixLowercased()] = desc
-        catalog[norm(key)] = desc
+        if let folded = normKey(key) { catalog[folded] = desc }
     }
     for f in brew.formulas { put(f.name, f.desc) }
     for c in brew.casks {
@@ -1001,12 +1009,12 @@ public func leftoverBlurbsFromBrew(
     var catalog: [String: String] = [:]
     for (name, desc) in summaries {
         catalog[name.posixLowercased()] = desc
-        catalog[norm(name)] = desc
+        if let folded = normKey(name) { catalog[folded] = desc }
     }
     for (token, title) in titles {
         if let desc = summaries[token] {
             catalog[title.posixLowercased()] = desc
-            catalog[norm(title)] = desc
+            if let folded = normKey(title) { catalog[folded] = desc }
         }
     }
     return catalog
@@ -1022,7 +1030,7 @@ public func applyLeftoverAppBlurbs(
     var catalog = leftoverBlurbsFromSnapshot(brew)
     let needed = items.filter { $0.leftoverStatus == .orphaned }.compactMap { item -> String? in
         leftoverLookupTokens(name: item.name, extraPaths: item.extraPaths).first { token in
-            leftoverProductBlurbs[norm(token)] == nil && catalog[token] == nil && catalog[norm(token)] == nil
+            leftoverBlurbLookup(token: token, catalog: catalog) == nil
         }
     }
     if !needed.isEmpty, brew.available, which("brew") != nil {
@@ -1403,7 +1411,7 @@ public final class Identity {
         }
         if isUUID(core) { return ("system", nil) }
         let user = currentUsername()
-        if !user.isEmpty, (low == user || n == norm(user)) { return ("system", nil) }
+        if !user.isEmpty, (low == user || normKey(user).map { n == $0 } == true) { return ("system", nil) }
         if appleServiceNames.contains(n) || isDaemonName(low) || asciiContains(n, "ratelimiter") || asciiContains(n, "loginwindow") {
             return ("system", nil)
         }

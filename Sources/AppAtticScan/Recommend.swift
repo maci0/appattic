@@ -117,7 +117,10 @@ public func visibleStaleSoftware(_ items: [SoftwareItem], includeSystem: Bool) -
 func matchDataItems(softwareName: String, bundleId: String?, items: [DataItem]) -> [DataItem] {
     var out: [DataItem] = []
     let swLow = softwareName.posixLowercased()
-    let swNorm = norm(softwareName)
+    // A name in another script folds to "", and so does every other such name,
+    // so the folded comparison below is skipped for it. Only the exact
+    // lowercase and bundle-id matches can decide ownership.
+    let swNorm = normKey(softwareName)
     let b = (bundleId ?? "").posixLowercased()
     for it in items {
         if it.leftoverStatus != .owned { continue }
@@ -131,13 +134,14 @@ func matchDataItems(softwareName: String, bundleId: String?, items: [DataItem]) 
             continue
         }
         let display = leftoverDisplayName(name: it.name, extraPaths: it.extraPaths)
-        if display.posixLowercased() == swLow || norm(display) == swNorm {
+        if display.posixLowercased() == swLow || n == swLow {
             out.append(it)
             continue
         }
-        if n == swLow || norm(it.name) == swNorm {
-            out.append(it)
-        }
+        guard let folded = swNorm,
+              normKey(display) == folded || normKey(it.name) == folded
+        else { continue }
+        out.append(it)
     }
     return out
 }

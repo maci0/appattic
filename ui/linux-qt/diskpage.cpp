@@ -584,7 +584,7 @@ void DiskPage::scanFolder() {
 void DiskPage::scanFilesystem() { startScan(QStringLiteral("/")); }
 
 void DiskPage::scanRemote() {
-    QString gvfs = QString::fromLocal8Bit(qgetenv("XDG_RUNTIME_DIR")) + QStringLiteral("/gvfs");
+    QString gvfs = QString::fromUtf8(qgetenv("XDG_RUNTIME_DIR")) + QStringLiteral("/gvfs");
     if (gvfs.startsWith(QLatin1Char('/')) == false) {
         gvfs = QDir::homePath() + QStringLiteral("/.gvfs");
     }

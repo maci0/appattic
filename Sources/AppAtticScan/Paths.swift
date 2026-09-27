@@ -84,6 +84,17 @@ public func norm(_ s: String) -> String {
     return String(decoding: bytes, as: UTF8.self)
 }
 
+/// `norm`, or nil when the fold leaves nothing. `norm` keeps only ASCII
+/// letters and digits, so a name written entirely in another script (CJK,
+/// Cyrillic, Greek) or made of symbols folds to "". A table indexed by this
+/// key must skip the empty form, or the first such name indexed answers every
+/// later one: a catalog entry for 微信 would describe any other non-Latin
+/// leftover.
+public func normKey(_ s: String) -> String? {
+    let k = norm(s)
+    return k.isEmpty ? nil : k
+}
+
 /// Comparison form for leftover ignore paths. NFC so a pasted path matches
 /// a filesystem path that used combining marks.
 public func pathIdentityKey(_ path: String) -> String {

@@ -226,8 +226,13 @@ void visitEntry(
 
     auto *child = new DiskNode;
     child->parent = node;
-    child->name = QString::fromLocal8Bit(name);
-    child->path = QString::fromLocal8Bit(path, int(*pathLen));
+    // Bytes from readdir/statfs, not locale text: decode as UTF-8 like every
+    // other core boundary here. Under a C locale `fromLocal8Bit` reads them as
+    // Latin-1, so a "Café" name displays as "CafÃ©" and the mangled path then
+    // names a file that does not exist. A name with undecodable bytes becomes
+    // U+FFFD, which is visible, instead of silent Latin-1 garbage.
+    child->name = QString::fromUtf8(name);
+    child->path = QString::fromUtf8(path, int(*pathLen));
     child->mtime = meta.mtime;
     child->device = meta.dev;
     child->items = 1;

@@ -25,6 +25,20 @@ final class PathsTests: XCTestCase {
     }
 
 
+    func testNormKeyDropsNamesThatFoldToNothing() {
+        // `norm` keeps only ASCII letters and digits, so a name written in
+        // another script has no fold key at all. Callers that index a table by
+        // it must not store or look up the empty form.
+        XCTAssertNil(normKey("微信"))
+        XCTAssertNil(normKey("Тест"))
+        XCTAssertNil(normKey("🎮"))
+        XCTAssertNil(normKey(""))
+        XCTAssertNil(normKey("---"))
+        XCTAssertEqual(normKey("Café"), "cafe")
+        XCTAssertEqual(normKey("iterm2"), "iterm2")
+    }
+
+
     func testPathIdentityKeyUsesNFC() {
         let nfc = "/tmp/Café"
         let nfd = "/tmp/Cafe\u{0301}"

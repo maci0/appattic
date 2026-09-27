@@ -195,9 +195,9 @@ public func plistDescription(_ info: [String: Any], appName: String) -> String? 
     if text.posixLowercased().contains("project group") { return nil }
     let parts = text.split(whereSeparator: \.isWhitespace).map(String.init)
     if let last = parts.last, fullMatch(last) { return nil }
-    let nameC = norm(appName)
+    let nameC = normKey(appName)
     let textC = norm(text)
-    if textC == nameC || textC == nameC + "formac" { return nil }
+    if let nameC, textC == nameC || textC == nameC + "formac" { return nil }
     if parts.count < 3 { return nil }
     return text
 }

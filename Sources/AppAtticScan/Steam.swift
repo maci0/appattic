@@ -164,9 +164,10 @@ func steamBundles(in dir: String, depth: Int) -> [String] {
 func steamGameBundle(in installDir: String, prefer names: [String]) -> String? {
     let bundles = steamBundles(in: installDir, depth: 2)
     guard !bundles.isEmpty else { return nil }
-    let wants = Set(names.map(norm).filter { !$0.isEmpty })
+    let wants = Set(names.compactMap(normKey))
     if let match = bundles.first(where: {
-        wants.contains(norm(URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent))
+        normKey(URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent)
+            .map { wants.contains($0) } ?? false
     }) {
         return match
     }
@@ -268,11 +269,11 @@ func steamManifestStamp(libraryRoots: [String]? = nil) -> String {
 
 func appendSteamApps(_ apps: inout [AppRecord], seen: inout Set<String>, libraryRoots: [String]? = nil) {
     let steam = findSteamApps(libraryRoots: libraryRoots)
-    let steamNames = Set(steam.map { norm($0.displayName) }.filter { !$0.isEmpty })
+    let steamNames = Set(steam.compactMap { normKey($0.displayName) })
     let steamBids = Set(steam.compactMap { $0.bundleId?.posixLowercased() }.filter { !$0.isEmpty })
     apps.removeAll { existing in
         guard isBrowserAppShortcut(existing.path) else { return false }
-        let drop = steamNames.contains(norm(existing.displayName))
+        let drop = normKey(existing.displayName).map { steamNames.contains($0) } == true
             || (existing.bundleId.map { steamBids.contains($0.posixLowercased()) } ?? false)
         if drop { seen.remove(existing.path) }
         return drop

@@ -471,6 +471,44 @@ final class RecommendTests: XCTestCase {
         XCTAssertEqual(hits.reduce(0) { $0 + $1.sizeBytes }, 45_000_000)
     }
 
+    func testMatchDataItemsDoesNotClaimEveryNonLatinOwnedFolder() {
+        // 微信 and another app's 日本語データ both fold to "". Without a fold
+        // key, every app written in another script would claim every such
+        // folder as its own data.
+        let wechat = DataItem(
+            path: "/tmp/Library/Application Support/微信",
+            name: "微信",
+            rootLabel: "Application Support",
+            kind: "dir",
+            status: "owned",
+            sizeBytes: 40_000_000
+        )
+        let other = DataItem(
+            path: "/tmp/Library/Application Support/日本語データ",
+            name: "日本語データ",
+            rootLabel: "Application Support",
+            kind: "dir",
+            status: "owned",
+            sizeBytes: 80_000_000
+        )
+        let ascii = DataItem(
+            path: "/tmp/Library/Application Support/Sketch",
+            name: "Sketch",
+            rootLabel: "Application Support",
+            kind: "dir",
+            status: "owned",
+            sizeBytes: 12_000_000
+        )
+        XCTAssertEqual(
+            matchDataItems(softwareName: "微信", bundleId: nil, items: [wechat, other, ascii]).map(\.path),
+            [wechat.path]
+        )
+        XCTAssertEqual(
+            matchDataItems(softwareName: "Sketch", bundleId: nil, items: [wechat, other, ascii]).map(\.path),
+            [ascii.path]
+        )
+    }
+
     func testBuildSoftwareAttachesOwnedDataWithoutOwnerField() {
         let app = AppRecord(
             path: "/Applications/Sketch.app",
