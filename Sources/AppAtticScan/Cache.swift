@@ -311,6 +311,9 @@ func userToolDirStamps(_ dirs: [(String, String)]) -> [String] {
     }
 }
 
+/// Cache stamp for an installed Android SDK. Presence only, by design: the
+/// stamp says the SDK is there, not which version, so a cached scan of a
+/// machine that later gains an SDK still has to be re-run for the apps in it.
 func androidSdkStamp(sdkDirs: [String]? = nil) -> String {
     for sdk in sdkDirs ?? defaultAndroidSdkDirs() where androidSdkLooksReal(sdk) {
         return "android-sdk"

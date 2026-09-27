@@ -98,9 +98,10 @@ public func filterPackages(
 
 /// Every removal is guarded: a generated script runs under `set -e`, so a
 /// second run over an already-removed package has to skip the line instead of
-/// exiting nonzero and abandoning the packages after it. Each `present`
-/// query is the same listing the collector reads, so the two agree on what
-/// "installed" means.
+/// exiting nonzero and abandoning the packages after it. A guard asks the
+/// manager what it still lists, which is deliberately broader than the
+/// collector's query: the collector wants the strict "nobody needs this"
+/// answer, while the guard only has to be sure the package is still installed.
 public func packageRemoveCommand(_ entry: PackageEntry) -> String {
     let q = shellQuote(entry.name)
     /// `grep -F --` on the manager's own listing, whose row format the

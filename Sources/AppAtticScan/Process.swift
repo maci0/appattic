@@ -5,6 +5,11 @@ import Darwin
 import Glibc
 #endif
 
+/// First executable named `name`, or nil. A name containing `/` is used as a
+/// path. Otherwise the per-user toolchain directories below are searched
+/// *before* `PATH`, so a `brew` in `~/.local/bin` wins over an earlier `PATH`
+/// entry on purpose: those directories are where this project's own overlays
+/// put a tool, and a stale copy in `PATH` would scan the wrong install.
 public func whichCommand(_ name: String) -> String? {
     if name.isEmpty { return nil }
     if name.contains("/") {
@@ -98,6 +103,11 @@ public func augmentedProcessEnvironment(
 /// writer closed, so a normal command never spends this.
 public let commandPipeDrainGrace: TimeInterval = 2
 
+/// Runs `cmd` without a shell and returns (status, stdout, stderr). Status 127
+/// with empty stdout means the command never ran: empty argv, executable not
+/// found, or a timeout that killed the process. A timeout discards the real
+/// status and stderr, so a caller cannot tell a missing binary from a hang and
+/// must report the tool as unavailable either way.
 public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, String, String) {
     guard let exe = cmd.first else { return (127, "", "empty command") }
     let resolved: String

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a portable AppImage for the Qt 6 Linux UI (appattic-qt).
-# Bundles Qt via linuxdeploy-plugin-qt, libwasmtime.so ($ORIGIN), and core/out WASM.
+# Bundles Qt via linuxdeploy-plugin-qt, libwasmtime.so (usr/lib, $ORIGIN/../lib), and core/out WASM.
 # Usage: bash scripts/linux-appimage.sh
 #   ARCH=aarch64 bash scripts/linux-appimage.sh   # override host arch for tool names
 # Requires Linux, Qt 6 dev, zig, wasmtime (scripts/linux-deps.sh). Exit 3 on Darwin.

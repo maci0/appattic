@@ -86,7 +86,9 @@ private struct UnixMeta {
 }
 
 /// Identity of a file for hardlink / bind-mount dedup. A packed value-keyed set
-/// avoids interpolating a `"dev:ino"` String for every directory entry.
+/// avoids interpolating a `"dev:ino"` String for every directory entry. Only
+/// the allocated size is zeroed on a repeat inode: apparent size is the file's
+/// own length, so a three-hardlink file reports 3x apparent and 1x allocated.
 private struct FileKey: Hashable {
     var dev: UInt64
     var ino: UInt64
@@ -189,6 +191,9 @@ public func validateDiskRoot(_ path: String) throws {
     }
 }
 
+/// Walks `root` and returns the tree, sorted by allocated size descending.
+/// `oneFileSystem` stops at the first other mounted device. `cancel` is polled
+/// during the walk; a cancel returns the partial tree rather than throwing.
 public func scanDiskUsage(
     root: String,
     oneFileSystem: Bool = true,

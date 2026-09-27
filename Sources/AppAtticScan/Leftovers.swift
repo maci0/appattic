@@ -30,8 +30,8 @@ public let appAliases: [String: [String]] = [
 /// two in sync); Packages owns *tools* (PATH overlays, globals). A file in an
 /// overlay root that a package dir also ships (e.g. `~/.local/bin/foo` against
 /// `/usr/bin/foo`) is reported on Leftovers with a `shadow` status linking the
-/// packaged path, never deleted outright. See `isUserBinLeftoverPath` /
-/// `listShadowingOverlays`.
+/// packaged path, and the cleanup script removes the overlay path only, leaving
+/// the packaged file alone. See `isUserBinLeftoverPath` / `listShadowingOverlays`.
 let homeDotData = [
     ".mozilla", ".thunderbird", ".steam", ".wine", ".java",
     ".gradle", ".docker", ".kube", ".aws", ".gnupg", ".ssh",
@@ -1088,7 +1088,8 @@ func collapseBundleIdChildBuckets(_ buckets: inout [String: [DataItem]]) {
         for child in childItems {
             guard let ll = itemLabel[ObjectIdentifier(child)] else { continue }
             // Proper dot-prefixes of the child label, longest first. The
-            // parent side must itself contain a dot (mirrors isBundleIdChild).
+            // parent side must itself contain a dot, so `com.foo.bar` can roll
+            // up to `com.foo` and then stops at `com`.
             var prefix = ll
             while let dot = prefix.lastIndex(of: ".") {
                 prefix = String(prefix[..<dot])

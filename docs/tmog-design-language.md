@@ -136,7 +136,7 @@ Keep: native toolkit, summary-then-depth, tree verbs, size-sorted installed list
 |---------------|----------|
 | Native UI + shared core + helpers | AppKit (SwiftCrossUI) on macOS, Qt 6 Widgets on Linux (`ui/linux-qt`), WinUI on Windows. Zig WASM core + plugins |
 | Summary without tabbing | Overview: totals plus largest leftovers and stale |
-| Deeper pages | Leftovers, Stale Apps, Outdated, Packages, Settings |
+| Deeper pages | Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settings |
 | Process tree: parent or one node | Package tree: remove unused deps with the parent, or one row |
 | Installed apps: sort by size, uninstall | Packages: size column, script-preview remove / mark-manual |
 | Apps vs background | Orphan (distro auto) vs Global (language tools) |

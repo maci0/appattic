@@ -12,6 +12,9 @@ public final class ScanResult {
     public var outdated: [OutdatedPkg]
     public var packages: [PackageEntry]
     public var appsInstalled: Int
+    /// The Homebrew outdated query failed. The rest of the scan ran, so this is
+    /// not "the scan was cut short": it gates scan-cache reuse and writes, so a
+    /// cached scan is retried instead of serving an outdated list.
     public var incomplete: Bool
 
     public init(

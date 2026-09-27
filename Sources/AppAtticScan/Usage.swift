@@ -41,10 +41,12 @@ public struct HistoryIndex {
         self.oldestSeen = oldestSeen
     }
 
-    /// Drops entries whose command timestamp sits after `now`. A shell that
-    /// wrote its history with a clock ahead of ours, or a corrupt epoch field,
-    /// otherwise reads as "run this second": `daysSince` clamps the negative
-    /// age to 0 and the formula is pinned to KEEP with no way to prove it idle.
+    /// Drops entries whose command timestamp is too far ahead of `now` to be a
+    /// real launch: `isPlausibleLaunchDate` allows `launchTimestampFutureTolerance`
+    /// of clock skew and rejects the rest. A shell that wrote its history with a
+    /// badly wrong clock, or a corrupt epoch field, otherwise reads as "run this
+    /// second": `daysSince` clamps the negative age to 0 and the formula is
+    /// pinned to KEEP with no way to prove it idle. `everUsed` is not filtered.
     func droppingTimestampsAfter(_ now: Date) -> HistoryIndex {
         HistoryIndex(
             lastSeen: lastSeen.filter { isPlausibleLaunchDate($0.value, now: now) },

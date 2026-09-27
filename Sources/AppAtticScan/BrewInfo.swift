@@ -384,7 +384,10 @@ public func collectBrew(
         let lines = outS.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         for line in lines.dropFirst() {
             let parts = line.split(whereSeparator: \.isWhitespace).map(String.init)
-            if parts.count >= 2, parts[1] == "started" || parts[1] == "running" {
+            // `brew services list` is "name state ...". Older brew releases
+            // print "running" where newer ones print "started".
+            let state = parts.count >= 2 ? parts[1] : ""
+            if state == "started" || state == "running" {
                 info.services.insert(parts[0])
             }
         }

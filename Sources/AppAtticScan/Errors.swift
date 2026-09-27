@@ -9,8 +9,9 @@ public enum AppAtticIOError: Error, Equatable, LocalizedError, CustomStringConve
     case decodeFailed(path: String, message: String)
 
     /// The cache and settings paths sit under the account home, so the account
-    /// name is in them. Foundation's `localizedDescription` carries the same
-    /// path, so the composed line is redacted whole rather than per field.
+    /// name is in them. `description` returns the raw path; callers that print
+    /// or log an error wrap the line in `redactHomePaths` so the account name
+    /// never leaves the machine.
     public var errorDescription: String? {
         description
     }

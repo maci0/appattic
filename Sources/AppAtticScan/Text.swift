@@ -8,8 +8,9 @@ public func decodeUTF8(_ data: Data) -> String {
     return text
 }
 
-/// Case fold that does not follow the process locale.
-/// `String.lowercased()` maps "I" to "ı" in tr_TR, which breaks identity keys.
+/// Case fold pinned to the POSIX locale, so a Turkish user locale cannot change
+/// an identity key. `String.lowercased()` already uses the Unicode default
+/// mapping, so the wrapper exists for the ASCII speed, not for the semantics.
 ///
 /// ASCII fast path: byte fold (~30 ns) instead of the Locale/ICU pass
 /// (~1.5 µs). Only non-ASCII input takes the slow path, where POSIX and

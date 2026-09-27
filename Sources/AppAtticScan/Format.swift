@@ -29,6 +29,7 @@ func oneDecimal(_ n: Double) -> String {
     return (neg ? "-" : "") + "\(tenths / 10)\(localeDecimalSeparator)\(tenths % 10)"
 }
 
+/// Binary-unit size, one decimal above KB. Bytes print as an exact integer.
 public func humanSize(_ bytes: Int) -> String {
     let units = ["B", "KB", "MB", "GB", "TB", "PB"]
     var n = Double(bytes)
@@ -50,6 +51,11 @@ public func humanSize(_ bytes: Int) -> String {
     return oneDecimal(n) + " " + units[unit]
 }
 
+/// Whole-day age, with the unit chosen by magnitude: hours below 1 day (at
+/// least 1h, so a future or fractional value never prints `0h`), days below
+/// 14, weeks below 60 days, months below 1.5 years, then years. The output unit
+/// changes silently with the input, so a caller comparing formatted strings
+/// across a threshold gets a different unit, not a different number.
 public func humanDays(_ days: Double) -> String {
     if days < 1 {
         return "\(max(Int(days * 24), 1))h"

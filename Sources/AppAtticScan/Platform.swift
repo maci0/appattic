@@ -15,8 +15,8 @@ public enum PlatformOverride {
 public func parseOsRelease(_ text: String) -> [String: String] {
     var out: [String: String] = [:]
     // Byte scan: `trimmingCharacters` + `firstIndex(of:)` per line cost ~26 µs
-    // for a 12-line os-release. Keys/values are ASCII; only the two result
-    // Strings allocate.
+    // for a 12-line os-release. Keys/values are ASCII, so the only String
+    // allocations are the one per key and value.
     //
     // Split on raw LF/CR bytes, not `split(separator: "\n")`: Swift treats
     // "\r\n" as one grapheme cluster, so that never splits a CRLF file.

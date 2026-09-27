@@ -130,6 +130,10 @@ public func duSizes(
 /// `resourceValues`. On corelibs-foundation those populate owner names, which
 /// costs an NSS lookup per entry (~0.5 ms here: `libnss_systemd` D-Bus round
 /// trip), so a 2 300-file tree took 1.2 s instead of ~3 ms.
+///
+/// The Bool is "measured", not "complete": on a deadline overrun the total is
+/// the partial sum of what was walked, so a caller must not present it as the
+/// full size. It is also false when the path could not be read at all.
 public func directoryByteSize(
     _ path: String,
     timeout: TimeInterval = 8,

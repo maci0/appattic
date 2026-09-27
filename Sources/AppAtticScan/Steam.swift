@@ -38,6 +38,10 @@ func vdfPairs(_ text: String, depth wanted: Int) -> [String: String] {
     return out
 }
 
+/// Bit 2 of `StateFlags` in appmanifest_*.acf. A game without it is not
+/// installed, so it is not reported at all.
+private let steamFlagInstalled = 4
+
 func parseSteamAppManifest(_ text: String) -> SteamAppManifest? {
     let pairs = vdfPairs(text, depth: 1)
     let appId = pairs["appid"] ?? ""
@@ -45,7 +49,7 @@ func parseSteamAppManifest(_ text: String) -> SteamAppManifest? {
     let installDir = pairs["installdir"] ?? ""
     guard !appId.isEmpty, !name.isEmpty, !installDir.isEmpty else { return nil }
     let flags = Int(pairs["StateFlags"] ?? "0") ?? 0
-    guard flags & 4 != 0 else { return nil }
+    guard flags & steamFlagInstalled != 0 else { return nil }
     let playedRaw = Int(pairs["LastPlayed"] ?? "0") ?? 0
     let size = Int(pairs["SizeOnDisk"] ?? "0") ?? 0
     return SteamAppManifest(
@@ -130,6 +134,9 @@ func isBrowserAppShortcut(_ path: String) -> Bool {
         || p.contains("/microsoft edge apps.localized/")
 }
 
+/// A Steam game whose manifest carried a size is never measured with `du`.
+/// The manifest value is kept instead, so a stale `SizeOnDisk` from a moved
+/// or partially deleted install is what gets reported.
 func skipLiveDu(_ a: AppRecord) -> Bool {
     a.extra["steam_appid"] != nil && a.sizeBytes > 0
 }

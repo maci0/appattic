@@ -121,8 +121,9 @@ QByteArray encodeSettingsJson(const AppSettings &s) {
     o.insert(QStringLiteral("confirmDelete"), s.confirmDelete);
     QJsonArray ign;
     QSet<QString> seen;
-    // Same order the CLI and the macOS UI write: normalized and deduplicated,
-    // otherwise as given. Sorting here would churn the file on every save.
+    // Paths are normalized and deduplicated, otherwise as given. The caller's
+    // list comes from a QSet, so it arrives in hash order, not in the order the
+    // user entered it; nothing here re-sorts it.
     for (const QString &raw : s.ignoredLeftoverPaths) {
         const QString p = raw.normalized(QString::NormalizationForm_C);
         if (p.isEmpty() || seen.contains(p)) continue;

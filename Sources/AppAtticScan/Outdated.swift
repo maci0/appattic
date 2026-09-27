@@ -4,8 +4,8 @@ import FoundationNetworking
 #endif
 
 // Per-line hot loops below use manual index walks instead of NSRegularExpression
-// plus `trimmingCharacters` (which alone costs ~2.2 µs/line). Zero allocations
-// except the result Strings.
+// plus `trimmingCharacters` (which alone costs ~2.2 µs/line). The byte walks
+// themselves allocate nothing; rows still build a result String.
 // Compiled once. NSRegularExpression is immutable and safe to share across threads.
 private let localeRegionRE = try! NSRegularExpression(pattern: #"rg=([a-z]{2})"#, options: [.caseInsensitive])
 private let localeCountryRE = try! NSRegularExpression(pattern: #"_([A-Z]{2})"#)
@@ -167,6 +167,9 @@ public func outdatedReason(_ pkg: OutdatedPkg) -> String {
     return "\(mgr) reports \(cur) installed and \(latest) available. AppAttic does not run this upgrade."
 }
 
+/// Marks refused casks as untrusted and adds the ones absent from `pkgs`.
+/// `OutdatedPkg` is a class, so the marking mutates the caller's elements in
+/// place; only newly added rows are exclusive to the returned array.
 public func applyUntrustedCasks(_ pkgs: [OutdatedPkg], refused: [UntrustedCask]) -> [OutdatedPkg] {
     var out = pkgs
     for u in refused {

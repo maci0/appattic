@@ -10,7 +10,7 @@ Follow-on to [`2026-08-17-swift-scan-port-design.md`](archive/2026-08-17-swift-s
 
 ## Decision
 
-Replace in-process Swift scan logic with a Zig core compiled to WebAssembly. **Every package manager and every leftover scan path is a WASM plugin.** Native SwiftCrossUI stays on macOS (AppKit). Linux UI is C++ Qt 6 Widgets (`ui/linux-qt`), matching TMOG Linux. Do not silent-delete. Named distro upgrades (`apt install --only-upgrade pkg`, `pacman -S pkg`, `dnf upgrade pkg`) wait for confirm. No full `apt upgrade` / `pacman -Syu`. `scripts/linux-qt-link.sh` is the Linux link step; CI and the Dockerfiles require `LINUX_QT_LINK=ok`. Build on the distro you run.
+Replace in-process Swift scan logic with a Zig core compiled to WebAssembly. **Every package manager and every leftover scan path is a WASM plugin.** Native SwiftCrossUI stays on macOS (AppKit). Linux UI is C++ Qt 6 Widgets (`ui/linux-qt`), matching TMOG Linux. Do not silent-delete. Named distro upgrades (`apt install --only-upgrade pkg`, `pacman -S pkg`, `dnf upgrade pkg`) wait for confirm. No full `apt upgrade` / `pacman -Syu`. `scripts/linux-qt-link.sh` is the Linux link step; CI and the Dockerfiles run it, and a `LINUX_QT_LINK=ok` line from it is the gate (`tests/AppAtticScanTests/PackagingTests.swift` fails a build file that hardcodes the line instead of running the check). Build on the distro you run.
 
 Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability*, https://github.com/cordiverse/paper (PDF, 88 pages). Text taken with `pdftotext` from `paper.pdf` on 2026-08-26. Cordis is TypeScript. AppAttic follows the same composability rules in Zig + WASM.
 

@@ -1,4 +1,8 @@
 import Foundation
+/// Map over `items` in parallel, preserving input order. `workers` bounds how
+/// many calls to `fn` run at once; `concurrentPerform` still gets one iteration
+/// per item, with a semaphore holding the rest. A single item or a `workers`
+/// value of 1 or less runs inline.
 public func pmap<T, R>(_ items: [T], workers: Int = 16, _ fn: (T) -> R) -> [R] {
     guard !items.isEmpty else { return [] }
     if items.count == 1 || workers <= 1 { return items.map(fn) }

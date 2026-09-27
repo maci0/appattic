@@ -14,6 +14,9 @@ struct DiskUsageView: View {
     private let allocated = true
     private let oneFileSystem = true
     @State private var selected: DiskUsageNode? = nil
+    /// The node waiting for the trash confirmation. Moving to Trash is not
+    /// undoable from here, so the button arms this instead of deleting.
+    @State private var pendingTrash: DiskUsageNode? = nil
     @State private var activeScan: ScanTicket? = nil
 
     /// A walk started before the one the user asked for last. Cancelled, not
@@ -89,7 +92,7 @@ struct DiskUsageView: View {
                             #endif
                         }
                         Button("Move to Trash") {
-                            trash(selected)
+                            pendingTrash = selected
                         }
                     }
                     Spacer()
@@ -130,6 +133,20 @@ struct DiskUsageView: View {
                 }
             }
         }
+        .alert("Move to Trash?", isPresented: trashConfirmBinding) {
+            Button("Cancel") { pendingTrash = nil }
+            Button("Move to Trash") {
+                if let node = pendingTrash { trash(node) }
+                pendingTrash = nil
+            }
+        }
+    }
+
+    private var trashConfirmBinding: Binding<Bool> {
+        Binding(
+            get: { pendingTrash != nil },
+            set: { if !$0 { pendingTrash = nil } }
+        )
     }
 
     @ViewBuilder

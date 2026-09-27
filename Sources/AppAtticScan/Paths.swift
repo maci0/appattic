@@ -40,10 +40,11 @@ public func xdgStateHome(
     xdgUserDir("XDG_STATE_HOME", fallback: ".local/state", home: home, env: env)
 }
 
-/// XDG Base Directory: an unset or empty `XDG_DATA_DIRS` uses the spec default.
-/// An empty variable is not the same as a variable listing no system dirs.
+/// The spec default for an unset or empty `XDG_DATA_DIRS`.
 private let defaultXDGDataDirs = "/usr/local/share:/usr/share"
 
+/// XDG Base Directory: an unset or empty `XDG_DATA_DIRS` uses the spec default.
+/// An empty variable is not the same as a variable listing no system dirs.
 public func xdgSystemDirs(
     env: [String: String] = ProcessInfo.processInfo.environment
 ) -> String {
@@ -51,9 +52,7 @@ public func xdgSystemDirs(
     return raw.isEmpty ? defaultXDGDataDirs : raw
 }
 
-/// Identity token for leftover/app matching. NFC and NFD spellings of the same
-/// word collapse (macOS filenames are NFD, plist names are usually NFC).
-/// Fold one scalar the way the slow path does: NFD -> case+diacritic fold -> keep
+/// Fold one scalar the way `norm` does: NFD -> case+diacritic fold -> keep
 /// ASCII letters/digits. Only the non-ASCII path needs the full Unicode machinery.
 private func normSlow(_ s: String) -> String {
     s.decomposedStringWithCanonicalMapping
@@ -64,6 +63,9 @@ private func normSlow(_ s: String) -> String {
         .filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
 }
 
+/// Identity token for leftover/app matching. NFC and NFD spellings of the same
+/// word collapse (macOS filenames are NFD, plist names are usually NFC), and
+/// `normSlow` shows the full fold this fast path reproduces.
 public func norm(_ s: String) -> String {
     // Fast path: for pure-ASCII input, canonical decomposition and diacritic
     // folding are no-ops, so this is exactly lowercasing then keeping [a-z0-9].
