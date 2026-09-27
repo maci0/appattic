@@ -19,4 +19,4 @@ AppAttic is a local CLI and desktop UI. It does not listen on a network port, au
 
 ## Out of scope for this file
 
-Individual vulnerability fixes, CVE/dependency inventory, and PII mapping live elsewhere. This file must not claim a mitigation the code does not implement.
+Individual vulnerability fixes, CVE/dependency inventory, and PII mapping live elsewhere. The third-party inventory is `scripts/deps.sh`: `check` gates the pins in `scripts/lint.sh`, `sbom` writes the CycloneDX file shipped next to each release artifact. This file must not claim a mitigation the code does not implement.

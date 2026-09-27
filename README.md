@@ -155,7 +155,14 @@ bash scripts/linux-appimage.sh
 
 `VERSION` is the current git tag without a leading `v`, or `1.2.1` if untagged. The release workflow sets it from the `v*` tag. The script then runs `--smoke` on the AppImage and fails if that does not print `SMOKE=ok`. Debug builds additionally take `--dev-check <table|stream|disk|shot>`: the CI gates and the offscreen page renders (`shot <dir>`), all compiled out with `NDEBUG`.
 
-Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downloads pinned linuxdeploy, linuxdeploy-plugin-qt, and appimagetool into `dist/.appimage-tools/` and checks SHA-256. WASM modules ship under `usr/share/appattic/`; `libwasmtime.so` sits next to the binary.
+Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downloads pinned linuxdeploy, linuxdeploy-plugin-qt, and appimagetool into `dist/.appimage-tools/` and checks SHA-256. WASM modules ship under `usr/share/appattic/`; `libwasmtime.so` sits next to the binary. It also writes `dist/AppAttic-<arch>.AppImage.sbom.json`, a CycloneDX 1.5 inventory of every pinned third-party artifact that went into the image. Regenerate it or check the pins yourself:
+
+```bash
+bash scripts/deps.sh check              # pins vs download URLs vs Flatpak sha256
+bash scripts/deps.sh sbom out.json      # CycloneDX 1.5 inventory
+```
+
+`scripts/lint.sh` runs `check`, so a version bump that leaves a pin, a URL, or a Flatpak `sha256:` behind fails the local gate.
 
 Flatpak (Qt 6 from org.kde.Platform, host package-manager queries via `flatpak-spawn --host`):
 

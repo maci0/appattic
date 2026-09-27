@@ -385,6 +385,9 @@ fi
     echo "qt: $($QMAKE -query QT_VERSION 2>/dev/null || printf unknown)"
 } >"${OUT}.buildinfo"
 
+# What third-party code went into the image, so a consumer can scan it.
+bash "$ROOT/scripts/deps.sh" sbom "${OUT}.sbom.json"
+
 export APPATTIC_HOST_EXEC_FIXTURE=1
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}"
 echo "smoke: QT_QPA_PLATFORM=$QT_QPA_PLATFORM $OUT --smoke"
@@ -400,6 +403,7 @@ fi
 
 echo "AppImage: $OUT"
 echo "buildinfo: ${OUT}.buildinfo"
+echo "sbom: ${OUT}.sbom.json"
 echo "run:    $OUT"
 echo "bundled:"
 echo "  - appattic-qt + Qt 6 (linuxdeploy-plugin-qt)"

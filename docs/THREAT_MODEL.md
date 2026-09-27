@@ -15,7 +15,7 @@ AppAttic is a local cleanup utility (CLI `appattic`, macOS AppKit UI, Linux Qt 6
 | 3 | Leftover classifier lists a credential or config tree as orphaned (`rm -rf ~/.aws` and similar) | Filesystem → leftover model | Secret loss (cloud keys, Docker config) | `linuxSystemNames` / `appleServiceNames` mark `.ssh`, `.gnupg`, and many OS dirs `system` (`Leftovers.swift`) | `.aws` is scanned as a home leaf and is not in the system-name set. Misclassification is a recurring class. |
 | 4 | `host.exec` is the only host import; a bug there is WASM breakout to process spawn | WASM guest → host | Arbitrary subprocess if allowlist fails | Allowlist + metacharacter reject + destructive-token deny (`hostexec.c`). No WASI filesystem. | No Wasmtime fuel/epoch. `APPATTIC_CORE_OUT` loads whatever `.wasm` files are there. Live `execvp` on Linux unless `APPATTIC_HOST_EXEC_FIXTURE`. |
 | 5 | Outdated / brew / Flatpak talk to the network; answers are parsed as versions and names | App → internet | Wrong upgrade target; attacker who owns the tap/index influences `brew upgrade` / `flatpak update` | Untrusted Homebrew casks listed, not updated (`BrewInfo.swift`, `Outdated.swift`). Named distro upgrades run only after confirm as `/bin/sh`, never via `host.exec`. App Store stays report-only. `HOMEBREW_NO_AUTO_UPDATE=1`. | iTunes lookup is HTTPS with no pinning. Package-manager stdout is trusted JSON/text. |
-| 6 | Build scripts download toolchains | Build → runtime | Compromised zig/wasmtime/Swift/linuxdeploy becomes the binary you ship | SHA-256 pins in `scripts/dep-checksums.sha256` for Zig, Wasmtime, Swift, linuxdeploy, appimagetool. Dockerfiles copy that file and `verify-sha256.sh` next to `linux-deps.sh` before `--install`. | No GPG. `swift:5.10.1-jammy` and `archlinux:base-devel` are tag-pinned, not digest-pinned. |
+| 6 | Build scripts download toolchains | Build → runtime | Compromised zig/wasmtime/Swift/linuxdeploy becomes the binary you ship | SHA-256 pins in `scripts/dep-checksums.sha256` for Zig, Wasmtime, Swift, linuxdeploy, appimagetool. Dockerfiles copy that file and `verify-sha256.sh` next to `linux-deps.sh` before `--install`. `scripts/deps.sh check` runs in `scripts/lint.sh` and fails if a pin, a download URL, or a Flatpak `sha256:` drifts. | No GPG. `swift:5.10.1-jammy` and `archlinux:base-devel` are tag-pinned, not digest-pinned. |
 
 ## Attack surface inventory
 
@@ -107,7 +107,7 @@ AppAttic does not store service credentials. It *reads* user files that may cont
 
 ### 7. Build → runtime
 
-Pinned SHA-256 for Zig, Wasmtime C API, Swift Linux tarball, linuxdeploy, and appimagetool (`scripts/dep-checksums.sha256`, `verify-sha256.sh`). macOS app is ad-hoc codesigned (`build.sh` `codesign --force --sign -`). AppImage is not signed in-tree. Docker base images are version tags, not digests.
+Pinned SHA-256 for Zig, Wasmtime C API, Swift Linux tarball, linuxdeploy, and appimagetool (`scripts/dep-checksums.sha256`, `verify-sha256.sh`). `scripts/deps.sh check` keeps those pins, the download URLs in the scripts, and the `sha256:` fields in `packaging/flatpak/` in agreement. `scripts/deps.sh sbom` writes a CycloneDX 1.5 inventory of those artifacts and of the `Package.resolved` pins next to each release artifact. macOS app is ad-hoc codesigned (`build.sh` `codesign --force --sign -`). AppImage is not signed in-tree. Docker base images are version tags, not digests.
 
 ## Assets and impact
 

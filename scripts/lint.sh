@@ -16,7 +16,8 @@ case "${1:-}" in
 Usage: bash scripts/lint.sh
 
   shellcheck on the shell scripts, yamllint on the YAML,
-  host C warnings-as-errors, zig fmt --check,
+  host C warnings-as-errors, hostexec warnings-as-errors,
+  dependency pin consistency, zig fmt --check,
   no AI tool credit in commit messages
 EOF
         exit 0
@@ -44,6 +45,9 @@ if ! command -v yamllint >/dev/null 2>&1; then
     exit 1
 fi
 yamllint -c "$ROOT/.yamllint" "$ROOT"/.github/workflows/*.yml "$ROOT"/packaging/flatpak/*.yml
+
+echo "== dependency pins =="
+bash "$ROOT/scripts/deps.sh" check
 
 if ! command -v cc >/dev/null 2>&1; then
     echo "error: cc missing" >&2

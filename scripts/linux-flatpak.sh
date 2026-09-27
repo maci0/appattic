@@ -197,6 +197,7 @@ if [[ $rc -ne 0 ]] || ! printf '%s\n' "$dump" | grep -q '^SMOKE=ok$'; then
 fi
 
 echo "Flatpak: $BUNDLE"
+bash "$ROOT/scripts/deps.sh" sbom "${BUNDLE}.sbom.json"
 echo "app-id: $APP_ID"
 echo "run:    flatpak run $APP_ID"
 echo "install from bundle: flatpak install --user $BUNDLE"
