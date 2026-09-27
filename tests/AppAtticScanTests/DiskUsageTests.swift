@@ -31,6 +31,29 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertEqual(tree.children.first?.name, "big")
     }
 
+    func testDecodeDirentNameRejectsBytesThatAreNotUTF8() {
+        // A POSIX name may hold any byte but NUL and `/`. Decoding 0xff with a
+        // lossy decoder yields a U+FFFD, whose re-encoded bytes name a different
+        // file, so the walk must refuse the entry instead of misattributing it.
+        let bad: [UInt8] = [0x63, 0x61, 0x66, 0xff, 0x65, 0x00]
+        let badName = bad.withUnsafeBytes { decodeDirentName($0) }
+        XCTAssertNil(badName)
+
+        let truncated: [UInt8] = [0x63, 0x61, 0x66, 0xc3]
+        let truncatedName = truncated.withUnsafeBytes { decodeDirentName($0) }
+        XCTAssertNil(truncatedName)
+    }
+
+    func testDecodeDirentNameKeepsValidUTF8AndStopsAtNUL() {
+        let bytes: [UInt8] = [0x63, 0x61, 0x66, 0xc3, 0xa9, 0x00, 0x6a, 0x75, 0x6e, 0x6b]
+        let decoded = bytes.withUnsafeBytes { decodeDirentName($0) }
+        XCTAssertEqual(decoded, "café")
+
+        let ascii: [UInt8] = Array("notes.txt".utf8)
+        let plain = ascii.withUnsafeBytes { decodeDirentName($0) }
+        XCTAssertEqual(plain, "notes.txt")
+    }
+
     func testFormatDiskTreeListsLargestFirst() {
         let root = DiskUsageNode(name: "root", path: "/tmp/root", apparent: 100, allocated: 200, isDir: true)
         root.children = [

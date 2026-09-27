@@ -46,16 +46,23 @@ func parseNewlineNameSet(_ text: String) -> Set<String> {
     )
 }
 
+/// Read the names file through `decodeUTF8`, not `String(contentsOf:encoding:)`.
+///
+/// A strict decode drops the whole file on the first byte it cannot read, and an
+/// empty name set makes every entry under a system root look like an orphan. A
+/// leading BOM decodes but sticks to the first name instead. `decodeUTF8` is the
+/// convention the rest of the scanners follow: invalid bytes become U+FFFD, a
+/// leading BOM is not content.
 func loadLinuxSystemNamesText() -> String {
     if let url = Bundle.module.url(forResource: "linux-system-names", withExtension: "txt"),
-       let text = try? String(contentsOf: url, encoding: .utf8)
+       let data = try? Data(contentsOf: url)
     {
-        return text
+        return decodeUTF8(data)
     }
     let here = URL(fileURLWithPath: #filePath)
     let repo = here.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let file = repo.appendingPathComponent("core/src/linux-system-names.txt")
-    return (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+    return readUTF8File(file.path) ?? ""
 }
 
 let linuxSystemNames: Set<String> = parseNewlineNameSet(loadLinuxSystemNamesText())
@@ -461,7 +468,7 @@ public func probeActivityMtime(
         while true {
             errno = 0
             guard let ent = readdir(dirp) else { break }
-            let name = direntName(ent)
+            guard let name = direntName(ent) else { continue }
             if name == "." || name == ".." || name.hasPrefix(".") { continue }
             names.append(name)
         }

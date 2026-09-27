@@ -130,9 +130,30 @@ private func unixMeta(_ path: String, follow: Bool = false) -> UnixMeta? {
     return unixMetaFromStat(st)
 }
 
-func direntName(_ ent: UnsafeMutablePointer<dirent>) -> String {
+/// A `d_name` byte buffer, up to its NUL terminator, as a String. Nil when
+/// the bytes are not UTF-8.
+func decodeDirentName(_ bytes: UnsafeRawBufferPointer) -> String? {
+    let name = bytes.prefix { $0 != 0 }
+    // Every real name is ASCII, and the stdlib decode is the only one of the
+    // two that does not go through NSString on a per-entry path.
+    if name.allSatisfy({ $0 < 0x80 }) { return String(decoding: name, as: UTF8.self) }
+    return String(bytes: name, encoding: .utf8)
+}
+
+/// A directory entry name, or nil when its bytes are not UTF-8.
+///
+/// `d_name` is raw bytes: a POSIX filesystem holds any byte except NUL and `/`,
+/// so a name can be invalid UTF-8. `String(cString:)` decodes with the platform
+/// default and substitutes U+FFFD, and the caller hands that lossy string back
+/// to `fstatat`/`openat` as UTF-8, which names a *different* entry: the walk
+/// would then attribute one file's size to another, or drop the entry when the
+/// replacement names nothing. A name that cannot be reproduced byte for byte
+/// has no usable path, so the entry is reported as unaccounted instead.
+func direntName(_ ent: UnsafeMutablePointer<dirent>) -> String? {
     withUnsafePointer(to: &ent.pointee.d_name) { ptr in
-        ptr.withMemoryRebound(to: CChar.self, capacity: 256) { String(cString: $0) }
+        ptr.withMemoryRebound(to: CChar.self, capacity: 256) { chars in
+            decodeDirentName(UnsafeRawBufferPointer(start: chars, count: 256))
+        }
     }
 }
 
@@ -229,7 +250,12 @@ private func walkDiskFd(
             if errno != 0 { node.unreadable = true }
             break
         }
-        let name = direntName(ent)
+        guard let name = direntName(ent) else {
+            // Not representable as text, so not representable as a path:
+            // counting it under a substituted name would report the wrong size.
+            node.unreadable = true
+            continue
+        }
         if name == "." || name == ".." { continue }
         let childPath = node.path.hasSuffix("/") ? node.path + name : node.path + "/" + name
         var st = stat()
