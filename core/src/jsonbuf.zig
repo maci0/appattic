@@ -1,4 +1,9 @@
 const std = @import("std");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
+const isQuotedValue = fuzzsupport.isQuotedValue;
+const unquote = fuzzsupport.unquote;
 
 /// Fixed-buffer JSON writer for WASM plugins. No allocator.
 pub const W = struct {
@@ -127,7 +132,7 @@ pub fn isSafeIdent(s: []const u8) bool {
 /// Bytes a POSIX shell reads as a literal inside an unquoted word. Same set
 /// as Swift `isSafeShellByte`, so a generated command reads the same on both
 /// sides of the core.
-fn isSafeShellByte(c: u8) bool {
+pub fn isSafeShellByte(c: u8) bool {
     return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
         (c >= '0' and c <= '9') or
         c == '_' or c == '@' or c == '%' or c == '+' or c == '=' or
@@ -140,7 +145,8 @@ fn isSafeShellByte(c: u8) bool {
 /// UI runs the result under `pkexec`. A value that is already shell-safe is
 /// returned as is. Writes into `buf` and returns the slice, or null when it
 /// does not fit so the caller fails the render instead of emitting a
-/// truncated command.
+/// truncated command. `fuzzsupport.quoteByConstruction` is the harness oracle
+/// for the same thing, and takes the byte rule from here.
 pub fn shQuote(buf: []u8, value: []const u8) ?[]const u8 {
     var needs_quote = value.len == 0;
     for (value) |c| {
@@ -389,4 +395,89 @@ test "json string replaces truncated utf8 sequence" {
     w.str(&[_]u8{ 'c', 0xc3 });
     const got = w.slice() orelse return error.Overflow;
     try std.testing.expectEqualStrings("\"c\\ufffd\"", got);
+}
+
+/// The seeds: real names the listing parsers have accepted, the injection
+/// payloads a hostile registry or a file in `~/.local/bin` would carry, and
+/// the UTF-8 and control bytes that arrive with them.
+const fuzz_shquote_names = packFuzzSlice("wget\n@scope/pkg\nlibfoo-1.2_3.4+5\n");
+const fuzz_shquote_utf8 = packFuzzSlice("café\n日本語\n\xff\n\xc3\n");
+const fuzz_shquote_quotes = packFuzzSlice("'\n''\n'''\na'b'c\nfoo'; reboot; '\nx'; reboot; '\n");
+const fuzz_shquote_shell = packFuzzSlice("$(id)\n`id`\na;rm -rf /\na|sh\na&b\na>b\na\\b\n");
+const fuzz_shquote_flags = packFuzzSlice("--force\n-rf\n--registry=evil\n");
+const fuzz_shquote_control = packFuzzSlice("a\nb\na\rb\na\x00b\na\x01b\na\x7fb\na\tb\n");
+const fuzz_shquote_empty = packFuzzSlice("");
+
+test "fuzz shQuote" {
+    try std.testing.fuzz({}, fuzzShQuote, .{ .corpus = &.{
+        &fuzz_shquote_names,
+        &fuzz_shquote_utf8,
+        &fuzz_shquote_quotes,
+        &fuzz_shquote_shell,
+        &fuzz_shquote_flags,
+        &fuzz_shquote_control,
+        &fuzz_shquote_empty,
+    } });
+}
+
+/// Every value reaches a generated `/bin/sh` command that the UI runs under
+/// `pkexec`, so the property is not that `shQuote` returns: it is that a shell
+/// reading the result recovers the value, byte for byte, as one word. A
+/// fuzzer that only checked for a null return would see every injection
+/// payload here as a pass, because the payload is quoted correctly.
+fn fuzzShQuote(_: void, smith: *std.testing.Smith) !void {
+    var raw: [512]u8 = undefined;
+    const value = raw[0..smith.slice(&raw)];
+
+    // A buffer with room for the worst case: two quotes around the value, and
+    // four bytes for each quote in it.
+    var buf: [4 * 512 + 2]u8 = undefined;
+    const quoted = shQuote(&buf, value) orelse {
+        // The only refusal is a value that does not fit, and this one fits.
+        try std.testing.expect(false);
+        return;
+    };
+
+    var all_safe = value.len > 0;
+    for (value) |c| {
+        if (!isSafeShellByte(c)) all_safe = false;
+    }
+    if (all_safe) {
+        // Nothing to quote means the value is emitted verbatim, so the shell
+        // reads it as one word only because every byte is inert on its own.
+        try std.testing.expectEqualStrings(value, quoted);
+        return;
+    }
+
+    // Quoted, so the Qt guard has to accept it and the shell has to read back
+    // exactly the value. A form the guard rejects is a cleanup the UI drops.
+    try std.testing.expect(isQuotedValue(quoted));
+    var back: [512]u8 = undefined;
+    try std.testing.expectEqualStrings(value, unquote(quoted, &back) orelse return error.Overflow);
+}
+
+// A value that does not fit the caller's buffer is refused rather than
+// truncated: a truncated command is a different command, and the UI runs it.
+// Sweeping every buffer size, so the sizes that need the widest escape are
+// covered whatever the loop reserves.
+test "shQuote refuses a value it cannot write whole" {
+    var buf: [512]u8 = undefined;
+    var back: [512]u8 = undefined;
+    for ([_][]const u8{ "wget", "", "a b", "a'b", "a'b'c", "foo'; reboot; '", "café", "a\nb" }) |value| {
+        var room: usize = 0;
+        while (room <= value.len * 4 + 8) : (room += 1) {
+            const quoted = shQuote(buf[0..room], value) orelse continue;
+            // A command written from a prefix of the value removes the wrong
+            // target, so whatever comes back has to be the whole value.
+            if (isQuotedValue(quoted)) {
+                try std.testing.expectEqualStrings(value, unquote(quoted, &back) orelse return error.Overflow);
+            } else {
+                try std.testing.expectEqualStrings(value, quoted);
+            }
+        }
+        // Room for the value and the widest escape on every byte of it is
+        // always enough, so a caller that sizes the buffer like this never
+        // loses the row.
+        try std.testing.expect(shQuote(buf[0 .. value.len * 4 + 2], value) != null);
+    }
 }
