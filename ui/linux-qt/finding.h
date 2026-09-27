@@ -71,6 +71,7 @@ QString shellQuote(const QString &s);
 bool scriptHasCommands(const QString &script);
 QString humanSize(qint64 bytes);
 QString localeDateLabel(const QDate &date);
+QString localeDateTimeLabel(const QDateTime &dt);
 QString humanKind(const QString &kind);
 QString pluginScanLabel(const QString &pluginId);
 QString managerLabel(const Finding &f);

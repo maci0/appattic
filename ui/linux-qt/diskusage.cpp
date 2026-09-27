@@ -4,6 +4,8 @@
 
 #include "diskusage.h"
 
+#include "finding.h"
+
 #include <QDateTime>
 #include <QTimeZone>
 #include <QDir>
@@ -631,7 +633,7 @@ QString diskModifiedLabel(qint64 mtime) {
     if (mtime <= 0) return QStringLiteral("unknown");
     const QDateTime dt = QDateTime::fromSecsSinceEpoch(mtime, QTimeZone::systemTimeZone());
     if (!dt.isValid()) return QStringLiteral("unknown");
-    return dt.toString(QStringLiteral("yyyy-MM-dd"));
+    return localeDateLabel(dt.date());
 }
 
 

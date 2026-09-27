@@ -12,7 +12,7 @@ public func restrictOwnerOnlyDirectory(at url: URL) throws {
 public func restrictPrivateDataFile(at url: URL) throws {
     try restrictOwnerOnlyFile(at: url)
     let dir = url.deletingLastPathComponent()
-    if dir.lastPathComponent.lowercased() == "appattic" {
+    if dir.lastPathComponent.posixLowercased() == "appattic" {
         try restrictOwnerOnlyDirectory(at: dir)
     }
 }

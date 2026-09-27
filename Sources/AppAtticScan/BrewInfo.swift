@@ -120,7 +120,7 @@ public func refusedCasks(from err: String) -> [UntrustedCask] {
             token = String(slash)
         }
         token = token.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
-        guard !token.isEmpty, seen.insert(token.lowercased()).inserted else { continue }
+        guard !token.isEmpty, seen.insert(token.posixLowercased()).inserted else { continue }
         var tap: String?
         if let tapR = Range(match.range(at: 2), in: err) {
             tap = String(err[tapR]).trimmingCharacters(in: CharacterSet(charactersIn: "'\". "))
@@ -396,12 +396,12 @@ public func collectBrew(
     attachSummaries(info.outdated, summaries: descMap, titles: titleMap)
     var unique: [UntrustedCask] = []
     var seen = Set<String>()
-    for u in refused where seen.insert(u.name.lowercased()).inserted {
+    for u in refused where seen.insert(u.name.posixLowercased()).inserted {
         unique.append(u)
     }
     info.untrustedCasks = unique
     for u in unique {
-        if let i = info.casks.firstIndex(where: { $0.name.lowercased() == u.name.lowercased() }) {
+        if let i = info.casks.firstIndex(where: { $0.name.posixLowercased() == u.name.posixLowercased() }) {
             info.casks[i].untrustedTap = u.tap
         }
     }

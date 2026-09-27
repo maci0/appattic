@@ -64,7 +64,7 @@ func parseSteamLibraryFolders(_ text: String) -> [String] {
     for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
         let line = raw.trimmingCharacters(in: .whitespaces)
         let quoted = vdfQuotedStrings(String(line))
-        if quoted.count >= 2, quoted[0].lowercased() == "path" {
+        if quoted.count >= 2, quoted[0].posixLowercased() == "path" {
             let path = quoted[1]
             if !path.isEmpty, seen.insert(path).inserted {
                 paths.append(path)
@@ -111,7 +111,7 @@ func visitSteamLibraries(libraryRoots: [String]?, body: (String) -> Void) {
 }
 
 func isSteamSupportPackage(_ name: String) -> Bool {
-    let n = name.lowercased()
+    let n = name.posixLowercased()
     if n.contains("steamworks") { return true }
     if n.contains("steam linux runtime") { return true }
     if n.hasPrefix("proton ") {
@@ -124,7 +124,7 @@ func isSteamSupportPackage(_ name: String) -> Bool {
 }
 
 func isBrowserAppShortcut(_ path: String) -> Bool {
-    let p = path.lowercased()
+    let p = path.posixLowercased()
     return p.contains("/chrome apps.localized/")
         || p.contains("/brave browser apps.localized/")
         || p.contains("/microsoft edge apps.localized/")
@@ -140,7 +140,7 @@ func steamBundles(in dir: String, depth: Int) -> [String] {
     for name in entries where !name.hasPrefix(".") {
         let child = (dir as NSString).appendingPathComponent(name)
         if name.hasSuffix(".app") {
-            if !name.lowercased().contains("helper") {
+            if !name.posixLowercased().contains("helper") {
                 out.append(child)
             }
             continue
@@ -241,7 +241,7 @@ public func findSteamApps(libraryRoots: [String]? = nil) -> [AppRecord] {
             apps.append(app)
         }
     }
-    apps.sort { $0.displayName.lowercased() < $1.displayName.lowercased() }
+    apps.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     return apps
 }
 
@@ -260,11 +260,11 @@ func steamManifestStamp(libraryRoots: [String]? = nil) -> String {
 func appendSteamApps(_ apps: inout [AppRecord], seen: inout Set<String>, libraryRoots: [String]? = nil) {
     let steam = findSteamApps(libraryRoots: libraryRoots)
     let steamNames = Set(steam.map { norm($0.displayName) }.filter { !$0.isEmpty })
-    let steamBids = Set(steam.compactMap { $0.bundleId?.lowercased() }.filter { !$0.isEmpty })
+    let steamBids = Set(steam.compactMap { $0.bundleId?.posixLowercased() }.filter { !$0.isEmpty })
     apps.removeAll { existing in
         guard isBrowserAppShortcut(existing.path) else { return false }
         let drop = steamNames.contains(norm(existing.displayName))
-            || (existing.bundleId.map { steamBids.contains($0.lowercased()) } ?? false)
+            || (existing.bundleId.map { steamBids.contains($0.posixLowercased()) } ?? false)
         if drop { seen.remove(existing.path) }
         return drop
     }

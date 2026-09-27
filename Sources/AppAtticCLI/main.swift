@@ -253,15 +253,7 @@ func renderTable(headers: [String], rows: [[String]]) -> String {
 
 func fmtDt(_ dt: Date?) -> String {
     guard let dt else { return "-" }
-    guard let days = calendarDaysSince(dt) else { return "-" }
-    if days <= 0 { return "today" }
-    if days < 45 { return "\(humanDays(Double(days))) ago" }
-    let f = DateFormatter()
-    f.locale = Locale(identifier: "en_US_POSIX")
-    f.calendar = Calendar(identifier: .gregorian)
-    f.timeZone = TimeZone.current
-    f.dateFormat = "yyyy-MM-dd"
-    return f.string(from: dt)
+    return TimestampFormat.string(from: dt)
 }
 
 func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {

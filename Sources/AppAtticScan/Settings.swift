@@ -223,7 +223,7 @@ public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSett
     let dir = url.deletingLastPathComponent()
     do {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if dir.lastPathComponent.lowercased() == "appattic" {
+        if dir.lastPathComponent.posixLowercased() == "appattic" {
             try restrictOwnerOnlyDirectory(at: dir)
         }
     } catch {

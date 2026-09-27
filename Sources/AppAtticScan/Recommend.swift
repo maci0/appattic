@@ -116,13 +116,13 @@ public func visibleStaleSoftware(_ items: [SoftwareItem], includeSystem: Bool) -
 
 func matchDataItems(softwareName: String, bundleId: String?, items: [DataItem]) -> [DataItem] {
     var out: [DataItem] = []
-    let swLow = softwareName.lowercased()
+    let swLow = softwareName.posixLowercased()
     let swNorm = norm(softwareName)
-    let b = (bundleId ?? "").lowercased()
+    let b = (bundleId ?? "").posixLowercased()
     for it in items {
         if it.leftoverStatus != .owned { continue }
-        let n = stripLeftoverNameSuffix(it.name).lowercased()
-        if let owner = it.owner, owner.lowercased() == swLow {
+        let n = stripLeftoverNameSuffix(it.name).posixLowercased()
+        if let owner = it.owner, owner.posixLowercased() == swLow {
             out.append(it)
             continue
         }
@@ -131,7 +131,7 @@ func matchDataItems(softwareName: String, bundleId: String?, items: [DataItem]) 
             continue
         }
         let display = leftoverDisplayName(name: it.name, extraPaths: it.extraPaths)
-        if display.lowercased() == swLow || norm(display) == swNorm {
+        if display.posixLowercased() == swLow || norm(display) == swNorm {
             out.append(it)
             continue
         }
@@ -184,16 +184,16 @@ func caskForApp(_ app: AppRecord, casks: [Cask], pathIndex: [String: String]) ->
     if let token = pathIndex[app.path], let hit = casks.first(where: { $0.name == token }) {
         return hit
     }
-    let base = URL(fileURLWithPath: app.path).deletingPathExtension().lastPathComponent.lowercased()
-    let display = app.displayName.lowercased()
+    let base = URL(fileURLWithPath: app.path).deletingPathExtension().lastPathComponent.posixLowercased()
+    let display = app.displayName.posixLowercased()
     let an = norm(app.displayName)
     for c in casks {
         for art in c.appNames {
-            let artBase = URL(fileURLWithPath: art).deletingPathExtension().lastPathComponent.lowercased()
+            let artBase = URL(fileURLWithPath: art).deletingPathExtension().lastPathComponent.posixLowercased()
             if !artBase.isEmpty, artBase == base { return c }
         }
         let titles = [c.name] + c.titles
-        let lowered = Set(titles.filter { !$0.isEmpty }.map { $0.lowercased() })
+        let lowered = Set(titles.filter { !$0.isEmpty }.map { $0.posixLowercased() })
         if !display.isEmpty, lowered.contains(display) { return c }
         if an.count < 6 { continue }
         let cn = norm(c.name)
@@ -323,8 +323,8 @@ public func buildSoftware(
 
     let darwinNonApp = includeDarwinNonApp ?? PlatformOverride.isDarwin
     if darwinNonApp {
-        let formulaNames = Set(brew.formulas.map { $0.name.lowercased() })
-        let caskNames = Dictionary(brew.casks.map { ($0.name.lowercased(), $0.name) }, uniquingKeysWith: { _, last in last })
+        let formulaNames = Set(brew.formulas.map { $0.name.posixLowercased() })
+        let caskNames = Dictionary(brew.casks.map { ($0.name.posixLowercased(), $0.name) }, uniquingKeysWith: { _, last in last })
         let paths = nonAppPaths ?? nonAppEntriesIn("/Applications")
         let measure = du ?? { p in
             var isDir: ObjCBool = false
@@ -338,7 +338,7 @@ public func buildSoftware(
                 continue
             }
             let name = URL(fileURLWithPath: path).lastPathComponent
-            let key = name.lowercased()
+            let key = name.posixLowercased()
             if formulaNames.contains(key) { continue }
             let (size, measured) = measure(path)
             let caskName = caskNames[key]
@@ -355,9 +355,9 @@ public func buildSoftware(
         }
     }
 
-    var seenCasks = Set(software.compactMap { $0.caskName?.lowercased() })
+    var seenCasks = Set(software.compactMap { $0.caskName?.posixLowercased() })
     for c in brew.casks {
-        let key = c.name.lowercased()
+        let key = c.name.posixLowercased()
         if seenCasks.contains(key) { continue }
         seenCasks.insert(key)
         let path = URL(fileURLWithPath: brew.prefix ?? "/opt/homebrew")

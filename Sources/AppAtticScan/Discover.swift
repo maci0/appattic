@@ -161,7 +161,7 @@ public func categoryLabel(_ uti: String?) -> String? {
 }
 
 public func isJunkAppBlurb(_ text: String) -> Bool {
-    let low = text.lowercased()
+    let low = text.posixLowercased()
     if low.contains("all rights reserved") { return true }
     if low.contains("unity player") { return true }
     return false
@@ -171,7 +171,7 @@ public func plistDescription(_ info: [String: Any], appName: String) -> String? 
     let raw = (info["NSHumanReadableDescription"] as? String) ?? (info["CFBundleGetInfoString"] as? String)
     guard var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
     if isJunkAppBlurb(text) { return nil }
-    let low = text.lowercased()
+    let low = text.posixLowercased()
     for marker in [", copyright", " copyright", ", ©", " ©", " (c)", "(c)"] {
         if let r = low.range(of: marker), r.lowerBound > low.startIndex {
             let idx = text.index(text.startIndex, offsetBy: low.distance(from: low.startIndex, to: r.lowerBound))
@@ -192,7 +192,7 @@ public func plistDescription(_ info: [String: Any], appName: String) -> String? 
         } ?? false
     }
     if fullMatch(text) { return nil }
-    if text.lowercased().contains("project group") { return nil }
+    if text.posixLowercased().contains("project group") { return nil }
     let parts = text.split(whereSeparator: \.isWhitespace).map(String.init)
     if let last = parts.last, fullMatch(last) { return nil }
     let nameC = norm(appName)
@@ -310,7 +310,7 @@ public func makeApp(from appPath: String) -> AppRecord? {
         }
     }
     let bid = info["CFBundleIdentifier"] as? String
-    if let bid, bid.lowercased().hasPrefix("com.apple.") {
+    if let bid, bid.posixLowercased().hasPrefix("com.apple.") {
         isSystem = true
     }
     var extra: [String: String] = [:]
@@ -541,7 +541,7 @@ private func finishAppDiscovery(_ apps: inout [AppRecord], seen: inout Set<Strin
         apps[i].sizeBytes = pair.0
         apps[i].sizeMeasured = pair.1
     }
-    apps.sort { $0.displayName.lowercased() < $1.displayName.lowercased() }
+    apps.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
 }
 
 public func findApps(progress: (String) -> Void = { _ in }) -> [AppRecord] {
@@ -621,7 +621,7 @@ public func nonAppEntriesIn(_ root: String) -> [String] {
     guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
     for name in names.sorted() {
         if name.hasSuffix(".app") || name.hasPrefix(".") { continue }
-        if skip.contains(name.lowercased()) { continue }
+        if skip.contains(name.posixLowercased()) { continue }
         let path = (root as NSString).appendingPathComponent(name)
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue, dirContainsAppBundle(path) {

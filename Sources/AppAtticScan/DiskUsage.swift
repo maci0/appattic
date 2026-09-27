@@ -47,16 +47,14 @@ public final class DiskUsageNode {
 
     public func sortChildren(allocatedSize: Bool) {
         if children.count > 1 {
-            // Fold the name once per child instead of bridging to NSString for
-            // every comparator call: tie-heavy directories do O(n) folds, not O(n log n).
-            var keyed = children.map { (node: $0, key: $0.name.lowercased()) }
-            keyed.sort { a, b in
-                let am = a.node.metric(allocatedSize: allocatedSize)
-                let bm = b.node.metric(allocatedSize: allocatedSize)
+            // Collation, not UTF-8 byte order: a byte-ordered tie-break puts
+            // "Über" after "Zurich" and every CJK folder after all Latin ones.
+            children.sort { a, b in
+                let am = a.metric(allocatedSize: allocatedSize)
+                let bm = b.metric(allocatedSize: allocatedSize)
                 if am != bm { return am > bm }
-                return a.key < b.key
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
             }
-            children = keyed.map(\.node)
         }
         for c in children { c.sortChildren(allocatedSize: allocatedSize) }
     }

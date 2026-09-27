@@ -52,7 +52,7 @@ public func writeScanCache(_ cache: ScanCacheFile, to url: URL = defaultScanCach
     let dir = url.deletingLastPathComponent()
     do {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if dir.lastPathComponent.lowercased() == "appattic" {
+        if dir.lastPathComponent.posixLowercased() == "appattic" {
             try restrictOwnerOnlyDirectory(at: dir)
         }
     } catch {

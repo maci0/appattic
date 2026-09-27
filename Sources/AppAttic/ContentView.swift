@@ -5,42 +5,10 @@ import AppAtticScan
 import AppKit
 #endif
 
-/// Cutoff past which a timestamp shows its date instead of a relative label.
-private let relativeDayLimit = 45
-
-private enum DateFmt {
-    static let medium: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .none
-        return f
-    }()
-
-    /// Locale-aware day counts: "Today", "Yesterday", "3 days ago", and the
-    /// plural forms a language actually needs (Polish has five).
-    static let days: DateComponentsFormatter = {
-        let f = DateComponentsFormatter()
-        f.allowedUnits = .day
-        f.unitsStyle = .named
-        f.maximumUnitCount = 1
-        return f
-    }()
-}
-
 func formatDate(_ iso: String?) -> String {
     guard let iso = iso, !iso.isEmpty else { return "-" }
     guard let d = parseISODate(iso) else { return String(iso.prefix(10)) }
-    guard let days = calendarDaysSince(d), days < relativeDayLimit else {
-        return DateFmt.medium.string(from: d)
-    }
-    // Anchor both ends at local midnight so the interval is a whole number of
-    // days, including across a daylight-saving change.
-    let calendar = Calendar.current
-    let today = calendar.startOfDay(for: Date())
-    guard let then = calendar.date(byAdding: .day, value: -days, to: today) else {
-        return DateFmt.medium.string(from: d)
-    }
-    return DateFmt.days.string(from: then, to: today)
+    return TimestampFormat.string(from: d)
 }
 
 /// One decimal, with the locale's decimal separator and grouping.

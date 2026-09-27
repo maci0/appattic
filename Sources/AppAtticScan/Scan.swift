@@ -144,7 +144,7 @@ public func applyPrefsFallback(_ apps: inout [AppRecord], items: [DataItem]) {
     var prefs: [String: Date] = [:]
     for i in items where i.rootLabel == "Preferences" {
         guard let mt = i.mtime else { continue }
-        var bid = i.name.lowercased()
+        var bid = i.name.posixLowercased()
         if bid.hasSuffix(".plist") { bid = String(bid.dropLast(6)) }
         if let prev = prefs[bid], prev >= mt { continue }
         prefs[bid] = mt
@@ -152,7 +152,7 @@ public func applyPrefsFallback(_ apps: inout [AppRecord], items: [DataItem]) {
     for i in apps.indices {
         if apps[i].lastUsed != nil { continue }
         guard let bid = apps[i].bundleId else { continue }
-        guard let dt = prefs[bid.lowercased()] else { continue }
+        guard let dt = prefs[bid.posixLowercased()] else { continue }
         if let used = effectiveLastUsed(dt, apps[i].installedAt) {
             apps[i].lastUsed = used
             apps[i].lastUsedSource = "prefs-mtime"

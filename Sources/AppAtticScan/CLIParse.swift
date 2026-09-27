@@ -124,7 +124,7 @@ func cliCommandList() -> String {
 /// Closest command within `cliSuggestionDistance` edits, for a typo like `updat`.
 func nearestCLICommand(_ typed: String) -> String? {
     let cliSuggestionDistance = 2
-    let input = Array(typed.lowercased())
+    let input = Array(typed.posixLowercased())
     var best: (command: String, distance: Int)?
     for command in cliCommands.sorted() {
         let distance = cliEditDistance(input, Array(command))

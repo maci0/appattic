@@ -140,4 +140,27 @@ final class DatesTests: XCTestCase {
         XCTAssertGreaterThan(evening.timeIntervalSince(morning) / 86400, 1)
         XCTAssertEqual(calendarDaysSince(morning, now: evening, calendar: cal), 0)
     }
+
+    /// A recent timestamp gets a relative label, never the absolute date.
+    /// Anchored in the current calendar so the assertion holds whatever TZ the
+    /// test runs under.
+    func testTimestampFormatUsesARelativeLabelWithinTheWindow() throws {
+        let cal = Calendar.current
+        let now = Date()
+        for daysAgo in [0, 1, 3, relativeDayLimit - 1] {
+            let then = try XCTUnwrap(cal.date(byAdding: .day, value: -daysAgo, to: now))
+            let label = TimestampFormat.string(from: then, now: now)
+            XCTAssertFalse(label.isEmpty)
+            XCTAssertNotEqual(label, TimestampFormat.date.string(from: then))
+        }
+    }
+
+    /// Past the relative window the absolute date is shown, and it comes from
+    /// the locale's own date style rather than a hardcoded `yyyy-MM-dd`.
+    func testTimestampFormatFallsBackToDatePastTheRelativeWindow() throws {
+        let cal = Calendar.current
+        let now = Date()
+        let old = try XCTUnwrap(cal.date(byAdding: .day, value: -(relativeDayLimit + 10), to: now))
+        XCTAssertEqual(TimestampFormat.string(from: old, now: now), TimestampFormat.date.string(from: old))
+    }
 }

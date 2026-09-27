@@ -55,8 +55,8 @@ public func parseOsRelease(_ text: String) -> [String: String] {
 
 public func linuxDistroFamily(osRelease: String) -> String {
     let fields = parseOsRelease(osRelease)
-    let id = (fields["ID"] ?? "").lowercased()
-    let like = (fields["ID_LIKE"] ?? "").lowercased()
+    let id = (fields["ID"] ?? "").posixLowercased()
+    let like = (fields["ID_LIKE"] ?? "").posixLowercased()
         .split(whereSeparator: \.isWhitespace)
         .map(String.init)
     let tokens = ([id] + like).filter { !$0.isEmpty }

@@ -64,7 +64,7 @@ public func toggleListedSelection(selected: Set<String>, visible: [String]) -> S
 }
 
 public func isSteamManagedPath(_ path: String) -> Bool {
-    let p = path.lowercased()
+    let p = path.posixLowercased()
     return p.contains("/steamapps/") || p.contains("/steam.appbundle/")
 }
 

@@ -619,7 +619,7 @@ func prettyDnsLeftoverLabel(_ label: String) -> String? {
     if !asciiHasByte(core, 0x2E) { return core }
     let parts = core.split(separator: ".").map(String.init).filter { !$0.isEmpty }
     for part in parts.reversed() {
-        let low = part.lowercased()
+        let low = part.posixLowercased()
         if genericDnsLabels.contains(low) { continue }
         if genericVendorLabels.contains(norm(part)) { continue }
         if isGenericOwnerToken(part) { continue }
@@ -671,7 +671,11 @@ private func leftoverMatchesCategory(
     categories: [String]
 ) -> Bool {
     guard !categories.isEmpty else { return true }
-    let cats = categories.map { $0.lowercased() }
+    // POSIX fold on both sides: the category comes from the command line and
+    // the fields come from disk, so neither should be case-folded by the
+    // user's locale. In tr_TR a plain lowercased() turns "--category FIREFOX"
+    // into "fırefox" and matches nothing.
+    let cats = categories.map { posixLowercased($0) }
     let fields = [
         name,
         leftoverDisplayName(name: name, extraPaths: extraPaths),
@@ -681,7 +685,7 @@ private func leftoverMatchesCategory(
         shadows ?? "",
     ] + extraPaths
     return fields.contains { field in
-        let low = field.lowercased()
+        let low = posixLowercased(field)
         return cats.contains { low.contains($0) }
     }
 }
@@ -965,7 +969,7 @@ public func leftoverBlurbsFromSnapshot(_ brew: BrewSnapshot) -> [String: String]
     var catalog: [String: String] = [:]
     func put(_ key: String, _ desc: String?) {
         guard let desc, !desc.isEmpty else { return }
-        catalog[key.lowercased()] = desc
+        catalog[key.posixLowercased()] = desc
         catalog[norm(key)] = desc
     }
     for f in brew.formulas { put(f.name, f.desc) }
@@ -989,19 +993,19 @@ public func leftoverBlurbsFromBrew(
     var seen = Set<String>()
     let names = tokens.filter { token in
         guard token.count >= 2 else { return false }
-        return seen.insert(token.lowercased()).inserted
+        return seen.insert(token.posixLowercased()).inserted
     }.prefix(limit).map { $0 }
     guard !names.isEmpty else { return [:] }
     let data = infoJSONForNames(brew: brew, names: names, run: run)
     let (summaries, titles) = brewPackageMeta(data)
     var catalog: [String: String] = [:]
     for (name, desc) in summaries {
-        catalog[name.lowercased()] = desc
+        catalog[name.posixLowercased()] = desc
         catalog[norm(name)] = desc
     }
     for (token, title) in titles {
         if let desc = summaries[token] {
-            catalog[title.lowercased()] = desc
+            catalog[title.posixLowercased()] = desc
             catalog[norm(title)] = desc
         }
     }
@@ -1107,7 +1111,7 @@ func collapseBundleIdChildBuckets(_ buckets: inout [String: [DataItem]]) {
 }
 
 func dnsVendorPrefix(_ name: String) -> String? {
-    let parts = entryLabel(name).split(separator: ".").map { $0.lowercased() }.filter { !$0.isEmpty }
+    let parts = entryLabel(name).split(separator: ".").map { posixLowercased(String($0)) }.filter { !$0.isEmpty }
     guard parts.count >= 3, genericDnsLabels.contains(parts[0]), parts[1].count >= 3 else { return nil }
     if genericVendorLabels.contains(norm(parts[1])) { return nil }
     return parts[0] + "." + parts[1]
@@ -1173,7 +1177,7 @@ func mergeOrphanGroup(_ group: [DataItem]) -> DataItem {
 }
 
 func vendorFromBid(_ bundleId: String) -> String? {
-    let labels = bundleId.lowercased().split(separator: ".").map(String.init).filter { !$0.isEmpty }
+    let labels = bundleId.posixLowercased().split(separator: ".").map(String.init).filter { !$0.isEmpty }
     if labels.isEmpty { return nil }
     var i = 0
     if genericDnsLabels.contains(labels[0]) {
@@ -1229,7 +1233,7 @@ public final class Identity {
                 addName(candidate, owner: a.displayName)
             }
             if let bidRaw = a.bundleId {
-                let b = bidRaw.lowercased()
+                let b = bidRaw.posixLowercased()
                 bundleIds.insert(b)
                 appByBid[b] = a.displayName
                 if !b.contains("."), b.count >= 4 {
@@ -1262,7 +1266,7 @@ public final class Identity {
             for name in brew.allNames {
                 let n = norm(name)
                 if !n.isEmpty { brewNames.insert(n) }
-                brewRaw.insert(name.lowercased())
+                brewRaw.insert(name.posixLowercased())
             }
         }
         for raw in toolNames {
@@ -1271,7 +1275,7 @@ public final class Identity {
             let n = norm(base)
             if n.count < 2 { continue }
             brewNames.insert(n)
-            brewRaw.insert(base.lowercased())
+            brewRaw.insert(base.posixLowercased())
             for alias in toolLeftoverAliases[n] ?? [] {
                 brewNames.insert(alias)
             }
@@ -1291,7 +1295,7 @@ public final class Identity {
     }
 
     func addStem(_ raw: String) {
-        var s = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        var s = raw.trimmingCharacters(in: .whitespaces).posixLowercased()
         if s.isEmpty { return }
         s = URL(fileURLWithPath: s).deletingPathExtension().lastPathComponent
         if s.hasSuffix(".app") { s = String(s.dropLast(4)) }
@@ -1312,7 +1316,7 @@ public final class Identity {
     }
 
     func ownedByStem(_ entry: String) -> Bool {
-        let e = stripLeftoverNameSuffix(entry).lowercased()
+        let e = stripLeftoverNameSuffix(entry).posixLowercased()
         guard let f = e.utf8.first, let bucket = stemIndex[f] else { return false }
         for t in bucket {
             if e == t.stem { return true }
@@ -1336,7 +1340,7 @@ public final class Identity {
             }
         }
         if stem.isEmpty { return }
-        let d = stem.lowercased()
+        let d = stem.posixLowercased()
         if isBundleId(d) {
             bundleIds.insert(d)
             if appByBid[d] == nil { appByBid[d] = app.displayName }
@@ -1363,7 +1367,7 @@ public final class Identity {
 
     public func classify(_ name: String, kind: String) -> (String, String?) {
         let core = stripLeftoverNameSuffix(name)
-        let low = core.lowercased()
+        let low = core.posixLowercased()
         let n = norm(core)
         let bidLike = ["bundleid", "group", "savedstate", "plist"].contains(kind) || isBundleId(low)
         if bidLike {
@@ -1446,7 +1450,7 @@ public final class Identity {
             return ("owned", nil)
         }
         if labels.count >= 2, isTeamId(labels[0]) {
-            let tokens = teamIdVendors[labels[0].lowercased()] ?? []
+            let tokens = teamIdVendors[labels[0].posixLowercased()] ?? []
             let known = affinity.union(names).union(stems)
             if !tokens.isDisjoint(with: known) { return ("owned", nil) }
             return classifyBid(labels.dropFirst().joined(separator: "."))

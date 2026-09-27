@@ -54,6 +54,24 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertEqual(plain, "notes.txt")
     }
 
+    /// Equal-size children fall back to the name. Byte order would put "Über"
+    /// and every CJK name after all ASCII ones; collation orders by letter.
+    func testSortChildrenTieBreaksOnLocaleCollation() {
+        let root = DiskUsageNode(name: "root", path: "/tmp/root", apparent: 300, allocated: 300, isDir: true)
+        root.children = [
+            DiskUsageNode(name: "Über", path: "/tmp/root/Über", apparent: 100, allocated: 100),
+            DiskUsageNode(name: "apple", path: "/tmp/root/apple", apparent: 100, allocated: 100),
+            DiskUsageNode(name: "Zebra", path: "/tmp/root/Zebra", apparent: 100, allocated: 100),
+        ]
+        root.sortChildren(allocatedSize: false)
+        let names = root.children.map(\.name)
+        XCTAssertEqual(names.count, 3)
+        XCTAssertEqual(
+            names,
+            names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        )
+    }
+
     func testFormatDiskTreeListsLargestFirst() {
         let root = DiskUsageNode(name: "root", path: "/tmp/root", apparent: 100, allocated: 200, isDir: true)
         root.children = [

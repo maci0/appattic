@@ -288,3 +288,49 @@ public func daysSince(_ date: Date?, now: Date = Date()) -> Double? {
     guard let date else { return nil }
     return max(0, now.timeIntervalSince(date) / 86400)
 }
+
+/// Day count past which a timestamp shows its date instead of a relative label.
+public let relativeDayLimit = 45
+
+/// Locale-aware timestamps for every surface that shows one.
+///
+/// `medium` and `named` carry the locale's own month and day names, its date
+/// order, and its plural rules (Polish has five forms, Arabic six), which a
+/// hardcoded `yyyy-MM-dd` plus "N days ago" cannot. Both formatters inherit
+/// `Locale.current`, so a `LC_ALL` change reaches them on the next call.
+public enum TimestampFormat {
+    /// Absolute date, no time. `dateStyle` rather than `dateFormat`, so the
+    /// pattern and the era come from CLDR instead of a fixed template.
+    public static let date: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    /// "Today", "Yesterday", "3 days ago", localized and correctly pluralized.
+    public static let relativeDays: DateComponentsFormatter = {
+        let f = DateComponentsFormatter()
+        f.allowedUnits = .day
+        f.unitsStyle = .named
+        f.maximumUnitCount = 1
+        return f
+    }()
+
+    /// A relative label within `relativeDayLimit` days, otherwise the date.
+    /// Falls back to the date whenever the age cannot be measured, so an
+    /// out-of-range or far-future timestamp never renders as an empty cell.
+    public static func string(from date: Date, now: Date = Date()) -> String {
+        guard let days = calendarDaysSince(date, now: now), days < relativeDayLimit else {
+            return self.date.string(from: date)
+        }
+        // Anchor both ends at local midnight so the interval is a whole number
+        // of days, including across a daylight-saving change.
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        guard let then = calendar.date(byAdding: .day, value: -days, to: today) else {
+            return self.date.string(from: date)
+        }
+        return relativeDays.string(from: then, to: today)
+    }
+}

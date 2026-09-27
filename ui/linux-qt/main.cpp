@@ -1022,7 +1022,7 @@ private slots:
         m_findings = findings;
         pruneStaleMarks();
         m_scanOk = (rc == 0);
-        m_scanAt = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"));
+        m_scanAt = localeDateTimeLabel(QDateTime::currentDateTime());
         if (rc != 0) {
             /* Core stderr carries absolute paths, so the account name in the
                home prefix reaches the error bar without this. */

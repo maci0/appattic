@@ -7,11 +7,11 @@ func defaultCrossOverBottlesDir() -> String? {
 }
 
 func isCrossOverHelperPath(_ path: String) -> Bool {
-    path.lowercased().contains("/applications/crossover/")
+    path.posixLowercased().contains("/applications/crossover/")
 }
 
 func isCrossOverPath(_ path: String) -> Bool {
-    let p = path.lowercased()
+    let p = path.posixLowercased()
     return p.contains("/crossover/bottles/") || isCrossOverHelperPath(path)
 }
 
@@ -29,7 +29,7 @@ func listCrossOverBottleDirs(bottlesDir: String? = nil) -> [String] {
         }
     }
     return out.sorted {
-        URL(fileURLWithPath: $0).lastPathComponent.lowercased() < URL(fileURLWithPath: $1).lastPathComponent.lowercased()
+        URL(fileURLWithPath: $0).lastPathComponent.localizedStandardCompare(URL(fileURLWithPath: $1).lastPathComponent) == .orderedAscending
     }
 }
 
@@ -74,7 +74,7 @@ func crossoverBottleStamp(bottlesDir: String? = nil) -> String {
 func appendCrossOverBottles(_ apps: inout [AppRecord], seen: inout Set<String>, bottlesDir: String? = nil) {
     apps.removeAll { existing in
         let helper = isCrossOverHelperPath(existing.path)
-            || (existing.bundleId?.lowercased().hasPrefix("com.codeweavers.crossoverhelper") ?? false)
+            || (existing.bundleId?.posixLowercased().hasPrefix("com.codeweavers.crossoverhelper") ?? false)
         if helper { seen.remove(existing.path) }
         return helper
     }

@@ -170,8 +170,8 @@ public func outdatedReason(_ pkg: OutdatedPkg) -> String {
 public func applyUntrustedCasks(_ pkgs: [OutdatedPkg], refused: [UntrustedCask]) -> [OutdatedPkg] {
     var out = pkgs
     for u in refused {
-        let key = u.name.lowercased()
-        if let existing = out.first(where: { $0.manager == "brew-cask" && $0.name.lowercased() == key }) {
+        let key = u.name.posixLowercased()
+        if let existing = out.first(where: { $0.manager == "brew-cask" && $0.name.posixLowercased() == key }) {
             existing.kind = "untrusted"
             existing.reason = untrustedCaskReason(u)
             if existing.summary?.isEmpty ?? true {
@@ -324,7 +324,7 @@ public func brewPackageMeta(_ data: [String: Any]) -> ([String: String], [String
         } else if let name = c["name"] as? String {
             pretty = name.trimmingCharacters(in: .whitespaces)
         }
-        if let pretty, !pretty.isEmpty, pretty.lowercased() != token.lowercased() {
+        if let pretty, !pretty.isEmpty, pretty.posixLowercased() != token.posixLowercased() {
             titles[token] = pretty
         }
     }
@@ -343,7 +343,7 @@ public func attachSummaries(
         }
         if p.title?.isEmpty ?? true {
             let text = (titles[p.name] ?? "").trimmingCharacters(in: .whitespaces)
-            if !text.isEmpty, text.lowercased() != p.name.lowercased() {
+            if !text.isEmpty, text.posixLowercased() != p.name.posixLowercased() {
                 p.title = text
             }
         }
@@ -417,12 +417,12 @@ private func flatpakRows(_ text: String) -> [String: (String?, String?, String?)
                     tail)
         }) ?? nil else { continue }
         let key = String(row.0)
-        let low = key.lowercased()
+        let low = key.posixLowercased()
         if low == "application" || low == "application id" || low == "name" || low == "id" { continue }
         let version = row.1.map(String.init)
         var title = row.2.map(String.init)
         let summary = row.3.map(String.init)
-        if let t = title, t.lowercased() == low { title = nil }
+        if let t = title, t.posixLowercased() == low { title = nil }
         mapping[key] = (version, title, summary)
     }
     return mapping
@@ -477,8 +477,8 @@ private func snapNameVersionMap(_ text: String) -> [String: String] {
     for (idx, raw) in raws.enumerated() {
         let t = raw.trimmingCharacters(in: .whitespaces)
         if t.isEmpty { continue }
-        if t.lowercased().hasPrefix("all snaps up to date") { return mapping }
-        headIdx = t.split(whereSeparator: \.isWhitespace).first?.lowercased() == "name" ? idx : nil
+        if t.posixLowercased().hasPrefix("all snaps up to date") { return mapping }
+        headIdx = t.split(whereSeparator: \.isWhitespace).first?.posixLowercased() == "name" ? idx : nil
         break
     }
     for (idx, raw) in raws.enumerated() {
@@ -789,10 +789,10 @@ public func storeCountries(_ localeText: String? = nil) -> [String] {
     let ns = src as NSString
     let full = NSRange(location: 0, length: ns.length)
     if let m = localeRegionRE.firstMatch(in: src, range: full), m.numberOfRanges >= 2 {
-        countries.append(ns.substring(with: m.range(at: 1)).lowercased())
+        countries.append(ns.substring(with: m.range(at: 1)).posixLowercased())
     }
     if let m = localeCountryRE.firstMatch(in: src, range: full), m.numberOfRanges >= 2 {
-        let code = ns.substring(with: m.range(at: 1)).lowercased()
+        let code = ns.substring(with: m.range(at: 1)).posixLowercased()
         if !countries.contains(code) { countries.append(code) }
     }
     if !countries.contains("us") { countries.append("us") }
@@ -912,7 +912,7 @@ public func pkgFromItunes(
     guard versionNewer(latest: latestVal, current: current) else { return nil }
     let title = (displayName ?? (row["trackName"] as? String) ?? "").trimmingCharacters(in: .whitespaces)
     var titleOut: String? = title.isEmpty ? nil : title
-    if let t = titleOut, t.lowercased() == bundleId.lowercased() { titleOut = nil }
+    if let t = titleOut, t.posixLowercased() == bundleId.posixLowercased() { titleOut = nil }
     return OutdatedPkg(
         name: bundleId,
         manager: "app-store",
@@ -1066,7 +1066,7 @@ public func attachItunesMeta(_ pkgs: [OutdatedPkg], catalog: [String: [String: A
         }
         if p.title == nil {
             let title = (row["trackName"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
-            if !title.isEmpty, title.lowercased() != p.name.lowercased() {
+            if !title.isEmpty, title.posixLowercased() != p.name.posixLowercased() {
                 p.title = title
             }
         }
@@ -1279,14 +1279,19 @@ public func collectLinux(
     return pmap(queries, workers: 4) { $0() }.flatMap { $0 }
 }
 
+/// Lookup keys for joining a package to the software it belongs to. These are
+/// identifiers from Homebrew, apt, the App Store and the desktop database, so
+/// the fold must not follow the user's locale: in tr_TR `lowercased()` maps "I"
+/// to "ı" and a package called "ILKER" never links to an app called "ilker",
+/// which silently drops it from the Outdated list.
 func softwareKeys(_ sw: Software) -> Set<String> {
-    var keys: Set<String> = [sw.name.lowercased()]
-    if let v = sw.caskName, !v.isEmpty { keys.insert(v.lowercased()) }
-    if let v = sw.bundleId, !v.isEmpty { keys.insert(v.lowercased()) }
-    if let v = sw.pkgId, !v.isEmpty { keys.insert(v.lowercased()) }
-    for b in sw.bins { keys.insert(b.lowercased()) }
+    var keys: Set<String> = [sw.name.posixLowercased()]
+    if let v = sw.caskName, !v.isEmpty { keys.insert(v.posixLowercased()) }
+    if let v = sw.bundleId, !v.isEmpty { keys.insert(v.posixLowercased()) }
+    if let v = sw.pkgId, !v.isEmpty { keys.insert(v.posixLowercased()) }
+    for b in sw.bins { keys.insert(b.posixLowercased()) }
     if let desktopId = sw.extra["desktop_id"], !desktopId.isEmpty {
-        keys.insert(desktopId.lowercased())
+        keys.insert(desktopId.posixLowercased())
     }
     return keys
 }
@@ -1299,8 +1304,8 @@ public func applyOutdated(_ software: [Software], pkgs: [OutdatedPkg]) {
         }
     }
     for pkg in pkgs {
-        var keys: Set<String> = [pkg.name.lowercased()]
-        if let title = pkg.title, !title.isEmpty { keys.insert(title.lowercased()) }
+        var keys: Set<String> = [pkg.name.posixLowercased()]
+        if let title = pkg.title, !title.isEmpty { keys.insert(title.posixLowercased()) }
         for key in keys {
             for sw in index[key] ?? [] {
                 sw.outdated = true
@@ -1326,9 +1331,9 @@ public func attachSummariesFromSoftware(_ software: [Software], pkgs: [OutdatedP
     }
     for pkg in pkgs {
         if pkg.summary != nil { continue }
-        var hit = index[pkg.name.lowercased()]
+        var hit = index[pkg.name.posixLowercased()]
         if hit == nil, let title = pkg.title {
-            hit = index[title.lowercased()]
+            hit = index[title.posixLowercased()]
         }
         if let hit { pkg.summary = hit }
     }

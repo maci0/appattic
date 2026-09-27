@@ -188,6 +188,13 @@ QString localeDateLabel(const QDate &date) {
     return loc.toString(date, QLocale::ShortFormat);
 }
 
+/// The same rule for a timestamp that carries a time of day.
+QString localeDateTimeLabel(const QDateTime &dt) {
+    const QLocale loc;
+    if (loc.name() == QLatin1String("C")) return dt.toString(Qt::ISODate);
+    return loc.toString(dt, QLocale::ShortFormat);
+}
+
 QString humanSize(qint64 bytes) {
     if (bytes < 0) return QStringLiteral("unknown");
     double n = double(bytes);

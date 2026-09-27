@@ -64,7 +64,7 @@ public func filterPackages(
     filter: PackageListFilter,
     search: String = ""
 ) -> [PackageEntry] {
-    let q = search.lowercased()
+    let q = posixLowercased(search)
     return rows.filter { item in
         switch filter {
         case .all:
@@ -75,12 +75,12 @@ public func filterPackages(
             if item.kind != "global" { return false }
         }
         if q.isEmpty { return true }
-        return item.name.lowercased().contains(q)
-            || item.manager.lowercased().contains(q)
-            || item.kind.lowercased().contains(q)
-            || (item.version ?? "").lowercased().contains(q)
-            || (item.summary ?? "").lowercased().contains(q)
-            || (item.reason ?? "").lowercased().contains(q)
+        return item.name.posixLowercased().contains(q)
+            || item.manager.posixLowercased().contains(q)
+            || item.kind.posixLowercased().contains(q)
+            || (item.version ?? "").posixLowercased().contains(q)
+            || (item.summary ?? "").posixLowercased().contains(q)
+            || (item.reason ?? "").posixLowercased().contains(q)
     }.sorted { a, b in
         switch (a.size_bytes, b.size_bytes) {
         case let (l?, r?):
@@ -92,7 +92,7 @@ public func filterPackages(
         default:
             break
         }
-        return a.name.lowercased() < b.name.lowercased()
+        return a.name.posixLowercased() < b.name.posixLowercased()
     }
 }
 
