@@ -313,10 +313,21 @@ func linuxUninstallId(source: String, path: String, pkgId: String?) -> String {
     return linuxPkgId(source: source, desktopId: base, exec: "")
 }
 
+/// A `..` path component. A name a scan read off the filesystem cannot be one,
+/// so a path carrying it was spelled by something else.
+func hasParentSegment(_ path: String) -> Bool {
+    path.split(separator: "/").contains("..")
+}
+
 /// Packaged OS prefixes that leftover/uninstall scripts must not `rm`.
 /// The root list is identical to Qt `isProtectedPackagedPath` in `ui/linux-qt/finding.cpp`.
 public func isProtectedPackagedPath(_ path: String) -> Bool {
     if path.isEmpty { return false }
+    // The removal quotes the path as written, so a `..` segment walks out of
+    // whatever the prefix test just approved: `/home/u/gone/../../../etc` is
+    // not under a packaged root by spelling and deletes `/etc` once `rm`
+    // resolves it.
+    if hasParentSegment(path) { return true }
     let roots = [
         "/usr", "/bin", "/sbin", "/etc", "/System", "/lib", "/lib64",
         "/boot", "/dev", "/proc", "/sys", "/private", "/Library",
@@ -329,9 +340,12 @@ public func isProtectedPackagedPath(_ path: String) -> Bool {
 /// spelling has to be clean before the prefix is trusted. Matches Qt
 /// `isPpaSourcesPath`.
 public func isPpaSourcesPath(_ path: String) -> Bool {
-    let clean = (path as NSString).standardizingPath
-    guard !clean.contains("..") else { return false }
-    return clean.hasPrefix("/etc/apt/sources.list.d/")
+    // Tested on the spelling as written, not on `standardizingPath`: that
+    // resolves `..`, so the check below could never see one and
+    // `/etc/apt/sources.list.d/../sources.list.d/x` was re-permitted past the
+    // packaged-root deny.
+    guard !hasParentSegment(path) else { return false }
+    return (path as NSString).standardizingPath.hasPrefix("/etc/apt/sources.list.d/")
 }
 
 /// Manager list, same as Qt `commandNeedsRoot`: the AUR helpers and snap are in

@@ -75,6 +75,49 @@ static int verifyHelpers() {
         std::fprintf(stderr, "invalid JSON integer treated as zero\n");
         return 1;
     }
+    if (!isProtectedPackagedPath(QStringLiteral("/usr/bin/python3"))) {
+        std::fprintf(stderr, "isProtectedPackagedPath missed /usr\n");
+        return 1;
+    }
+    if (isProtectedPackagedPath(QStringLiteral("/home/u/gone-app"))) {
+        std::fprintf(stderr, "isProtectedPackagedPath over-matched a home path\n");
+        return 1;
+    }
+    /* rm resolves `..`, so a path that walks out of the tree the prefix test
+       approved deletes a packaged root. */
+    if (!isProtectedPackagedPath(QStringLiteral("/home/u/gone/../../../etc"))) {
+        std::fprintf(stderr, "isProtectedPackagedPath accepted a parent traversal\n");
+        return 1;
+    }
+    {
+        Finding trav;
+        trav.status = QStringLiteral("orphaned");
+        trav.kind = QStringLiteral("config");
+        trav.plugin = QStringLiteral("path-home-dot");
+        trav.path = QStringLiteral("/home/u/gone/../../../etc");
+        if (leftoverCleanupCommand(trav).contains(QLatin1String("rm "))) {
+            std::fprintf(stderr, "leftoverCleanupCommand removed a parent traversal\n");
+            return 1;
+        }
+    }
+    {
+        Finding ppa;
+        ppa.status = QStringLiteral("orphaned");
+        ppa.kind = QStringLiteral("ppa");
+        ppa.plugin = QStringLiteral("apt");
+        ppa.path = QStringLiteral("/etc/apt/sources.list.d/vendor.list");
+        ppa.extraPaths = QStringList{QStringLiteral("/etc/apt/sources.list.d/../sources.list.d/evil.list")};
+        const QString cmd = leftoverCleanupCommand(ppa);
+        if (!cmd.contains(QLatin1String("vendor.list"))) {
+            std::fprintf(stderr, "leftoverCleanupCommand dropped the ppa row\n");
+            return 1;
+        }
+        if (cmd.contains(QLatin1String("evil.list"))) {
+            std::fprintf(stderr, "leftoverCleanupCommand kept a ppa parent traversal\n");
+            return 1;
+        }
+    }
+
     Finding f;
     f.path = QString::fromUtf8("/tmp/Cafe\xCC\x81");
     QSet<QString> ignored;

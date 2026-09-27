@@ -432,8 +432,19 @@ QString statusLabel(const Finding &f) {
     return s;
 }
 
+/// A `..` path component. A name a scan read off the filesystem cannot be one,
+/// so a path carrying it was spelled by something else.
+static bool hasParentSegment(const QString &path) {
+    return path.split(QLatin1Char('/')).contains(QLatin1String(".."));
+}
+
 bool isProtectedPackagedPath(const QString &path) {
     if (path.isEmpty()) return false;
+    // The removal quotes the path as written, so a `..` segment walks out of
+    // whatever the prefix test just approved: `/home/u/gone/../../../etc` is
+    // not under a packaged root by spelling and deletes `/etc` once `rm`
+    // resolves it.
+    if (hasParentSegment(path)) return true;
     static const char *kRoots[] = {
         "/usr", "/bin", "/sbin", "/etc", "/System", "/lib", "/lib64",
         "/boot", "/dev", "/proc", "/sys", "/private", "/Library",
@@ -542,9 +553,12 @@ static bool leftoverStatusBlocksCleanup(const QString &status) {
 }
 
 static bool isPpaSourcesPath(const QString &path) {
-    const QString clean = QDir::cleanPath(path);
-    if (clean.contains(QLatin1String(".."))) return false;
-    return clean.startsWith(QLatin1String("/etc/apt/sources.list.d/"));
+    // Tested on the spelling as written, not on the cleaned path: cleanPath
+    // resolves `..`, so the check below could never see one and
+    // `/etc/apt/sources.list.d/../sources.list.d/x` was re-permitted past the
+    // packaged-root deny.
+    if (hasParentSegment(path)) return false;
+    return QDir::cleanPath(path).startsWith(QLatin1String("/etc/apt/sources.list.d/"));
 }
 
 QString leftoverCleanupCommand(const Finding &f) {

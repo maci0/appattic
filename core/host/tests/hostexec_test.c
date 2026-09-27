@@ -465,6 +465,22 @@ int main(void) {
     rc |= expect_deny("test -e");
     rc |= expect_deny("test -f");
     rc |= expect_deny("apt-get -s autoremove --prefix /tmp");
+    /* A config switch whose value the manager runs. `-o APT::Update::Pre-Invoke::`
+       is a listing-shaped argv no destructive token matches, and apt hands the
+       value to the shell. */
+    rc |= expect_deny("apt list --upgradable -o APT::Update::Pre-Invoke::=id");
+    rc |= expect_deny("apt list --upgradable -oDebug::pkgDPkgPM::=id");
+    rc |= expect_deny("apt list --upgradable --option=Dpkg::Pre-Install-Pkgs::=id");
+    rc |= expect_deny("apt-get -s autoremove -o APT::Update::Post-Invoke-Success::=id");
+    rc |= expect_deny("apt list --upgradable --pre-invoke=/tmp/x");
+    rc |= expect_deny("apt list --upgradable --post-invoke=/tmp/x");
+    rc |= expect_deny("apt list --upgradable -c /tmp/evil.conf");
+    rc |= expect_deny("apt list --upgradable --config=/tmp/evil.conf");
+    rc |= expect_deny("yum list --upgrades --setopt=x=id");
+    rc |= expect_deny("dnf list --upgrades -o x=id");
+    rc |= expect_deny("pacman -Q --dbpath=/tmp/evil");
+    rc |= expect_deny("zypper --non-interactive list-updates --root /tmp/evil");
+    rc |= expect_deny("flatpak list --app --config=/tmp/x");
     rc |= expect_deny("npm ls -g --prefix=/tmp/proj");
     rc |= expect_deny("composer global outdated --working-dir=/tmp/proj");
     rc |= expect_deny("");

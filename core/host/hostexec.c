@@ -49,6 +49,28 @@ static int destructive_token(const char *t) {
            eq(t, "add") || eq(t, "upgrade-all") || eq(t, "inject");
 }
 
+/* Config injection: a token that hands the manager a setting whose value is run
+   as a command. `apt list --upgradable -o APT::Update::Pre-Invoke::=id` is a
+   listing-shaped argv that `destructive_token` never sees, and apt runs the
+   Pre-Invoke value through the shell, so the allowlist returned true and the
+   guest got a subprocess of its own. None of the real queries need any of
+   these switches, so the whole family is denied. */
+static int config_injection_token(const char *t) {
+    return eq(t, "-o") || strncmp(t, "-o", 2) == 0 ||
+           eq(t, "-c") || eq(t, "--config") || strncmp(t, "--config", 8) == 0 ||
+           eq(t, "--opt") || strncmp(t, "--opt", 5) == 0 ||
+           eq(t, "--setopt") || strncmp(t, "--setopt", 8) == 0 ||
+           strncmp(t, "--pre-invoke", 12) == 0 ||
+           strncmp(t, "--post-invoke", 13) == 0 ||
+           strncmp(t, "--pre-remove-invoke", 19) == 0 ||
+           strncmp(t, "--post-remove-invoke", 20) == 0 ||
+           eq(t, "--hook") || eq(t, "--root") || strncmp(t, "--root", 6) == 0 ||
+           eq(t, "--load-profile") || eq(t, "--admindir") ||
+           eq(t, "--dbpath") || strncmp(t, "--dbpath", 8) == 0 ||
+           eq(t, "--logfile") || strncmp(t, "--logfile", 9) == 0 ||
+           eq(t, "--sysroot") || strncmp(t, "--sysroot", 8) == 0;
+}
+
 /* docker/podman query shapes only: images -f dangling=true, volume ls -f dangling=true,
    ps -a -f status=exited. Never rmi, rm, prune, system. */
 /* ls: listing flags only (-1/-a/-A, glued). One optional path. No -R/-l/--*. */
@@ -245,6 +267,7 @@ int appattic_host_exec_allowed(const char *cmdline) {
         if (eq(t, "--prefix") || strncmp(t, "--prefix=", 9) == 0) return 0;
         if (eq(t, "--working-dir") || strncmp(t, "--working-dir=", 14) == 0) return 0;
         if (destructive_token(t)) return 0;
+        if (config_injection_token(t)) return 0;
         if (eq(t, "-s") || eq(t, "--simulate") || eq(t, "--dry-run")) has_s = 1;
         if (eq(t, "autoremove")) has_autoremove = 1;
         if (eq(t, "list") || eq(t, "ls")) has_list = 1;

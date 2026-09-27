@@ -1730,6 +1730,10 @@ final class ClassifyTests: XCTestCase {
         XCTAssertFalse(isProtectedPackagedPath("/home/u/.local/bin/python3"))
         XCTAssertFalse(isProtectedPackagedPath("/tmp/Foo"))
         XCTAssertFalse(isProtectedPackagedPath("/Users/x/Library/LaunchAgents/com.dead.app.plist"))
+        // `rm` resolves `..`, so a path that walks out of the tree the prefix
+        // test approved deletes a packaged root.
+        XCTAssertTrue(isProtectedPackagedPath("/home/u/gone/../../../etc"))
+        XCTAssertTrue(isProtectedPackagedPath("/tmp/gone/../.."))
         let cmd = leftoverRemoveCommand(path: "/usr/bin/python3", rootLabel: ".local/bin")
         XCTAssertFalse(cmd.contains("rm -rf"), cmd)
         XCTAssertTrue(cmd.contains("skipped"), cmd)
@@ -1796,6 +1800,10 @@ final class ClassifyTests: XCTestCase {
         XCTAssertFalse(isPpaSourcesPath("/etc/apt/sources.list.d/../../root"))
         XCTAssertFalse(isPpaSourcesPath("/etc/apt/sources.list.d"))
         XCTAssertFalse(isPpaSourcesPath("/tmp/vendor.list"))
+        // Standardizing resolves the `..`, so the old check tested the cleaned
+        // spelling and this one came back permitted.
+        XCTAssertFalse(isPpaSourcesPath("/etc/apt/sources.list.d/../sources.list.d/vendor.list"))
+        XCTAssertFalse(isPpaSourcesPath("/etc/apt/sources.list.d/x/../../sources.list.d/vendor.list"))
         let cmd = leftoverRemoveCommand(
             path: "/home/u/.local/bin/thing",
             rootLabel: ".local/bin",
