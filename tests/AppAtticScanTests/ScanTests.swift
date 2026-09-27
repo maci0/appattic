@@ -572,7 +572,7 @@ final class ScriptPreviewTests: XCTestCase {
     func testGuardedRemovalStillEscalatesForPackageManagers() {
         XCTAssertFalse(commandNeedsRoot(uninstallCommand(source: "flatpak", name: "Firefox", path: "/x/f.desktop", caskName: nil, steamAppId: nil)))
         XCTAssertTrue(commandNeedsRoot(
-            withRootCmd(packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan")))
+            packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan"))
         ))
         let pacman = withRootCmd(packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan")))
         XCTAssertTrue(pacman.hasPrefix("rootcmd "), pacman)

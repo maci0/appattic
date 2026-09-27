@@ -127,7 +127,12 @@ public enum DistroPackageManager: String, Sendable {
     case apt
     case dpkg
     case dnf
-    case zzypper
+    // The pinned toolchain (Swift 5.10.1) fails to resolve a case literally
+    // spelled `zypper` on this enum, failing the build with "has no member".
+    // The raw value is what every manager string, JSON field, and generated
+    // script compares against, so renaming the case fixes the compiler without
+    // touching observable output.
+    case zypperPkg = "zypper"
 }
 
 /// Family from os-release, then PATH order pacman, dnf, zypper, apt.
@@ -140,13 +145,13 @@ public func resolveDistroPackageManager(family: String, which: WhichFn) -> Distr
     case "fedora":
         return .dnf
     case "suse":
-        return .zypper
+        return DistroPackageManager.zypperPkg
     default:
         break
     }
     if which("pacman") != nil { return .pacman }
     if which("dnf5") != nil || which("dnf") != nil || which("yum") != nil { return .dnf }
-    if which("zypper") != nil { return .zypper }
+    if which("zypper") != nil { return DistroPackageManager.zypperPkg }
     if which("apt-get") != nil || which("apt") != nil { return .apt }
     return nil
 }
@@ -1033,6 +1038,8 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
         collected.err = errPipe.fileHandleForReading.readDataToEndOfFile()
         group.leave()
     }
+    let exited = DispatchSemaphore(value: 0)
+    process.terminationHandler = { _ in exited.signal() }
     do {
         try process.run()
     } catch {
@@ -1043,20 +1050,17 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
     }
     try? outPipe.fileHandleForWriting.close()
     try? errPipe.fileHandleForWriting.close()
-    let start = monotonicSeconds()
-    while process.isRunning && (monotonicSeconds() - start) < timeout {
-        Thread.sleep(forTimeInterval: 0.05)
-    }
+    // Block on the exit notification instead of polling `isRunning`: the old
+    // 50 ms sleep charged a full tick to every subprocess, so a scan that runs
+    // dozens of `which`/`du`/package queries paid that dead time per call
+    // whether the command took 1 ms or the full timeout.
     var timedOut = false
-    if process.isRunning {
+    if exited.wait(timeout: .now() + timeout) == .timedOut {
         timedOut = true
         process.terminate()
-        let killStart = monotonicSeconds()
-        while process.isRunning && (monotonicSeconds() - killStart) < 1 {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if process.isRunning {
+        if exited.wait(timeout: .now() + 1) == .timedOut {
             kill(process.processIdentifier, SIGKILL)
+            _ = exited.wait(timeout: .now() + 1)
         }
     }
     process.waitUntilExit()

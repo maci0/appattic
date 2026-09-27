@@ -1219,7 +1219,7 @@ public func collectLinux(
         queries.append { queryPacman(which: which, run: run) }
     case .dnf:
         queries.append { queryDnf(which: which, run: run) }
-    case .zypper:
+    case .some(DistroPackageManager.zypperPkg):
         queries.append { queryZypper(which: which, run: run) }
     case .apt, .dpkg:
         queries.append { queryApt(which: which, run: run) }

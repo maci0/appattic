@@ -7,7 +7,7 @@ final class UtilTests: XCTestCase {
         XCTAssertEqual(resolveDistroPackageManager(family: "arch", which: none), .pacman)
         XCTAssertEqual(resolveDistroPackageManager(family: "debian", which: none), .apt)
         XCTAssertEqual(resolveDistroPackageManager(family: "fedora", which: none), .dnf)
-        XCTAssertEqual(resolveDistroPackageManager(family: "suse", which: none), .zypper)
+        XCTAssertEqual(resolveDistroPackageManager(family: "suse", which: none), .zypperPkg)
         XCTAssertNil(resolveDistroPackageManager(family: "unknown", which: none))
         XCTAssertEqual(
             resolveDistroPackageManager(family: "unknown", which: { $0 == "pacman" ? "/usr/bin/pacman" : nil }),
@@ -19,7 +19,7 @@ final class UtilTests: XCTestCase {
         )
         XCTAssertEqual(
             resolveDistroPackageManager(family: "unknown", which: { $0 == "zypper" ? "/usr/bin/zypper" : nil }),
-            .zypper
+            .zypperPkg
         )
         XCTAssertEqual(
             resolveDistroPackageManager(family: "unknown", which: { $0 == "apt" ? "/usr/bin/apt" : nil }),

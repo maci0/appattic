@@ -569,7 +569,7 @@ public func collectPackages(
                 ) else { return [] }
                 return parseDnfUnneeded(text)
             }
-        case .zypper:
+        case .some(DistroPackageManager.zypperPkg):
             queries.append {
                 guard let text = runPackageQuery(
                     which: which, run: run, names: ["zypper"],
