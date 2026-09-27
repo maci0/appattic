@@ -1,5 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="AppAttic">
   <rect width="128" height="128" rx="24" fill="#1e1e1e"/>
-  <rect x="22" y="30" width="58" height="58" rx="11" fill="#4d4d4d"/>
-  <rect x="50" y="48" width="56" height="56" rx="11" fill="#0a84ff"/>
+  <!-- the installed app, and the data it leaves behind -->
+  <rect x="24" y="24" width="56" height="56" rx="12" fill="#2e2e2e"/>
+  <rect x="48" y="48" width="56" height="56" rx="12" fill="#ff453a"/>
+  <!-- the two verdicts the app reaches: keep, and go look -->
+  <rect x="40" y="88" width="16" height="16" rx="4" fill="#30d158"/>
+  <rect x="68" y="88" width="16" height="16" rx="4" fill="#0a84ff"/>
 </svg>
