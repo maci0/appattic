@@ -65,7 +65,10 @@ identifiers of packages, not of you:
 - The App Store check: App Store track IDs and bundle IDs, to Apple's iTunes
   lookup API. Which apps you have installed is not sent; the identifiers of the
   ones that carry an App Store receipt are.
-- `docker` and `podman`, when installed, for the containers and images list.
+- `docker` and `podman`, when installed, for the containers and images list. The
+  Linux window runs these; the CLI and the macOS window have no container scan,
+  so on those the list is empty. Under Flatpak the query goes to the host
+  engine through `flatpak-spawn --host`.
 
 AppAttic opens no socket of its own. The lookups above are the ones the
 installed tools make, and the check that reaches Apple runs only for apps

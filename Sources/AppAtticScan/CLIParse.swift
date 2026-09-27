@@ -260,7 +260,9 @@ Progress and status go to stderr. Reports and --dry-run scripts go to stdout.
 exit codes:
   0  success
   1  the run failed, or an update was cancelled
-  2  usage error (bad command, option, or value), or settings.json is malformed
+  2  usage error (bad command, option, or value), a disk root that is missing
+     or not a directory, an update with no terminal and no --yes, or
+     settings.json is malformed
 
 examples:
   appattic leftovers --top 10

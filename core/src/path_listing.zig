@@ -675,11 +675,11 @@ fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
             try std.testing.expect(!pstore.nameInList(hit.name, spec.keep));
             if (spec.allow.len != 0) try std.testing.expect(pstore.nameInList(hit.name, spec.allow));
 
-            // The path is either the absolute line `ls` printed, or a
-            // root-joined copy inside the store. A path from anywhere else is a
-            // pointer into a dead frame.
+            // The path is a root-joined copy inside the store, never the line
+            // as printed. A path from anywhere else is a pointer into a dead
+            // frame.
             const in_store = sliceInside(&paths, hit.path);
-            try std.testing.expect(in_store or sliceInside(text, hit.path));
+            try std.testing.expect(in_store);
             try std.testing.expectEqualStrings(hit.name, pstore.basenameOf(hit.path));
             if (in_store) {
                 const joined = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ spec.root, hit.name });

@@ -197,10 +197,12 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
 ///
 /// A switch the process does not read is not listed, so the block cannot grow
 /// into a copy of the environment: these are the names in the README's
-/// environment table that a scan or a window run can be changed by. The two
-/// host-exec switches are read by the C core host and the Qt shell rather than
-/// by this process, and they are listed because a Linux run's package results
-/// come from them and a diff of two machines has to show that.
+/// environment table whose effect is one boolean or one choice. The XDG roots
+/// are not here, because each has its own resolution rule rather than a switch
+/// value; `EffectiveConfig.lines` prints those as plain `NAME: path` lines
+/// above. The two host-exec switches are read by the C core host and the Qt
+/// shell rather than by this process, and they are listed because a Linux run's
+/// package results come from them and a diff of two machines has to show that.
 public func configEnvEntries(
     env: [String: String] = ProcessInfo.processInfo.environment
 ) -> [EffectiveConfig.ConfigEnvEntry] {

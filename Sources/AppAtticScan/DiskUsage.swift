@@ -514,7 +514,8 @@ func unescapeProcMountField(_ field: String) -> String {
     return out + rest
 }
 
-/// The volumes to list, largest first. `mountsText` replaces the platform's
+/// The volumes to list, the root file system first, then the home one, then
+/// the rest in collated mount-path order. `mountsText` replaces the platform's
 /// mount table, so a caller can parse a captured one on either platform.
 public func listDiskVolumes(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,

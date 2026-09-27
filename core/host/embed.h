@@ -20,7 +20,9 @@ typedef void (*appattic_progress_fn)(
    ("path.wasm" or "path.wasm=tag"). The tag is split at the LAST '=', so a
    plugin path may itself contain one.
    tag 0 = missing coeffect; default 1. container-runtime: 1 docker, 2 podman.
-   Missing plugin files are skipped. Returns 0 on success, 1 on plugin/abi error, 2 on usage.
+   Missing plugin files are skipped. A plugin that is missing, has the wrong
+   abi, or whose query fails is skipped and still returns 0. Returns 1 only when
+   the host intercept below refuses the result, 2 on usage.
    Host intercept rejects `system prune`, `rmi -f`, `volume prune`,
    `snap remove --purge`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`,
    `rm /usr/bin/flatpak`.
