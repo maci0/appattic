@@ -332,9 +332,21 @@ final class FuzzDesktopEntryTests: XCTestCase {
                 }
                 let expected = exec.filter { $0 != "\"" && $0 != "\\" && !$0.isWhitespace }
                 let actual = tokens.joined().filter { $0 != "\"" && $0 != "\\" }
+                // Every character has to be in the tokens, in the order it was
+                // written: the tokenizer drops the quotes, the backslashes and
+                // the env assignments in front, and adds nothing, so the text is
+                // a subsequence of the tokens rather than a prefix of them. A
+                // whitespace inside a token (an unbalanced quote swallows the
+                // rest of the line) and a dropped assignment are the two reasons
+                // the tokens carry characters the text does not.
                 var cursor = actual.makeIterator()
                 XCTAssertTrue(
-                    expected.allSatisfy { char in cursor.next() == char },
+                    expected.allSatisfy { char in
+                        while let next = cursor.next() {
+                            if next == char { return true }
+                        }
+                        return false
+                    },
                     "text lost or reordered: \(where_)"
                 )
             }
