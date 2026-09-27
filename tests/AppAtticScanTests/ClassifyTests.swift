@@ -1842,7 +1842,7 @@ final class ClassifyTests: XCTestCase {
             steamAppId: nil
         )
         XCTAssertTrue(brew.hasPrefix("if brew list --formula '"), brew)
-        XCTAssertTrue(brew.contains("'rm -rf ~'"), brew)
+        XCTAssertTrue(brew.contains("'ok\nrm -rf ~'"), brew)
 
         let ppa = packageRemoveCommand(PackageEntry(
             name: "vendor",
