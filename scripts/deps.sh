@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Dependency inventory and pin consistency for the third-party artifacts this repo fetches.
+# Dependency inventory and pin consistency for the third-party code this repo
+# ships: what it fetches, what SwiftPM resolves, and what it vendors.
 #
 #   bash scripts/deps.sh check   verify pins agree across the tree (no args also means check)
 #   bash scripts/deps.sh sbom    write a CycloneDX 1.5 SBOM for the requested output
 #
 # Usage: bash scripts/deps.sh sbom <out.json>
 #
-# The SBOM is generated from files already in the tree (dep-checksums.sha256, the table
-# below, Package.resolved), so it needs no scanner, no network, and no extra tool.
+# The SBOM is generated from files already in the tree (dep-checksums.sha256, the
+# tables below, Package.resolved), so it needs no scanner, no network, and no
+# extra tool.
 set -euo pipefail
 
 _script_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -29,8 +31,9 @@ usage() {
 Usage: bash scripts/deps.sh [check | sbom <out.json> | yamllint-version]
 
   check             default; pins must agree across dep-checksums.sha256,
-                    scripts/, packaging/flatpak/, and the table in this file
-  sbom <out.json>   CycloneDX 1.5 inventory of fetched artifacts and SwiftPM pins
+                    scripts/, packaging/flatpak/, and the tables in this file
+  sbom <out.json>   CycloneDX 1.5 inventory of fetched artifacts, SwiftPM
+                    pins, and vendored third-party files
   yamllint-version  the yamllint version CI installs, for scripts/lint.sh
 EOF
 }
@@ -55,6 +58,22 @@ linuxdeploy-plugin-qt-x86_64.AppImage|1-alpha-20250213-1|pkg:github/linuxdeploy/
 linuxdeploy-plugin-qt-aarch64.AppImage|1-alpha-20250213-1|pkg:github/linuxdeploy/linuxdeploy-plugin-qt|https://github.com/linuxdeploy/linuxdeploy-plugin-qt|https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-aarch64.AppImage|LINUXDEPLOY_PLUGIN_QT_VER=1-alpha-20250213-1
 appimagetool-x86_64.AppImage|1.9.1|pkg:github/AppImage/appimagetool|https://github.com/AppImage/appimagetool|https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage|APPIMAGETOOL_VER=1.9.1
 appimagetool-aarch64.AppImage|1.9.1|pkg:github/AppImage/appimagetool|https://github.com/AppImage/appimagetool|https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-aarch64.AppImage|APPIMAGETOOL_VER=1.9.1
+EOF
+)
+
+# One row per third-party file that lives in the tree instead of being fetched,
+# because it ships inside the binary:
+#   name|path|sha256|purl|SPDX license id|license text path|upstream
+# A vendored file is pinned by its own content, so the hash belongs here beside
+# the path rather than in dep-checksums.sha256, which pins downloads. The font
+# is compiled into the Qt resource, so its grant has to ship too: OFL 1.1 wants
+# the license to travel with the font software, which
+# ui/linux-qt/CMakeLists.txt installs next to it. sbom lists the row with its
+# license; check fails when the bytes, the license text, or the row set drifts.
+# No version column: the upstream font carries none to record, and a made-up
+# one is worse than none.
+VENDORED=$(cat <<'EOF'
+Michroma-Regular.ttf|ui/linux-qt/fonts/Michroma-Regular.ttf|b62301163788bc5b7f8fcac0b74b184e34e1827e577b499ecb724da065098f87|pkg:generic/michroma|OFL-1.1|ui/linux-qt/fonts/Michroma-OFL.txt|https://github.com/googlefonts/Michroma-font
 EOF
 )
 
@@ -158,6 +177,69 @@ check_table_coverage() {
             fail "$name is pinned in $CHECKSUMS but absent from the table in scripts/deps.sh"
         fi
     done < <(parse_checksums | awk -F'\t' '$1 == "OK" { print $2 }')
+}
+
+# Paths of every vendored file, one per line, for the coverage check below.
+vendored_paths() {
+    awk -F'|' 'NF >= 2 && $2 != "" { print $2 }' <<<"$VENDORED"
+}
+
+# Paths of the license texts those files are covered by. A grant is not an
+# asset of its own: it is the row's own license_path, and shipping it is the
+# install rule's job, not a second inventory entry.
+vendored_license_paths() {
+    awk -F'|' 'NF >= 6 && $6 != "" { print $6 }' <<<"$VENDORED"
+}
+
+# Every vendored file exists, still hashes to the pinned value, and names a
+# license text that is in the tree. The hash is what catches a binary asset
+# being replaced under the pin, which nothing else here would notice.
+check_vendored() {
+    require_sha256sum
+    local name path hash purl license license_path upstream dir file rel
+    while IFS='|' read -r name path hash purl license license_path upstream; do
+        [[ -n "$name" ]] || continue
+        if [[ -z "$path" || -z "$hash" || -z "$purl" || -z "$license" \
+            || -z "$license_path" || -z "$upstream" ]]; then
+            fail "vendored $name leaves a column empty; a shipped file needs a hash, a purl, a license, and its text"
+            continue
+        fi
+        assert_json_safe "vendored name" "$name"
+        assert_json_safe "vendored purl" "$purl"
+        assert_json_safe "vendored license" "$license"
+        if [[ ! -f "$ROOT/$path" ]]; then
+            fail "vendored $name is declared at $path, which is not in the tree"
+            continue
+        fi
+        if [[ "$(file_sha256 "$ROOT/$path")" != "$hash" ]]; then
+            fail "vendored $name does not match its pinned SHA-256; the file changed under the pin"
+        fi
+        if [[ ! -s "$ROOT/$license_path" ]]; then
+            fail "vendored $name names license text $license_path, which is missing or empty"
+        fi
+    done <<<"$VENDORED"
+
+    # A file dropped beside a vendored one joins the binary through the qrc, so
+    # an undeclared file is third-party code shipping with no hash and no
+    # license. Only this direction needs checking: the rows themselves were
+    # verified against the tree above.
+    local licenses
+    licenses="$(vendored_license_paths)"
+    while IFS='|' read -r name path _; do
+        [[ -n "$name" ]] || continue
+        dir="${path%/*}"
+        [[ -d "$ROOT/$dir" ]] || continue
+        for file in "$ROOT/$dir"/*; do
+            [[ -f "$file" ]] || continue
+            rel="${file#"$ROOT"/}"
+            if printf '%s\n' "$licenses" | grep -qxF -- "$rel"; then
+                continue
+            fi
+            if ! vendored_paths | grep -qxF -- "$rel"; then
+                fail "$rel sits in the vendored set but has no row in scripts/deps.sh: no hash, no license"
+            fi
+        done
+    done <<<"$VENDORED"
 }
 
 # The Flatpak manifest carries its own sha256 field, which flatpak-builder
@@ -382,6 +464,7 @@ swiftpm_pins() {
 run_check() {
     check_checksum_file
     check_table_coverage
+    check_vendored
     check_flatpak_hashes
     check_urls
     check_version_anchors
@@ -393,7 +476,7 @@ run_check() {
         echo "deps: $FAILURES problem(s) with third-party pins" >&2
         return 1
     fi
-    echo "deps: pins ok ($(parse_checksums | awk -F'\t' '$1 == "OK"' | wc -l) artifacts, $(swiftpm_pins | wc -l) SwiftPM pins)"
+    echo "deps: pins ok ($(parse_checksums | awk -F'\t' '$1 == "OK"' | wc -l) artifacts, $(vendored_paths | wc -l) vendored, $(swiftpm_pins | wc -l) SwiftPM pins)"
 }
 
 # CycloneDX 1.5. No scanner, no network: the inventory is read out of the
@@ -432,6 +515,25 @@ run_sbom() {
         assert_json_safe "sbom swiftpm location" "$location"
         components+=("$(artifact_component "$identity" "$version" "pkg:swift/${identity}" "$location" "$rev" SHA-1)")
     done < <(swiftpm_pins | sort)
+
+    # Vendored files are already in the binary, so an inventory that stops at
+    # the downloaded artifacts would under-report what the release ships.
+    require_sha256sum
+    local vname vpath vhash vpurl vlicense vlicense_path vupstream
+    while IFS='|' read -r vname vpath vhash vpurl vlicense vlicense_path vupstream; do
+        [[ -n "$vname" ]] || continue
+        if [[ ! -f "$ROOT/$vpath" ]] || [[ "$(file_sha256 "$ROOT/$vpath")" != "$vhash" ]]; then
+            fail "cannot build SBOM: vendored $vname is missing or does not match its pinned SHA-256"
+            return 1
+        fi
+        if [[ ! -s "$ROOT/$vlicense_path" ]]; then
+            fail "cannot build SBOM: vendored $vname names license text $vlicense_path, which is missing or empty"
+            return 1
+        fi
+        assert_json_safe "sbom vendored name" "$vname"
+        assert_json_safe "sbom vendored license" "$vlicense"
+        components+=("$(vendored_component "$vname" "$vpurl" "$vupstream" "$vhash" "$vlicense")")
+    done < <(awk -F'|' 'NF' <<<"$VENDORED")
 
     mkdir -p "$(dirname "$out")"
     {
@@ -478,6 +580,27 @@ artifact_component() {
     printf '      ],\n'
     printf '      "externalReferences": [\n'
     printf '        { "type": "distribution", "url": "%s" }\n' "$url"
+    printf '      ]\n'
+    printf '    }'
+}
+
+# Same shape as artifact_component, plus the license and no version: a vendored
+# file has no release the manifest can name, and a consumer reading the
+# license is the point of listing it at all.
+vendored_component() {
+    local name="$1" purl="$2" upstream="$3" hash="$4" license="$5"
+    printf '    {\n'
+    printf '      "type": "library",\n'
+    printf '      "name": "%s",\n' "$name"
+    printf '      "purl": "%s",\n' "$purl"
+    printf '      "hashes": [\n'
+    printf '        { "alg": "SHA-256", "content": "%s" }\n' "$hash"
+    printf '      ],\n'
+    printf '      "licenses": [\n'
+    printf '        { "license": { "id": "%s" } }\n' "$license"
+    printf '      ],\n'
+    printf '      "externalReferences": [\n'
+    printf '        { "type": "distribution", "url": "%s" }\n' "$upstream"
     printf '      ]\n'
     printf '    }'
 }

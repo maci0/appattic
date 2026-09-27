@@ -221,6 +221,16 @@ install(DIRECTORY "${APPATTIC_ROOT}/core/out/"
     FILES_MATCHING PATTERN "*.wasm"
 )
 
+# The Michroma font is compiled into the binary, so its SIL OFL grant has to
+# reach the artifact as well: the license is a condition of using the font, and
+# shipping only the .ttf drops it. Every license text in the vendored font
+# directory is installed, because scripts/deps.sh check fails on a font with no
+# grant beside it, and a second font brings its own.
+file(GLOB _appattic_font_licenses "${CMAKE_CURRENT_SOURCE_DIR}/fonts/*.txt")
+foreach(_font_license IN LISTS _appattic_font_licenses)
+    install(FILES "${_font_license}" DESTINATION share/appattic/licenses)
+endforeach()
+
 # Helper coverage for finding.cpp and diskusage.cpp. It needs no scan and no
 # wasm host, so it lives in its own binary instead of the shipped app.
 add_executable(appattic-qt-helper-tests
