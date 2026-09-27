@@ -497,6 +497,13 @@ QString packageChildCommand(const Finding &f, const QString &child) {
 bool commandNeedsRoot(const QString &cmd) {
     QString t = cmd.trimmed();
     if (t.startsWith(QLatin1String("rootcmd "))) return false;
+    // A guarded removal is `if <query>; then <action>; fi`. Judge the action,
+    // or the leading `if` hides an action that needs root.
+    if (t.startsWith(QLatin1String("if "))) {
+        const int then = t.indexOf(QLatin1String("; then "));
+        const int fi = t.lastIndexOf(QLatin1String("; fi"));
+        if (then > 0 && fi > then) t = t.mid(then + 7, fi - then - 7).trimmed();
+    }
     QString first = t.section(QLatin1Char(' '), 0, 0);
     if (first.contains(QLatin1Char('/'))) first = first.section(QLatin1Char('/'), -1);
     return first == QLatin1String("apt-get")

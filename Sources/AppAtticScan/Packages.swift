@@ -100,7 +100,7 @@ public func packageRemoveCommand(_ entry: PackageEntry) -> String {
     let q = shellQuote(entry.name)
     switch entry.manager {
     case "pacman", "aur":
-        return "pacman -Rns \(q)"
+        return guardedRemoveCommand(present: "pacman -Qq \(q)", remove: "pacman -Rns \(q)")
     case "apt", "dpkg":
         return "apt-get purge -y \(q)"
     case "dnf":

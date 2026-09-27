@@ -86,17 +86,19 @@ public func uninstallCommand(
 ) -> String {
     if source == "brew-formula" {
         let q = shellQuote(name)
-        return "if brew list --formula \(q) >/dev/null 2>&1; then brew uninstall \(q); fi"
+        return guardedRemoveCommand(present: "brew list --formula \(q)", remove: "brew uninstall \(q)")
     }
     if source == "brew-cask" {
         let q = shellQuote(caskName ?? name)
-        return "if brew list --cask \(q) >/dev/null 2>&1; then brew uninstall --cask \(q); fi"
+        return guardedRemoveCommand(present: "brew list --cask \(q)", remove: "brew uninstall --cask \(q)")
     }
     if source == "flatpak" {
-        return "flatpak uninstall -y \(shellQuote(linuxUninstallId(source: source, path: path, pkgId: pkgId)))"
+        let q = shellQuote(linuxUninstallId(source: source, path: path, pkgId: pkgId))
+        return guardedRemoveCommand(present: "flatpak info \(q)", remove: "flatpak uninstall -y \(q)")
     }
     if source == "snap" {
-        return "snap remove \(shellQuote(linuxUninstallId(source: source, path: path, pkgId: pkgId)))"
+        let q = shellQuote(linuxUninstallId(source: source, path: path, pkgId: pkgId))
+        return guardedRemoveCommand(present: "snap list \(q)", remove: "snap remove \(q)")
     }
     if source == "appimage" {
         if isProtectedPackagedPath(path) {
@@ -273,8 +275,13 @@ public func isProtectedPackagedPath(_ path: String) -> Bool {
 }
 
 public func commandNeedsRoot(_ cmd: String) -> Bool {
-    let t = cmd.trimmingCharacters(in: .whitespaces)
+    var t = cmd.trimmingCharacters(in: .whitespaces)
     if t.hasPrefix("rootcmd ") { return false }
+    // A guarded remove is `if <query>; then <action>; fi`. Judge the action, or
+    // the wrapper's leading `if` hides an action that needs root.
+    if t.hasPrefix("if "), let then = t.range(of: "; then "), let fi = t.range(of: "; fi", options: .backwards) {
+        t = String(t[then.upperBound..<fi.lowerBound]).trimmingCharacters(in: .whitespaces)
+    }
     let first = t.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
     let base = first.split(separator: "/").last.map(String.init) ?? first
     switch base {

@@ -439,7 +439,7 @@ final class ScriptPreviewTests: XCTestCase {
             caskName: nil,
             steamAppId: nil
         )
-        XCTAssertEqual(flatpak, "flatpak uninstall -y org.mozilla.Firefox")
+        XCTAssertEqual(flatpak, "if flatpak info org.mozilla.Firefox >/dev/null 2>&1; then flatpak uninstall -y org.mozilla.Firefox; fi")
         XCTAssertFalse(flatpak.contains("rm -rf"), flatpak)
 
         let snap = uninstallCommand(
@@ -449,7 +449,7 @@ final class ScriptPreviewTests: XCTestCase {
             caskName: nil,
             steamAppId: nil
         )
-        XCTAssertEqual(snap, "snap remove firefox")
+        XCTAssertEqual(snap, "if snap list firefox >/dev/null 2>&1; then snap remove firefox; fi")
         XCTAssertFalse(snap.contains("rm -rf"), snap)
 
         let image = uninstallCommand(
@@ -489,7 +489,7 @@ final class ScriptPreviewTests: XCTestCase {
             source: "flatpak",
             pkg_id: "org.mozilla.Firefox"
         )
-        XCTAssertEqual(uninstallCommand(for: item), "flatpak uninstall -y org.mozilla.Firefox")
+        XCTAssertEqual(uninstallCommand(for: item), "if flatpak info org.mozilla.Firefox >/dev/null 2>&1; then flatpak uninstall -y org.mozilla.Firefox; fi")
         XCTAssertEqual(
             uninstallCommand(
                 source: "flatpak",
@@ -498,7 +498,7 @@ final class ScriptPreviewTests: XCTestCase {
                 caskName: nil,
                 steamAppId: nil
             ),
-            "flatpak uninstall -y firefox"
+            "if flatpak info firefox >/dev/null 2>&1; then flatpak uninstall -y firefox; fi"
         )
         let snap = SoftwareItem(
             name: "Code",
@@ -507,7 +507,7 @@ final class ScriptPreviewTests: XCTestCase {
             source: "snap",
             pkg_id: "code"
         )
-        XCTAssertEqual(uninstallCommand(for: snap), "snap remove code")
+        XCTAssertEqual(uninstallCommand(for: snap), "if snap list code >/dev/null 2>&1; then snap remove code; fi")
     }
 
     func testScanDataRoundTripKeepsPkgIdForUninstall() {
@@ -525,8 +525,8 @@ final class ScriptPreviewTests: XCTestCase {
         XCTAssertEqual(restored.software[0].pkgId, "org.mozilla.Firefox")
         XCTAssertEqual(result.toScanData().software[0].pkg_id, "org.mozilla.Firefox")
         restored.verdicts = [Verdict(software: restored.software[0], tier: "remove", reason: "test")]
-        XCTAssertTrue(cleanupScript(restored).contains("flatpak uninstall -y org.mozilla.Firefox"))
-        XCTAssertFalse(cleanupScript(restored).contains("flatpak uninstall -y firefox\n"))
+        XCTAssertTrue(cleanupScript(restored).contains("if flatpak info org.mozilla.Firefox >/dev/null 2>&1; then flatpak uninstall -y org.mozilla.Firefox; fi"))
+        XCTAssertFalse(cleanupScript(restored).contains("then flatpak uninstall -y firefox; fi"))
     }
 
     func testPreviewScriptSkipsEmptyCleanupHeader() {
@@ -546,5 +546,39 @@ final class ScriptPreviewTests: XCTestCase {
         let mixed = previewScript(cleanup: steam, update: update)
         XCTAssertTrue(mixed.contains("uninstall from Steam"), mixed)
         XCTAssertTrue(mixed.contains("brew upgrade wget"), mixed)
+    }
+
+    /// Every manager removal in a generated script runs under `set -e`. A run
+    /// that already removed its target must not exit nonzero, or `set -e` stops
+    /// the script there and the items after it never run.
+    func testManagerRemovalsAreGuardedAgainstAlreadyRemovedTargets() {
+        let removals = [
+            uninstallCommand(source: "brew-formula", name: "jq", path: "/opt/homebrew/bin/jq", caskName: nil, steamAppId: nil),
+            uninstallCommand(source: "brew-cask", name: "Firefox", path: "/Applications/Firefox.app", caskName: "firefox", steamAppId: nil),
+            uninstallCommand(source: "flatpak", name: "Firefox", path: "/var/lib/flatpak/exports/share/applications/org.mozilla.Firefox.desktop", caskName: nil, steamAppId: nil),
+            uninstallCommand(source: "snap", name: "Code", path: "/var/lib/snapd/desktop/applications/code_code.desktop", caskName: nil, steamAppId: nil),
+            packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan")),
+        ]
+        for cmd in removals {
+            XCTAssertTrue(
+                cmd.hasPrefix("if ") && cmd.hasSuffix("; fi"),
+                "removal is unguarded, a rerun aborts the script: \(cmd)"
+            )
+        }
+    }
+
+    /// The guard is invisible to the privilege wrapper: a `pacman` removal still
+    /// has to reach the user through `rootcmd`.
+    func testGuardedRemovalStillEscalatesForPackageManagers() {
+        XCTAssertFalse(commandNeedsRoot(uninstallCommand(source: "flatpak", name: "Firefox", path: "/x/f.desktop", caskName: nil, steamAppId: nil)))
+        XCTAssertTrue(commandNeedsRoot(
+            withRootCmd(packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan")))
+        ))
+        let pacman = withRootCmd(packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan")))
+        XCTAssertTrue(pacman.hasPrefix("rootcmd "), pacman)
+        XCTAssertEqual(
+            pacman,
+            "rootcmd if pacman -Qq jq >/dev/null 2>&1; then pacman -Rns jq; fi"
+        )
     }
 }

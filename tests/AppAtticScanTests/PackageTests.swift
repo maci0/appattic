@@ -211,7 +211,7 @@ final class PackageTests: XCTestCase {
     }
 
     func testPackageRemoveCommandsAreNamedAndQuoted() {
-        XCTAssertEqual(packageRemoveCommand(entry("libfoo", "pacman", "orphan")), "pacman -Rns libfoo")
+        XCTAssertEqual(packageRemoveCommand(entry("libfoo", "pacman", "orphan")), "if pacman -Qq libfoo >/dev/null 2>&1; then pacman -Rns libfoo; fi")
         XCTAssertEqual(packageRemoveCommand(entry("libfoo0", "apt", "orphan")), "apt-get purge -y libfoo0")
         XCTAssertEqual(packageRemoveCommand(entry("libfoo", "dnf", "orphan")), "dnf remove -y libfoo")
         XCTAssertEqual(packageRemoveCommand(entry("libfoo", "zypper", "orphan")), "zypper --non-interactive rm libfoo")
@@ -249,7 +249,7 @@ final class PackageTests: XCTestCase {
                 entry("libkeep", "apt", "orphan"),
             ]
         )
-        XCTAssertTrue(script.contains("rootcmd pacman -Rns libfoo"), script)
+        XCTAssertTrue(script.contains("rootcmd if pacman -Qq libfoo >/dev/null 2>&1; then pacman -Rns libfoo; fi"), script)
         XCTAssertTrue(script.contains("npm -g uninstall typescript"), script)
         XCTAssertTrue(script.contains("rootcmd apt-mark manual libkeep"), script)
         XCTAssertFalse(script.contains("rootcmd npm"), script)

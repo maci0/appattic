@@ -734,6 +734,16 @@ public func shellQuote(_ value: String) -> String {
     return "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
 }
 
+/// Wrap a removal so an already-removed target is a no-op instead of a failure.
+///
+/// Generated scripts run under `set -e`, so an unguarded `pkgmgr remove` on a
+/// target a previous run already deleted exits nonzero and `set -e` stops the
+/// script there: the items after it never run. `present` is a read-only query
+/// that exits 0 only while the target is still installed.
+public func guardedRemoveCommand(present: String, remove: String) -> String {
+    "if \(present) >/dev/null 2>&1; then \(remove); fi"
+}
+
 /// Cached process username: environment copy + trims + folds per call cost
 /// ~2 µs, and `classify` calls this per entry. The account name cannot change
 /// mid-scan.

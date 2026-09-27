@@ -189,13 +189,22 @@ fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated)
             w.raw(",\"version\":");
             w.str(h.branch);
         }
-        w.raw(",\"status\":\"orphaned\",\"command\":\"flatpak uninstall -y ");
+        // `set -e` stops the script at the first nonzero line, so a rerun that
+        // already removed this runtime would never reach the runtimes after it.
+        // The presence query makes an already-removed runtime a no-op.
+        w.raw(",\"status\":\"orphaned\",\"command\":\"if flatpak info ");
         w.raw(h.name);
         if (h.branch.len > 0) {
             w.raw("//");
             w.raw(h.branch);
         }
-        w.raw("\",\"manager\":\"flatpak\"}");
+        w.raw(" >/dev/null 2>&1; then flatpak uninstall -y ");
+        w.raw(h.name);
+        if (h.branch.len > 0) {
+            w.raw("//");
+            w.raw(h.branch);
+        }
+        w.raw("; fi\",\"manager\":\"flatpak\"}");
     }
     for (outdated) |h| {
         if (!first) w.raw(",");
@@ -208,13 +217,19 @@ fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated)
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic flatpak. Review before running.\\n");
         for (hits) |h| {
-            w.raw("flatpak uninstall -y ");
+            w.raw("if flatpak info ");
             w.raw(h.name);
             if (h.branch.len > 0) {
                 w.raw("//");
                 w.raw(h.branch);
             }
-            w.raw("\\n");
+            w.raw(" >/dev/null 2>&1; then flatpak uninstall -y ");
+            w.raw(h.name);
+            if (h.branch.len > 0) {
+                w.raw("//");
+                w.raw(h.branch);
+            }
+            w.raw("; fi\\n");
         }
         w.raw("\"");
     }
@@ -320,6 +335,9 @@ test "plugin_query present JSON comes from unused fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "org.freedesktop.Platform.GL.default") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "23.08") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "flatpak uninstall -y org.freedesktop.Platform.GL.default//23.08") != null);
+    // A rerun of the emitted script must skip a runtime an earlier run removed
+    // instead of exiting nonzero and stopping `set -e` at that line.
+    try std.testing.expect(std.mem.indexOf(u8, json, "if flatpak info org.freedesktop.Platform.GL.default//23.08 >/dev/null 2>&1; then flatpak uninstall -y org.freedesktop.Platform.GL.default//23.08; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "flatpak remote-ls") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "org.mozilla.firefox") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);

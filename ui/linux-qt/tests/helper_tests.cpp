@@ -243,6 +243,14 @@ static int verifyHelpers() {
         std::fprintf(stderr, "commandNeedsRoot: distro/AUR/snap yes, user leftover/pip no\n");
         return 1;
     }
+    // A guarded removal is judged on its action, not on the leading `if`.
+    if (!commandNeedsRoot(QStringLiteral("if snap list hello >/dev/null 2>&1; then snap remove hello; fi"))
+        || !withRootCmd(QStringLiteral("if snap list hello >/dev/null 2>&1; then snap remove hello; fi"))
+               .startsWith(QLatin1String("rootcmd "))
+        || commandNeedsRoot(QStringLiteral("if flatpak info org.mozilla.Firefox >/dev/null 2>&1; then flatpak uninstall -y org.mozilla.Firefox; fi"))) {
+        std::fprintf(stderr, "commandNeedsRoot: guarded removal judged on its action\n");
+        return 1;
+    }
     Finding keepRm;
     keepRm.plugin = QStringLiteral("path-xdg-config");
     keepRm.kind = QStringLiteral("orphan-dir");

@@ -351,7 +351,11 @@ emit_ci_path() {
     for d in /opt/zig /usr/local/bin; do
         if [[ "$d" == /opt/zig && -x "$d/zig" ]] || [[ "$d" == /usr/local/bin && ( -x "$d/zig" || -L "$d/zig" ) ]]; then
             if [[ -n "${GITHUB_PATH:-}" ]]; then
-                echo "$d" >>"$GITHUB_PATH"
+                # $GITHUB_PATH is append-only, so a rerun in the same job would
+                # otherwise stack another copy of each directory on PATH.
+                if ! grep -qxF "$d" "$GITHUB_PATH" 2>/dev/null; then
+                    echo "$d" >>"$GITHUB_PATH"
+                fi
                 echo "CI PATH: $d"
             fi
         fi

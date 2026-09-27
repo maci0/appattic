@@ -134,7 +134,7 @@ final class ModelTests: XCTestCase {
         XCTAssertTrue(leftoverMatchesCategory(data.leftovers[0], categories: ["/usr/bin/python3"]))
         XCTAssertEqual(
             uninstallCommand(for: data.software[0]),
-            "flatpak uninstall -y org.mozilla.Firefox"
+            "if flatpak info org.mozilla.Firefox >/dev/null 2>&1; then flatpak uninstall -y org.mozilla.Firefox; fi"
         )
         let exported = exportedScanData(from: data, fromCache: true)
         XCTAssertEqual(exported.leftovers[0].shadows, "/usr/bin/python3")
@@ -171,7 +171,7 @@ final class ModelTests: XCTestCase {
             source: "snap",
             pkg_id: "code"
         )
-        XCTAssertEqual(uninstallCommand(for: item), "snap remove code")
+        XCTAssertEqual(uninstallCommand(for: item), "if snap list code >/dev/null 2>&1; then snap remove code; fi")
     }
 
     func testLeftoverStatusAccessor() {
