@@ -1,5 +1,38 @@
 import XCTest
+
+#if canImport(Glibc)
+import Glibc
+#endif
+
 @testable import AppAtticScan
+
+/// Move a file's modification date to `date`, fraction included.
+///
+/// `FileManager.setAttributes` cannot set a pre-1970 date that has a fraction
+/// on Linux: corelibs-foundation turns the interval into whole microseconds,
+/// and `Date(timeIntervalSince1970: -1.5)` arrives at `utimes` as a negative
+/// `tv_usec`, which the kernel refuses with `EINVAL`, surfaced as
+/// `NSFileWriteUnknownError`. The stamp is the fingerprint of exactly that kind
+/// of mtime, so the test lands the date with the syscall instead of weakening
+/// what it checks. The nanoseconds are the normalized form `utimensat` wants,
+/// so `-1.5` is `tv_sec -2, tv_nsec 500000000`. Darwin's Foundation does this
+/// conversion itself, so the ordinary call stays there.
+func setModificationDate(_ date: Date, atPath path: String) throws {
+    #if canImport(Glibc)
+    let interval = date.timeIntervalSince1970
+    let seconds = interval.rounded(.down)
+    let nanos = Int32(((interval - seconds) * 1_000_000_000).rounded())
+    var times = [
+        timespec(tv_sec: Int(seconds), tv_nsec: Int(nanos)),
+        timespec(tv_sec: Int(seconds), tv_nsec: Int(nanos)),
+    ]
+    guard utimensat(AT_FDCWD, path, &times, 0) == 0 else {
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+    }
+    #else
+    try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: path)
+    #endif
+}
 
 final class CacheTests: XCTestCase {
     func testSaveLoadRoundTrip() throws {
@@ -278,10 +311,7 @@ final class CacheTests: XCTestCase {
         )
         let subSecond = pathMtimeStamp("flatpak-user", entry.path)
         XCTAssertNotEqual(line, subSecond)
-        try FileManager.default.setAttributes(
-            [.modificationDate: Date(timeIntervalSince1970: -1.5)],
-            ofItemAtPath: entry.path
-        )
+        try setModificationDate(Date(timeIntervalSince1970: -1.5), atPath: entry.path)
         let beforeEpoch = pathMtimeStamp("flatpak-user", entry.path)
         XCTAssertNotEqual(subSecond, beforeEpoch)
     }
