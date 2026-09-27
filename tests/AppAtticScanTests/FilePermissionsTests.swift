@@ -73,4 +73,24 @@ final class FilePermissionsTests: XCTestCase {
         XCTAssertEqual(try mode(of: file) & 0o777, 0o600)
         XCTAssertEqual(try mode(of: dir) & 0o777, 0o700)
     }
+
+    func testWriteOwnerOnlyFileNarrowsAnExistingWorldReadableTarget() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("existing-\(UUID().uuidString).txt")
+        try Data("old".utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try writeOwnerOnlyFile(Data("new".utf8), to: url)
+        let mode = (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as! NSNumber).intValue
+        XCTAssertEqual(mode & 0o777, 0o600)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "new")
+    }
+
+    func testWriteOwnerOnlyFileLeavesNoTempFileBehind() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wown-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try writeOwnerOnlyFile(Data("payload".utf8), to: dir.appendingPathComponent("out.txt"))
+        let left = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+        XCTAssertEqual(left, ["out.txt"])
+    }
 }

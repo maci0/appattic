@@ -3132,6 +3132,13 @@ private:
             showError(settingsUnwritableMessage(path));
             return;
         }
+        /* Narrow the parent before the file lands in it, not after: mkpath
+           creates at the umask default (0755), so an owner-only settings file
+           sat in a world-readable directory for as long as the run took. The
+           Swift scanner's prepareStateDirectory does this in the same order. */
+        if (QFileInfo(fi.absolutePath()).fileName().compare(QStringLiteral("appattic"), Qt::CaseInsensitive) == 0) {
+            restrictOwnerOnlyDir(fi.absolutePath());
+        }
         QSaveFile f(path);
         if (!f.open(QIODevice::WriteOnly)) {
             showError(settingsUnwritableMessage(path));
