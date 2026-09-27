@@ -309,10 +309,9 @@ final class FuzzDesktopEntryTests: XCTestCase {
 
     /// `Exec` tokenization under mutation: a quoted span and a backslash escape
     /// both fold into the token they appear in, no token comes out holding a
-    /// quote, and every character that is neither quote, backslash nor
-    /// whitespace still appears in the tokens, in the order it was written. The
-    /// env assignments in front are the only tokens dropped, so the order is
-    /// checked as a subsequence.
+    /// quote, and the tokens spell out the text exactly, in the order it was
+    /// written. The env assignments in front are the only tokens dropped, and
+    /// they are a prefix of the text, so the comparison is against its tail.
     func testMutatedExecLinesKeepTheirTextInOrder() {
         let execSeeds = [
             "/usr/bin/gedit %U",
@@ -331,22 +330,19 @@ final class FuzzDesktopEntryTests: XCTestCase {
                     XCTAssertFalse(token.contains("\""), "quote left in token: \(where_)")
                 }
                 let expected = exec.filter { $0 != "\"" && $0 != "\\" && !$0.isWhitespace }
-                let actual = tokens.joined().filter { $0 != "\"" && $0 != "\\" }
-                // Every character has to be in the tokens, in the order it was
-                // written: the tokenizer drops the quotes, the backslashes and
-                // the env assignments in front, and adds nothing, so the text is
-                // a subsequence of the tokens rather than a prefix of them. A
-                // whitespace inside a token (an unbalanced quote swallows the
-                // rest of the line) and a dropped assignment are the two reasons
-                // the tokens carry characters the text does not.
-                var cursor = actual.makeIterator()
-                XCTAssertTrue(
-                    expected.allSatisfy { char in
-                        while let next = cursor.next() {
-                            if next == char { return true }
-                        }
-                        return false
-                    },
+                let actual = tokens.joined().filter { $0 != "\"" && $0 != "\\" && !$0.isWhitespace }
+                // The tokens are the text, character for character, in the
+                // order it was written: the tokenizer takes out the quotes and
+                // the whitespace it splits on and adds nothing. Compared
+                // against the tail, because the one thing it drops is the
+                // leading `NAME=value` run, whose characters are a prefix of
+                // the text that is not expected back. A character lost in the
+                // middle, duplicated, or reordered fails here, and the tail is
+                // `actual.count` long, so a shorter or longer token run does
+                // too.
+                XCTAssertEqual(
+                    actual,
+                    String(expected.suffix(actual.count)),
                     "text lost or reordered: \(where_)"
                 )
             }
