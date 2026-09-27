@@ -289,6 +289,12 @@ func historyBytesAreASCII(_ bytes: [UInt8]) -> Bool {
 /// overflows the `Int` this accumulates in and takes the scan down with it.
 let hxMaxEpochDigits = 11
 
+/// Shortest run that still reads as a unix epoch: 9 digits is September 2001,
+/// before no shell history file on a machine this runs on. A shorter run is a
+/// line a writer was interrupted in the middle of, and reading it as 1970 makes
+/// `historySpanDays` report that no tool was used in the machine's lifetime.
+let hxMinEpochDigits = 9
+
 func hxDigitsValue(_ b: [UInt8], _ i: Int, _ j: Int) -> Double? {
     guard j > i, j - i <= hxMaxEpochDigits else { return nil }
     var v = 0
@@ -419,7 +425,7 @@ func parseHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Set<St
                     while p < stop, hxDigit(bytes[p]) { p += 1 }
                     tsCount = p - d0
                     tsStart = d0
-                    if tsCount >= 9, tsCount <= 11, p < stop, bytes[p] == 0x3A {
+                    if tsCount >= hxMinEpochDigits, tsCount <= hxMaxEpochDigits, p < stop, bytes[p] == 0x3A {
                         p += 1
                         let d2 = p
                         while p < stop, hxDigit(bytes[p]) { p += 1 }
@@ -505,7 +511,7 @@ func parseFishHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Se
                 if q > p + 5 {
                     var d = q
                     while d < stop, hxDigit(bytes[d]) { d += 1 }
-                    if d > q, d == stop {
+                    if d > q, d - q >= hxMinEpochDigits, d <= q + hxMaxEpochDigits, d == stop {
                         let ts = hxDigitsValue(bytes, q, d).map(dateFromUnixEpoch)
                         noteHistoryTime(ts, index: &index)
                         hxRecordCommand(bytes, ps, pe, ts: ts, index: &index, keep: keep)

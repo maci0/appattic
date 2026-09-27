@@ -540,6 +540,9 @@ public func parseUvToolList(_ text: String) -> [PackageEntry] {
 /// apart from "every candidate binary answered with a failure status": the
 /// first is a real empty answer, the second is an unknown, and an unknown
 /// written to the scan cache is served as "no orphans" for `scanCacheMaxAge`.
+/// Recording the unknown is the caller's job, under the label it wants the
+/// user to see, because a query that is one step of a chain has not failed
+/// until every step has.
 struct PackageQueryResult {
     var output: String?
     var failed: Bool
@@ -559,11 +562,6 @@ func runPackageQuery(
         attempted = true
         let (rc, out, _) = run([path] + args, timeout)
         if ok(rc) { return PackageQueryResult(output: out, failed: false) }
-        // A query that ran and failed is an unknown, not the answer "no unused
-        // packages". The empty list it would otherwise leave behind is written
-        // to the scan cache and served for a day, so it is recorded the same
-        // way a failed update check is.
-        noteScanCheckFailed(name)
     }
     return PackageQueryResult(output: nil, failed: attempted)
 }

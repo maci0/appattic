@@ -327,6 +327,32 @@ final class DiscoverTests: XCTestCase {
         XCTAssertFalse(path.hasPrefix("/Applications/"), path)
     }
 
+    /// Two exports launched through the same wrapper are two apps. The wrapper
+    /// binary names the launcher, not the app, so it cannot be the record's
+    /// identity: `findLinuxApps` dedupes on it and one export would be dropped
+    /// from the scan.
+    func testWrapperLaunchedDesktopEntriesKeepSeparateRecords() throws {
+        let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let appsDir = td.appendingPathComponent("applications")
+        try FileManager.default.createDirectory(at: appsDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: td) }
+        for (id, name) in [("org.mozilla.Firefox", "Firefox"), ("org.gnome.Calculator", "Calculator")] {
+            let body = """
+            [Desktop Entry]
+            Type=Application
+            Name=\(name)
+            Exec=/usr/bin/flatpak run \(id)
+            """
+            try body.write(
+                toFile: appsDir.appendingPathComponent("\(id).desktop").path,
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        let found = findLinuxApps(progress: { _ in }, desktopDirs: [appsDir.path])
+        XCTAssertEqual(found.map(\.displayName), ["Calculator", "Firefox"])
+    }
+
     func testFlatpakDesktopDoesNotUseWrapperBinaryAsPath() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let bin = td.appendingPathComponent("bin")

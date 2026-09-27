@@ -138,7 +138,7 @@ public final class OutdatedPkg {
             current_version: currentVersion,
             latest_version: latestVersion,
             title: title,
-            summary: summary ?? outdatedSummaryFallback(self),
+            summary: outdatedSummaryFallback(self),
             reason: outdatedReason(self),
             kind: kind ?? defaultOutdatedKind(manager),
             bundle_id: bundleId

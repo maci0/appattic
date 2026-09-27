@@ -34,11 +34,11 @@ final class LeftoversTests: XCTestCase {
         XCTAssertTrue(isDaemonName("loginwindowd"))
         XCTAssertTrue(isDaemonName("syspolicyd"))
         XCTAssertTrue(isDaemonName("diskarbitrationd"))
-        XCTAssertTrue(isDaemonName("a1234567d"), "9 alnum between the lead and the trailing d")
+        XCTAssertTrue(isDaemonName("a12345678d"), "8 alnum between the lead and the trailing d, the length floor")
     }
 
     func testIsDaemonNameRejectsShortUppercaseAndDottedNames() {
-        XCTAssertFalse(isDaemonName("a123456d"), "9 characters is below the length floor")
+        XCTAssertFalse(isDaemonName("a1234567d"), "7 alnum between the lead and the trailing d is below the length floor")
         XCTAssertFalse(isDaemonName("syspolicy"), "no trailing d")
         XCTAssertFalse(isDaemonName("Syspolicyd"), "the pattern is lowercase")
         XCTAssertFalse(isDaemonName("syspolicy-d"))

@@ -474,7 +474,10 @@ func confirmUpdate(count: Int, assumeYes: Bool) -> Bool {
 
 /// Runs a generated script under `/bin/sh` and returns the exit status and
 /// whatever the script wrote to stderr, which is the only thing that says
-/// which of `set -e`'s lines failed.
+/// which of `set -e`'s lines failed. A script that outruns
+/// `scriptRunTimeout` is stopped and reported as `scriptStoppedStatus`
+/// with the reason appended, so the caller never sees a killed process as an
+/// ordinary nonzero exit.
 func runShellScript(_ script: String) -> (status: Int32, stderr: String) {
     do {
         let run = try runGeneratedScript(script)

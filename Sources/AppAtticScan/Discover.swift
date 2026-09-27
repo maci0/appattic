@@ -542,7 +542,14 @@ public func parseDesktopFile(_ path: String, sourceDir: String = "") -> AppRecor
     let wmclass = (info["StartupWMClass"] ?? "").trimmingCharacters(in: .whitespaces)
     let desktopId = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
     let exeBase = URL(fileURLWithPath: exe).deletingPathExtension().lastPathComponent
-    var bundleId = posixLowercased(wmclass.isEmpty ? (exeBase.isEmpty ? desktopId : exeBase) : wmclass)
+    // A wrapper launches whatever it is told to, so its own name is not the
+    // app's identity: every `flatpak run` export would answer `flatpak`, and
+    // `findLinuxApps` dedupes on this value, so all but one would be dropped
+    // from the scan. The desktop id names the entry that launched it.
+    let identity = wmclass.isEmpty
+        ? (exeBase.isEmpty || linuxWrapperNames.contains(posixLowercased(exeBase)) ? desktopId : exeBase)
+        : wmclass
+    var bundleId = posixLowercased(identity)
     let linuxSource = linuxDesktopSource(sourceDir: sourceDir, exec: execLine)
     let appPath = linuxDesktopAppPath(source: linuxSource, desktopPath: path, exec: execLine, firstExe: exe)
     let isSystem = linuxSource == nil && sourceDir.hasPrefix("/usr/")
