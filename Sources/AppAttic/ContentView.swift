@@ -1259,7 +1259,17 @@ struct ContentView: View {
                         Text(ignoredCountLabel)
                             .font(.system(size: TypeScale.small))
                             .foregroundColor(Color.appDim)
-                        ForEach(Array(vm.ignoredLeftovers.sorted().prefix(12)), id: \.self) { path in
+                        // Collated, not byte order: the Qt window sorts this
+                        // same list with a QCollator, and a path with a
+                        // non-ASCII name ("Über", "日本語") lands after every
+                        // ASCII one in byte order, which reads as unordered to
+                        // a German or Japanese user.
+                        ForEach(Array(vm.ignoredLeftovers
+                            .sorted {
+                                collatedBefore(ignoredPathLabel($0), ignoredPathLabel($1),
+                                               tieBreak: $0, $1)
+                            }
+                            .prefix(12)), id: \.self) { path in
                             Text(ignoredPathLabel(path))
                                 .font(.system(size: TypeScale.monoSmall))
                                 .foregroundColor(Color.appText)

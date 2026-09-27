@@ -11,15 +11,27 @@ public func mulBytes(_ a: Int, _ b: Int) -> Int {
     return overflow ? Int.max : product
 }
 
-/// Decimal separator of the current locale, read once. `String(format:)` pays
-/// for locale setup on every call (~1.2 µs); the separator is a single lookup.
-let localeDecimalSeparator: String = {
+/// Decimal separator of `Locale.current`. `String(format:)` pays for locale
+/// setup on every call (~1.2 µs), so the separator is cached, but only against
+/// the locale it was read from: a `NumberFormatter` keeps the locale it was
+/// built with, so a value read once at startup would keep the old separator
+/// for the rest of the session after the user switches language.
+private let decimalSeparatorLock = NSLock()
+private var cachedDecimalSeparator: (locale: String, separator: String)?
+
+var localeDecimalSeparator: String {
+    decimalSeparatorLock.lock()
+    defer { decimalSeparatorLock.unlock() }
+    let id = Locale.current.identifier
+    if let cached = cachedDecimalSeparator, cached.locale == id { return cached.separator }
     let f = NumberFormatter()
     f.locale = .current
     f.numberStyle = .decimal
     f.usesGroupingSeparator = false
-    return f.decimalSeparator ?? "."
-}()
+    let separator = f.decimalSeparator ?? "."
+    cachedDecimalSeparator = (id, separator)
+    return separator
+}
 
 /// One decimal place without `String(format:)` (~1.2 µs/call from locale +
 /// varargs overhead). Rounds half away from zero the way `%.1f` prints.

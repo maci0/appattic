@@ -6,9 +6,11 @@
 
 #include "finding.h"
 
+#include <QCollator>
 #include <QDateTime>
 #include <QTimeZone>
 #include <QDir>
+#include <QLocale>
 #include <QByteArray>
 #include <QFile>
 #include <QFileInfo>
@@ -515,13 +517,36 @@ DiskNode::~DiskNode() {
 }
 
 void DiskNode::sortChildren(bool allocatedSize) {
-    std::sort(children.begin(), children.end(), [allocatedSize](const DiskNode *a, const DiskNode *b) {
+    // Collation, not code units: `QString::compare(..., Qt::CaseInsensitive)`
+    // orders by code unit, so "Zebra" sorts before "apple" and "Ä" lands after
+    // "Z" in German or Swedish. `QCollator` holds the locale's rules; the C
+    // locale has none, so it keeps the code-unit order. The collator is built
+    // once for the whole tree: opening an ICU collator costs far more than the
+    // comparisons, and this recurses into every directory.
+    const QLocale locale;
+    const bool collated = locale.name() != QLatin1String("C");
+    const QCollator collator(locale);
+    sortChildrenWith(allocatedSize, collated, &collator);
+}
+
+void DiskNode::sortChildrenWith(bool allocatedSize, bool collated, const QCollator *collator) {
+    std::sort(children.begin(), children.end(), [allocatedSize, collated, collator](const DiskNode *a, const DiskNode *b) {
         const qint64 as = a->metric(allocatedSize);
         const qint64 bs = b->metric(allocatedSize);
         if (as != bs) return as > bs;
-        return a->name.compare(b->name, Qt::CaseInsensitive) < 0;
+        if (collated) {
+            const int c = collator->compare(a->name, b->name);
+            if (c != 0) return c < 0;
+        } else {
+            const int c = a->name.compare(b->name, Qt::CaseInsensitive);
+            if (c != 0) return c < 0;
+        }
+        // `std::sort` is not stable, so rows the collator calls equal would keep
+        // the order the directory walk handed over, which the filesystem picks
+        // and changes between runs.
+        return a->path < b->path;
     });
-    for (DiskNode *c : children) c->sortChildren(allocatedSize);
+    for (DiskNode *c : children) c->sortChildrenWith(allocatedSize, collated, collator);
 }
 
 DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts) {

@@ -209,4 +209,19 @@ final class DatesTests: XCTestCase {
         XCTAssertEqual(calendarDaysSince(ahead, now: now), -3)
         XCTAssertEqual(TimestampFormat.string(from: ahead, now: now), TimestampFormat.date.string(from: ahead))
     }
+
+    /// A language switch reaches the display formatters without a restart.
+    /// `DateFormatter` keeps the locale it was built with, so a formatter held
+    /// from the first call answers in the old language for the rest of the
+    /// session: German reads "25.02.2026", English "Feb 25, 2026".
+    func testTimestampFormatFollowsALocaleChange() {
+        let saved = Locale.current
+        defer { Locale.current = saved }
+        let instant = Date(timeIntervalSince1970: 1_772_000_000)
+        Locale.current = Locale(identifier: "en_US")
+        let english = TimestampFormat.date.string(from: instant)
+        Locale.current = Locale(identifier: "de_DE")
+        let german = TimestampFormat.date.string(from: instant)
+        XCTAssertNotEqual(english, german, "the date formatter kept the old locale")
+    }
 }

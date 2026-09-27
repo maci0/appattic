@@ -292,41 +292,67 @@ public func daysSince(_ date: Date?, now: Date = Date()) -> Double? {
 /// Day count past which a timestamp shows its date instead of a relative label.
 public let relativeDayLimit = 45
 
+/// The display pair (`TimestampFormat`) for one `Locale.current`.
+///
+/// A `DateFormatter` keeps the locale it was built with, so a pair built on the
+/// first call would print the old language for the rest of the session after
+/// the user switches. Building both on every call is too expensive for a table
+/// that formats a row per frame, so the pair is cached and replaced when
+/// `Locale.current` changes.
+private final class LocaleScopedTimestamps {
+    private let lock = NSLock()
+    private var localeID: String?
+    private var dateFormatter: DateFormatter?
+    private var relativeClosure: ((Date, Date) -> String?)?
+
+    /// The formatters for the current locale, rebuilt on a locale change.
+    func current() -> (date: DateFormatter, relativeDays: ((Date, Date) -> String?)?) {
+        lock.lock()
+        defer { lock.unlock() }
+        let id = Locale.current.identifier
+        if let cached = dateFormatter, localeID == id { return (cached, relativeClosure) }
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        #if canImport(Darwin)
+        let r = DateComponentsFormatter()
+        r.allowedUnits = .day
+        r.unitsStyle = .named
+        r.maximumUnitCount = 1
+        let relative: ((Date, Date) -> String?)? = { r.string(from: $0, to: $1) }
+        #else
+        let relative: ((Date, Date) -> String?)? = nil
+        #endif
+        dateFormatter = f
+        relativeClosure = relative
+        localeID = id
+        return (f, relative)
+    }
+}
+
 /// Locale-aware timestamps for every surface that shows one.
 ///
 /// `medium` and `named` carry the locale's own month and day names, its date
 /// order, and its plural rules (Polish has five forms, Arabic six), which a
-/// hardcoded `yyyy-MM-dd` plus "N days ago" cannot. Both formatters inherit
-/// `Locale.current`, so a `LC_ALL` change reaches them on the next call.
+/// hardcoded `yyyy-MM-dd` plus "N days ago" cannot. Both formatters read
+/// `Locale.current` on each call, so a `LC_ALL` change reaches them on the
+/// next one.
 public enum TimestampFormat {
+    private static let scoped = LocaleScopedTimestamps()
+
     /// Absolute date, no time. `dateStyle` rather than `dateFormat`, so the
     /// pattern and the era come from CLDR instead of a fixed template.
     /// Internal: a public formatter would hand every target a handle to
     /// reconfigure a shared, process-wide object. Callers use `string(from:)`.
-    static let date: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .none
-        return f
-    }()
+    static var date: DateFormatter { scoped.current().date }
 
     /// "Today", "Yesterday", "3 days ago", localized and correctly pluralized.
     ///
     /// swift-corelibs-foundation declares `DateComponentsFormatter` without
-    /// implementing it, so `relativeDays` is nil there and `string(from:now:)`
+    /// implementing it, so the value is nil there and `string(from:now:)`
     /// falls back to the ASCII day unit. The type is erased into a closure so
     /// the name does not appear in this file's signatures off Darwin.
-    static let relativeDays: ((Date, Date) -> String)? = {
-        #if canImport(Darwin)
-        let f = DateComponentsFormatter()
-        f.allowedUnits = .day
-        f.unitsStyle = .named
-        f.maximumUnitCount = 1
-        return { f.string(from: $0, to: $1) }
-        #else
-        return nil
-        #endif
-    }()
+    static var relativeDays: ((Date, Date) -> String?)? { scoped.current().relativeDays }
 
     /// A relative label within `relativeDayLimit` days, otherwise the date.
     /// Falls back to the date whenever the age cannot be measured or is
@@ -334,17 +360,20 @@ public enum TimestampFormat {
     /// file written while the clock was ahead) never renders as an empty cell
     /// or claims to have changed today.
     public static func string(from date: Date, now: Date = Date()) -> String {
+        // One snapshot of the locale-scoped pair, so the date and the relative
+        // label cannot come from two different locales.
+        let formatters = scoped.current()
         guard let days = calendarDaysSince(date, now: now), days >= 0, days < relativeDayLimit else {
-            return self.date.string(from: date)
+            return formatters.date.string(from: date)
         }
         // Anchor both ends at local midnight so the interval is a whole number
         // of days, including across a daylight-saving change.
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         guard let then = calendar.date(byAdding: .day, value: -days, to: today) else {
-            return self.date.string(from: date)
+            return formatters.date.string(from: date)
         }
-        guard let relativeDays else { return "\(days) d" }
+        guard let relativeDays = formatters.relativeDays else { return "\(days) d" }
         return relativeDays(then, today)
     }
 }

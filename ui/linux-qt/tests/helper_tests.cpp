@@ -991,6 +991,37 @@ static int checkDeferredFdBound() {
     return 0;
 }
 
+static int checkDiskTreeCollation() {
+    // Rows of one size are ordered by name, and a German or Swedish reader
+    // expects dictionary order: code units put "Zebra" ahead of "apple" and
+    // "Äpfel" behind every ASCII name. The default locale is what `QLocale()`
+    // and so `sortChildren` reads, so setting it here is what a German window
+    // would see.
+    const QLocale saved = QLocale();
+    QLocale::setDefault(QLocale(QLocale::German, QLocale::Germany));
+    DiskNode root;
+    const char *names[] = {"Zebra", "Äpfel", "apple"};
+    for (const char *name : names) {
+        auto *child = new DiskNode;
+        child->name = QString::fromUtf8(name);
+        child->path = QStringLiteral("/tmp/") + child->name;
+        child->apparent = 10;
+        child->allocated = 10;
+        root.children.append(child);
+    }
+    root.sortChildren(false);
+    QStringList order;
+    for (const DiskNode *c : root.children) order.append(c->name);
+    QLocale::setDefault(saved);
+    if (order != QStringList({QString::fromUtf8("Äpfel"), QStringLiteral("apple"),
+                              QStringLiteral("Zebra")})) {
+        std::fprintf(stderr, "disk: German tree order is %s\n",
+            qPrintable(order.join(QLatin1Char(','))));
+        return 1;
+    }
+    return 0;
+}
+
 static int checkDiskUsage() {
     QTemporaryDir tmp;
     if (!tmp.isValid()) {
@@ -1155,6 +1186,8 @@ static int checkDiskUsage() {
         std::fprintf(stderr, "disk: items label\n");
         return 1;
     }
+    const int collation = checkDiskTreeCollation();
+    if (collation != 0) return collation;
     std::fprintf(stdout, "disk: ok\n");
     return 0;
 }

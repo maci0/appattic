@@ -5,6 +5,8 @@
 #include <QVector>
 #include <cstdint>
 
+class QCollator;
+
 struct DiskNode {
     QString name;
     QString path;
@@ -25,6 +27,11 @@ struct DiskNode {
 
     qint64 metric(bool allocatedSize) const { return allocatedSize ? allocated : apparent; }
     void sortChildren(bool allocatedSize);
+
+private:
+    /// `sortChildren` with the locale's collator, so one collator serves the
+    /// whole tree instead of one per directory.
+    void sortChildrenWith(bool allocatedSize, bool collated, const QCollator *collator);
 };
 
 struct DiskVolume {
