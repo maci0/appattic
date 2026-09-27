@@ -2594,7 +2594,7 @@ private:
             const QString key = packageChildMarkKey(uid, child);
             auto *inc = new QCheckBox(QStringLiteral("Include this dependency in remove"));
             inc->setChecked(m_marked.contains(key));
-            inc->setEnabled(!packageChildCommand(*f, child).isEmpty());
+            inc->setEnabled(!m_scanning && !packageChildCommand(*f, child).isEmpty());
             connect(inc, &QCheckBox::toggled, this, [this, uid, child, key](bool on) {
                 if (on) m_marked.insert(key);
                 else m_marked.remove(key);
@@ -2609,6 +2609,7 @@ private:
                                                                  : QStringLiteral("Include in cleanup"))
             );
             inc->setChecked(m_marked.contains(f->uid()));
+            inc->setEnabled(!m_scanning);
             const QString uid = f->uid();
             connect(inc, &QCheckBox::toggled, this, [this, uid](bool on) {
                 if (on) {
@@ -2625,6 +2626,7 @@ private:
         if (page == Page::Packages && canMarkManual(*f)) {
             auto *keep = new QCheckBox(QStringLiteral("Mark as manually installed"));
             keep->setChecked(m_markedManual.contains(f->uid()));
+            keep->setEnabled(!m_scanning);
             const QString uid = f->uid();
             connect(keep, &QCheckBox::toggled, this, [this, uid](bool on) {
                 if (on) {
@@ -2902,6 +2904,10 @@ private:
         tmp.close();
         QFile::setPermissions(tmp.fileName(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
         m_scanning = true;
+        // The run reads the selection, so the inspector's include boxes go
+        // with it: they are the same control as the column-0 mark, which the
+        // busy rule already refuses.
+        if (m_table->isVisible()) rebuildInspector();
         m_rescan->setEnabled(false);
         statusBar()->showMessage(progress);
         /* A package removal runs for as long as the package manager takes, and
@@ -2991,6 +2997,7 @@ private:
                 showError(err);
                 if (stopped) statusBar()->showMessage(QStringLiteral("Script stopped."));
                 refreshActionBar();
+                if (m_table->isVisible()) rebuildInspector();
             } else {
                 if (!m_settingsError) {
                     m_errorBar->hide();
@@ -3015,6 +3022,7 @@ private:
             if (m_scanBar) m_scanBar->hide();
             showError(QStringLiteral("Could not run the script."));
             refreshActionBar();
+            if (m_table->isVisible()) rebuildInspector();
             proc->deleteLater();
         });
         proc->start(QStringLiteral("/bin/sh"), {tmp.fileName()});

@@ -300,6 +300,12 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->sizeMode->addItem(QStringLiteral("Apparent"), 0);
     d->oneFs = new QCheckBox(QStringLiteral("This file system only"));
     d->oneFs->setChecked(true);
+    // The two mode pickers beside it redraw the tree as they change; this one
+    // only sets what the next walk does, so say so instead of letting the
+    // toggle look broken.
+    d->oneFs->setToolTip(
+        QStringLiteral("Sets what the next scan reads. Press Rescan to scan again with it.")
+    );
     d->search = new QLineEdit;
     d->search->setPlaceholderText(QStringLiteral("Search"));
     d->search->setClearButtonEnabled(true);
@@ -571,6 +577,15 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         d->progress->hide();
         d->progressLabel->hide();
         updateChrome();
+        // The rows the walk had finished are still on screen, and a blank line
+        // under them reads as an empty scan rather than a cancelled one.
+        d->status->setText(
+            d->streamedRows > 0
+                ? QStringLiteral("Scan stopped. %1 folders measured so far.").arg(
+                    localeCount(d->streamedRows)
+                )
+                : QStringLiteral("Scan stopped before any folder finished.")
+        );
         emit statusMessage(QStringLiteral("Disk scan stopped"));
     });
 
@@ -857,6 +872,11 @@ void DiskPage::openSelected() {
 void DiskPage::copyPath() {
     if (!d->selected) return;
     QApplication::clipboard()->setText(d->selected->path);
+    // The other two menu items say what they did. This one was silent, so a
+    // paste that came out empty had nothing to explain it.
+    emit statusMessage(
+        QStringLiteral("Copied %1 to the clipboard.").arg(redactHomePaths(d->selected->path))
+    );
 }
 
 void DiskPage::trashSelected() {
@@ -895,6 +915,9 @@ void DiskPage::updateChrome() {
     const bool scanning = m_scanning;
     d->stopBtn->setEnabled(scanning);
     d->rescanBtn->setEnabled(!scanning && !d->scanPath.isEmpty());
+    // Same busy state as the other scan controls: the walk reads this at its
+    // start, so changing it mid-scan would promise something the run ignores.
+    d->oneFs->setEnabled(!scanning);
     DiskNode *view = d->chart->viewRoot();
     d->upBtn->setEnabled(!scanning && view && view->parent);
     d->openBtn->setEnabled(d->selected);
