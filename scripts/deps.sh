@@ -413,21 +413,46 @@ check_artifact_versions_in_tree() {
     done
 }
 
-# Every uv-installed tool is pinned to the version declared here, so a lint run
-# cannot pick up a different release than the one the config was written for.
+# Every uv- or pipx-installed tool is pinned to the version declared here, so a
+# lint run cannot pick up a different release than the one the config was
+# written for. Both spellings are accepted: the workflows install yamllint with
+# pipx (the runner image ships pipx and no uv), and the local instructions use
+# `uv tool install`. Neither is allowed to leave the version off the spec.
 check_tool_pins() {
     local workflow line spec
     for workflow in "$ROOT"/.github/workflows/*.yml; do
         [[ -f "$workflow" ]] || continue
         while IFS= read -r line; do
-            [[ "$line" == *"uv tool install"* ]] || continue
-            spec="$(printf '%s' "$line" | sed -n 's/.*uv tool install "\([^"]*\)".*/\1/p')"
-            if [[ -z "$spec" ]]; then
-                spec="$(printf '%s' "$line" | sed -n 's/.*uv tool install \(.*\)/\1/p')"
-            fi
+            # $line is `N:<indent>...` from grep -n. Drop the number first, then
+            # the YAML list item and indentation, so a comment is recognised as
+            # one whether it is the whole line or the value of a `run:` key: a
+            # comment may name either spelling while explaining the choice, and
+            # only a real command line can install anything.
+            line="${line#*:}"
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line#- }"
+            line="${line#"${line%%[![:space:]]*}"}"
+            [[ "$line" == "#"* ]] && continue
+            line="${line#run: }"
+            spec=""
+            case "$line" in
+                *"uv tool install"*)
+                    spec="$(printf '%s' "$line" | sed -n 's/.*uv tool install "\([^"]*\)".*/\1/p')"
+                    if [[ -z "$spec" ]]; then
+                        spec="$(printf '%s' "$line" | sed -n 's/.*uv tool install \(.*\)/\1/p')"
+                    fi
+                    ;;
+                *"pipx install"*)
+                    spec="$(printf '%s' "$line" | sed -n 's/.*pipx install \(--global \)\?"\([^"]*\)".*/\2/p')"
+                    if [[ -z "$spec" ]]; then
+                        spec="$(printf '%s' "$line" | sed -n 's/.*pipx install \(--global \)\?\([^"]*\).*/\2/p')"
+                    fi
+                    ;;
+                *) continue ;;
+            esac
             [[ "$spec" == "yamllint==${YAMLLINT_VERSION}" ]] || fail \
                 "${workflow#"$ROOT"/}: installs '$spec', deps.sh pins yamllint==${YAMLLINT_VERSION}"
-        done < <(grep -n 'uv tool install' "$workflow" || true)
+        done < <(grep -nE 'uv tool install|pipx install' "$workflow" || true)
     done
 }
 

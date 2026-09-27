@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: swift-actions/setup-swift@364295d9c23900ce04d4e5cc708387921b4e50f9 # v3
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "5.10.1"
       # .swift-version, but without AppAtticUI: swift-cross-ui 0.2.1 needs a
@@ -61,7 +61,9 @@ jobs:
         # Pinned: an unpinned linter makes a green run mean "whatever
         # yamllint shipped that morning", not "this tree passes". The pin is
         # repeated in scripts/deps.sh, which fails if the two disagree.
-        run: uv tool install "yamllint==1.38.0"
+        # pipx, not `uv tool install`: the runner image ships pipx and no uv,
+        # so the uv spelling is a step that never finds its own tool.
+        run: pipx install "yamllint==1.38.0"
       - name: Install Wasmtime C API
         # embed.c is the WASM loader, and the C gate compiles every source
         # under core/host. Without these headers it is the one file the gate
@@ -87,7 +89,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Swift
-        uses: swift-actions/setup-swift@364295d9c23900ce04d4e5cc708387921b4e50f9 # v3
+        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "5.10.1"
       - name: Cache build

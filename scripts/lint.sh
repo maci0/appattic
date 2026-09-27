@@ -127,7 +127,7 @@ if ! command -v yamllint >/dev/null 2>&1; then
     # disagree, so name it here rather than sending the contributor to CI.
     yl="$(bash "$ROOT/scripts/deps.sh" yamllint-version)"
     echo "error: yamllint missing (CI lints with yamllint $yl)" >&2
-    echo "install: uv tool install \"yamllint==$yl\"" >&2
+    echo "install: pipx install \"yamllint==$yl\"   (or: uv tool install \"yamllint==$yl\")" >&2
     exit 1
 fi
 # --strict: without it yamllint exits 0 on warnings, so a rule downgraded to a
