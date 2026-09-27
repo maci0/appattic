@@ -419,9 +419,11 @@ public func withRootCmd(_ cmd: String) -> String {
     guard commandNeedsRoot(cmd) else { return cmd }
     // Escalating the whole line hands `rootcmd` the words `if` and `<query>` as
     // arguments and leaves a bare `then` behind, so the line stops parsing and
-    // `set -e` ends the script there. Escalate the action inside the guard.
+    // `set -e` ends the script there. Escalate the action inside the guard, and
+    // rebuild it through the writer so the query keeps the redirect the parse
+    // took off it and the escalated line is the original one.
     if let guarded = parseGuardedRemove(cmd) {
-        return "if \(guarded.present); then rootcmd \(guarded.action); fi"
+        return guardedCommand(present: guarded.present, action: "rootcmd \(guarded.action)")
     }
     return "rootcmd \(cmd)"
 }

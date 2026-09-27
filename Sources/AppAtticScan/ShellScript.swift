@@ -34,21 +34,21 @@ public func isSafeCommandArgument(_ value: String) -> Bool {
     !value.isEmpty && !value.hasPrefix("-")
 }
 
+/// The ` >/dev/null 2>&1` the guard wrapper puts behind the query, and the one
+/// `parseGuardedRemove` takes back off it.
+let guardSilence = " >/dev/null 2>&1"
+
 /// `if <present> >/dev/null 2>&1; then <action>; fi`, the wrapper a removal and
 /// a guarded upgrade share. `present` is a read-only query that exits 0 only
 /// while the target is still in the state the action acts on.
 ///
-/// The redirect is asked for once. `parseGuardedRemove` hands the query back
-/// with it, because that is what the line holds, so a caller that reads a guard
-/// and writes it again gets the line it started from rather than a second
-/// `>/dev/null 2>&1`. The Zig core writes the guard without the redirect
-/// (`core/src/guarded_remove.zig` `writeNameGuard`, whose comment names this
-/// difference), and the Qt `rootcmd` escalation reads both spellings.
+/// The redirect belongs to the wrapper rather than to the query, so the pair
+/// with `parseGuardedRemove` is an inverse: the parse hands the query back
+/// without it, and writing the two halves out again puts exactly one back. The
+/// Zig core writes the guard without it at all (`core/src/guarded_remove.zig`
+/// `writeNameGuard`), and the Qt `rootcmd` escalation reads both spellings.
 public func guardedCommand(present: String, action: String) -> String {
-    let silence = " >/dev/null 2>&1"
-    return present.hasSuffix(silence)
-        ? "if \(present); then \(action); fi"
-        : "if \(present)\(silence); then \(action); fi"
+    "if \(present)\(guardSilence); then \(action); fi"
 }
 
 /// Wrap a removal so an already-removed target is a no-op instead of a failure.
@@ -88,10 +88,12 @@ public func parseGuardedRemove(_ cmd: String) -> GuardedRemove? {
     // Nothing may follow the guard: the callers judge only these two halves,
     // so a tail after the last `; fi` would run unjudged.
     guard t[fi.upperBound...].trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-    // The query ends where the `; then ` starts: including the separator made
-    // `present` a half no writer produces, and a caller that writes the halves
-    // back would have spliced it into the command.
-    let present = String(t[t.index(t.startIndex, offsetBy: 3)..<then.lowerBound])
+    // The query ends where the `; then ` starts — including the separator made
+    // it a half no writer produces — and the wrapper's redirect comes off with
+    // it: callers judge and re-run the query, not the plumbing that silences
+    // it, and `guardedCommand` puts it back when the halves are written out.
+    var present = String(t[t.index(t.startIndex, offsetBy: 3)..<then.lowerBound])
+    if present.hasSuffix(guardSilence) { present.removeLast(guardSilence.count) }
     let action = String(t[then.upperBound..<fi.lowerBound]).trimmingCharacters(in: .whitespaces)
     return GuardedRemove(present: present, action: action)
 }

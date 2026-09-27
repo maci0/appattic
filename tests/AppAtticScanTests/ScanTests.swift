@@ -637,7 +637,9 @@ final class ScriptPreviewTests: XCTestCase {
     func testParseGuardedRemoveSplitsQueryFromAction() {
         let cmd = guardedRemoveCommand(present: "brew list --formula jq", remove: "brew uninstall jq")
         let parsed = parseGuardedRemove(cmd)
-        XCTAssertEqual(parsed?.present, "brew list --formula jq >/dev/null 2>&1")
+        // The redirect is the wrapper's, not the query's, so the parsed
+        // query does not carry it; `guardedCommand` puts it back.
+        XCTAssertEqual(parsed?.present, "brew list --formula jq")
         XCTAssertEqual(parsed?.action, "brew uninstall jq")
         XCTAssertNil(parseGuardedRemove("rm -rf /tmp/x"))
         XCTAssertNil(parseGuardedRemove("if true; then"))

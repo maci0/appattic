@@ -220,7 +220,7 @@ final class ScriptReRunTests: XCTestCase {
 
         let line = guardedRemoveCommand(
             present: "test -e \(shellQuote(target.path))",
-            remove: "rm -f \(shellQuote(target.path)); printf removed"
+            remove: "rm -f \(shellQuote(target.path)); printf 'removed\\n'"
         )
         let script = "set -e\n\(line)\nprintf done"
 
