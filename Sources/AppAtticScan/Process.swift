@@ -310,6 +310,8 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: MonotonicFn) -> (
     process.standardOutput = outPipe
     process.standardError = errPipe
     process.standardInput = FileHandle.nullDevice
+    let outRead = outPipe.fileHandleForReading
+    let errRead = errPipe.fileHandleForReading
     let collected = CommandPipes(clock: clock)
     let group = DispatchGroup()
     // Dedicated threads: pmap workers already occupy the GCD pool. Queueing
@@ -317,13 +319,20 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: MonotonicFn) -> (
     // for threads).
     group.enter()
     Thread.detachNewThread {
-        collected.out = collected.drain(outPipe.fileHandleForReading)
+        collected.out = collected.drain(outRead)
         group.leave()
     }
     group.enter()
     Thread.detachNewThread {
-        collected.err = collected.drain(errPipe.fileHandleForReading)
+        collected.err = collected.drain(errRead)
         group.leave()
+    }
+    // The read ends are this function's, and both readers are joined before
+    // either close, so a run cannot hand a live descriptor to the next one.
+    // The write ends are closed below, once the child owns its copies.
+    func closeReadEnds() {
+        try? outRead.close()
+        try? errRead.close()
     }
     let exited = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in exited.signal() }
@@ -334,6 +343,7 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: MonotonicFn) -> (
         try? errPipe.fileHandleForWriting.close()
         collected.closeDrainWindow()
         group.wait()
+        closeReadEnds()
         return (127, "", error.localizedDescription)
     }
     isolateProcessGroup(process)
@@ -356,6 +366,7 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: MonotonicFn) -> (
     // per such command.
     collected.closeDrainWindow()
     group.wait()
+    closeReadEnds()
     if timedOut {
         return (127, "", "timeout")
     }

@@ -135,6 +135,35 @@ final class ProcessTests: XCTestCase {
     }
     #endif
 
+    /// The reader threads are joined, but the descriptors they read through
+    /// belong to the pipes this call opened. A scan runs hundreds of commands
+    /// in one process, so two descriptors left open per command is a slow
+    /// exhaustion of the per-process limit, and it fails the next open rather
+    /// than the one that leaked.
+    #if os(Linux)
+    func testRunCommandClosesBothPipeEnds() throws {
+        func liveFDs() throws -> Int {
+            try FileManager.default.contentsOfDirectory(atPath: "/proc/self/fd").count
+        }
+        func batch() {
+            for _ in 0..<8 {
+                _ = runCommand(["/bin/echo", "piped"], timeout: 5)
+            }
+        }
+        // Same reasoning as the thread test: the first batch also opens what
+        // Foundation itself materializes lazily, so growth is measured from a
+        // warmed process.
+        batch()
+        batch()
+        let afterWarm = try liveFDs()
+        batch()
+        XCTAssertLessThanOrEqual(
+            try liveFDs() - afterWarm,
+            2,
+            "each command must close both pipe ends; eight more commands cannot add sixteen descriptors"
+        )
+    }
+    #endif
 
     func testPmapRunCommandKeepsStdoutWithWorker() {
         let n = 32
