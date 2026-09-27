@@ -305,14 +305,63 @@ check_swiftpm_pins() {
             fail "SwiftPM pin $identity shadows the $APP_NAME project name"
         fi
     done < <(swiftpm_pins | awk -F'\t' '{ print $1 }')
+    # A revision is last, so an absent one is a trailing empty field: bash
+    # folds runs of tab, and a gap in the middle would shift the columns.
+    while IFS=$'\t' read -r identity version location revision; do
+        [[ -n "$identity" ]] || continue
+        if [[ -z "$revision" ]]; then
+            fail "SwiftPM pin $identity carries no revision; a branch pin is not a pin"
+        fi
+    done < <(swiftpm_pins)
+    check_swiftpm_declarations
 }
 
-# identity|version|revision|location, one per pin, tab separated.
+# Every dependency Package.swift declares must resolve to the version the
+# manifest pins, from the URL the manifest names. A resolved file that
+# disagrees is the one SwiftPM silently rewrites, so nothing else would
+# notice the drift until a build fetched different source.
+check_swiftpm_declarations() {
+    local identity version url resolved resolved_version resolved_location
+    while IFS=$'\t' read -r identity version url; do
+        [[ -n "$identity" ]] || continue
+        resolved="$(swiftpm_pins | awk -F'\t' -v i="$identity" '$1 == i { print $2 "\t" $3 }')"
+        if [[ -z "$resolved" ]]; then
+            fail "Package.swift declares $identity, Package.resolved pins no such package"
+            continue
+        fi
+        resolved_version="${resolved%%$'\t'*}"
+        resolved_location="${resolved#*$'\t'}"
+        [[ "$resolved_version" == "$version" ]] || fail \
+            "Package.swift pins $identity $version, Package.resolved pins $resolved_version"
+        [[ "$resolved_location" == "$url" ]] || fail \
+            "Package.swift fetches $identity from $url, Package.resolved pins $resolved_location"
+    done < <(swiftpm_declared)
+}
+
+# identity|version|url for every .package(url:, .exact()) in Package.swift.
+# SwiftPM derives a package identity from the URL by dropping the scheme and
+# the .git suffix, so this reads the same key Package.resolved records.
+swiftpm_declared() {
+    local url version identity
+    while IFS=$'\t' read -r url version; do
+        [[ -n "$url" ]] || continue
+        identity="${url##*/}"
+        identity="${identity%.git}"
+        printf '%s\t%s\t%s\n' "$identity" "$version" "$url"
+    done < <(
+        sed -n 's/.*\.package(url:[[:space:]]*"\([^"]*\)"[[:space:]]*,[[:space:]]*\.exact("\([^"]*\)").*/\1\t\2/p' \
+            "$ROOT/Package.swift"
+    )
+}
+
+# identity|version|location|revision, one per pin, tab separated. SwiftPM
+# writes no revision for a branch or a plain range, so that column is empty
+# and the check has to reject it.
 swiftpm_pins() {
     awk '
         function flush() {
             if (identity != "") {
-                printf "%s\t%s\t%s\t%s\n", identity, version, revision, location
+                printf "%s\t%s\t%s\t%s\n", identity, version, location, revision
             }
             identity = ""; version = ""; revision = ""; location = ""
         }
@@ -371,8 +420,12 @@ run_sbom() {
     done < <(parse_checksums | awk -F'\t' '$1 == "OK" { print $2 }' | sort)
 
     local identity rev location
-    while IFS=$'\t' read -r identity version rev location; do
+    while IFS=$'\t' read -r identity version location rev; do
         [[ -n "$identity" ]] || continue
+        if [[ -z "$rev" ]]; then
+            fail "cannot build SBOM: $identity has no pinned revision"
+            return 1
+        fi
         assert_json_safe "sbom swiftpm identity" "$identity"
         assert_json_safe "sbom swiftpm version" "$version"
         assert_json_safe "sbom swiftpm location" "$location"
