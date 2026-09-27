@@ -128,18 +128,19 @@ public func humanDays(_ days: Double) -> String {
 private let durationFormatters: [Calendar.Component: (DateComponents) -> String?] = {
     #if canImport(Darwin)
     var formatters: [Calendar.Component: (DateComponents) -> String?] = [:]
-    // The spelling is named: an array literal in a `for` whose element type is
-    // only decided by the body — `allowed.insert(unit)` — is an inference cycle
-    // the compiler refuses ("reference to member 'hour' cannot be resolved
-    // without a contextual type") wherever this arm is compiled, which is
-    // Darwin only.
-    for unit in [Calendar.Component.hour, .day, .weekOfYear, .month, .year] {
+    // Each unit with the calendar unit that names it: `allowedUnits` is an
+    // `NSCalendar.Unit`, and there is no `DateComponentsFormatter.Units` for the
+    // loop to build an empty set of, which is what this arm used to name. The
+    // pairs also give the array its type, so the literal does not leave the
+    // element type to be decided by the loop body.
+    let units: [(component: Calendar.Component, allowed: NSCalendar.Unit)] = [
+        (.hour, .hour), (.day, .day), (.weekOfYear, .weekOfYear), (.month, .month), (.year, .year),
+    ]
+    for unit in units {
         let f = DateComponentsFormatter()
-        var allowed: DateComponentsFormatter.Units = []
-        allowed.insert(unit)
-        f.allowedUnits = allowed
+        f.allowedUnits = unit.allowed
         f.unitsStyle = .abbreviated
-        formatters[unit] = { f.string(from: $0) }
+        formatters[unit.component] = { f.string(from: $0) }
     }
     return formatters
     #else

@@ -181,8 +181,26 @@ strict_cflags=(-Wall -Wextra -Werror
     -Wpedantic -Wnull-dereference
     -Wcast-qual -Wundef -Wmissing-prototypes -Wold-style-definition
     -Wredundant-decls -Wswitch-enum -Wswitch-default -Wdouble-promotion
-    -Wfloat-equal -Wjump-misses-init -Wtautological-compare)
+    -Wfloat-equal -Wtautological-compare)
+# `-Wjump-misses-init` is GCC's alone, and clang refuses the whole invocation
+# over a warning option it does not know — under `-Werror` that is a failed
+# gate, not a note — so it joins the list for the compiler that has it.
+gcc_only_cflags=(-Wjump-misses-init)
 cflags=(-O2 "${strict_cflags[@]}")
+compiler_cflags() {
+    if [[ "$1" == clang* ]]; then
+        printf '%s\n' "${cflags[@]}"
+    else
+        printf '%s\n' "${cflags[@]}" "${gcc_only_cflags[@]}"
+    fi
+}
+embed_compiler_cflags() {
+    if [[ "$1" == clang* ]]; then
+        printf '%s\n' "${embed_cflags[@]}"
+    else
+        printf '%s\n' "${embed_cflags[@]}" "${gcc_only_cflags[@]}"
+    fi
+}
 # Every C file under core/host is compiled here, so a new one cannot join the
 # tree without also joining the gate. Discovered, not listed: a new
 # subdirectory of core/host otherwise compiles with warnings nothing fails on.
@@ -215,6 +233,8 @@ if [[ -z "$wasmtime_include" ]]; then
     echo "      install: bash scripts/linux-deps.sh --install-wasmtime" >&2
 fi
 for comp in "${compilers[@]}"; do
+    mapfile -t comp_cflags < <(compiler_cflags "$comp")
+    mapfile -t comp_embed_cflags < <(embed_compiler_cflags "$comp")
     for src in "${c_sources[@]}"; do
         base="$(basename "$src")"
         obj="$tmp/${comp}-${base%.c}.o"
@@ -227,14 +247,15 @@ for comp in "${compilers[@]}"; do
             # -Wstrict-prototypes, in a warnings-as-errors pass — would
             # otherwise fail the gate on code the gate does not own. Our own
             # sources are still checked with the strict set.
-            "$comp" "${embed_cflags[@]}" -I "$ROOT/core/host" \
+            "$comp" "${comp_embed_cflags[@]}" -I "$ROOT/core/host" \
                 -isystem "$wasmtime_include" -c "$src" -o "$obj"
             continue
         fi
-        "$comp" "${cflags[@]}" -I "$ROOT/core/host" -c "$src" -o "$obj"
+        "$comp" "${comp_cflags[@]}" -I "$ROOT/core/host" -c "$src" -o "$obj"
     done
 done
-cc "${cflags[@]}" \
+mapfile -t cc_cflags < <(compiler_cflags cc)
+cc "${cc_cflags[@]}" \
     -I "$ROOT/core/host" \
     "$ROOT/core/host/hostexec.c" \
     "$ROOT/core/host/tests/hostexec_test.c" \
