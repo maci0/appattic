@@ -236,11 +236,15 @@ foreach(_font_license IN LISTS _appattic_font_licenses)
     install(FILES "${_font_license}" DESTINATION share/appattic/licenses)
 endforeach()
 
-# Helper coverage for finding.cpp and diskusage.cpp. It needs no scan and no
-# wasm host, so it lives in its own binary instead of the shipped app.
+# Helper coverage for finding.cpp, diskusage.cpp, and settings.cpp. It needs no
+# scan and no wasm host, so it lives in its own binary instead of the shipped
+# app. settings.cpp is here, not only on the app target: checkSettings() calls
+# parseSettingsJson and legacyBoolValue, so the test binary does not link
+# without it.
 add_executable(appattic-qt-helper-tests
     tests/helper_tests.cpp
     $<TARGET_OBJECTS:appattic-qt-core>
+    settings.cpp
     appattic.qrc
 )
 target_include_directories(appattic-qt-helper-tests PRIVATE

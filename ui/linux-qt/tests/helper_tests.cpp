@@ -1093,8 +1093,11 @@ static int checkSettings() {
             return 1;
         }
     }
+    // The `!` this line used to carry made it ask the opposite question: an
+    // unreadable value that returned its fallback, which is the contract, read
+    // as a failure, so the check failed on correct behaviour.
     if (legacyBoolValue(QVariant(QStringLiteral("maybe")), true, &readable) != true
-        || !legacyBoolValue(QVariant(QStringLiteral("maybe")), false, &readable) != false
+        || legacyBoolValue(QVariant(QStringLiteral("maybe")), false, &readable) != false
         || readable) {
         std::fprintf(stderr, "settings: unreadable legacy value was not reported\n");
         return 1;
