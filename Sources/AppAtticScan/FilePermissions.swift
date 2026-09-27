@@ -25,8 +25,22 @@ public func restrictOwnerOnlyDirectory(at url: URL) throws {
 /// Makes `dir` exist, owner-only when it is the app's own state directory. A
 /// state file's parent has to be ready and locked down before the file is
 /// written, so callers do this first rather than after.
+///
+/// An existing entry is left to the caller: when it is a directory there is
+/// nothing to make, and when it is a file this is not a directory-creation
+/// failure to report. The write that follows fails on the real reason, which
+/// names the file the caller asked for instead of its parent.
 public func prepareStateDirectory(_ dir: URL) throws {
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    var isDirectory: ObjCBool = false
+    if FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDirectory) {
+        // Something is already there. A directory is ready as it stands; a
+        // file is the caller's own problem, and the write that follows names
+        // it. Either way this is not a directory-creation failure, and
+        // `createDirectory` would report the file as one.
+        guard isDirectory.boolValue else { return }
+    } else {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
     if isAppStateDirectory(dir) {
         try restrictOwnerOnlyDirectory(at: dir)
     }
