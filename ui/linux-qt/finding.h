@@ -82,6 +82,9 @@ bool isShadowFinding(const Finding &f);
 QString leftoverCleanupCommand(const Finding &f);
 QString packageChildCommand(const Finding &f, const QString &child);
 bool commandNeedsRoot(const QString &cmd);
+/// A plugin command may only reach a script when every byte is inert to
+/// `/bin/sh`. Anything else is an unquoted name or path.
+bool commandIsShellSafe(const QString &cmd);
 QString withRootCmd(const QString &cmd);
 QString scriptRootHelper();
 void groupLinuxLeftovers(QVector<Finding> &findings);

@@ -214,6 +214,7 @@ const package_fixture = "/usr/bin";
 
 fn renderShadows(hits: []const ShadowFinding) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"path-shadow\",\"engine\":null,\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
@@ -226,7 +227,7 @@ fn renderShadows(hits: []const ShadowFinding) bool {
         w.raw(",\"status\":\"shadow\",\"shadows\":");
         w.str(h.shadows);
         w.raw(",\"command\":\"rm -f ");
-        w.raw(h.path);
+        jsonbuf.rawShQuote(&w, &q_buf, h.path);
         w.raw("\"}");
     }
     w.raw("],\"script\":");
@@ -236,7 +237,7 @@ fn renderShadows(hits: []const ShadowFinding) bool {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic path-shadow. Review before running.\\n");
         for (hits) |h| {
             w.raw("rm -f ");
-            w.raw(h.path);
+            jsonbuf.rawShQuote(&w, &q_buf, h.path);
             w.raw("\\n");
         }
         w.raw("\"");

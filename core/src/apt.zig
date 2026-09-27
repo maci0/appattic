@@ -146,6 +146,7 @@ fn renderApt(
     ppas: []const PpaSource,
 ) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"apt\",\"engine\":\"apt\",\"findings\":[");
     var first = true;
     for (orphans) |h| {
@@ -160,7 +161,7 @@ fn renderApt(
             w.str(h.version);
         }
         w.raw(",\"status\":\"orphaned\",\"command\":\"apt-get purge -y ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"apt\"}");
     }
     for (rc_pkgs) |h| {
@@ -175,7 +176,7 @@ fn renderApt(
             w.str(h.version);
         }
         w.raw(",\"status\":\"orphaned\",\"command\":\"apt-get purge -y ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"dpkg\",\"summary\":\"Removed package still has config files\",\"reason\":\"dpkg status rc: the package is gone, config remnants remain. Purge drops them.\"}");
     }
     for (ppas) |h| {
@@ -186,7 +187,7 @@ fn renderApt(
         w.raw(",\"name\":");
         w.str(h.name);
         w.raw(",\"path\":\"/etc/apt/sources.list.d/");
-        w.raw(h.name);
+        w.str(h.name);
         w.raw("\",\"status\":\"review\",\"manager\":\"apt\",\"summary\":\"Third-party apt source\",\"reason\":\"PPA or Launchpad source under /etc/apt/sources.list.d. Removing it needs root and is not done automatically.\"}");
     }
     for (outdated) |h| {
@@ -201,7 +202,7 @@ fn renderApt(
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic apt. Review before running.\\n");
         for (orphans) |h| {
             w.raw("apt-get purge -y ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

@@ -277,6 +277,7 @@ var none_json_buf: [512]u8 = undefined;
 
 fn render(comptime spec: Spec, hits: []const Orphan) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":");
     w.str(spec.id);
     w.raw(",\"engine\":null,\"findings\":[");
@@ -291,7 +292,7 @@ fn render(comptime spec: Spec, hits: []const Orphan) bool {
         w.raw(",\"rootLabel\":");
         w.str(spec.root_label);
         w.raw(",\"status\":\"orphaned\",\"command\":\"rm -rf ");
-        w.raw(h.path);
+        jsonbuf.rawShQuote(&w, &q_buf, h.path);
         w.raw("\"}");
     }
     w.raw("],\"script\":");
@@ -303,7 +304,7 @@ fn render(comptime spec: Spec, hits: []const Orphan) bool {
         w.raw(". Review before running.\\n");
         for (hits) |h| {
             w.raw("rm -rf ");
-            w.raw(h.path);
+            jsonbuf.rawShQuote(&w, &q_buf, h.path);
             w.raw("\\n");
         }
         w.raw("\"");

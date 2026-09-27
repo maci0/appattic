@@ -35,6 +35,7 @@ pub fn parsePnpmGlobalList(text: []const u8, out: []PnpmGlobal) usize {
 
 fn renderPnpm(hits: []const PnpmGlobal) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"pnpm\",\"engine\":\"pnpm\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
@@ -47,7 +48,7 @@ fn renderPnpm(hits: []const PnpmGlobal) bool {
             w.str(h.version);
         }
         w.raw(",\"status\":\"global\",\"command\":\"pnpm remove -g ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"pnpm\"}");
     }
     w.raw("],\"script\":");
@@ -57,7 +58,7 @@ fn renderPnpm(hits: []const PnpmGlobal) bool {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic pnpm. Review before running.\\n");
         for (hits) |h| {
             w.raw("pnpm remove -g ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

@@ -126,17 +126,18 @@ pub fn parseBrewOutdatedJSON(text: []const u8, out: []BrewOutdated) usize {
     return ctx.n;
 }
 
-fn writeUpgrade(w: *jsonbuf.W, h: BrewOutdated) void {
+fn writeUpgrade(w: *jsonbuf.W, h: BrewOutdated, q_buf: []u8) void {
     if (h.cask) {
         w.raw("brew upgrade --cask ");
     } else {
         w.raw("brew upgrade ");
     }
-    w.raw(h.name);
+    jsonbuf.rawShQuote(w, q_buf, h.name);
 }
 
 fn renderBrew(hits: []const BrewOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"brew\",\"engine\":\"brew\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
@@ -153,7 +154,7 @@ fn renderBrew(hits: []const BrewOutdated) bool {
             w.str(h.latest);
         }
         w.raw(",\"status\":\"outdated\",\"updatable\":true,\"command\":\"");
-        writeUpgrade(&w, h);
+        writeUpgrade(&w, h, &q_buf);
         w.raw("\",\"manager\":");
         w.str(if (h.cask) "brew-cask" else "brew-formula");
         w.raw("}");
@@ -164,7 +165,7 @@ fn renderBrew(hits: []const BrewOutdated) bool {
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic brew. Review before running.\\n");
         for (hits) |h| {
-            writeUpgrade(&w, h);
+            writeUpgrade(&w, h, &q_buf);
             w.raw("\\n");
         }
         w.raw("\"");

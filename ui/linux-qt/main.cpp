@@ -2693,6 +2693,18 @@ private:
                 QStringLiteral("# AppAttic. Review before running.")};
     }
 
+    /// A plugin command is copied into the script as written. Refuse it and
+    /// say so in the preview when it carries a character `/bin/sh` would act
+    /// on: the row is left alone rather than run as an unquoted command.
+    static QString scriptLine(const Finding &f, const QString &raw) {
+        if (raw.isEmpty()) return {};
+        if (!commandIsShellSafe(raw)) {
+            return QStringLiteral("# skipped ") + f.plugin
+                + QStringLiteral(": command is not shell-safe, refusing to run it");
+        }
+        return withRootCmd(raw);
+    }
+
     QString cleanupScript() const {
         QStringList header = scriptHeader();
         QStringList body;
@@ -2700,16 +2712,17 @@ private:
             if (isOutdated(f) && !isLeftover(f) && !isStale(f) && !isPackage(f)) continue;
             if (m_marked.contains(f.uid())) {
                 const QString raw = isLeftover(f) ? leftoverCleanupCommand(f) : f.command;
-                if (raw.isEmpty()) continue;
-                body << withRootCmd(raw);
+                const QString line = scriptLine(f, raw);
+                if (line.isEmpty()) continue;
+                body << line;
                 continue;
             }
             if (!isPackage(f)) continue;
             for (const QString &child : f.children) {
                 if (!m_marked.contains(packageChildMarkKey(f.uid(), child))) continue;
-                const QString raw = packageChildCommand(f, child);
-                if (raw.isEmpty()) continue;
-                body << withRootCmd(raw);
+                const QString line = scriptLine(f, packageChildCommand(f, child));
+                if (line.isEmpty()) continue;
+                body << line;
             }
         }
         return finishScript(header, body);
@@ -2722,8 +2735,9 @@ private:
             if (!m_marked.contains(f.uid()) || !isOutdated(f)) continue;
             if (!f.updatable) continue;
             const QString raw = f.updateCommand.isEmpty() ? f.command : f.updateCommand;
-            if (raw.isEmpty()) continue;
-            body << withRootCmd(raw);
+            const QString line = scriptLine(f, raw);
+            if (line.isEmpty()) continue;
+            body << line;
         }
         return finishScript(header, body);
     }

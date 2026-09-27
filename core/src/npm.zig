@@ -37,6 +37,7 @@ pub fn parseNpmGlobalList(text: []const u8, out: []NpmGlobal) usize {
 
 fn renderNpm(hits: []const NpmGlobal, outdated: []const jsonscan.NamedVer) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"npm\",\"engine\":\"npm\",\"findings\":[");
     var first = true;
     for (hits) |h| {
@@ -51,7 +52,7 @@ fn renderNpm(hits: []const NpmGlobal, outdated: []const jsonscan.NamedVer) bool 
             w.str(h.version);
         }
         w.raw(",\"status\":\"global\",\"command\":\"npm -g uninstall ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"npm\"}");
     }
     for (outdated) |h| {
@@ -66,7 +67,7 @@ fn renderNpm(hits: []const NpmGlobal, outdated: []const jsonscan.NamedVer) bool 
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic npm. Review before running.\\n");
         for (hits) |h| {
             w.raw("npm -g uninstall ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

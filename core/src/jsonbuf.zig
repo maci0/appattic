@@ -100,6 +100,57 @@ pub fn isSafeIdent(s: []const u8) bool {
     return true;
 }
 
+/// Bytes a POSIX shell reads as a literal inside an unquoted word. Same set
+/// as Swift `isSafeShellByte`, so a generated command reads the same on both
+/// sides of the core.
+fn isSafeShellByte(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
+        (c >= '0' and c <= '9') or
+        c == '_' or c == '@' or c == '%' or c == '+' or c == '=' or
+        c == ':' or c == ',' or c == '.' or c == '/' or c == '-';
+}
+
+/// POSIX single-quote form of `value`, for a name or path spliced into a
+/// generated `/bin/sh` command. A package name or leftover path is attacker
+/// controlled: without this, `foo'; reboot; '` runs as two commands, and the
+/// UI runs the result under `pkexec`. A value that is already shell-safe is
+/// returned as is. Writes into `buf` and returns the slice, or null when it
+/// does not fit so the caller fails the render instead of emitting a
+/// truncated command.
+pub fn shQuote(buf: []u8, value: []const u8) ?[]const u8 {
+    var needs_quote = value.len == 0;
+    for (value) |c| {
+        if (!isSafeShellByte(c)) needs_quote = true;
+    }
+    if (!needs_quote) return value;
+    if (value.len + 2 > buf.len) return null;
+    var i: usize = 1;
+    buf[0] = '\'';
+    for (value) |c| {
+        if (i + 4 > buf.len) return null;
+        if (c == '\'') {
+            @memcpy(buf[i..][0..4], "'\\''");
+            i += 4;
+        } else {
+            buf[i] = c;
+            i += 1;
+        }
+    }
+    if (i >= buf.len) return null;
+    buf[i] = '\'';
+    return buf[0 .. i + 1];
+}
+
+/// `shQuote` straight into a `W`, failing the row when the value is too long
+/// for `buf`. A finding with no command is not a finding with a broken one.
+pub fn rawShQuote(w: *W, buf: []u8, value: []const u8) void {
+    const q = shQuote(buf, value) orelse {
+        w.failed = true;
+        return;
+    };
+    w.raw(q);
+}
+
 /// Named outdated finding. `updatable` means the confirm script may run `command`.
 /// host.exec still never runs that command.
 pub fn writeOutdated(
@@ -130,13 +181,18 @@ pub fn writeOutdated(
         w.raw("null");
     } else {
         var cmd_buf: [384]u8 = undefined;
-        if (command.len + name.len > cmd_buf.len) {
+        var name_buf: [320]u8 = undefined;
+        const quoted = shQuote(&name_buf, name) orelse {
+            w.failed = true;
+            return;
+        };
+        if (command.len + quoted.len > cmd_buf.len) {
             w.failed = true;
             return;
         }
         @memcpy(cmd_buf[0..command.len], command);
-        @memcpy(cmd_buf[command.len..][0..name.len], name);
-        w.str(cmd_buf[0 .. command.len + name.len]);
+        @memcpy(cmd_buf[command.len..][0..quoted.len], quoted);
+        w.str(cmd_buf[0 .. command.len + quoted.len]);
     }
     w.raw(",\"manager\":");
     w.str(manager);
@@ -203,13 +259,13 @@ test "json writer overflow sets failed" {
     try std.testing.expect(w.slice() == null);
 }
 
-test "writeOutdated JSON-escapes command and name" {
+test "writeOutdated JSON-escapes command and shell-quotes the name" {
     var buf: [512]u8 = undefined;
     var w = W{ .buf = &buf };
     writeOutdated(&w, "a\"b", "1", "2", "apt", "apt install ", true);
     const got = w.slice() orelse return error.Overflow;
     try std.testing.expect(std.mem.indexOf(u8, got, "a\\\"b") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "\"command\":\"apt install a\\\"b\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "\"command\":\"apt install 'a\\\"b'\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, got, "\"updatable\":true") != null);
 
     var buf2: [256]u8 = undefined;
@@ -219,6 +275,28 @@ test "writeOutdated JSON-escapes command and name" {
     try std.testing.expect(std.mem.indexOf(u8, got2, "\"command\":null") != null);
     try std.testing.expect(std.mem.indexOf(u8, got2, "\"updatable\":false") != null);
     try std.testing.expect(std.mem.indexOf(u8, got2, "\"command\":\"typescript\"") == null);
+}
+
+test "shQuote keeps an injected command inside one argv entry" {
+    var buf: [256]u8 = undefined;
+    const injected = shQuote(&buf, "foo'; reboot; '") orelse return error.Overflow;
+    try std.testing.expectEqualStrings("'foo'\\''; reboot; '\\'''", injected);
+
+    var plain: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("wget", shQuote(&plain, "wget").?);
+    try std.testing.expectEqualStrings("''", shQuote(&plain, "").?);
+    try std.testing.expectEqualStrings("'/home/user/a b'", shQuote(&plain, "/home/user/a b").?);
+
+    var small: [4]u8 = undefined;
+    try std.testing.expect(shQuote(&small, "a b") == null);
+}
+
+test "writeOutdated quotes a name that would otherwise split the command" {
+    var buf: [512]u8 = undefined;
+    var w = W{ .buf = &buf };
+    writeOutdated(&w, "x'; reboot; '", "1", "2", "apt", "apt install ", true);
+    const got = w.slice() orelse return error.Overflow;
+    try std.testing.expect(std.mem.indexOf(u8, got, "apt install 'x'\\\\''; reboot; '\\\\'''") != null);
 }
 
 test "isSafeIdent rejects empty and shell metacharacters" {

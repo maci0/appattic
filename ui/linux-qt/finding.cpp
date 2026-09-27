@@ -426,6 +426,49 @@ static bool commandRemovesProtectedPath(const QString &cmd) {
         || has("/Library");
 }
 
+/// A plugin `command` reaches the generated script verbatim, so it may only
+/// hold characters that mean nothing to `/bin/sh`. A `;`, `|`, `&`, `$`,
+/// backtick, quote, redirect, or newline means the plugin spliced a package
+/// name or leftover path into the command without quoting it, and the shell
+/// would run whatever follows. Names and paths are attacker controlled (an
+/// npm package name, a tap's cask, a file in `~/.local/bin`), and distro
+/// lines go through `rootcmd`, so the payload would run as root. Refuse the
+/// command instead. Same character set as Zig `jsonbuf.shQuote` and Swift
+/// `isSafeShellByte`, plus the space and the single quote a quoted value needs.
+bool commandIsShellSafe(const QString &cmd) {
+    if (cmd.isEmpty()) return false;
+    bool in_quote = false;
+    for (int i = 0; i < cmd.size(); ++i) {
+        const QChar c = cmd.at(i);
+        if (in_quote) {
+            // Everything between single quotes is literal data, including a
+            // newline, so only the closing quote matters.
+            if (c == QLatin1Char('\'')) in_quote = false;
+            continue;
+        }
+        if (c == QLatin1Char('\'')) {
+            in_quote = true;
+            continue;
+        }
+        if (c == QLatin1Char('\\') && i + 1 < cmd.size()
+            && cmd.at(i + 1) == QLatin1Char('\'')) {
+            ++i;  // the `'\''` spelling shellQuote uses for an embedded quote
+            continue;
+        }
+        if (c.unicode() >= 0x80) continue;
+        const char b = char(c.unicode());
+        if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')) continue;
+        switch (b) {
+            case '_': case '@': case '%': case '+': case '=':
+            case ':': case ',': case '.': case '/': case '-': case ' ':
+                continue;
+            default:
+                return false;
+        }
+    }
+    return !in_quote;
+}
+
 bool isShadowFinding(const Finding &f) {
     return f.status == QLatin1String("shadow")
         || f.kind == QLatin1String("shadow")
