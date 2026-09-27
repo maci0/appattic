@@ -479,6 +479,17 @@ run_check() {
     echo "deps: pins ok ($(parse_checksums | awk -F'\t' '$1 == "OK"' | wc -l) artifacts, $(vendored_paths | wc -l) vendored, $(swiftpm_pins | wc -l) SwiftPM pins)"
 }
 
+# Epoch seconds to ISO 8601 UTC. GNU date takes `-d @epoch`; BSD (macOS) has
+# no `-d` and takes `-r epoch`. Probe the GNU spelling, fall back to BSD.
+epoch_iso8601() {
+    local epoch="$1" out
+    if out="$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"; then
+        printf '%s\n' "$out"
+        return 0
+    fi
+    date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ
+}
+
 # CycloneDX 1.5. No scanner, no network: the inventory is read out of the
 # files that already decide what gets fetched.
 run_sbom() {
@@ -487,7 +498,7 @@ run_sbom() {
     local epoch timestamp app_version
     epoch="${SOURCE_DATE_EPOCH:-0}"
     [[ "$epoch" =~ ^[0-9]+$ ]] || epoch=0
-    timestamp="$(date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ)"
+    timestamp="$(epoch_iso8601 "$epoch")"
     app_version="$(git describe --tags --exact-match 2>/dev/null || printf '0.0.0')"
     app_version="${app_version#v}"
 
