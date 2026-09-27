@@ -81,12 +81,16 @@ modules:
       - /libexec/zig
       - /bin/zig
     sources:
+      # The tree itself, so a local or CI build needs no published tarball.
+      # A distribution build wants a released archive with a sha256 here
+      # instead: Flatpak remotes have no way to fetch a dir source.
       - type: dir
         path: ../..
         skip:
           - .build
           - .deps
           - .gauntlet
+          - .git
           - .scratch
           - .tmp-shots
           - .zig-cache

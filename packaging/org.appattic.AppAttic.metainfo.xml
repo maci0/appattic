@@ -29,6 +29,7 @@
   <categories>
     <category>Utility</category>
     <category>System</category>
+    <category>Filesystem</category>
   </categories>
   <provides>
     <binary>appattic-qt</binary>

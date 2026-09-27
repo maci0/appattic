@@ -362,14 +362,28 @@ patch_apprun
 # Squashfs mtimes and file order follow SOURCE_DATE_EPOCH / LC_ALL=C.
 find "$APPDIR" -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} +
 
+# Update information, so a downloaded AppImage can check for a newer release
+# through AppImageUpdate. appimagetool writes the .zsync next to the image and
+# the release workflow has to publish it beside the image, or the check finds
+# nothing. The URL names the tag this build carries, so an image built from an
+# untagged checkout is the only one whose endpoint 404s.
+UPDATE_URL="https://github.com/maci0/appattic/releases/download/v${VERSION}/${OUT#"$DIST/"}"
+UPDATE_ZSYNC="$OUT.zsync"
+
 mkdir -p "$DIST"
-rm -f "$OUT"
+rm -f "$OUT" "$UPDATE_ZSYNC"
 echo "appimagetool: $OUT"
 ARCH="$APPIMAGE_ARCH" SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" VERSION="$VERSION" \
-    run_appimage_tool "$APPIMAGETOOL" "$APPDIR" "$OUT"
+    run_appimage_tool "$APPIMAGETOOL" --updateinformation "zsync|${UPDATE_URL}" "$APPDIR" "$OUT"
 
 if [[ ! -x "$OUT" ]]; then
     echo "error: AppImage not created: $OUT" >&2
+    exit 1
+fi
+if [[ ! -f "$UPDATE_ZSYNC" ]]; then
+    echo "error: $UPDATE_ZSYNC not created" >&2
+    echo "       the embedded update information points at it: $UPDATE_URL" >&2
+    echo "       publishing the AppImage without it would leave users with no update check" >&2
     exit 1
 fi
 
@@ -401,6 +415,8 @@ if [[ $rc -ne 0 ]] || ! printf '%s\n' "$dump" | grep -q '^SMOKE=ok$'; then
 fi
 
 echo "AppImage: $OUT"
+echo "zsync: $UPDATE_ZSYNC"
+echo "update information: $UPDATE_URL"
 echo "buildinfo: ${OUT}.buildinfo"
 echo "sbom: ${OUT}.sbom.json"
 echo "run:    $OUT"

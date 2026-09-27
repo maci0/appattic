@@ -84,6 +84,7 @@ jobs:
         with:
           files: |
             dist/AppAttic-x86_64.AppImage
+            dist/AppAttic-x86_64.AppImage.zsync
             dist/AppAttic-x86_64.AppImage.buildinfo
             dist/AppAttic-x86_64.AppImage.sbom.json
           fail_on_unmatched_files: true
