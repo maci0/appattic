@@ -4,6 +4,7 @@
 #include "diskusage.h"
 #include "finding.h"
 
+#include <QAtomicInt>
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
@@ -661,6 +662,103 @@ static int writeFile(const QString &path, const QByteArray &body) {
     return 0;
 }
 
+/// Open descriptors in this process, from /proc. -1 where that is unavailable,
+/// so a non-Linux run skips the bound instead of failing it.
+static int openDescriptorCount() {
+    QDir d(QStringLiteral("/proc/self/fd"));
+    if (!d.exists()) return -1;
+    return int(d.entryList(QDir::AllEntries | QDir::System | QDir::NoDotAndDotDot).size());
+}
+
+namespace {
+
+struct FdProbe {
+    QAtomicInt peak{0};
+};
+
+/// Sampled at the end of every directory's walk: the root's fires last on the
+/// first thread, which is the moment the whole deferral is outstanding.
+void noteDescriptors(const DiskNode &, void *user) {
+    auto *probe = static_cast<FdProbe *>(user);
+    const int n = openDescriptorCount();
+    int seen = probe->peak.loadAcquire();
+    while (n > seen && !probe->peak.testAndSetAcquire(seen, n)) {
+        seen = probe->peak.loadAcquire();
+    }
+}
+
+} // namespace
+
+/// A wide tree must not sit on one descriptor per directory it defers: the
+/// deferred fds are all live until the worker phase starts, so an uncapped
+/// deferral holds hundreds at once on a home folder and runs into the process
+/// limit. The walk still has to produce every directory and the same totals.
+static int checkDeferredFdBound() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "fd bound: temp dir failed\n");
+        return 1;
+    }
+    const QString root = tmp.path();
+    const int dirCount = 400;
+    for (int i = 0; i < dirCount; ++i) {
+        const QString sub = QStringLiteral("%1/d%2").arg(root).arg(i);
+        if (!QDir().mkpath(sub)) {
+            std::fprintf(stderr, "fd bound: mkpath %d failed\n", i);
+            return 1;
+        }
+        if (writeFile(sub + QStringLiteral("/f.bin"), QByteArray(4096, 'x'))) {
+            std::fprintf(stderr, "fd bound: write %d failed\n", i);
+            return 1;
+        }
+    }
+    const int before = openDescriptorCount();
+    if (before < 0) {
+        std::fprintf(stdout, "fd bound: no /proc/self/fd, skipped\n");
+        return 0;
+    }
+    FdProbe probe;
+    DiskScanOptions opts;
+    opts.oneFileSystem = true;
+    opts.dirDone = &noteDescriptors;
+    opts.user = &probe;
+    DiskNode *tree = scanDiskTree(root, opts);
+    if (!tree || tree->unreadable) {
+        std::fprintf(stderr, "fd bound: scan produced no tree\n");
+        delete tree;
+        return 1;
+    }
+    if (tree->children.size() != dirCount) {
+        std::fprintf(stderr, "fd bound: got %lld children, want %d\n",
+            static_cast<long long>(tree->children.size()), dirCount);
+        delete tree;
+        return 1;
+    }
+    qint64 perDir = 0;
+    for (const DiskNode *c : tree->children) {
+        if (!c->isDir) continue;
+        perDir += c->apparent;
+    }
+    if (perDir < qint64(dirCount) * 4096) {
+        std::fprintf(stderr, "fd bound: deferred totals lost (%lld of %lld)\n",
+            static_cast<long long>(perDir), static_cast<long long>(dirCount) * 4096);
+        delete tree;
+        return 1;
+    }
+    delete tree;
+    /* The deferred pool (kMaxDeferredDirFds), the workers walking at the same
+       time, and the descriptors the test already held. An uncapped deferral
+       reaches one per directory instead, which is what this pins. */
+    const int slack = before + 64 + 8 + 16;
+    if (probe.peak.loadAcquire() > slack) {
+        std::fprintf(stderr, "fd bound: %d descriptors open mid-walk, limit %d\n",
+            probe.peak.loadAcquire(), slack);
+        return 1;
+    }
+    std::fprintf(stdout, "fd bound: ok (peak %d, limit %d)\n", probe.peak.loadAcquire(), slack);
+    return 0;
+}
+
 static int checkDiskUsage() {
     QTemporaryDir tmp;
     if (!tmp.isValid()) {
@@ -831,7 +929,8 @@ static int checkDiskUsage() {
 
 int main() {
     const int checks[] = {
-        verifyHelpers(), checkPrivacy(), checkTiming(), checkDiskUsage(),
+        verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
+        checkDiskUsage(),
     };
     for (const int rc : checks) {
         if (rc != 0) return rc;

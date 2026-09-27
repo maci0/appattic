@@ -183,6 +183,12 @@ void pathPop(char *path, size_t *len, size_t saved) {
     path[saved] = '\0';
 }
 
+/// A deferred directory is held open until the worker phase starts, so the
+/// first-thread walk would otherwise sit on one descriptor per directory it
+/// found. Past this many outstanding fds a child is walked inline and closed at
+/// once, which keeps the walk off the descriptor limit on a wide tree.
+constexpr size_t kMaxDeferredDirFds = 64;
+
 void addChildTotals(DiskNode *node, const DiskNode *child) {
     node->apparent = addSat(node->apparent, child->apparent);
     node->allocated = addSat(node->allocated, child->allocated);
@@ -246,6 +252,7 @@ void visitEntry(
             }
         }
     }
+    if (deferDir && defer->size() >= kMaxDeferredDirFds) deferDir = false;
     if (meta.isDir && !child->mountPoint) {
         const int childFd = openChildDir(dirfd, name);
         if (childFd < 0) {
