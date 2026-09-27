@@ -98,6 +98,22 @@ public struct CLIOptions {
 
 let cliCommands: Set<String> = ["report", "leftovers", "stale", "outdated", "packages", "update", "disk"]
 
+/// Options that stand alone: the flag name and the field it sets. `cliHelpText`
+/// lists these; `parseCLIArguments` walks the table.
+let cliBooleanFlags: [(name: String, key: WritableKeyPath<CLIOptions, Bool>)] = [
+    ("--version", \.version), ("-v", \.version),
+    ("--help", \.help), ("-h", \.help),
+    ("--include-system", \.includeSystem),
+    ("--fresh", \.fresh),
+    ("--no-color", \.noColor),
+    ("--all-file-systems", \.allFileSystems),
+    ("--allocated", \.allocated),
+    ("--dry-run", \.dryRun),
+    ("--yes", \.yes), ("-y", \.yes),
+    ("--leftovers-only", \.leftoversOnly),
+    ("--stale-only", \.staleOnly),
+]
+
 func cliCommandList() -> String {
     cliCommands.sorted().joined(separator: ", ")
 }
@@ -247,58 +263,8 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     var positional: [String] = []
     while i < args.count {
         let a = args[i]
-        if a == "--version" || a == "-v" {
-            opts.version = true
-            i += 1
-            continue
-        }
-        if a == "--help" || a == "-h" {
-            opts.help = true
-            i += 1
-            continue
-        }
-        if a == "--include-system" {
-            opts.includeSystem = true
-            i += 1
-            continue
-        }
-        if a == "--fresh" {
-            opts.fresh = true
-            i += 1
-            continue
-        }
-        if a == "--no-color" {
-            opts.noColor = true
-            i += 1
-            continue
-        }
-        if a == "--all-file-systems" {
-            opts.allFileSystems = true
-            i += 1
-            continue
-        }
-        if a == "--allocated" {
-            opts.allocated = true
-            i += 1
-            continue
-        }
-        if a == "--dry-run" {
-            opts.dryRun = true
-            i += 1
-            continue
-        }
-        if a == "--yes" || a == "-y" {
-            opts.yes = true
-            i += 1
-            continue
-        }
-        if a == "--leftovers-only" {
-            opts.leftoversOnly = true
-            i += 1
-            continue
-        }
-        if a == "--stale-only" {
-            opts.staleOnly = true
+        if let flag = cliBooleanFlags.first(where: { $0.name == a }) {
+            opts[keyPath: flag.key] = true
             i += 1
             continue
         }
