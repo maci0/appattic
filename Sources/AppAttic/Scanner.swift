@@ -97,31 +97,31 @@ final class ScannerViewModel {
             cachedPackages = []
             return
         }
-        let q = posixLowercased(searchText)
+        let q = posixFolded(searchText)
         cachedLeftovers = visibleOrphanedLeftovers(data.leftovers, ignoring: ignoredLeftovers).filter { item in
             if q.isEmpty { return true }
-            return leftoverDisplayName(name: item.name, extraPaths: item.extra_paths ?? []).posixLowercased().contains(q)
-                || item.name.posixLowercased().contains(q)
-                || item.path.posixLowercased().contains(q)
-                || item.root.posixLowercased().contains(q)
-                || item.status.posixLowercased().contains(q)
-                || (item.owner ?? "").posixLowercased().contains(q)
-                || (item.reason ?? "").posixLowercased().contains(q)
-                || (item.summary ?? "").posixLowercased().contains(q)
-                || (item.shadows ?? "").posixLowercased().contains(q)
-                || (item.extra_paths ?? []).contains { $0.posixLowercased().contains(q) }
+            return posixFolded(leftoverDisplayName(name: item.name, extraPaths: item.extra_paths ?? [])).contains(q)
+                || posixFolded(item.name).contains(q)
+                || posixFolded(item.path).contains(q)
+                || posixFolded(item.root).contains(q)
+                || posixFolded(item.status).contains(q)
+                || posixFolded(item.owner ?? "").contains(q)
+                || posixFolded(item.reason ?? "").contains(q)
+                || posixFolded(item.summary ?? "").contains(q)
+                || posixFolded(item.shadows ?? "").contains(q)
+                || (item.extra_paths ?? []).contains { posixFolded($0).contains(q) }
         }.sorted { a, b in
             let (ls, rs) = (a.size_bytes ?? 0, b.size_bytes ?? 0)
             return ls == rs ? a.path < b.path : ls > rs
         }
         cachedStale = visibleStaleSoftware(data.software, includeSystem: includeSystem).filter { item in
             if q.isEmpty { return true }
-            return item.name.posixLowercased().contains(q)
-                || item.path.posixLowercased().contains(q)
-                || item.source.posixLowercased().contains(q)
-                || (item.tier ?? "").posixLowercased().contains(q)
-                || (item.reason ?? "").posixLowercased().contains(q)
-                || (item.summary ?? "").posixLowercased().contains(q)
+            return posixFolded(item.name).contains(q)
+                || posixFolded(item.path).contains(q)
+                || posixFolded(item.source).contains(q)
+                || posixFolded(item.tier ?? "").contains(q)
+                || posixFolded(item.reason ?? "").contains(q)
+                || posixFolded(item.summary ?? "").contains(q)
                 || (item.outdated == true && "outdated".hasPrefix(q))
         }.sorted { a, b in
             a.totalBytes == b.totalBytes ? a.path < b.path : a.totalBytes > b.totalBytes
@@ -131,11 +131,11 @@ final class ScannerViewModel {
             cachedOutdated = outdated
         } else {
             cachedOutdated = outdated.filter {
-                $0.name.posixLowercased().contains(q)
-                    || $0.manager.posixLowercased().contains(q)
-                    || ($0.title ?? "").posixLowercased().contains(q)
-                    || ($0.summary ?? "").posixLowercased().contains(q)
-                    || ($0.reason ?? "").posixLowercased().contains(q)
+                posixFolded($0.name).contains(q)
+                    || posixFolded($0.manager).contains(q)
+                    || posixFolded($0.title ?? "").contains(q)
+                    || posixFolded($0.summary ?? "").contains(q)
+                    || posixFolded($0.reason ?? "").contains(q)
             }
         }
         cachedPackages = data.packages ?? []

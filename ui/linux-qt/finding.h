@@ -131,8 +131,12 @@ QString markManualCommand(const Finding &f);
 bool canMarkCleanup(const Finding &f, Page page);
 QStringList leftoverIgnoreKeys(const Finding &f);
 bool leftoverIsIgnored(const Finding &f, const QSet<QString> &ignored);
-/// Lowercased search haystack (name, path, kind, manager, status, packaged
+/// Lowercased, NFC search haystack (name, path, kind, manager, status, packaged
 /// path, summary, reason, extra paths). Built on demand by the UI filter.
+/// Compare it against `searchFold(query)`, not a bare `toLower()`.
 QString searchHaystack(const Finding &f);
+/// Case form both sides of a search use: POSIX-independent lowercase in NFC,
+/// so a decomposed filename from the disk matches a precomposed query.
+QString searchFold(const QString &s);
 
 #endif

@@ -83,6 +83,22 @@ static int verifyHelpers() {
         std::fprintf(stderr, "leftoverIsIgnored NFC/NFD mismatch\n");
         return 1;
     }
+    // A decomposed path off an exFAT/NTFS share must still match a
+    // precomposed query typed into the search box.
+    Finding searched;
+    searched.name = QString::fromUtf8("Cafe\xCC\x81 Player");
+    if (!searchHaystack(searched).contains(searchFold(QString::fromUtf8("caf\xC3\xA9")))) {
+        std::fprintf(stderr, "searchHaystack misses an NFD name for an NFC query\n");
+        return 1;
+    }
+    if (searchHaystack(searched).contains(searchFold(QStringLiteral("cafe")))) {
+        std::fprintf(stderr, "searchHaystack folded a diacritic away\n");
+        return 1;
+    }
+    if (searchFold(QStringLiteral("IINA")) != QLatin1String("iina")) {
+        std::fprintf(stderr, "searchFold did not lowercase ASCII\n");
+        return 1;
+    }
     if (scriptHasCommands(QStringLiteral("#!/bin/sh\nset -e\n# comment\n"))) {
         std::fprintf(stderr, "scriptHasCommands preamble-only should be empty\n");
         return 1;

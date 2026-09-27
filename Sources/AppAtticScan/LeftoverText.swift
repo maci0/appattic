@@ -176,8 +176,9 @@ private func leftoverMatchesCategory(
     // POSIX fold on both sides: the category comes from the command line and
     // the fields come from disk, so neither should be case-folded by the
     // user's locale. In tr_TR a plain lowercased() turns "--category FIREFOX"
-    // into "fırefox" and matches nothing.
-    let cats = categories.map { posixLowercased($0) }
+    // into "fırefox" and matches nothing. NFC on top of that, because the name
+    // off the disk is NFD on macOS while the argument is whatever was typed.
+    let cats = categories.map { posixFolded($0) }
     let fields = [
         name,
         leftoverDisplayName(name: name, extraPaths: extraPaths),
@@ -187,7 +188,7 @@ private func leftoverMatchesCategory(
         shadows ?? "",
     ] + extraPaths
     return fields.contains { field in
-        let low = posixLowercased(field)
+        let low = posixFolded(field)
         return cats.contains { low.contains($0) }
     }
 }

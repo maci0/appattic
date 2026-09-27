@@ -1505,7 +1505,7 @@ private:
 
     QVector<Finding> visibleRows(Page page) const {
         QVector<Finding> rows;
-        const QString q = m_search->text().trimmed().toLower();
+        const QString q = searchFold(m_search->text().trimmed());
         const QString filt = m_filter->currentData().toString();
         const bool needQ = !q.isEmpty();
         for (const Finding &f : m_findings) {

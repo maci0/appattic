@@ -31,6 +31,34 @@ final class TextTests: XCTestCase {
     }
 
 
+    func testPosixFoldedCollapsesNFCAndNFD() {
+        // The failing input: macOS reports "Café" as "Cafe" + U+0301, a
+        // keyboard gives the precomposed form, and a bare case fold leaves the
+        // two as different strings.
+        let nfc = "Café"
+        let nfd = "Cafe\u{0301}"
+        XCTAssertNotEqual(nfc, nfd)
+        XCTAssertEqual(posixFolded(nfc), posixFolded(nfd))
+        XCTAssertEqual(posixFolded(nfd), "café")
+        XCTAssertTrue(posixFolded(nfd).contains(posixFolded("CAFÉ")))
+        // The query arrives NFC and the name off the disk arrives NFD.
+        XCTAssertTrue(posixFolded(nfd).contains(posixFolded(nfc)))
+    }
+
+
+    func testPosixFoldedKeepsDiacriticsAndAsciiFastPath() {
+        // Normalization, not folding: "cafe" is not "Café". A caller that wants
+        // the accent-insensitive match uses `norm`.
+        XCTAssertFalse(posixFolded("Café").contains("cafe"))
+        XCTAssertEqual(posixFolded(""), "")
+        XCTAssertEqual(posixFolded("IINA"), "iina")
+        // A precomposed string with no combining mark is already NFC.
+        XCTAssertEqual(posixFolded("Straße"), "straße")
+        // A script with no case and no composition comes back unchanged.
+        XCTAssertEqual(posixFolded("日本語"), "日本語")
+    }
+
+
     func testDisplayWidthCountsTerminalColumns() {
         XCTAssertEqual(displayWidth(""), 0)
         XCTAssertEqual(displayWidth("abc"), 3)

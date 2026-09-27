@@ -306,6 +306,13 @@ final class PackageTests: XCTestCase {
         XCTAssertTrue(scriptHasActionableCommands(script))
     }
 
+    func testFilterPackagesSearchMatchesAnFDNameAgainstAnNFCCQuery() {
+        // macOS hands back NFD; the search box takes NFC.
+        let rows = [entry("libCafe\u{0301}", "apt", "orphan", size: 10)]
+        XCTAssertEqual(filterPackages(rows, filter: .all, search: "café").map(\.name), ["libCafe\u{0301}"])
+        XCTAssertEqual(filterPackages(rows, filter: .all, search: "CAFÉ").map(\.name), ["libCafe\u{0301}"])
+    }
+
     func testFilterAllLeavesGlobalsAndSearch() {
         let rows = [
             entry("libfoo", "pacman", "orphan", size: 100),

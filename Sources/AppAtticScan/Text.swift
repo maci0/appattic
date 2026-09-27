@@ -33,6 +33,27 @@ public func posixLowercased(_ s: String) -> String {
     return s.lowercased(with: Locale(identifier: "en_US_POSIX"))
 }
 
+/// `posixLowercased` plus one canonical form, for comparing text a person
+/// typed against text read off the disk.
+///
+/// The fold alone is not enough: macOS reports filenames in NFD while a
+/// keyboard, a paste, and a `.desktop` entry give NFC, and "Café" and
+/// "Cafe" + U+0301 are different `String`s, so `posixLowercased("café")
+/// .contains(posixLowercased("Cafe" + U+0301))` is false. Every search box and
+/// the `--category` filter compare exactly that way, and a user typing an
+/// accented name sees the one matching row disappear. NFC is the form the
+/// project's identity keys already use (`pathIdentityKey`).
+///
+/// Diacritics are *not* folded away: "cafe" still does not match "Café". That
+/// is a product decision, not a normalization bug, and `norm` is where a
+/// caller that wants it goes.
+public func posixFolded(_ s: String) -> String {
+    let low = posixLowercased(s)
+    // ASCII cannot carry a combining mark, so the canonical pass is a no-op
+    // there and the common case pays only the check.
+    return low.utf8.contains(where: { $0 >= 0x80 }) ? low.precomposedStringWithCanonicalMapping : low
+}
+
 /// Read a file as UTF-8. Invalid sequences become U+FFFD, matching `runCommand`.
 public func readUTF8File(_ path: String) -> String? {
     guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }

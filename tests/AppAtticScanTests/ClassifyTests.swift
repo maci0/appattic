@@ -1024,6 +1024,21 @@ final class ClassifyTests: XCTestCase {
         XCTAssertEqual(grouped.first { $0.rootLabel == "LaunchAgents" }?.extraPaths ?? [], [])
     }
 
+    func testLeftoverMatchesCategoryMatchesANFDNameAgainstAnNFCQuery() {
+        // The name off the disk is NFD, the argument on the command line is
+        // whatever the shell and keyboard produced, which is NFC.
+        let item = DataItem(
+            path: "/Users/x/Library/Caches/com.example.Cafe\u{0301}",
+            name: "com.example.Cafe\u{0301}",
+            rootLabel: "Caches",
+            kind: "dir",
+            status: "orphaned"
+        )
+        XCTAssertTrue(leftoverMatchesCategory(item, categories: ["café"]))
+        XCTAssertTrue(leftoverMatchesCategory(item, categories: ["CAFÉ"]))
+        XCTAssertFalse(leftoverMatchesCategory(item, categories: ["whisky"]))
+    }
+
     func testLeftoverLocationLabelNotesExtraPaths() {
         XCTAssertEqual(leftoverLocationLabel(rootLabel: "Caches", extraCount: 0), "Caches")
         XCTAssertEqual(leftoverLocationLabel(rootLabel: "Application Support", extraCount: 3), "Application Support +3")

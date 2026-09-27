@@ -45,6 +45,18 @@ QString pathIdentityKey(const QString &path) {
     return path.normalized(QString::NormalizationForm_C);
 }
 
+/// Case form for comparing typed text against text read off the disk.
+///
+/// `toLower()` alone is not enough: an exFAT, NTFS, or SMB share hands back
+/// decomposed filenames, a keyboard and a paste give the precomposed spelling,
+/// and "Café" and "Cafe" + U+0301 are different QStrings, so a search for
+/// "café" finds nothing. NFC is the form `pathIdentityKey` already uses for
+/// identity, so the search uses the same one. Diacritics are not stripped:
+/// "cafe" still does not match "Café".
+QString searchFold(const QString &s) {
+    return s.toLower().normalized(QString::NormalizationForm_C);
+}
+
 QString redactHomePaths(const QString &text, const QString &home) {
     const QString homePath = QDir::cleanPath(home.isEmpty() ? QDir::homePath() : home);
     if (homePath.size() <= 1) return text;
@@ -1112,5 +1124,5 @@ QString searchHaystack(const Finding &f) {
         hay += QLatin1Char('\n');
         hay += p;
     }
-    return hay.toLower();
+    return searchFold(hay);
 }
