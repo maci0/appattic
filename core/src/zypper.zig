@@ -63,7 +63,7 @@ pub fn parseZypperListUpdates(text: []const u8, out: []ZypperOutdated) usize {
         if (name.len == 0) continue;
         if (status.len == 1 and (status[0] == 's' or status[0] == 'S')) continue;
         if (std.ascii.eqlIgnoreCase(name, "Name")) continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         out[n] = .{ .name = name, .current = cols[3], .latest = cols[4] };
         n += 1;
     }
@@ -86,7 +86,7 @@ pub fn parseZypperUnneeded(text: []const u8, out: []ZypperOrphan) usize {
         const name = cols[1];
         if (name.len == 0) continue;
         if (std.ascii.eqlIgnoreCase(name, "Name")) continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         const version = cols[3];
         out[n] = .{ .name = name, .version = version };
         n += 1;
@@ -310,7 +310,7 @@ fn fuzzZypperTables(_: void, smith: *std.testing.Smith) !void {
     const nout = parseZypperListUpdates(text, &outdated);
     try std.testing.expect(nout <= outdated.len);
     for (outdated[0..nout]) |o| {
-        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(o.name));
         try std.testing.expect(sliceInside(text, o.name));
         try std.testing.expect(sliceInside(text, o.current));
         try std.testing.expect(sliceInside(text, o.latest));
@@ -327,7 +327,7 @@ fn fuzzZypperTables(_: void, smith: *std.testing.Smith) !void {
     const nord = parseZypperUnneeded(text, &orphans);
     try std.testing.expect(nord <= orphans.len);
     for (orphans[0..nord]) |o| {
-        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(o.name));
         try std.testing.expect(sliceInside(text, o.name));
         try std.testing.expect(sliceInside(text, o.version));
         try std.testing.expectEqualStrings(std.mem.trim(u8, o.name, " \t"), o.name);

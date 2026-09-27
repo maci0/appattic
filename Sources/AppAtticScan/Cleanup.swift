@@ -84,6 +84,18 @@ public func uninstallCommand(
     steamAppId: String?,
     pkgId: String? = nil
 ) -> String {
+    // A name, cask name, or package id reaches a package manager as an
+    // argument. A leading `-` is read as an option, so the removal is
+    // refused rather than run.
+    if !isSafeCommandArgument(name) {
+        return "# skipped \(shellComment(name)): name reads as a command option"
+    }
+    if let caskName, !isSafeCommandArgument(caskName) {
+        return "# skipped \(shellComment(caskName)): cask name reads as a command option"
+    }
+    if let pkgId, !isSafeCommandArgument(pkgId) {
+        return "# skipped \(shellComment(pkgId)): package id reads as a command option"
+    }
     if source == "brew-formula" {
         let q = shellQuote(name)
         return guardedRemoveCommand(present: "brew list --formula \(q)", remove: "brew uninstall \(q)")

@@ -103,6 +103,9 @@ public func filterPackages(
 /// collector's query: the collector wants the strict "nobody needs this"
 /// answer, while the guard only has to be sure the package is still installed.
 public func packageRemoveCommand(_ entry: PackageEntry) -> String {
+    guard isSafeCommandArgument(entry.name) else {
+        return "# skipped \(shellComment(entry.name)): name reads as a command option"
+    }
     let q = shellQuote(entry.name)
     /// `grep -F --` on the manager's own listing, whose row format the
     /// parsers above already pin.
@@ -159,6 +162,7 @@ public func packageRemoveCommand(_ entry: PackageEntry) -> String {
 
 public func packageMarkManualCommand(_ entry: PackageEntry) -> String? {
     guard entry.canMarkManual else { return nil }
+    guard isSafeCommandArgument(entry.name) else { return nil }
     let q = shellQuote(entry.name)
     switch entry.manager {
     case "apt", "dpkg":

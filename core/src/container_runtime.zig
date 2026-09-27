@@ -97,7 +97,7 @@ pub fn parseDanglingVolumes(text: []const u8, out: []Hit) usize {
         var name: []const u8 = first;
         while (it.next()) |tok| name = tok;
         if (name.ptr == first.ptr) continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         out[n] = .{ .id = name, .name = name };
         n += 1;
     }
@@ -119,7 +119,7 @@ pub fn parseExitedContainers(text: []const u8, out: []Hit) usize {
         if (!isSafeImageId(id)) continue;
         var name: []const u8 = id;
         while (it.next()) |tok| name = tok;
-        if (!jsonbuf.isSafeIdent(name)) name = id;
+        if (!jsonbuf.isSafeCmdIdent(name)) name = id;
         out[n] = .{ .id = id, .name = name };
         n += 1;
     }
@@ -447,7 +447,7 @@ fn fuzzContainerListings(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(sliceInside(text, h.name));
         // The volume row has at least two columns, so the name is a token
         // after the first, never the first itself.
-        try std.testing.expect(jsonbuf.isSafeIdent(h.id));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(h.id));
     }
 
     var containers: [32]Hit = undefined;

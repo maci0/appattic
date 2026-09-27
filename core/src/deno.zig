@@ -40,7 +40,7 @@ pub fn parseDenoGlobalList(text: []const u8, out: []DenoGlobal) usize {
         if (line.len == 0) continue;
         const name = basenameOf(line);
         if (skipName(name)) continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         out[n] = .{ .name = name };
         n += 1;
     }

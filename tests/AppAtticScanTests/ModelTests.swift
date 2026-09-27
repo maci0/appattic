@@ -174,6 +174,21 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(uninstallCommand(for: item), "if snap list code >/dev/null 2>&1; then snap remove code; fi")
     }
 
+    /// A package id from a hostile remote reaches `snap remove` as an
+    /// argument, so a leading `-` has to be refused rather than quoted.
+    func testUninstallCommandRefusesNameThatReadsAsAnOption() {
+        let item = SoftwareItem(
+            name: "Code",
+            kind: "app",
+            path: "/var/lib/snapd/desktop/applications/code_code.desktop",
+            source: "snap",
+            pkg_id: "--purge"
+        )
+        let cmd = uninstallCommand(for: item)
+        XCTAssertEqual(cmd, "# skipped --purge: package id reads as a command option")
+        XCTAssertNil(parseGuardedRemove(cmd))
+    }
+
     func testLeftoverStatusAccessor() {
         let item = LeftoverItem(
             name: "python3",

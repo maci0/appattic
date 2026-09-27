@@ -66,7 +66,7 @@ pub fn parseDpkgRc(text: []const u8, out: []DpkgRc) usize {
         if (!(line[0] == 'r' and line[1] == 'c' and (line[2] == ' ' or line[2] == '\t'))) continue;
         var it = std.mem.tokenizeAny(u8, line[2..], " \t");
         const name = it.next() orelse continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         const version = it.next() orelse "";
         out[n] = .{ .name = name, .version = version };
         n += 1;
@@ -87,7 +87,7 @@ pub fn parsePpaSources(text: []const u8, out: []PpaSource) usize {
             break :blk line;
         };
         if (!isPpaFile(name)) continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         out[n] = .{ .name = name, .path = line };
         n += 1;
     }
@@ -113,7 +113,7 @@ pub fn parseAptUpgradable(text: []const u8, out: []AptOutdated) usize {
         const first = it.next() orelse continue;
         const slash = std.mem.indexOfScalar(u8, first, '/') orelse continue;
         const name = first[0..slash];
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         const latest = it.next() orelse continue;
         out[n] = .{ .name = name, .current = current, .latest = latest };
         n += 1;
@@ -131,7 +131,7 @@ pub fn parseAptAutoremove(text: []const u8, out: []AptOrphan) usize {
         if (!std.mem.startsWith(u8, line, "Remv ")) continue;
         var it = std.mem.tokenizeAny(u8, line["Remv ".len..], " \t");
         const name = it.next() orelse continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         var version: []const u8 = "";
         if (it.next()) |tok| {
             if (tok.len >= 2 and tok[0] == '[' and tok[tok.len - 1] == ']') {
@@ -466,7 +466,7 @@ fn fuzzAptListings(_: void, smith: *std.testing.Smith) !void {
     const nrc = parseDpkgRc(text, &rc);
     try std.testing.expect(nrc <= rc.len);
     for (rc[0..nrc]) |r| {
-        try std.testing.expect(jsonbuf.isSafeIdent(r.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(r.name));
         try std.testing.expect(sliceInside(text, r.name));
         try std.testing.expect(sliceInside(text, r.version));
     }
@@ -475,7 +475,7 @@ fn fuzzAptListings(_: void, smith: *std.testing.Smith) !void {
     const nrem = parseAptAutoremove(text, &orphans);
     try std.testing.expect(nrem <= orphans.len);
     for (orphans[0..nrem]) |o| {
-        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(o.name));
         try std.testing.expect(sliceInside(text, o.name));
         try std.testing.expect(sliceInside(text, o.version));
     }
@@ -484,7 +484,7 @@ fn fuzzAptListings(_: void, smith: *std.testing.Smith) !void {
     const nup = parseAptUpgradable(text, &outdated);
     try std.testing.expect(nup <= outdated.len);
     for (outdated[0..nup]) |o| {
-        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(o.name));
         try std.testing.expect(sliceInside(text, o.name));
         try std.testing.expect(o.current.len > 0);
         try std.testing.expect(sliceInside(text, o.current));
@@ -499,7 +499,7 @@ fn fuzzAptListings(_: void, smith: *std.testing.Smith) !void {
     const nppa = parsePpaSources(text, &ppas);
     try std.testing.expect(nppa <= ppas.len);
     for (ppas[0..nppa]) |p| {
-        try std.testing.expect(jsonbuf.isSafeIdent(p.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(p.name));
         try std.testing.expect(sliceInside(text, p.name));
         try std.testing.expect(sliceInside(text, p.path));
         // The name is the last path component, so it is a suffix of the line.

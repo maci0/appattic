@@ -101,6 +101,17 @@ pub const W = struct {
     }
 };
 
+/// A leading `-` would let a name from a hostile registry or tap be read by
+/// the package manager as an option: `shQuote` returns `--force` unquoted
+/// (every byte is shell-safe), so `apt-get purge -y --force` parses as a flag
+/// rather than a name. No real package or formula is named that way, so the
+/// name is dropped rather than the command disambiguated. Path components
+/// use `isSafeIdent` instead: they are always joined onto a constant root, so
+/// a leading `-` there is inert.
+pub fn isSafeCmdIdent(s: []const u8) bool {
+    return s.len > 0 and s[0] != '-' and isSafeIdent(s);
+}
+
 pub fn isSafeIdent(s: []const u8) bool {
     if (s.len == 0) return false;
     if (!std.unicode.utf8ValidateSlice(s)) return false;
@@ -220,6 +231,7 @@ pub const max_pkg_name_len = 214;
 /// Unscoped ident, or one npm-style `@scope/name`. No `..`, no extra `/`.
 pub fn isSafePkgName(s: []const u8) bool {
     if (s.len == 0 or s.len > max_pkg_name_len) return false;
+    if (s[0] == '-') return false;
     if (s[0] != '@') return s[0] != '.' and isSafeIdent(s);
     var slash: ?usize = null;
     for (s, 0..) |c, i| {
@@ -237,7 +249,7 @@ pub fn isSafePkgName(s: []const u8) bool {
 /// Packagist `vendor/package`. One slash. No `@`, no `..`.
 pub fn isSafeComposerName(s: []const u8) bool {
     if (s.len == 0 or s.len > max_pkg_name_len) return false;
-    if (s[0] == '@') return false;
+    if (s[0] == '@' or s[0] == '-') return false;
     var slash: ?usize = null;
     var i: usize = 0;
     while (i < s.len) : (i += 1) {
@@ -339,6 +351,20 @@ test "isSafeIdent accepts utf8 letters and rejects invalid bytes" {
     try std.testing.expect(isSafeIdent("日本語"));
     try std.testing.expect(!isSafeIdent(&[_]u8{0xff}));
     try std.testing.expect(!isSafeIdent("foo\nbar"));
+}
+
+test "a name starting with a dash is not a command name" {
+    // `shQuote` leaves `--force` unquoted, so it would reach apt-get as a flag.
+    try std.testing.expect(isSafeIdent("--force"));
+    try std.testing.expect(!isSafeCmdIdent("--force"));
+    try std.testing.expect(!isSafeCmdIdent("-rf"));
+    try std.testing.expect(isSafeCmdIdent("libfoo-1.2"));
+    try std.testing.expect(!isSafePkgName("--registry=evil"));
+    try std.testing.expect(!isSafePkgName("-x"));
+    try std.testing.expect(isSafePkgName("lodash"));
+    try std.testing.expect(isSafePkgName("@scope/name"));
+    try std.testing.expect(!isSafeComposerName("-vendor/pkg"));
+    try std.testing.expect(isSafeComposerName("vendor/pkg"));
 }
 
 test "json string passes utf8 through" {

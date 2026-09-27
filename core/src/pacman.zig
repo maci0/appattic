@@ -47,7 +47,7 @@ pub fn parsePacmanQu(text: []const u8, out: []PacmanOutdated) usize {
         var left = std.mem.tokenizeAny(u8, line[0..arrow], " \t");
         const name = left.next() orelse continue;
         const current = left.next() orelse continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         var right = std.mem.tokenizeAny(u8, line[arrow + 4 ..], " \t");
         const latest = right.next() orelse continue;
         out[n] = .{ .name = name, .current = current, .latest = latest };
@@ -67,7 +67,7 @@ pub fn parsePacmanQdt(text: []const u8, out: []PacmanOrphan) usize {
         if (std.mem.startsWith(u8, line, "error:") or std.mem.startsWith(u8, line, "warning:")) continue;
         var it = std.mem.tokenizeAny(u8, line, " \t");
         const name = it.next() orelse continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         const version = it.next() orelse "";
         out[n] = .{ .name = name, .version = version };
         n += 1;
@@ -286,7 +286,7 @@ fn fuzzPacmanListings(_: void, smith: *std.testing.Smith) !void {
     const nord = parsePacmanQdt(text, &orphans);
     try std.testing.expect(nord <= orphans.len);
     for (orphans[0..nord]) |o| {
-        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(o.name));
         try std.testing.expect(sliceInside(text, o.name));
         try std.testing.expect(sliceInside(text, o.version));
     }
@@ -295,7 +295,7 @@ fn fuzzPacmanListings(_: void, smith: *std.testing.Smith) !void {
     const nout = parsePacmanQu(text, &outdated);
     try std.testing.expect(nout <= outdated.len);
     for (outdated[0..nout]) |o| {
-        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(o.name));
         try std.testing.expect(sliceInside(text, o.name));
         try std.testing.expect(sliceInside(text, o.current));
         try std.testing.expect(sliceInside(text, o.latest));

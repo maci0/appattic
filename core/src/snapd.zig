@@ -41,7 +41,7 @@ pub fn parseSnapListAll(text: []const u8, out: []DisabledRev) usize {
         var notes: []const u8 = "";
         while (it.next()) |tok| notes = tok;
         if (!notesHasDisabled(notes)) continue;
-        if (!jsonbuf.isSafeIdent(name) or !jsonbuf.isSafeIdent(rev)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name) or !jsonbuf.isSafeCmdIdent(rev)) continue;
         out[n] = .{ .name = name, .revision = rev };
         n += 1;
     }
@@ -71,7 +71,7 @@ pub fn parseInstalledSnapNames(text: []const u8, out: [][]const u8) usize {
         var notes: []const u8 = "";
         while (it.next()) |tok| notes = tok;
         if (notesHasDisabled(notes)) continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         if (nameInList(name, out[0..n])) continue;
         out[n] = name;
         n += 1;

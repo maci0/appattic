@@ -368,6 +368,25 @@ static int verifyHelpers() {
         std::fprintf(stderr, "canMarkCleanup: leftover row must be markable for the list tickbox\n");
         return 1;
     }
+    // A name from a registry, a tap, or the scan cache: a leading `-` reaches
+    // the manager as an option, so mark-manual has to refuse it rather than
+    // quote it into a different command.
+    Finding option;
+    option.manager = QStringLiteral("apt");
+    option.kind = QStringLiteral("orphan");
+    option.name = QStringLiteral("--set-priority=install");
+    if (!markManualCommand(option).isEmpty()) {
+        std::fprintf(stderr, "markManualCommand: a leading dash must be refused\n");
+        return 1;
+    }
+    Finding named;
+    named.manager = QStringLiteral("apt");
+    named.kind = QStringLiteral("orphan");
+    named.name = QStringLiteral("libfoo");
+    if (markManualCommand(named) != QStringLiteral("apt-mark manual 'libfoo'")) {
+        std::fprintf(stderr, "markManualCommand: a real name must still be scripted\n");
+        return 1;
+    }
     Finding ppa;
     ppa.kind = QStringLiteral("ppa");
     ppa.status = QStringLiteral("review");

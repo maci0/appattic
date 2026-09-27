@@ -272,6 +272,7 @@ func aurHelperBin(_ which: WhichFn = whichCommand) -> String {
 
 public func updateCommand(_ pkg: OutdatedPkg) -> String? {
     guard let manager = pkg.upgradableManager else { return nil }
+    guard isSafeCommandArgument(pkg.name) else { return nil }
     let quoted = shellQuote(pkg.name)
     switch manager {
     case .brewFormula:

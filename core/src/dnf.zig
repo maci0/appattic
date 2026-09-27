@@ -57,7 +57,7 @@ pub fn parseDnfUpgrades(text: []const u8, out: []DnfOutdated) usize {
         _ = it.next() orelse continue;
         if (!hasDigit(latest)) continue;
         const name = stripDnfArch(raw_name);
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         out[n] = .{ .name = name, .latest = latest };
         n += 1;
     }
@@ -105,7 +105,7 @@ pub fn parseDnfUnneeded(text: []const u8, out: []DnfOrphan) usize {
         if (skipDnfNoise(line)) continue;
         var it = std.mem.tokenizeAny(u8, line, " \t");
         const name = it.next() orelse continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         out[n] = .{ .name = name };
         n += 1;
     }
@@ -343,7 +343,7 @@ fn fuzzDnfListings(_: void, smith: *std.testing.Smith) !void {
     const nout = parseDnfUpgrades(text, &outdated);
     try std.testing.expect(nout <= outdated.len);
     for (outdated[0..nout]) |o| {
-        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(o.name));
         try std.testing.expect(sliceInside(text, o.name));
         try std.testing.expect(sliceInside(text, o.latest));
         try std.testing.expect(o.latest.len > 0);
@@ -356,7 +356,7 @@ fn fuzzDnfListings(_: void, smith: *std.testing.Smith) !void {
     const nord = parseDnfUnneeded(text, &orphans);
     try std.testing.expect(nord <= orphans.len);
     for (orphans[0..nord]) |o| {
-        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(o.name));
         try std.testing.expect(sliceInside(text, o.name));
         try std.testing.expect(o.name.len > 0);
     }

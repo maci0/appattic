@@ -309,6 +309,14 @@ struct Dirent64View {
     const char *name;
 };
 
+// Whether a whole record header fits at `pos`. The check has to precede the
+// read: `nread` can leave fewer than the header's bytes when a caller is
+// handed a truncated trailing record.
+inline bool dirent64Fits(long nread, long pos) {
+    return pos >= 0 && pos <= nread
+        && nread - pos >= static_cast<long>(kDirent64MinRecLen);
+}
+
 inline Dirent64View viewDirent64(const char *buf, long pos) {
     unsigned short reclen = 0;
     memcpy(&reclen, buf + pos + offsetof(AppDirent64, d_reclen), sizeof reclen);
@@ -343,6 +351,7 @@ void walkDirFd(
         long bpos = 0;
         while (bpos < nread) {
             if (isCancelled(*ctx->opts)) return;
+            if (!dirent64Fits(nread, bpos)) break;
             const Dirent64View d = viewDirent64(buf, bpos);
             if (d.reclen < kDirent64MinRecLen || bpos + d.reclen > nread) break;
             bpos += d.reclen;
@@ -450,6 +459,7 @@ void measureWalkFd(
         long bpos = 0;
         while (bpos < nread) {
             if (isCancelled(opts)) return;
+            if (!dirent64Fits(nread, bpos)) break;
             const Dirent64View d = viewDirent64(buf, bpos);
             if (d.reclen < kDirent64MinRecLen || bpos + d.reclen > nread) break;
             bpos += d.reclen;

@@ -37,7 +37,7 @@ pub fn parseGemOutdated(text: []const u8, out: []GemOutdated) usize {
         if (line[0] == '*') continue;
         const open = std.mem.indexOf(u8, line, " (") orelse continue;
         const name = line[0..open];
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         const rest = line[open + 2 ..];
         const lt = std.mem.indexOf(u8, rest, " < ") orelse continue;
         const current = std.mem.trim(u8, rest[0..lt], " \t");
@@ -181,7 +181,7 @@ fn fuzzGemOutdated(_: void, smith: *std.testing.Smith) !void {
     const n = parseGemOutdated(text, &buf);
     try std.testing.expect(n <= buf.len);
     for (buf[0..n]) |h| {
-        try std.testing.expect(jsonbuf.isSafeIdent(h.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(h.name));
         try std.testing.expect(sliceInside(text, h.name));
         try std.testing.expect(sliceInside(text, h.current));
         try std.testing.expect(sliceInside(text, h.latest));

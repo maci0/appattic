@@ -182,7 +182,11 @@ static int parse_argv(const char *cmdline, char *buf, size_t bufn, char **argv, 
     if (strpbrk(cmdline, ";|&`$<>\n\r()")) return -1;
     snprintf(buf, bufn, "%s", cmdline);
     int n = 0;
-    for (char *p = strtok(buf, " \t"); p && n < maxn; p = strtok(NULL, " \t")) {
+    /* strtok_r, not strtok: the cursor in strtok is process-global, so two
+     * threads tokenizing at once hand each other's pointers back and the
+     * allowlist can judge a different argv than the one execvp runs. */
+    char *save = NULL;
+    for (char *p = strtok_r(buf, " \t", &save); p && n < maxn; p = strtok_r(NULL, " \t", &save)) {
         argv[n++] = p;
     }
     return n;
@@ -792,64 +796,67 @@ static int test_fixture_ok(const char *cmdline) {
     return 0;
 }
 
-static char canon_fixture[MAX_CMD];
-
-static const char *fixture_for(const char *cmdline) {
+/* Writes a synthesized result into `scratch` and points `*out` at it, so the
+ * buffer is on the caller's frame: a static one would be shared by every
+ * thread that reaches the fixture path. */
+static int fixture_for(const char *cmdline, char *scratch, size_t scratchn, const char **out) {
     char buf[MAX_CMD];
     char *tok[MAX_TOK];
     int n = parse_argv(cmdline, buf, sizeof buf, tok, MAX_TOK);
-    if (n < 1) return NULL;
+    if (n < 1) return 0;
+    *out = NULL;
     const char *base = base_of(tok[0]);
     if (eq(base, "realpath") || eq(base, "readlink")) {
         const char *path = tok[n - 1];
-        if (!path || !path[0] || path[0] == '-') return NULL;
-        snprintf(canon_fixture, sizeof canon_fixture, "%s\n", path);
-        return canon_fixture;
+        if (!path || !path[0] || path[0] == '-') return 0;
+        snprintf(scratch, scratchn, "%s\n", path);
+        *out = scratch;
+        return 1;
     }
     if (eq(base, "apt-get") || eq(base, "apt")) {
         for (int i = 1; i < n; i++) {
-            if (eq(tok[i], "--upgradable")) return FIXTURE_APT_UPGRADABLE;
+            if (eq(tok[i], "--upgradable")) { *out = FIXTURE_APT_UPGRADABLE; return 1; }
         }
-        return FIXTURE_APT;
+        *out = FIXTURE_APT; return 1;
     }
-    if (eq(base, "dpkg")) return FIXTURE_DPKG;
+    if (eq(base, "dpkg")) { *out = FIXTURE_DPKG; return 1; }
     if (eq(base, "paru") || eq(base, "yay") || eq(base, "pikaur")) {
-        return FIXTURE_PACMAN_OUTDATED;
+        *out = FIXTURE_PACMAN_OUTDATED; return 1;
     }
     if (eq(base, "pacman")) {
         for (int i = 1; i < n; i++) {
-            if (eq(tok[i], "-Qu") || eq(tok[i], "-Qua")) return FIXTURE_PACMAN_OUTDATED;
+            if (eq(tok[i], "-Qu") || eq(tok[i], "-Qua")) { *out = FIXTURE_PACMAN_OUTDATED; return 1; }
         }
-        return FIXTURE_PACMAN;
+        *out = FIXTURE_PACMAN; return 1;
     }
-    if (eq(base, "test")) return test_fixture_ok(cmdline) ? "" : NULL;
+    if (eq(base, "test")) { *out = test_fixture_ok(cmdline) ? "" : NULL; return 1; }
     if (eq(base, "ls")) {
         for (int i = 1; i < n; i++) {
             const char *t = tok[i];
-            if (strstr(t, "/snap") != NULL) return FIXTURE_LS_SNAP;
-            if (strstr(t, "/.deno/bin") != NULL) return FIXTURE_LS_DENO;
-            if (strstr(t, "/.local/bin") != NULL) return FIXTURE_LS_USER_BIN;
+            if (strstr(t, "/snap") != NULL) { *out = FIXTURE_LS_SNAP; return 1; }
+            if (strstr(t, "/.deno/bin") != NULL) { *out = FIXTURE_LS_DENO; return 1; }
+            if (strstr(t, "/.local/bin") != NULL) { *out = FIXTURE_LS_USER_BIN; return 1; }
             if (eq(t, "/home/user/bin") || strstr(t, "/home/user/bin/") != NULL) {
-                return FIXTURE_LS_USER_HOME_BIN;
+                *out = FIXTURE_LS_USER_HOME_BIN; return 1;
             }
-            if (strstr(t, "/usr/bin") != NULL) return FIXTURE_LS_USR_BIN;
-            if (strstr(t, "sources.list.d") != NULL) return FIXTURE_APT_SOURCES;
-            if (eq(t, "-A") || eq(t, "-a") || eq(t, "-1A") || eq(t, "-A1")) return FIXTURE_LS_DOT;
+            if (strstr(t, "/usr/bin") != NULL) { *out = FIXTURE_LS_USR_BIN; return 1; }
+            if (strstr(t, "sources.list.d") != NULL) { *out = FIXTURE_APT_SOURCES; return 1; }
+            if (eq(t, "-A") || eq(t, "-a") || eq(t, "-1A") || eq(t, "-A1")) { *out = FIXTURE_LS_DOT; return 1; }
         }
-        return FIXTURE_LS;
+        *out = FIXTURE_LS; return 1;
     }
-    if (eq(base, "snap")) return FIXTURE_SNAP;
+    if (eq(base, "snap")) { *out = FIXTURE_SNAP; return 1; }
     if (eq(base, "dnf") || eq(base, "dnf5") || eq(base, "yum")) {
         for (int i = 1; i < n; i++) {
-            if (eq(tok[i], "--upgrades") || eq(tok[i], "check-update")) return FIXTURE_DNF_UPGRADES;
+            if (eq(tok[i], "--upgrades") || eq(tok[i], "check-update")) { *out = FIXTURE_DNF_UPGRADES; return 1; }
         }
-        return FIXTURE_DNF;
+        *out = FIXTURE_DNF; return 1;
     }
     if (eq(base, "zypper")) {
         for (int i = 1; i < n; i++) {
-            if (eq(tok[i], "list-updates")) return FIXTURE_ZYPPER_UPDATES;
+            if (eq(tok[i], "list-updates")) { *out = FIXTURE_ZYPPER_UPDATES; return 1; }
         }
-        return FIXTURE_ZYPPER;
+        *out = FIXTURE_ZYPPER; return 1;
     }
     if (eq(base, "flatpak")) {
         int has_updates = 0, has_list = 0, has_remote_ls = 0;
@@ -860,42 +867,42 @@ static const char *fixture_for(const char *cmdline) {
             }
             if (eq(tok[i], "list") || eq(tok[i], "ls")) has_list = 1;
         }
-        if (has_remote_ls || has_updates) return FIXTURE_FLATPAK_UPDATES;
-        if (has_list) return FIXTURE_FLATPAK_LIST;
-        return FIXTURE_FLATPAK;
+        if (has_remote_ls || has_updates) { *out = FIXTURE_FLATPAK_UPDATES; return 1; }
+        if (has_list) { *out = FIXTURE_FLATPAK_LIST; return 1; }
+        *out = FIXTURE_FLATPAK; return 1;
     }
-    if (eq(base, "pnpm")) return FIXTURE_PNPM;
+    if (eq(base, "pnpm")) { *out = FIXTURE_PNPM; return 1; }
     if (eq(base, "npm")) {
         for (int i = 1; i < n; i++) {
-            if (eq(tok[i], "outdated")) return FIXTURE_NPM_OUTDATED;
+            if (eq(tok[i], "outdated")) { *out = FIXTURE_NPM_OUTDATED; return 1; }
         }
-        return FIXTURE_NPM;
+        *out = FIXTURE_NPM; return 1;
     }
-    if (eq(base, "bun")) return FIXTURE_BUN;
-    if (eq(base, "pipx")) return FIXTURE_PIPX;
+    if (eq(base, "bun")) { *out = FIXTURE_BUN; return 1; }
+    if (eq(base, "pipx")) { *out = FIXTURE_PIPX; return 1; }
     if (eq(base, "pip") || eq(base, "pip3")) {
         int has_outdated = 0, has_not_required = 0;
         for (int i = 1; i < n; i++) {
             if (eq(tok[i], "--outdated")) has_outdated = 1;
             if (eq(tok[i], "--not-required")) has_not_required = 1;
         }
-        if (has_outdated) return FIXTURE_PIP;
-        if (has_not_required) return FIXTURE_PIP_NOT_REQUIRED;
-        return FIXTURE_PIP_LIST;
+        if (has_outdated) { *out = FIXTURE_PIP; return 1; }
+        if (has_not_required) { *out = FIXTURE_PIP_NOT_REQUIRED; return 1; }
+        *out = FIXTURE_PIP_LIST; return 1;
     }
-    if (eq(base, "uv")) return FIXTURE_UV;
-    if (eq(base, "brew")) return FIXTURE_BREW;
-    if (eq(base, "gem")) return FIXTURE_GEM;
-    if (eq(base, "composer")) return FIXTURE_COMPOSER;
+    if (eq(base, "uv")) { *out = FIXTURE_UV; return 1; }
+    if (eq(base, "brew")) { *out = FIXTURE_BREW; return 1; }
+    if (eq(base, "gem")) { *out = FIXTURE_GEM; return 1; }
+    if (eq(base, "composer")) { *out = FIXTURE_COMPOSER; return 1; }
     if (eq(base, "docker") || eq(base, "podman")) {
         for (int i = 1; i < n; i++) {
-            if (eq(tok[i], "volume")) return FIXTURE_CTR_VOLUME;
-            if (eq(tok[i], "images")) return FIXTURE_CTR_IMAGES;
-            if (eq(tok[i], "ps")) return FIXTURE_CTR_PS;
+            if (eq(tok[i], "volume")) { *out = FIXTURE_CTR_VOLUME; return 1; }
+            if (eq(tok[i], "images")) { *out = FIXTURE_CTR_IMAGES; return 1; }
+            if (eq(tok[i], "ps")) { *out = FIXTURE_CTR_PS; return 1; }
         }
-        return NULL;
+        return 0;
     }
-    return NULL;
+    return 0;
 }
 
 #ifndef _WIN32
@@ -1080,8 +1087,11 @@ int appattic_host_exec(const char *cmdline, char *out, size_t cap) {
     if (!appattic_host_exec_allowed(cmdline)) return APPATTIC_HOST_EXEC_DENY;
 
     if (use_fixture()) {
-        const char *text = fixture_for(cmdline);
-        if (!text) return APPATTIC_HOST_EXEC_FAIL;
+        char scratch[MAX_CMD];
+        const char *text = NULL;
+        if (!fixture_for(cmdline, scratch, sizeof scratch, &text) || !text) {
+            return APPATTIC_HOST_EXEC_FAIL;
+        }
         size_t n = strlen(text);
         if (n <= cap) {
             memcpy(out, text, n);

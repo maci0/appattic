@@ -60,7 +60,7 @@ const ItemCtx = struct {
 
     pub fn finish(self: *ItemCtx) void {
         if (self.n >= self.out.len) return;
-        if (!jsonbuf.isSafeIdent(self.name)) return;
+        if (!jsonbuf.isSafeCmdIdent(self.name)) return;
         self.out[self.n] = .{ .name = self.name, .current = self.current, .latest = self.latest };
         self.n += 1;
     }

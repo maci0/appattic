@@ -43,7 +43,7 @@ pub fn parseAurQua(text: []const u8, out: []AurOutdated) usize {
         var left = std.mem.tokenizeAny(u8, line[0..arrow], " \t");
         const name = left.next() orelse continue;
         const current = left.next() orelse continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         var right = std.mem.tokenizeAny(u8, line[arrow + 4 ..], " \t");
         const latest = right.next() orelse continue;
         out[n] = .{ .name = name, .current = current, .latest = latest };
@@ -165,7 +165,7 @@ fn fuzzAurQua(_: void, smith: *std.testing.Smith) !void {
     const n = parseAurQua(text, &buf);
     try std.testing.expect(n <= buf.len);
     for (buf[0..n]) |o| {
-        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(o.name));
         try std.testing.expect(sliceInside(text, o.name));
         try std.testing.expect(sliceInside(text, o.current));
         try std.testing.expect(sliceInside(text, o.latest));

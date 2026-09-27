@@ -255,6 +255,25 @@ final class PackageTests: XCTestCase {
         )
     }
 
+    /// `shellQuote` leaves a leading `-` unquoted, so a name from a hostile
+    /// registry reaches the package manager as an option. The row is refused
+    /// instead of scripted.
+    func testPackageRemoveRefusesNameThatReadsAsAnOption() {
+        let cmd = packageRemoveCommand(entry("--allow-unauthenticated", "apt", "orphan"))
+        XCTAssertEqual(
+            cmd,
+            "# skipped --allow-unauthenticated: name reads as a command option"
+        )
+        XCTAssertNil(parseGuardedRemove(cmd))
+        XCTAssertTrue(cmd.hasPrefix("#"))
+    }
+
+    func testPackageMarkManualRefusesNameThatReadsAsAnOption() {
+        let item = entry("--set-priority=install", "apt", "orphan")
+        XCTAssertTrue(item.canMarkManual)
+        XCTAssertNil(packageMarkManualCommand(item))
+    }
+
     /// The guard's presence query has to be a read-only listing, never the
     /// removal itself, or the guard is what runs the removal.
     func testPackageRemoveGuardsDoNotRemove() throws {

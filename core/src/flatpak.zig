@@ -63,10 +63,10 @@ fn splitRef(tok: []const u8, name: *[]const u8, branch: *[]const u8) bool {
     const id = it.next() orelse return false;
     _ = it.next();
     const last = it.next();
-    if (!jsonbuf.isSafeIdent(id)) return false;
+    if (!jsonbuf.isSafeCmdIdent(id)) return false;
     name.* = id;
     if (last) |b| {
-        if (jsonbuf.isSafeIdent(b)) branch.* = b;
+        if (jsonbuf.isSafeCmdIdent(b)) branch.* = b;
     }
     return true;
 }
@@ -93,14 +93,14 @@ pub fn parseFlatpakUnused(text: []const u8, out: []FlatpakUnused) usize {
             if (std.mem.indexOfScalar(u8, idtok, '/') != null) {
                 if (!splitRef(idtok, &name, &branch)) continue;
             } else {
-                if (!jsonbuf.isSafeIdent(idtok) or std.mem.indexOfScalar(u8, idtok, '.') == null) continue;
+                if (!jsonbuf.isSafeCmdIdent(idtok) or std.mem.indexOfScalar(u8, idtok, '.') == null) continue;
                 name = idtok;
             }
             while (it.next()) |tok| {
                 if (tok.len == 1) continue;
                 if (tok[0] == '[') continue;
                 if (isArch(tok)) continue;
-                if (jsonbuf.isSafeIdent(tok) and branch.len == 0) {
+                if (jsonbuf.isSafeCmdIdent(tok) and branch.len == 0) {
                     branch = tok;
                     break;
                 }
@@ -148,7 +148,7 @@ fn parseFlatpakAppRows(text: []const u8, out: []FlatpakRow) usize {
             version = it.next() orelse "";
         }
         if (name.len == 0 or skipFlatpakHeader(name)) continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
+        if (!jsonbuf.isSafeCmdIdent(name)) continue;
         out[n] = .{ .name = name, .version = version };
         n += 1;
     }

@@ -21,6 +21,19 @@ public func shellQuote(_ value: String) -> String {
     return "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
 }
 
+/// A scanned name is safe to splice as a command argument.
+///
+/// `shellQuote` leaves a leading `-` unquoted, because every byte of `--force`
+/// is shell-safe, so the package manager reads the name as an option rather
+/// than as its argument. A name here comes from a registry, a tap, or the
+/// scan cache, so it is not this app's to trust. No real package or formula is
+/// named this way, so a caller that sees `false` drops the row instead of
+/// emitting a command. The Zig core applies the same rule in
+/// `jsonbuf.isSafeCmdIdent`.
+public func isSafeCommandArgument(_ value: String) -> Bool {
+    !value.isEmpty && !value.hasPrefix("-")
+}
+
 /// Wrap a removal so an already-removed target is a no-op instead of a failure.
 ///
 /// Generated scripts run under `set -e`, so an unguarded `pkgmgr remove` on a

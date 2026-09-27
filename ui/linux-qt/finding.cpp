@@ -598,6 +598,10 @@ QString leftoverCleanupCommand(const Finding &f) {
 
 static bool isSafePackageName(const QString &n) {
     if (n.isEmpty()) return false;
+    // A leading `-` reaches the manager as an option, not as a name. The name
+    // comes from the plugin's parse of a manager listing, so refuse it rather
+    // than quote it into a different command.
+    if (n.startsWith(QLatin1Char('-'))) return false;
     for (const QChar c : n) {
         if (c.isLetterOrNumber() || c == QLatin1Char('-') || c == QLatin1Char('_')
             || c == QLatin1Char('.') || c == QLatin1Char('+') || c == QLatin1Char('@')
@@ -1084,7 +1088,13 @@ bool canMarkManual(const Finding &f) {
 
 QString markManualCommand(const Finding &f) {
     if (!canMarkManual(f)) return {};
-    const QString q = shellQuote(displayName(f));
+    // A leading `-` reaches the manager as an option, not as the package name.
+    // The name comes from a registry, a tap, or the scan cache, so refuse it
+    // rather than quoting it into a different command. Mirrors Swift
+    // `isSafeCommandArgument` and Zig `jsonbuf.isSafeCmdIdent`.
+    const QString name = displayName(f);
+    if (name.isEmpty() || name.startsWith(QLatin1Char('-'))) return {};
+    const QString q = shellQuote(name);
     const QString m = distroManager(f);
     if (m == QLatin1String("apt")) return QStringLiteral("apt-mark manual ") + q;
     if (m == QLatin1String("pacman")) return QStringLiteral("pacman -D --asexplicit ") + q;

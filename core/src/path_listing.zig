@@ -248,19 +248,23 @@ pub fn parseListing(
         if (isSystemLeftoverName(name)) continue;
         if (nameInKeep(name, keep)) continue;
         if (allow.len > 0 and !nameInKeep(name, allow)) continue;
-        const path = if (line[0] == '/') line else blk: {
-            const need = root.len + 1 + name.len;
-            if (used + need > path_store.len) continue;
-            const start = used;
-            @memcpy(path_store[used..][0..root.len], root);
-            used += root.len;
-            path_store[used] = '/';
-            used += 1;
-            @memcpy(path_store[used..][0..name.len], name);
-            used += name.len;
-            break :blk path_store[start..used];
-        };
-        out[n] = .{ .name = name, .path = path };
+        // The path is always `root` joined with the validated basename, never
+        // the line as printed. `ls -1` prints a bare basename, so a line that
+        // is already absolute is accepted only when it says exactly that; a
+        // listing that spells out anything else (`/root/../../etc`) is dropped
+        // rather than turned into an `rm -rf` target.
+        const need = root.len + 1 + name.len;
+        if (used + need > path_store.len) continue;
+        const start = used;
+        @memcpy(path_store[used..][0..root.len], root);
+        used += root.len;
+        path_store[used] = '/';
+        used += 1;
+        @memcpy(path_store[used..][0..name.len], name);
+        used += name.len;
+        const joined = path_store[start..used];
+        if (line[0] == '/' and !std.mem.eql(u8, line, joined)) continue;
+        out[n] = .{ .name = name, .path = joined };
         n += 1;
     }
     return n;
@@ -417,6 +421,23 @@ test "parseListing accepts full paths, skips . and .., keeps other dots" {
     try std.testing.expectEqualStrings("/home/user/.cache/gone-app", hits[0].path);
     try std.testing.expectEqualStrings(".cache-secret", hits[1].name);
     try std.testing.expectEqualStrings("/home/user/.cache/.cache-secret", hits[1].path);
+}
+
+test "parseListing drops an absolute line that is not root joined with the name" {
+    var hits: [8]Orphan = undefined;
+    var paths: [512]u8 = undefined;
+    // The basename validates, so only the path spelling can keep
+    // `/home/user/.cache/../../etc` from becoming an `rm -rf` argument.
+    const n = parseListing(
+        "/home/user/.cache/../../etc\n/home/user/.cache/gone-app\n",
+        "",
+        "/home/user/.cache",
+        &hits,
+        &paths,
+        "",
+    );
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqualStrings("/home/user/.cache/gone-app", hits[0].path);
 }
 
 test "parseListing empty listing" {
