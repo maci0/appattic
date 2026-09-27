@@ -14,6 +14,26 @@ struct DiskUsageView: View {
     private let allocated = true
     private let oneFileSystem = true
     @State private var selected: DiskUsageNode? = nil
+    @State private var activeScan: ScanTicket? = nil
+
+    /// A walk started before the one the user asked for last. Cancelled, not
+    /// merely ignored: a full-tree walk holds its whole node tree until the
+    /// main queue takes the result, so a superseded walk left running keeps that
+    /// memory for the length of its own tree.
+    private final class ScanTicket: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            lock.unlock()
+        }
+        var isCancelled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return cancelled
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -139,13 +159,17 @@ struct DiskUsageView: View {
     }
 
     func scan(_ rootPath: String) {
+        activeScan?.cancel()
+        let ticket = ScanTicket()
+        activeScan = ticket
         scanning = true
         status = "Scanning \(rootPath)"
         path = rootPath
         let one = oneFileSystem
         DispatchQueue.global(qos: .userInitiated).async {
-            let tree = scanDiskUsage(root: rootPath, oneFileSystem: one)
+            let tree = scanDiskUsage(root: rootPath, oneFileSystem: one, cancel: { ticket.isCancelled })
             DispatchQueue.main.async {
+                guard !ticket.isCancelled else { return }
                 root = tree
                 selected = tree
                 scanning = false
