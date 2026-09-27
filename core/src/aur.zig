@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const fuzzsupport = @import("fuzzsupport.zig");
@@ -58,21 +59,38 @@ fn helperFromCmd(cmd: []const u8) []const u8 {
     return "paru";
 }
 
-fn upgradePrefix(helper: []const u8) []const u8 {
-    if (std.mem.eql(u8, helper, "yay")) return "yay --noconfirm -S ";
-    if (std.mem.eql(u8, helper, "pikaur")) return "pikaur --noconfirm -S ";
-    return "paru --noconfirm -S ";
+fn upgradeAction(helper: []const u8) []const u8 {
+    if (std.mem.eql(u8, helper, "yay")) return "yay --noconfirm -S";
+    if (std.mem.eql(u8, helper, "pikaur")) return "pikaur --noconfirm -S";
+    return "paru --noconfirm -S";
 }
 
 fn renderAur(outdated: []const AurOutdated, helper: []const u8) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"aur\",\"engine\":");
     w.str(helper);
     w.raw(",\"findings\":[");
-    const prefix = upgradePrefix(helper);
+    const action = upgradeAction(helper);
     for (outdated, 0..) |h, i| {
         if (i != 0) w.raw(",");
-        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "aur", prefix, true);
+        // Guarded: `paru -S` on a package already at the scanned version
+        // reinstalls it, so a script that runs twice would do the work twice.
+        // The row is read from the helper's own `paru -Q`, the database an AUR
+        // package is installed into.
+        var cmd_buf: [1024]u8 = undefined;
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        var query_buf: [32]u8 = undefined;
+        const query = std.fmt.bufPrint(&query_buf, "{s} -Qu", .{helper}) catch {
+            w.failed = true;
+            return false;
+        };
+        guard.writeUpgradeGuard(&cmd_w, &q_buf, query, action, h.name);
+        const cmd = cmd_w.slice() orelse {
+            w.failed = true;
+            return false;
+        };
+        jsonbuf.writeOutdatedCommand(&w, h.name, h.current, h.latest, "aur", cmd, true);
     }
     w.raw("],\"script\":null,\"dialog\":{\"title\":\"AUR packages outdated\",\"body\":\"Named paru/yay/pikaur -S waits for confirm. Nothing runs until you confirm.\"}}");
     note.write(&w);
@@ -116,6 +134,13 @@ test "plugin_query present JSON includes AUR outdated from paru -Qua fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "coreutils") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "paru --noconfirm -S coreutils") != null);
+    // Guarded on the version the scan saw, so a script that runs twice does
+    // not reinstall the package.
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        json,
+        "if paru -Qu coreutils >/dev/null 2>&1; then paru --noconfirm -S coreutils; fi",
+    ) != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "-Syu") == null);
 }

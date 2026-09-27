@@ -98,7 +98,16 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
     for (outdated) |h| {
         if (!first) w.raw(",");
         first = false;
-        jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "pacman", "pacman --noconfirm -S ", true);
+        // Guarded: `pacman -S` on a package already at the scanned version
+        // reinstalls it, so a script that runs twice would do the work twice.
+        var cmd_buf: [1024]u8 = undefined;
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeUpgradeGuard(&cmd_w, &q_buf, "pacman -Qu", "pacman --noconfirm -S", h.name);
+        const cmd = cmd_w.slice() orelse {
+            w.failed = true;
+            return false;
+        };
+        jsonbuf.writeOutdatedCommand(&w, h.name, h.current, h.latest, "pacman", cmd, true);
     }
     w.raw("],\"script\":");
     if (orphans.len == 0) {
@@ -204,6 +213,13 @@ test "plugin_query present JSON includes pacman -Qu outdated" {
     try std.testing.expect(std.mem.indexOf(u8, json, "9.5-1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "9.5-2") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pacman --noconfirm -S coreutils") != null);
+    // Guarded, so a script that runs twice does not reinstall the package:
+    // `pacman -S` on a package already at the scanned version is a reinstall.
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        json,
+        "if pacman -Qu coreutils >/dev/null 2>&1; then pacman --noconfirm -S coreutils; fi",
+    ) != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "-Syu") == null);
 }

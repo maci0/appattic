@@ -60,6 +60,36 @@ pub fn writeNameGuard(
     w.raw("; fi");
 }
 
+/// `if <present> <name> >/dev/null 2>&1; then <upgrade> <name>; fi`.
+///
+/// `pacman -S <name>` and `paru -S <name>` on a package that is already at the
+/// repo's version is a reinstall, not a no-op: the download, the install
+/// scripts, and the database entry all happen again, so a script run twice
+/// would do the work twice. `present` is the manager's own update check
+/// (`pacman -Qu`, `paru -Qu`), which exits 0 only while the package is still
+/// behind: the same question the scan asked, asked again.
+///
+/// Same shape as `writeWholeGuard` with a name and a redirect, which is the
+/// spelling the Qt `commandIsShellSafe` guard already accepts, so the `rootcmd`
+/// escalation reads a guarded upgrade like a guarded removal.
+pub fn writeUpgradeGuard(
+    w: *jsonbuf.W,
+    q_buf: []u8,
+    present: []const u8,
+    upgrade: []const u8,
+    name: []const u8,
+) void {
+    w.raw("if ");
+    w.raw(present);
+    w.raw(" ");
+    jsonbuf.rawShQuote(w, q_buf, name);
+    w.raw(" >/dev/null 2>&1; then ");
+    w.raw(upgrade);
+    w.raw(" ");
+    jsonbuf.rawShQuote(w, q_buf, name);
+    w.raw("; fi");
+}
+
 /// `if <list> | grep -qF -- '<row>'; then <remove> <name>; fi`. For the
 /// managers that have no per-package query and answer only with a listing.
 pub fn writeRowGuard(
@@ -104,6 +134,28 @@ test "name guard quotes an injected name in both halves" {
     const got = w.slice() orelse return error.Overflow;
     try std.testing.expect(std.mem.indexOf(u8, got, "if test -e ~/.deno/bin/'x'\\''; reboot; '\\'''; then ") != null);
     try std.testing.expect(std.mem.indexOf(u8, got, "deno uninstall --global 'x'\\''; reboot; '\\'''; fi") != null);
+}
+
+test "upgrade guard runs only while the package is still behind" {
+    var buf: [512]u8 = undefined;
+    var q_buf: [128]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    writeUpgradeGuard(&w, &q_buf, "pacman -Qu", "pacman --noconfirm -S", "vim");
+    try std.testing.expectEqualStrings(
+        "if pacman -Qu vim >/dev/null 2>&1; then pacman --noconfirm -S vim; fi",
+        w.slice() orelse return error.Overflow,
+    );
+}
+
+test "upgrade guard quotes an injected name in both halves" {
+    var buf: [512]u8 = undefined;
+    var q_buf: [128]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    writeUpgradeGuard(&w, &q_buf, "paru -Qu", "paru --noconfirm -S", "x'; reboot; '");
+    try std.testing.expectEqualStrings(
+        "if paru -Qu 'x'\\''; reboot; '\\''' >/dev/null 2>&1; then paru --noconfirm -S 'x'\\''; reboot; '\\'''; fi",
+        w.slice() orelse return error.Overflow,
+    );
 }
 
 test "whole guard takes both halves whole" {

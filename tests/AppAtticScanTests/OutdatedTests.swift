@@ -328,7 +328,13 @@ final class OutdatedTests: XCTestCase {
         XCTAssertEqual(pkgs.first?.manager, "aur")
         XCTAssertTrue(pkgs.first?.updatable ?? false)
         let cmd = updateCommand(pkgs[0]) ?? ""
-        XCTAssertEqual(cmd, "paru --noconfirm -S yay-bin")
+        // Guarded on the helper's own update check: `paru -S` on a package
+        // already at the newest version is a reinstall, not a no-op, so a
+        // script that runs twice would otherwise do the work twice.
+        XCTAssertEqual(
+            cmd,
+            "if paru -Qu yay-bin >/dev/null 2>&1; then paru --noconfirm -S yay-bin; fi"
+        )
         XCTAssertTrue(cmds.contains { $0.contains("-Qua") }, "\(cmds)")
         XCTAssertFalse(cmds.contains { $0.contains("-S") })
     }

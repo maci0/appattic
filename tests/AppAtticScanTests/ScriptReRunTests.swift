@@ -108,6 +108,65 @@ final class ScriptReRunTests: XCTestCase {
         try parses(script)
     }
 
+    /// The pacman upgrade is guarded, because `pacman -S` on a package that is
+    /// already at the newest version is a reinstall: the download, the install
+    /// scripts, and the database entry happen again. The stub answers `-Qu`
+    /// the way pacman does, exiting 0 only while the package is still behind,
+    /// so the first run upgrades and the second has to skip the line.
+    func testSecondRunOfAPacmanUpgradeDoesNotReinstall() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("appattic-rerun-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let bin = root.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+
+        let installed = root.appendingPathComponent("installed")
+        let upgrades = root.appendingPathComponent("upgrades")
+        // The row `pacman -Q vim` prints: name and version, one per line.
+        try "vim 9.0-1\n".write(to: installed, atomically: true, encoding: .utf8)
+        try "".write(to: upgrades, atomically: true, encoding: .utf8)
+        let stub = bin.appendingPathComponent("pacman")
+        let stubBody = """
+        #!/bin/sh
+        if [ "$1" = "-Qu" ]; then
+          if grep -q 'vim 9.1-1' "\(installed.path)"; then exit 1; fi
+          exit 0
+        fi
+        if [ "$1" = "--noconfirm" ] && [ "$2" = "-S" ]; then
+          printf 'upgraded %s\\n' "$3" >> "\(upgrades.path)"
+          printf 'vim 9.1-1\\n' > "\(installed.path)"
+          exit 0
+        fi
+        printf 'unexpected pacman %s\\n' "$*" >&2
+        exit 1
+        """
+        try stubBody.write(to: stub, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+        let savedPath = ProcessInfo.processInfo.environment["PATH"]
+        addTeardownBlock {
+            if let savedPath { setenv("PATH", savedPath, 1) } else { unsetenv("PATH") }
+        }
+        setenv("PATH", "\(bin.path):\(savedPath ?? "")", 1)
+
+        let pkg = OutdatedPkg(name: "vim", manager: "pacman", currentVersion: "9.0-1", latestVersion: "9.1-1")
+        let line = try XCTUnwrap(updateCommand(pkg), "a pacman row always has an upgrade command")
+        let script = "set -e\n\(line)\nprintf done"
+
+        let first = try run(script)
+        XCTAssertEqual(first.0, 0, first.1)
+        XCTAssertEqual(first.1, "done", first.1)
+        XCTAssertEqual(try String(contentsOf: upgrades, encoding: .utf8), "upgraded vim\n")
+
+        let second = try run(script)
+        XCTAssertEqual(second.0, 0, second.1)
+        XCTAssertEqual(second.1, "done", second.1)
+        XCTAssertEqual(
+            try String(contentsOf: upgrades, encoding: .utf8),
+            "upgraded vim\n",
+            "the second run reinstalled a package the first run had already upgraded"
+        )
+    }
+
     /// Each line the app can generate parses on its own, so one bad line cannot
     /// take the rest of a multi-selection script down with it.
     func testEveryRemovalAndKeepLineParsesAlone() throws {

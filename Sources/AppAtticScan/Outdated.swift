@@ -294,9 +294,25 @@ public func updateCommand(_ pkg: OutdatedPkg) -> String? {
     case .apt:
         return "apt-get -y install --only-upgrade \(quoted)"
     case .pacman:
-        return "pacman --noconfirm -S \(quoted)"
+        // Guarded, and the only managers here that need it: `pacman -S` on a
+        // package that is already at the repo's version is a reinstall, not a
+        // no-op, so a script run twice would download it again, run its
+        // install scripts again, and rewrite its database entry. `-Qu` exits 0
+        // only while the package is still behind, which is the same question
+        // the scan asked, so the second run skips the line.
+        return guardedCommand(
+            present: "pacman -Qu \(quoted)",
+            action: "pacman --noconfirm -S \(quoted)"
+        )
     case .aur:
-        return "\(aurHelperBin()) --noconfirm -S \(quoted)"
+        // The AUR helper installs through the pacman database, and its `-Qu`
+        // checks the AUR, which the pacman-side query cannot: the new version
+        // of an AUR package is not in any sync database.
+        let helper = aurHelperBin()
+        return guardedCommand(
+            present: "\(helper) -Qu \(quoted)",
+            action: "\(helper) --noconfirm -S \(quoted)"
+        )
     case .dnf:
         return "dnf upgrade -y \(quoted)"
     case .yum:

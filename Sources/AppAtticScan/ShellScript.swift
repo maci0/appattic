@@ -34,14 +34,20 @@ public func isSafeCommandArgument(_ value: String) -> Bool {
     !value.isEmpty && !value.hasPrefix("-")
 }
 
+/// `if <present> >/dev/null 2>&1; then <action>; fi`, the wrapper a removal and
+/// a guarded upgrade share. `present` is a read-only query that exits 0 only
+/// while the target is still in the state the action acts on.
+public func guardedCommand(present: String, action: String) -> String {
+    "if \(present) >/dev/null 2>&1; then \(action); fi"
+}
+
 /// Wrap a removal so an already-removed target is a no-op instead of a failure.
 ///
 /// Generated scripts run under `set -e`, so an unguarded `pkgmgr remove` on a
 /// target a previous run already deleted exits nonzero and `set -e` stops the
-/// script there: the items after it never run. `present` is a read-only query
-/// that exits 0 only while the target is still installed.
+/// script there: the items after it never run.
 public func guardedRemoveCommand(present: String, remove: String) -> String {
-    "if \(present) >/dev/null 2>&1; then \(remove); fi"
+    guardedCommand(present: present, action: remove)
 }
 
 /// The two halves of a `guardedRemoveCommand` line, so the root wrapper and

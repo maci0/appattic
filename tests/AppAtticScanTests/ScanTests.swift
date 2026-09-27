@@ -718,7 +718,8 @@ final class ScriptPreviewTests: XCTestCase {
         let update = updateScript([OutdatedPkg(name: "vim", manager: "aur", currentVersion: "1", latestVersion: "2")])
         let merged = previewScript(cleanup: cleanup, update: update)
         XCTAssertEqual(merged.components(separatedBy: "rootcmd() {").count - 1, 1, merged)
-        XCTAssertTrue(merged.contains(" --noconfirm -S 'vim'"), merged)
+        XCTAssertTrue(merged.contains("-Qu vim >/dev/null 2>&1"), merged)
+        XCTAssertTrue(merged.contains(" --noconfirm -S vim"), merged)
         XCTAssertTrue(try shScriptParses(merged), merged)
     }
 }

@@ -267,6 +267,24 @@ static int verifyHelpers() {
         std::fprintf(stderr, "commandIsShellSafe accepted an injected query in a row guard\n");
         return 1;
     }
+    // The pacman-family upgrade is guarded on the manager's own update query,
+    // so a script that runs twice does not reinstall. Same wrapper shape as a
+    // guarded removal, so it has to be accepted the same way.
+    if (!commandIsShellSafe(QStringLiteral(
+            "if pacman -Qu vim >/dev/null 2>&1; then pacman --noconfirm -S vim; fi"))) {
+        std::fprintf(stderr, "commandIsShellSafe rejected a guarded upgrade\n");
+        return 1;
+    }
+    if (commandIsShellSafe(QStringLiteral(
+            "if pacman -Qu vim >/dev/null 2>&1; then pacman --noconfirm -S vim; reboot; fi"))) {
+        std::fprintf(stderr, "commandIsShellSafe accepted an injected action in an upgrade guard\n");
+        return 1;
+    }
+    if (!commandNeedsRoot(QStringLiteral(
+            "if pacman -Qu vim >/dev/null 2>&1; then pacman --noconfirm -S vim; fi"))) {
+        std::fprintf(stderr, "commandNeedsRoot lost the action inside an upgrade guard\n");
+        return 1;
+    }
     if (!QFile::exists(QStringLiteral(":/icons/appattic.png"))) {
         std::fprintf(stderr, "icon: embedded :/icons/appattic.png missing\n");
         return 1;

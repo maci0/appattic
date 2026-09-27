@@ -77,6 +77,8 @@ The `note` is a fact about the whole plugin result, not about one row. It travel
 
 Every named removal a script runs is wrapped in `if <present>; then <remove>; fi` (`core/src/guarded_remove.zig`). The script runs under `set -e`, and a manager exits nonzero when asked to remove something it already removed, so an unguarded line would stop a rerun at the first target the first run took and strand every line below it. The presence check is a read and never escalates: a package query (`dpkg -s`, `pacman -Qq`, `flatpak info`, `pip show`), a file the removal takes away (`test -e /var/lib/snapd/snaps/<name>_<rev>.snap`), or an engine query (`docker image inspect`, `docker volume inspect`, `docker container inspect`).
 
+The pacman-family upgrade carries the same guard, for a different reason: `pacman -S <name>` on a package already at the repo's version is a reinstall, not a no-op, so a rerun would download the package again, run its install scripts again, and rewrite its database entry. The check is the manager's own update query (`pacman -Qu <name>`, `paru -Qu <name>`), which exits 0 only while the package is still behind. Every other manager answers "nothing to do" on a package that is already current (`brew upgrade`, `flatpak update`, `apt-get --only-upgrade`, `dnf upgrade`), so those lines are left unguarded.
+
 ## Inventory (in scope)
 
 Plugin membership lives in one place: the `wasm_sources` list in `core/build.sh`. One `core/src/<id>.zig` compiles to `core/out/<id>.wasm`; there is no manifest directory. Backlog ids are not in `wasm_sources`, so no `.wasm` is built for them. Query plugins call `host.exec`. Darwin leftover roots stay in Swift `AppAtticScan`.

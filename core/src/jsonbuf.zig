@@ -192,6 +192,40 @@ pub fn writeOutdated(
     command: []const u8,
     updatable: bool,
 ) void {
+    writeOutdatedRow(w, name, current, latest, manager, updatable, .{ .prefix = command });
+}
+
+/// `writeOutdated` for a command the caller has already built whole, because it
+/// names the package more than once: a guarded upgrade reads the name from a
+/// version listing, matches a row, and then passes it to the upgrade.
+pub fn writeOutdatedCommand(
+    w: *W,
+    name: []const u8,
+    current: []const u8,
+    latest: []const u8,
+    manager: []const u8,
+    command: []const u8,
+    updatable: bool,
+) void {
+    writeOutdatedRow(w, name, current, latest, manager, updatable, .{ .whole = command });
+}
+
+const OutdatedCommand = union(enum) {
+    /// A command prefix; the quoted name is appended to it.
+    prefix: []const u8,
+    /// A finished command, quoted by whoever built it.
+    whole: []const u8,
+};
+
+fn writeOutdatedRow(
+    w: *W,
+    name: []const u8,
+    current: []const u8,
+    latest: []const u8,
+    manager: []const u8,
+    updatable: bool,
+    command: OutdatedCommand,
+) void {
     w.raw("{\"kind\":\"outdated\",\"id\":");
     w.str(name);
     w.raw(",\"name\":");
@@ -207,22 +241,33 @@ pub fn writeOutdated(
     w.raw(",\"status\":\"outdated\",\"updatable\":");
     w.raw(if (updatable) "true" else "false");
     w.raw(",\"command\":");
-    if (command.len == 0) {
-        w.raw("null");
-    } else {
-        var cmd_buf: [384]u8 = undefined;
-        var name_buf: [320]u8 = undefined;
-        const quoted = shQuote(&name_buf, name) orelse {
-            w.failed = true;
-            return;
-        };
-        if (command.len + quoted.len > cmd_buf.len) {
-            w.failed = true;
-            return;
-        }
-        @memcpy(cmd_buf[0..command.len], command);
-        @memcpy(cmd_buf[command.len..][0..quoted.len], quoted);
-        w.str(cmd_buf[0 .. command.len + quoted.len]);
+    switch (command) {
+        .whole => |whole| {
+            if (whole.len == 0) {
+                w.raw("null");
+            } else {
+                w.str(whole);
+            }
+        },
+        .prefix => |prefix| {
+            if (prefix.len == 0) {
+                w.raw("null");
+            } else {
+                var cmd_buf: [384]u8 = undefined;
+                var name_buf: [320]u8 = undefined;
+                const quoted = shQuote(&name_buf, name) orelse {
+                    w.failed = true;
+                    return;
+                };
+                if (prefix.len + quoted.len > cmd_buf.len) {
+                    w.failed = true;
+                    return;
+                }
+                @memcpy(cmd_buf[0..prefix.len], prefix);
+                @memcpy(cmd_buf[prefix.len..][0..quoted.len], quoted);
+                w.str(cmd_buf[0 .. prefix.len + quoted.len]);
+            }
+        },
     }
     w.raw(",\"manager\":");
     w.str(manager);
