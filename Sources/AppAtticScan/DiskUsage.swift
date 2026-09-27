@@ -511,8 +511,13 @@ public func listDiskVolumes(
         var avail = 0
         var st = statvfs()
         if root.withCString({ statvfs($0, &st) }) == 0 {
-            total = Int(st.f_frsize) * Int(st.f_blocks)
-            avail = Int(st.f_frsize) * Int(st.f_bavail)
+            // The counts are unsigned and the product is not bounded by the
+            // filesystem, so both the conversion and the multiply are
+            // checked: a wrapped total reads as negative, which drops the
+            // volume below out of the list entirely.
+            let blockSize = Int(clamping: st.f_frsize)
+            total = mulBytes(blockSize, Int(clamping: st.f_blocks))
+            avail = mulBytes(blockSize, Int(clamping: st.f_bavail))
         }
         if total <= 0 && root != "/" { continue }
         // Claimed only once it is really a volume: an over-mount that statvfs

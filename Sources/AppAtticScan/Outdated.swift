@@ -799,6 +799,22 @@ public func storeCountries(_ localeText: String? = nil) -> [String] {
     return countries
 }
 
+/// `cur * 10 + digit` that saturates instead of trapping.
+///
+/// A version comes from a package index or the App Store, so a digit run is
+/// only as long as whoever published it made it. The same bound `hxDigitsValue`
+/// needs for shell history applies here: past 18 digits `cur * 10` overflows
+/// and the trap takes the whole scan down with it. Saturating keeps the
+/// comparison ordered, and two components too wide to tell apart compare by
+/// the components after them.
+@inline(__always)
+private func appendVersionDigit(_ cur: Int, _ digit: Int) -> Int {
+    let (scaled, scaleOverflow) = cur.multipliedReportingOverflow(by: 10)
+    if scaleOverflow { return Int.max }
+    let (sum, sumOverflow) = scaled.addingReportingOverflow(digit)
+    return sumOverflow ? Int.max : sum
+}
+
 public func versionNewer(latest: String?, current: String?) -> Bool {
     func parts(_ v: String?) -> [Int] {
         var nums: [Int] = []
@@ -809,7 +825,7 @@ public func versionNewer(latest: String?, current: String?) -> Bool {
             // ASCII 0-9 only. `Character.isNumber` is also true for numeric
             // punctuation such as ½, which has no wholeNumberValue.
             if ch.isNumber, ch.isASCII, let digit = ch.wholeNumberValue {
-                cur = cur * 10 + digit
+                cur = appendVersionDigit(cur, digit)
                 inDigits = true
             } else if inDigits {
                 nums.append(cur)
@@ -818,7 +834,10 @@ public func versionNewer(latest: String?, current: String?) -> Bool {
             }
         }
         if inDigits { nums.append(cur) }
-        while nums.last == 0 { nums.removeLast() }
+        // Keep one component: a version of "0" or "0.0.0" is still a version,
+        // and emptying the list sent it down the string-compare path below,
+        // which called "0" newer than "1".
+        while nums.count > 1, nums.last == 0 { nums.removeLast() }
         return nums
     }
     let lp = parts(latest)

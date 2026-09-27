@@ -634,6 +634,23 @@ final class OutdatedTests: XCTestCase {
         XCTAssertFalse(versionNewer(latest: "14.5", current: "14.5.0"))
         XCTAssertFalse(versionNewer(latest: "26.6", current: "26.6"))
         XCTAssertTrue(versionNewer(latest: "15.0", current: "14.5"))
+        // An all-zero version is still a version: stripping it to an empty
+        // list fell through to the string compare, which called "0" newer
+        // than "1".
+        XCTAssertFalse(versionNewer(latest: "0", current: "1"))
+        XCTAssertTrue(versionNewer(latest: "1", current: "0.0.0"))
+    }
+
+    func testVersionNewerSurvivesOversizedDigitRun() {
+        // A 20-digit component overflows Int: the version arrives from the
+        // App Store, so it has to compare without trapping the scan.
+        let huge = "99999999999999999999"
+        XCTAssertTrue(versionNewer(latest: "\(huge).1", current: "2.0"))
+        XCTAssertFalse(versionNewer(latest: "2.0", current: "\(huge).1"))
+        XCTAssertFalse(versionNewer(latest: huge, current: huge))
+        // Width alone no longer decides; the components after it still do.
+        XCTAssertTrue(versionNewer(latest: "\(huge).2", current: "\(huge).1"))
+        XCTAssertFalse(versionNewer(latest: "\(huge).1", current: "\(huge).2"))
     }
 
     func testItunesRowRequiresExactBundleId() {

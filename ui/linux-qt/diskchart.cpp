@@ -214,14 +214,11 @@ void DiskChart::squarify(
             rowArea += areas[j];
             const qreal rowOther = rowArea / shortSide;
             qreal worstNow = 0;
-            qreal acc = 0;
             for (int k = i; k <= j; ++k) {
                 const qreal len = shortSide * (areas[k] / rowArea);
                 const qreal r = qMax(rowOther / len, len / rowOther);
                 worstNow = qMax(worstNow, r);
-                acc += areas[k];
             }
-            Q_UNUSED(acc);
             if (j > i && worstNow > bestWorst) {
                 rowArea -= areas[j];
                 break;
