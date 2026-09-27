@@ -110,7 +110,7 @@ if [ "${1:-}" = "test-core" ]; then
     exit 0
 fi
 
-zig fmt --check "$root/src"
+zig fmt --check "$root/src" "$root/bench"
 
 zig_wasm() {
     zig build-exe \

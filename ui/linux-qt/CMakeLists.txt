@@ -158,10 +158,16 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
             target_compile_options(appattic-qt PRIVATE -mbranch-protection=standard)
         endif()
     endif()
-    set_property(SOURCE "${APPATTIC_ROOT}/core/host/hostexec.c"
-        APPEND PROPERTY COMPILE_OPTIONS
-        -Werror -Wformat=2 -Wformat-security -Wshadow
-        -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference)
+    # Every C source this target compiles gets the strict set core/build.sh
+    # already builds them with, so the two builds cannot disagree.
+    foreach(_src IN ITEMS
+            "${APPATTIC_ROOT}/core/host/hostexec.c"
+            "${APPATTIC_ROOT}/core/host/embed.c")
+        set_property(SOURCE "${_src}"
+            APPEND PROPERTY COMPILE_OPTIONS
+            -Werror -Wformat=2 -Wformat-security -Wshadow
+            -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference)
+    endforeach()
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(appattic-qt-core PRIVATE
@@ -174,10 +180,29 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-D_GLIBCXX_ASSERTIONS>
     )
-    # Source-level so a separate AUTOMOC TU does not inherit -Werror.
-    set_property(SOURCE main.cpp finding.cpp settings.cpp smoke.cpp
-        diskusage.cpp diskchart.cpp diskpage.cpp
-        APPEND PROPERTY COMPILE_OPTIONS -Werror)
+    # Source-level so a separate AUTOMOC TU does not inherit -Werror. The list
+    # is every C++ source in this directory: a file left out of it builds with
+    # warnings nobody fails on.
+    set(_appattic_werror_cxx
+        main.cpp corehost.cpp finding.cpp settings.cpp smoke.cpp
+        diskusage.cpp diskchart.cpp diskpage.cpp)
+    foreach(_src IN LISTS _appattic_werror_cxx)
+        set_property(SOURCE "${_src}" APPEND PROPERTY COMPILE_OPTIONS -Werror)
+    endforeach()
+    file(GLOB _appattic_ui_cxx CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
+    foreach(_path IN LISTS _appattic_ui_cxx)
+        get_filename_component(_name "${_path}" NAME)
+        # tests/helper_tests.cpp carries -Werror on its own target below.
+        if(_name MATCHES "^helper_tests\\.cpp$" OR
+           _name IN_LIST _appattic_werror_cxx)
+            continue()
+        endif()
+        message(FATAL_ERROR
+            "${_name} is a C++ source of this UI but is missing from "
+            "_appattic_werror_cxx, so it would build without -Werror.")
+    endforeach()
 endif()
 if(UNIX AND NOT APPLE)
     get_filename_component(_wasmtime_libdir "${WASMTIME_LIBRARY}" DIRECTORY)
