@@ -52,6 +52,11 @@ jobs:
         # path CONTRIBUTING.md documents and the one the other distro families
         # go through, so the lint job cannot drift from local setup.
         run: sudo bash scripts/linux-deps.sh --install-shellcheck
+      - name: Install desktop-file-utils
+        # scripts/check-packaging.sh runs desktop-file-validate on the desktop
+        # entry and names the skip when the tool is absent. Installing it here
+        # is what keeps that check blocking in CI rather than a note.
+        run: sudo bash scripts/linux-deps.sh --install-desktop-file-utils
       - name: Install yamllint
         # Pinned: an unpinned linter makes a green run mean "whatever
         # yamllint shipped that morning", not "this tree passes". The pin is

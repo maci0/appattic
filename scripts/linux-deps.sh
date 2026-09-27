@@ -42,7 +42,7 @@ fi
 usage() {
     cat <<'EOF'
 Usage: scripts/linux-deps.sh [--install] [--install-swift] [--install-wasmtime] [--install-zig]
-                              [--install-shellcheck]
+                              [--install-shellcheck] [--install-desktop-file-utils]
 
   (no flags)           Print Qt 6, Wasmtime, Swift, and shellcheck notes for this distro.
   --install            Install Qt 6 Widgets headers, cmake, ninja, pkg-config, clang (needs root).
@@ -51,6 +51,8 @@ Usage: scripts/linux-deps.sh [--install] [--install-swift] [--install-wasmtime] 
   --install-wasmtime   Install Wasmtime C API headers/libs (needed to embed appattic_core.wasm).
   --install-zig        Install the .zig-version toolchain only (no Qt, no wasmtime).
   --install-shellcheck  Install shellcheck (scripts/lint.sh needs it).
+  --install-desktop-file-utils  Install desktop-file-validate, which
+                       scripts/check-packaging.sh runs on the desktop entry.
 
 Then run: bash scripts/linux-qt-link.sh
 
@@ -65,6 +67,7 @@ INSTALL_SWIFT=0
 INSTALL_WASMTIME=0
 INSTALL_ZIG=0
 INSTALL_SHELLCHECK=0
+INSTALL_DESKTOP_FILE_UTILS=0
 for arg in "$@"; do
     case "$arg" in
         --install) INSTALL_PKGS=1 ;;
@@ -72,6 +75,7 @@ for arg in "$@"; do
         --install-wasmtime) INSTALL_WASMTIME=1 ;;
         --install-zig) INSTALL_ZIG=1 ;;
         --install-shellcheck) INSTALL_SHELLCHECK=1 ;;
+        --install-desktop-file-utils) INSTALL_DESKTOP_FILE_UTILS=1 ;;
         -h|--help) usage; exit 0 ;;
         *)
             echo "unknown argument: $arg" >&2
@@ -563,4 +567,37 @@ install_shellcheck() {
 if [[ "$INSTALL_SHELLCHECK" -eq 1 ]]; then
     install_shellcheck
     echo "Then: bash scripts/lint.sh"
+fi
+
+# desktop-file-validate validates the desktop entry the Qt install ships.
+# scripts/check-packaging.sh runs it when it is on PATH and names the skip when
+# it is not, so CI installs it rather than letting the gate go unchecked.
+install_desktop_file_utils() {
+    if command -v desktop-file-validate >/dev/null 2>&1; then
+        echo "desktop-file-validate already on PATH: $(command -v desktop-file-validate)"
+        return 0
+    fi
+    case "$family" in
+        arch) run_as_root pacman -S --needed --noconfirm desktop-file-utils ;;
+        fedora) run_as_root dnf install -y desktop-file-utils ;;
+        suse) run_as_root zypper --non-interactive install desktop-file-utils ;;
+        debian)
+            run_as_root apt-get update
+            run_as_root apt-get install -y --no-install-recommends desktop-file-utils
+            ;;
+        *)
+            echo "error: cannot install desktop-file-utils on unrecognized distro" >&2
+            echo "Debian/Ubuntu: apt install desktop-file-utils" >&2
+            echo "Fedora:        dnf install desktop-file-utils" >&2
+            echo "Arch:          pacman -S desktop-file-utils" >&2
+            echo "openSUSE:      zypper install desktop-file-utils" >&2
+            return 1
+            ;;
+    esac
+    echo "desktop-file-validate: $(command -v desktop-file-validate || printf 'not on PATH')"
+}
+
+if [[ "$INSTALL_DESKTOP_FILE_UTILS" -eq 1 ]]; then
+    install_desktop_file_utils
+    echo "Then: bash scripts/check-packaging.sh"
 fi

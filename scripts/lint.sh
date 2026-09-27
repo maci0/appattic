@@ -20,6 +20,7 @@ Usage: bash scripts/lint.sh
   host C under ASan + UBSan,
   hostexec warnings-as-errors, dependency pin consistency,
   the system-name list matches across the Zig core and the Swift library,
+  desktop entry, AppStream metainfo, man page, Flatpak manifest,
   zig fmt --check, no AI tool credit in commit messages
 EOF
         exit 0
@@ -73,6 +74,13 @@ if ! cmp -s "$ROOT/core/src/linux-system-names.txt" \
     exit 1
 fi
 echo "system-name list mirror: ok"
+
+# The desktop entry, the AppStream metainfo, the man page, and the Flatpak
+# manifest have to name the same app, the same binary, and the same icon, and
+# the install has to produce what they name. Nothing builds a Flatpak or an
+# AppImage on every change, so this is where a rename that misses one of those
+# files is caught.
+bash "$ROOT/scripts/check-packaging.sh"
 
 if ! command -v yamllint >/dev/null 2>&1; then
     # The pin lives in deps.sh, which also fails when the workflow and that pin
