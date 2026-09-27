@@ -231,12 +231,11 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 
 | Path | Role |
 |------|------|
-| `Sources/AppAtticScan/` | Discover, usage, brew, leftovers, outdated, packages, recommend, full scan. One file per feature, plus the shared support modules it is built on: `Process` (subprocess, `which`), `Paths` (XDG, identity, redaction), `DiskSize` (`du`, directory walks), `Dates`, `Format`, `Text`, `ShellScript` (quoting for generated `sh`), `FilePermissions`, `Concurrency`, `Platform` (os-release, distro package manager), `Version` (the one version declaration) |
+| `Sources/AppAtticScan/` | Discover, usage, brew, outdated, packages, recommend, full scan. One file per feature, with the leftovers cluster split by concern: `Leftovers` (scan, roots, item model), `Identity` (who owns a name), `LeftoverText` (labels, reasons, blurbs), `LeftoverGroups` (grouping and collapsing), `Overlays` (PATH dirs, broken links, shadows). Plus the shared support modules it is built on: `Process` (subprocess, `which`), `Paths` (XDG, identity, redaction), `DiskSize` (`du`, directory walks), `Dates`, `Format`, `Text`, `ShellScript` (quoting for generated `sh`), `FilePermissions`, `Concurrency`, `Platform` (os-release, distro package manager), `Version` (the one version declaration) |
 | `Sources/AppAtticCLI/` | `appattic` command line |
 | `Sources/AppAttic/` | SwiftCrossUI app (AppKit on macOS) |
 | `ui/linux-qt/` | C++ Qt 6 Widgets shell (Linux). Window, findings, settings, WASM host paths, and smoke are separate files |
 | `tests/AppAtticScanTests/` | XCTest port of the old scanner cases, plus seeded mutation harnesses for the parsers that read foreign text: the CLI argv and `COLORFGBG`, package manager listings, `settings.json`, and ISO timestamps |
-
 | `DESIGN.md` | Native UI visual rules |
 | `docs/superpowers/specs/` | Requirement and architecture records (index: [`docs/superpowers/specs/README.md`](docs/superpowers/specs/README.md)). The Zig WASM core record is accepted and implemented; the Swift scan port record is implemented and superseded, kept in `archive/` |
 | `core/` | Zig `wasm32` scan core (loader + plugins + C Wasmtime embedder). The Linux window runs on it |
