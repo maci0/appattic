@@ -209,6 +209,39 @@ debian_bootstrap_curl() {
     run_as_root apt-get install -y --no-install-recommends ca-certificates curl xz-utils
 }
 
+# Download a pinned release tarball, unpack the single top-level directory it
+# holds, and move that directory to dest. The Zig, Wasmtime and Swift
+# installers differ only in the archive they name, so the pin check, the
+# download and the unpack live here once.
+#   $1 url  $2 archive  $3 top-level dir prefix  $4 tar decompress flag
+#   $5 progress line  $6 label for layout errors  $7 pin hint  $8 dest
+install_release_tarball() {
+    local url="$1" archive="$2" prefix="$3" tarflag="$4"
+    local message="$5" label="$6" hint="$7" dest="$8"
+    local expected
+    expected="$(checksum_for "$archive")" || {
+        echo "error: no pinned SHA-256 for $archive${hint}" >&2
+        exit 1
+    }
+    echo "$message"
+    local tmp
+    tmp="$(mktemp -d)"
+    curl_fetch "$url" "$tmp/$archive"
+    verify_sha256 "$tmp/$archive" "$expected"
+    tar "$tarflag" -C "$tmp" -f "$tmp/$archive"
+    rm -f "$tmp/$archive"
+    local unpacked
+    unpacked="$(printf '%s\n' "$tmp"/"$prefix"* | LC_ALL=C sort | head -n 1)"
+    if [[ ! -d "$unpacked" ]]; then
+        echo "error: ${label} layout unexpected" >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "$dest")"
+    rm -rf "$dest"
+    mv "$unpacked" "$dest"
+    rm -rf "$tmp"
+}
+
 install_family_pkgs() {
     case "$family" in
         arch)
@@ -333,28 +366,13 @@ install_zig_tarball() {
     esac
     local archive="zig-${triple}-linux-${ZIG_VER}.tar.xz"
     local url="https://ziglang.org/download/${ZIG_VER}/${archive}"
-    local expected
-    expected="$(checksum_for "$archive")" || {
-        echo "error: no pinned SHA-256 for $archive (ZIG_VERSION=$ZIG_VER)" >&2
-        exit 1
-    }
-    echo "Downloading Zig ${ZIG_VER} ($triple)…"
-    local tmp
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' RETURN
-    curl_fetch "$url" "$tmp/$archive"
-    verify_sha256 "$tmp/$archive" "$expected"
-    tar -xJ -C "$tmp" -f "$tmp/$archive"
-    rm -f "$tmp/$archive"
-    local unpacked
-    unpacked="$(printf '%s\n' "$tmp"/zig-* | LC_ALL=C sort | head -n 1)"
-    if [[ ! -x "$unpacked/zig" ]]; then
+    install_release_tarball "$url" "$archive" "zig-" -xJ \
+        "Downloading Zig ${ZIG_VER} ($triple)…" "Zig tarball" \
+        " (ZIG_VERSION=$ZIG_VER)" "$dest"
+    if [[ ! -x "$dest/zig" ]]; then
         echo "error: Zig tarball layout unexpected" >&2
         exit 1
     fi
-    mkdir -p "$(dirname "$dest")"
-    rm -rf "$dest"
-    mv "$unpacked" "$dest"
     if [[ "$(id -u)" -eq 0 ]]; then
         ln -sf "$dest/zig" /usr/local/bin/zig
     fi
@@ -463,28 +481,9 @@ install_wasmtime_c_api() {
     esac
     local archive="wasmtime-v${WASMTIME_VER}-${triple}-c-api.tar.xz"
     local url="https://github.com/bytecodealliance/wasmtime/releases/download/v${WASMTIME_VER}/${archive}"
-    local expected
-    expected="$(checksum_for "$archive")" || {
-        echo "error: no pinned SHA-256 for $archive (WASMTIME_C_API_VERSION=$WASMTIME_VER)" >&2
-        exit 1
-    }
-    echo "Downloading Wasmtime C API ${WASMTIME_VER} ($triple)…"
-    local tmp
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' RETURN
-    curl_fetch "$url" "$tmp/$archive"
-    verify_sha256 "$tmp/$archive" "$expected"
-    tar -xJ -C "$tmp" -f "$tmp/$archive"
-    rm -f "$tmp/$archive"
-    local unpacked
-    unpacked="$(printf '%s\n' "$tmp"/wasmtime-* | LC_ALL=C sort | head -n 1)"
-    if [[ ! -d "$unpacked" ]]; then
-        echo "error: Wasmtime tarball layout unexpected" >&2
-        exit 1
-    fi
-    mkdir -p "$(dirname "$dest")"
-    rm -rf "$dest"
-    mv "$unpacked" "$dest"
+    install_release_tarball "$url" "$archive" "wasmtime-" -xJ \
+        "Downloading Wasmtime C API ${WASMTIME_VER} ($triple)…" "Wasmtime tarball" \
+        " (WASMTIME_C_API_VERSION=$WASMTIME_VER)" "$dest"
     if [[ ! -f "$dest/include/wasmtime.h" ]]; then
         echo "error: $dest/include/wasmtime.h missing after unpack" >&2
         exit 1
@@ -539,28 +538,8 @@ install_swift_tarball() {
             exit 1
             ;;
     esac
-    echo "Downloading Swift ${ver} for $arch…"
-    local expected
-    expected="$(checksum_for "$archive")" || {
-        echo "error: no pinned SHA-256 for $archive" >&2
-        exit 1
-    }
-    local tmp
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' RETURN
-    curl_fetch "$url" "$tmp/$archive"
-    verify_sha256 "$tmp/$archive" "$expected"
-    tar -xz -C "$tmp" -f "$tmp/$archive"
-    rm -f "$tmp/$archive"
-    local unpacked
-    unpacked="$(printf '%s\n' "$tmp"/swift-* | LC_ALL=C sort | head -n 1)"
-    if [[ ! -d "$unpacked" ]]; then
-        echo "error: Swift tarball layout unexpected" >&2
-        exit 1
-    fi
-    mkdir -p "$(dirname "$dest")"
-    rm -rf "$dest"
-    mv "$unpacked" "$dest"
+    install_release_tarball "$url" "$archive" "swift-" -xz \
+        "Downloading Swift ${ver} for $arch…" "Swift tarball" "" "$dest"
     echo "Installed Swift ${ver} to $dest/usr/bin"
     echo "export PATH=\"$dest/usr/bin:\$PATH\""
     if ! "$dest/usr/bin/swift" --version >/dev/null 2>&1; then
