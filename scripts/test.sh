@@ -4,7 +4,7 @@
 # Usage: bash scripts/test.sh [<filter>]
 #   (no filter)  AppAtticScanTests
 #   <filter>     one class or one test, e.g. DiskSizeTests
-#                 DiskSizeTests/testDirectorySize
+#                 DiskSizeTests/testParseDuKBRequiresLeadingInteger
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,7 +20,7 @@ Usage: bash scripts/test.sh [<filter>]
 
   (no filter)  every AppAtticScanTests test
   <filter>     one class or one test, e.g. DiskSizeTests
-               DiskSizeTests/testDirectorySize
+               DiskSizeTests/testParseDuKBRequiresLeadingInteger
 
 The CI jobs call this script, so a green run here is the same run there.
 It adds --disable-automatic-resolution, APPATTIC_NO_MAC_UI=1 on macOS, and a

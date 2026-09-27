@@ -144,7 +144,7 @@ bash scripts/verify-reproducible.sh                          # two builds, diffe
 swift build --target AppAtticScan -c debug --disable-automatic-resolution
 bash scripts/test.sh                                           # AppAtticScanTests
 bash scripts/test.sh DiskSizeTests                             # one class
-bash scripts/test.sh DiskSizeTests/testDirectorySize           # one test
+bash scripts/test.sh DiskSizeTests/testParseDuKBRequiresLeadingInteger   # one test
 ./core/build.sh test brew.zig                                  # one Zig plugin
 ./core/build.sh test-core                                      # whole Zig core, no wasmtime/Qt
 bash scripts/lint.sh

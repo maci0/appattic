@@ -157,6 +157,113 @@ final class PackagingTests: XCTestCase {
         return String(text[group])
     }
 
+    /// Group 1 of every `pattern` match in `text`, in order.
+    private func captures(_ pattern: String, in text: String) -> [String] {
+        guard let match = try? NSRegularExpression(pattern: pattern) else {
+            XCTFail("bad pattern: \(pattern)")
+            return []
+        }
+        return match.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            .compactMap { hit in
+                guard let group = Range(hit.range(at: 1), in: text) else { return nil }
+                return String(text[group])
+            }
+    }
+
+    /// Every class and every `test*` method declared under tests/AppAtticScanTests.
+    /// A `class func` or `class var` member is not a class, so the pattern wants
+    /// a capitalised name and a class header after it.
+    private func scanTestDeclarations(root: URL) throws -> (classes: Set<String>, methods: [String: Set<String>]) {
+        let dir = root.appendingPathComponent("tests/AppAtticScanTests")
+        let files = try FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "swift" }
+        var classes = Set<String>()
+        var methods: [String: Set<String>] = [:]
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            let here = Set(captures(#"(?:final\s+)?class\s+([A-Z][A-Za-z0-9_]*)"#, in: text))
+            let tests = Set(captures(#"func\s+(test[A-Za-z0-9_]*)\s*\("#, in: text))
+            guard !tests.isEmpty else { continue }
+            classes.formUnion(here)
+            // Every class in a file owns every test method in it, so a method
+            // added by an extension is attributed to the class that names it.
+            for name in here {
+                methods[name, default: []].formUnion(tests)
+            }
+        }
+        return (classes, methods)
+    }
+
+    /// The contributor docs are the only route to a one-test or one-plugin run,
+    /// and a filter that matches nothing reads as a green run. Each example has
+    /// to name a class, a method and a plugin file that still exist.
+    func testDocumentedSingleTestExamplesStillResolve() throws {
+        let root = repoRoot()
+        let (classes, methods) = try scanTestDeclarations(root: root)
+        XCTAssertFalse(classes.isEmpty, "no test class found under tests/AppAtticScanTests")
+
+        // The no-filter run names the test target, which is a class of no name.
+        let manifest = try String(contentsOf: root.appendingPathComponent("Package.swift"), encoding: .utf8)
+        let target = capture(#"\.testTarget\(\s*name: "([^"]+)""#, in: manifest)
+        XCTAssertFalse(target.isEmpty, "Package.swift declares no testTarget name")
+
+        let docs = [
+            "README.md",
+            "CONTRIBUTING.md",
+            "core/README.md",
+            "build.sh",
+            "scripts/check.sh",
+            "scripts/test.sh",
+        ]
+        var filters: Set<String> = []
+        var plugins: Set<String> = []
+        for doc in docs {
+            let text = try String(contentsOf: root.appendingPathComponent(doc), encoding: .utf8)
+            filters.formUnion(captures(#"scripts/test\.sh[ \t]+([A-Za-z][A-Za-z0-9_]*)"#, in: text))
+            filters.formUnion(
+                captures(#"([A-Z][A-Za-z0-9_]*Tests/[A-Za-z][A-Za-z0-9_]*)"#, in: text)
+            )
+            plugins.formUnion(captures(#"core/build\.sh test ([A-Za-z0-9_]+\.zig)"#, in: text))
+        }
+        XCTAssertTrue(
+            filters.contains("DiskSizeTests"),
+            "the docs must keep one single-class run: \(filters.sorted())"
+        )
+        XCTAssertTrue(
+            plugins.contains("brew.zig"),
+            "the docs must keep one single-plugin run: \(plugins.sorted())"
+        )
+
+        for example in filters.sorted() {
+            let parts = example.split(separator: "/", maxSplits: 1)
+            if parts.count == 2 {
+                let name = String(parts[0])
+                let method = String(parts[1])
+                XCTAssertTrue(
+                    classes.contains(name) || name == target,
+                    "no test class named \(name) for \(example)"
+                )
+                XCTAssertTrue(
+                    methods[name]?.contains(method) ?? false,
+                    "\(name) has no test named \(method), so \(example) runs nothing"
+                )
+            } else {
+                XCTAssertTrue(
+                    classes.contains(example) || example == target,
+                    "no test class named \(example)"
+                )
+            }
+        }
+        for plugin in plugins.sorted() {
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: root.appendingPathComponent("core/src/\(plugin)").path),
+                "no core/src/\(plugin), so `core/build.sh test \(plugin)` cannot run"
+            )
+        }
+    }
+
     func testMacBundleSourcesMatchPlatformFloor() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -444,10 +551,14 @@ final class PackagingTests: XCTestCase {
             "core/build.sh",
             "run.sh",
             "scripts/check.sh",
+            "scripts/check-version.sh",
+            "scripts/deps.sh",
             "scripts/lint.sh",
             "scripts/linux-deps.sh",
             "scripts/linux-qt-link.sh",
+            "scripts/test.sh",
             "scripts/verify-qt-link.sh",
+            "scripts/verify-reproducible.sh",
             "scripts/linux-appimage.sh",
             "scripts/linux-flatpak.sh",
         ]
