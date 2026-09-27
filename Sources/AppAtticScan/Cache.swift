@@ -83,10 +83,9 @@ public func readScanCache(
     // in a string, and a string region that is not valid UTF-8. A string
     // holding either one aborts the process instead of throwing, and the cache
     // is a file anything running as the account can write. The serialization
-    // reports malformed input as an error, and where it does not — a raw
-    // control character in a *value* is one it hands back as it found it — the
-    // scan below does, so the decoder only ever sees a document whose failures
-    // it can throw.
+    // reports malformed input as an error, and the scan below reports the
+    // control character wherever it sits in a string, key or value, so the
+    // decoder only ever sees a document whose failures it can throw.
     do {
         _ = try JSONSerialization.jsonObject(with: raw)
     } catch {

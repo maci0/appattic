@@ -122,8 +122,10 @@ final class CacheTests: XCTestCase {
     /// scanner leaves the unescaped-control-character and invalid-UTF-8 checks
     /// to it. A cache is a file anything running as the account can write, so a
     /// key *or a value* holding either one has to come back as a dropped file
-    /// and not as a dead process — `JSONSerialization` reports the key spellings
-    /// itself and on macOS hands the value spelling straight back.
+    /// and not as a dead process. `JSONSerialization` rejects both key
+    /// spellings here; the value spellings are what the scan in `readScanCache`
+    /// is for, since whether that serialization rejects every one of them is
+    /// not something this suite can measure on Linux.
     func testCacheStringsTheDecoderWouldTrapOnAreDropped() throws {
         let inputs: [(what: String, bytes: Data)] = [
             ("a raw newline in a key", Data("{\"fingerpr\nnt\":1}".utf8)),
