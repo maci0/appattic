@@ -637,7 +637,10 @@ public func cleanupScript(_ result: ScanResult, category: [String] = [], top: In
 public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [], now: Date = Date()) -> ScanResult {
     let result = ScanResult()
     result.scannedAt = parseISODate(data.scanned_at) ?? now
-    result.durationS = data.duration_s
+    // Clamped like the freshly measured value is, so a `duration_s` written by
+    // hand or carried over from another machine cannot make a caller report a
+    // negative or infinite scan. `reportDuration()` guards the encode side.
+    result.durationS = data.duration_s.isFinite && data.duration_s > 0 ? data.duration_s : 0
     result.brewAvailable = data.brew_available
     result.incomplete = data.incomplete == true
     result.appsInstalled = data.totals.apps_installed

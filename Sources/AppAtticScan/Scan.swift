@@ -56,6 +56,21 @@ public final class ScanResult {
         dataItems.filter { $0.isListedLeftover }
     }
 
+    /// Seconds for the report: one decimal, never negative, never non-finite.
+    ///
+    /// `JSON` has no spelling for an infinity or a NaN, and `JSONEncoder`
+    /// throws `EncodingError.invalidValue` rather than writing one, so a
+    /// non-finite duration fails the whole `--json` report instead of printing
+    /// a duration. The freshly measured value is clamped where it is taken
+    /// (`runFullScan`), but `scanResult(from:)` copies `duration_s` back out of
+    /// `last-scan.json` unchecked, and a `1e999` in that file decodes to an
+    /// infinity. A negative one is not an encoder failure but still reaches the
+    /// UI as "-3.5s" for a scan that took no time at all.
+    func reportDuration() -> Double {
+        guard durationS.isFinite, durationS > 0 else { return 0 }
+        return (durationS * 10).rounded() / 10
+    }
+
     public func toScanData() -> ScanData {
         var orphanedCount = 0
         var orphanedBytes = 0
@@ -85,7 +100,7 @@ public final class ScanResult {
         }
         return ScanData(
             scanned_at: isoString(scannedAt) ?? "",
-            duration_s: (durationS * 10).rounded() / 10,
+            duration_s: reportDuration(),
             brew_available: brewAvailable,
             totals: ScanTotals(
                 apps_installed: apps.isEmpty ? appsInstalled : apps.count,

@@ -208,6 +208,16 @@ void DiskChart::squarify(
     qreal h = bounds.height();
     int i = 0;
     while (i < areas.size()) {
+        // A node with no bytes of its own gets no area, and the row it would
+        // open has rowArea 0, so areas[k] / rowArea is 0/0. The rectangle then
+        // comes out NaN, which passes neither the `width() < 2` test in
+        // paintTreemap nor the painter's clip, so the cell is drawn outside the
+        // box instead of being left out. Give it an empty rect and move on.
+        if (areas[i] <= 0) {
+            out->append(QRectF());
+            ++i;
+            continue;
+        }
         const bool vertical = w >= h;
         const qreal shortSide = vertical ? h : w;
         if (shortSide <= 0.5) break;

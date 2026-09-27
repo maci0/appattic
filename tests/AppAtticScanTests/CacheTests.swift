@@ -573,4 +573,40 @@ final class CacheTests: XCTestCase {
         let saved = try XCTUnwrap(loadScanCache(from: url))
         XCTAssertEqual(saved.data.scanned_at, live.scanned_at)
     }
+
+    /// `duration_s` is a `Double`, so a `"duration_s": 1e999` in
+    /// `last-scan.json` decodes to an infinity and a negative one decodes as
+    /// itself. `JSON` spells neither: `JSONEncoder` throws on a non-finite
+    /// value rather than writing it, so one such number failed the whole
+    /// `--json` report, and a negative one showed as a scan that took less
+    /// than no time.
+    func testNonFiniteCachedDurationDoesNotReachTheReport() throws {
+        func snapshot(_ duration: Double) -> ScanData {
+            ScanData(
+                scanned_at: "2026-08-17T12:00:00Z",
+                duration_s: duration,
+                brew_available: false,
+                totals: ScanTotals(
+                    apps_installed: 0,
+                    orphaned_items: 0,
+                    orphaned_bytes: 0,
+                    system_leftover_bytes: 0,
+                    reclaimable_bytes: 0,
+                    stale_apps: 0,
+                    outdated_apps: 0
+                ),
+                leftovers: [],
+                software: []
+            )
+        }
+        for bad in [Double.infinity, -Double.infinity, Double.nan, -3.5] {
+            let result = scanResult(from: snapshot(bad))
+            XCTAssertEqual(result.durationS, 0)
+            XCTAssertEqual(result.toScanData().duration_s, 0)
+            XCTAssertNoThrow(try JSONEncoder().encode(result.toScanData()))
+        }
+        // A real duration still rounds to one decimal rather than being dropped.
+        XCTAssertEqual(scanResult(from: snapshot(1.25)).toScanData().duration_s, 1.3)
+        XCTAssertEqual(scanResult(from: snapshot(0.04)).toScanData().duration_s, 0)
+    }
 }

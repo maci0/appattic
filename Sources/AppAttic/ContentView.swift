@@ -12,8 +12,14 @@ func formatDate(_ iso: String?) -> String {
 }
 
 /// One decimal, with the locale's decimal separator and grouping.
+///
+/// `duration_s` comes back out of `last-scan.json`, where a `1e999` decodes to
+/// an infinity, so a value the formatter would print as "∞" is clamped to the
+/// 0.0 a scan that measured no time reports. The report JSON gets the same
+/// treatment in `ScanResult.reportDuration()`.
 func formatSeconds(_ seconds: Double) -> String {
-    seconds.formatted(.number.precision(.fractionLength(1)))
+    let s = seconds.isFinite && seconds > 0 ? seconds : 0
+    return s.formatted(.number.precision(.fractionLength(1)))
 }
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
