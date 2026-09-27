@@ -137,7 +137,7 @@ private func scalarIsZeroWidth(_ s: Unicode.Scalar) -> Bool {
 /// `displayWidth` counts both scalars as zero columns, so the second line
 /// lands under an unrelated column. An escape sequence is not drawn at all:
 /// the terminal executes it, which repaints the title bar or hides a row the
-/// user is about to tick. `shellComment` already flattens this set of scalars
+/// user is about to tick. `shellComment` already drops this set of scalars
 /// for the generated script; this is the same rule for the rendered table.
 public func sanitizeForTerminal(_ s: String) -> String {
     // Pure-ASCII printables with no ESC are the common case and return as-is.

@@ -642,6 +642,9 @@ final class ScriptPreviewTests: XCTestCase {
         XCTAssertNil(parseGuardedRemove("rm -rf /tmp/x"))
         XCTAssertNil(parseGuardedRemove("if true; then"))
         XCTAssertNil(parseGuardedRemove(""))
+        // The caller judges only the two halves, so a command after the last
+        // `; fi` would escape the check. Such a line is not a guard at all.
+        XCTAssertNil(parseGuardedRemove("if true; then id; fi; reboot"))
     }
 
     /// A PPA sources file is the one leftover under a packaged root that is

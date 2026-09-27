@@ -27,6 +27,9 @@ pub const BrewOutdated = struct {
 
 fn isSafeBrewName(s: []const u8) bool {
     if (s.len == 0 or s.len > jsonbuf.max_pkg_name_len) return false;
+    // A leading `-` is all-safe for `shQuote`, so the name would reach `brew`
+    // as an option: `brew upgrade --greedy` upgrades everything on the machine.
+    if (s[0] == '-') return false;
     var at: usize = 0;
     for (s) |c| {
         const ok = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
@@ -240,6 +243,16 @@ test "parseBrewOutdatedJSON empty junk skips unsafe" {
         \\{"formulae":[{"name":"wget;rm","installed_versions":["1"],"current_version":"2"}],"casks":[]}
     ;
     try std.testing.expectEqual(@as(usize, 0), parseBrewOutdatedJSON(bad, &buf));
+}
+
+test "parseBrewOutdatedJSON drops a name that reads as an option" {
+    var buf: [4]BrewOutdated = undefined;
+    // `--greedy` is all shell-safe, so `shQuote` passes it through and
+    // `brew upgrade --greedy` would upgrade every formula on the machine.
+    const flag =
+        \\{"formulae":[{"name":"--greedy","installed_versions":["1"],"current_version":"2"}],"casks":[]}
+    ;
+    try std.testing.expectEqual(@as(usize, 0), parseBrewOutdatedJSON(flag, &buf));
 }
 
 test "plugin_query present JSON comes from brew outdated fixture" {

@@ -1793,6 +1793,12 @@ final class ClassifyTests: XCTestCase {
         XCTAssertEqual(shellComment("Game\rrm -rf ~"), "Game rm -rf ~")
         XCTAssertEqual(shellComment("A\u{2028}rm -rf ~"), "A rm -rf ~")
         XCTAssertEqual(shellComment("\nrm -rf ~"), "rm -rf ~")
+        // `--dry-run` prints the script, and the terminal executes what it
+        // reads, so an escape sequence in a name retitles the window or
+        // clears the rows being approved.
+        XCTAssertEqual(shellComment("x\u{1B}]0;pwned\u{07}"), "x\u{FFFD}]0;pwned\u{FFFD}")
+        XCTAssertEqual(shellComment("x\u{1B}[2J"), "x\u{FFFD}[2J")
+        XCTAssertEqual(shellComment("x\u{9B}0"), "x\u{FFFD}0")
 
         let steam = uninstallCommand(
             source: "steam",

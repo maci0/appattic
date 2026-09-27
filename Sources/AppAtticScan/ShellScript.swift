@@ -71,6 +71,9 @@ public func parseGuardedRemove(_ cmd: String) -> GuardedRemove? {
           let fi = t.range(of: "; fi", options: .backwards),
           then.upperBound < fi.lowerBound
     else { return nil }
+    // Nothing may follow the guard: the callers judge only these two halves,
+    // so a tail after the last `; fi` would run unjudged.
+    guard t[fi.upperBound...].trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
     let present = String(t[t.index(t.startIndex, offsetBy: 3)..<then.upperBound])
     let action = String(t[then.upperBound..<fi.lowerBound]).trimmingCharacters(in: .whitespaces)
     return GuardedRemove(present: present, action: action)
@@ -88,7 +91,8 @@ public func callsRootHelper(_ cmd: String) -> Bool {
 /// command the script runs, so a folder named `Game\nrm -rf ~` would otherwise
 /// inject a line into the script the UI runs after one preview. `shellQuote`
 /// does not help here: a quoted newline is legal but the value is not quoted
-/// when it lands in a comment.
+/// when it lands in a comment. Control scalars go too, because the script is
+/// printed to a terminal that executes them.
 public func shellComment(_ value: String) -> String {
     let flattened = value
         .replacingOccurrences(of: "\r\n", with: " ")
@@ -96,5 +100,19 @@ public func shellComment(_ value: String) -> String {
         .replacingOccurrences(of: "\r", with: " ")
         .replacingOccurrences(of: "\u{2028}", with: " ")
         .replacingOccurrences(of: "\u{2029}", with: " ")
-    return flattened.trimmingCharacters(in: .whitespaces)
+    // `--dry-run` prints the script, so a control scalar left in a name is
+    // read by the terminal running it: `ESC ] 0 ;` retitles the window and
+    // `ESC [ 2 J` clears the rows the user is about to approve. Newlines are
+    // flattened above, so they stay readable spaces; the rest become U+FFFD,
+    // the same marker `terminalSafe` uses.
+    var scalars = String.UnicodeScalarView()
+    for scalar in flattened.unicodeScalars {
+        let v = scalar.value
+        if v < 0x20 || v == 0x7F || (v >= 0x80 && v <= 0x9F) {
+            scalars.append("\u{FFFD}")
+        } else {
+            scalars.append(scalar)
+        }
+    }
+    return String(scalars).trimmingCharacters(in: .whitespaces)
 }

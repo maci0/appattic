@@ -688,6 +688,11 @@ std::optional<GuardedRemove> parseGuardedRemove(const QString &cmd) {
     const int then = t.indexOf(QLatin1String("; then "));
     const int fi = t.lastIndexOf(QLatin1String("; fi"));
     if (then < 0 || fi <= then + 7) return std::nullopt;
+    // Nothing may follow the guard. `if q; then id; fi; reboot` would parse to
+    // a clean query and action while the tail runs unguarded, and the callers
+    // judge only the two halves, so a line with a tail is not a guard at all
+    // and the whole-line byte rule has to see it.
+    if (!t.mid(fi + 4).trimmed().isEmpty()) return std::nullopt;
     return GuardedRemove{t.mid(3, then - 3), t.mid(then + 7, fi - then - 7).trimmed()};
 }
 

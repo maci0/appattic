@@ -249,6 +249,23 @@ static int verifyHelpers() {
         std::fprintf(stderr, "commandIsShellSafe accepted an injected query in a guard\n");
         return 1;
     }
+    // The action is judged between `; then` and the last `; fi`, so a tail
+    // after that `; fi` is not part of either half and would run unjudged.
+    if (commandIsShellSafe(QStringLiteral(
+            "if test -e /tmp/x >/dev/null 2>&1; then rm -rf /tmp/x; fi; reboot"))) {
+        std::fprintf(stderr, "commandIsShellSafe accepted a command after the guard\n");
+        return 1;
+    }
+    if (parseGuardedRemove(
+            QStringLiteral("if test -e /tmp/x >/dev/null 2>&1; then rm -rf /tmp/x; fi; reboot"))) {
+        std::fprintf(stderr, "parseGuardedRemove took a line with a tail for a guard\n");
+        return 1;
+    }
+    if (!parseGuardedRemove(QStringLiteral(
+            "if test -e /tmp/x >/dev/null 2>&1; then rm -rf /tmp/x; fi"))) {
+        std::fprintf(stderr, "parseGuardedRemove rejected a plain guard\n");
+        return 1;
+    }
     // The row guard filters a listing inside the guard, so npm, pnpm, bun,
     // pipx and uv removals reach the script in this shape.
     if (!commandIsShellSafe(QStringLiteral(
