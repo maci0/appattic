@@ -10,6 +10,12 @@ cd "$ROOT"
 export LC_ALL=C
 export LANG=C
 export TZ=UTC
+# ostree and the SBOM both stamp times; the AppImage script derives the same
+# epoch from the commit, so two builds of one tree match.
+if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+    SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct 2>/dev/null || printf '0')"
+    export SOURCE_DATE_EPOCH
+fi
 
 for arg in "$@"; do
     case "$arg" in

@@ -78,7 +78,9 @@ jobs:
           mkdir -p dist
           cp .build/release/AppAtticUI dist/
           bash scripts/deps.sh sbom dist/AppAttic-macos-arm64.sbom.json
-          (cd dist && TZ=UTC zip -X -r AppAttic-macos-arm64.zip AppAtticUI)
+          epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --pretty=%ct 2>/dev/null || printf 0)}"
+          find dist -name AppAtticUI -exec touch -h -d "@${epoch}" {} +
+          (cd dist && find AppAtticUI -type f | LC_ALL=C sort | TZ=UTC zip -X -q AppAttic-macos-arm64.zip -@)
       - name: Publish macOS zip
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2

@@ -79,7 +79,7 @@ jobs:
             .swiftpm
             .zig-cache
             .zig-cache-local
-          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('Package.resolved', 'Package.swift', 'core/src/**/*.zig') }}
+          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('Package.resolved', 'Package.swift', 'Sources/**/*.swift', 'tests/**/*.swift', 'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
           restore-keys: |
             ${{ runner.os }}-${{ github.job }}-
       - name: Install Qt 6
@@ -142,7 +142,7 @@ jobs:
             .swiftpm
             .zig-cache
             .zig-cache-local
-          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('Package.resolved', 'Package.swift', 'core/src/**/*.zig') }}
+          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('Package.resolved', 'Package.swift', 'Sources/**/*.swift', 'tests/**/*.swift', 'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
           restore-keys: |
             ${{ runner.os }}-${{ github.job }}-
       - name: Install Qt 6

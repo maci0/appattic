@@ -20,10 +20,9 @@ Swift 5.10.1 is `.swift-version`. Zig 0.16.0 is `.zig-version`. `./build.sh` fai
 
 ## Releasing
 
-The version is declared in three files, and `bash scripts/check-version.sh` fails when they disagree. It runs in `scripts/lint.sh`, so CI catches a partial bump. Bump all three in one commit:
+The version is declared in two files, and `bash scripts/check-version.sh` fails when they disagree. It runs in `scripts/lint.sh`, so CI catches a partial bump. Bump both in one commit:
 
-- `Sources/AppAtticScan/Util.swift`, `appAtticVersion` (what `appattic --version` prints)
-- `ui/linux-qt/CMakeLists.txt`, `APPATTIC_VERSION`
+- `Sources/AppAtticScan/Util.swift`, `appAtticVersion` (what `appattic --version` prints, and what `ui/linux-qt/CMakeLists.txt` reads at configure time for `APPATTIC_VERSION`)
 - `packaging/org.appattic.AppAttic.metainfo.xml`, a new `<release>` with its date and a consumer-facing `<description>`
 
 The AppStream `<description>` is the only release note shipped to users, so a release without one is a silent release. The `v*` tag is the release trigger; the workflow refuses to build a tag that does not match the declared version. Minor bumps carry new features, patch bumps carry fixes, and a breaking change to the CLI, JSON output, or cache format goes out as a major.
