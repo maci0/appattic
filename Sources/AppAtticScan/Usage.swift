@@ -578,15 +578,25 @@ func parseFishHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Se
                bytes[p + 3] == 0x6E, bytes[p + 4] == 0x3A {
                 var q = p + 5
                 while q < stop, hxSpace(bytes[q]) { q += 1 }
+                // The whitespace behind the colon is what `fishWhenRE` requires,
+                // so a line without it is not a `when:` line in either scanner
+                // and the entry stays pending for the line that follows.
                 if q > p + 5 {
                     var d = q
                     while d < stop, hxDigit(bytes[d]) { d += 1 }
-                    if d > q, d - q >= hxMinEpochDigits, d <= q + hxMaxEpochDigits, d == stop {
-                        let ts = hxDigitsValue(bytes, q, d).map(dateFromUnixEpoch)
-                        noteHistoryTime(ts, index: &index)
-                        hxRecordCommand(bytes, ps, pe, ts: ts, index: &index, keep: keep)
-                        pending = nil
-                    }
+                    // A `when:` line whose value is not a whole timestamp still
+                    // ends the entry, the way `parseFishHistoryRegex` reads it:
+                    // fish wrote the command down, so it is usage evidence
+                    // without a date, and a corrupt value must not drop it. A
+                    // value wider than the epoch range, or with anything behind
+                    // it, is not a timestamp; `hxDigitsValue` refuses the
+                    // overflow.
+                    let ts = (d > q && d - q >= hxMinEpochDigits && d <= q + hxMaxEpochDigits && d == stop)
+                        ? hxDigitsValue(bytes, q, d).map(dateFromUnixEpoch)
+                        : nil
+                    noteHistoryTime(ts, index: &index)
+                    hxRecordCommand(bytes, ps, pe, ts: ts, index: &index, keep: keep)
+                    pending = nil
                 }
             }
         }
@@ -652,19 +662,49 @@ func parseFishHistoryRegex(_ text: String, index: inout HistoryIndex, keep: Set<
             continue
         }
         if let m = fishWhenRE.firstMatch(in: line, range: range), m.numberOfRanges >= 2,
-           let r = Range(m.range(at: 1), in: line), let pendingCmd = pending {
-            let ts = TimeInterval(line[r]).map(dateFromUnixEpoch)
-            noteHistoryTime(ts, index: &index)
-            if let first = firstCommandToken(pendingCmd), fullMatch(cmdTokenRE, first), retainHistoryToken(first, keep: keep) {
-                let token = posixLowercased(first)
-                index.everUsed.insert(token)
-                if let ts, index.lastSeen[token].map({ ts > $0 }) ?? true {
-                    index.lastSeen[token] = ts
-                }
+           let r = Range(m.range(at: 1), in: line) {
+            if let pendingCmd = pending {
+                let ts = TimeInterval(line[r]).map(dateFromUnixEpoch)
+                noteHistoryTime(ts, index: &index)
+                recordFishCommand(pendingCmd, ts: ts, index: &index, keep: keep)
             }
+            pending = nil
+            continue
+        }
+        // A `when:` line whose value is not a whole timestamp still ends the
+        // entry, exactly as the byte scanner reads it: fish wrote the command
+        // down, so it is usage evidence without a date. An entry with no
+        // `when:` line at all is a truncated write and stays dropped.
+        if let pendingCmd = pending, fishWhenLine(line) {
+            recordFishCommand(pendingCmd, ts: nil, index: &index, keep: keep)
             pending = nil
         }
     }
+}
+
+/// The first command token of a `- cmd:` value, indexed with the entry's
+/// timestamp when it had a parseable one.
+private func recordFishCommand(_ cmd: String, ts: Date?, index: inout HistoryIndex, keep: Set<String>?) {
+    guard let first = firstCommandToken(cmd), fullMatch(cmdTokenRE, first),
+          retainHistoryToken(first, keep: keep) else { return }
+    let token = posixLowercased(first)
+    index.everUsed.insert(token)
+    if let ts, index.lastSeen[token].map({ ts > $0 }) ?? true {
+        index.lastSeen[token] = ts
+    }
+}
+
+/// Whether a line is a `when:` line, with the same shape the byte scanner
+/// matches: leading whitespace (`hxSpace`: space, tab, or one of the breaks it
+/// treats as space), then `when:`, then the whitespace `fishWhenRE` makes
+/// mandatory behind the colon. A line without that whitespace is not a
+/// `when:` line to either scanner.
+private func fishWhenLine(_ line: String) -> Bool {
+    func isSpace(_ c: Character) -> Bool { c == " " || (c >= "\u{09}" && c <= "\u{0D}") }
+    let rest = line.drop(while: isSpace)
+    guard rest.hasPrefix("when:") else { return false }
+    guard let next = rest.dropFirst(5).first else { return false }
+    return isSpace(next)
 }
 
 public func loadHistory(
