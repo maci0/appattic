@@ -250,7 +250,7 @@ public func leftoverSummary(
         what = summaryKind[kind] ?? summaryRoot[rootLabel] ?? "\(rootLabel) data"
     }
     let label = leftoverDisplayName(name: name, extraPaths: extraPaths)
-    let extra = extraPaths.isEmpty ? "" : " and \(extraPaths.count) more"
+    let extra = extraPaths.isEmpty ? "" : " and \(localeCount(extraPaths.count)) more"
     if let blurb = shortDesc(appBlurb ?? leftoverAppBlurb(name: name, extraPaths: extraPaths)), !blurb.isEmpty {
         let who = label.isEmpty ? "" : "\(label): "
         return "\(who)\(blurb). Leftover \(what)\(extra)."
@@ -323,7 +323,7 @@ public func leftoverWhyText(
             return orphanReason(rootLabel: rootLabel, kind: kind)
         }
         let n = 1 + extraPaths.count
-        return "Broken PATH command. \(n) leftover names. The tool is gone."
+        return "Broken PATH command. \(localeCount(n)) leftover names. The tool is gone."
     }
     var reason = orphanReason(rootLabel: rootLabel, kind: kind)
     if extraPaths.isEmpty { return reason }

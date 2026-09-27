@@ -1299,7 +1299,7 @@ final class ClassifyTests: XCTestCase {
             ]
         )
         applyOrphanReasons([item])
-        XCTAssertEqual(item.reason, "Broken PATH command. 3 leftover names. The tool is gone.")
+        XCTAssertEqual(item.reason, "Broken PATH command. \(localeCount(3)) leftover names. The tool is gone.")
         XCTAssertTrue(item.summary?.contains("2 more") == true, item.summary ?? "")
     }
 

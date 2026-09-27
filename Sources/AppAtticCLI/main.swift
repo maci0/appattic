@@ -112,7 +112,7 @@ enum AppAtticCLI {
                 fputs("Update cancelled.\n", stderr)
                 Foundation.exit(1)
             }
-            fputs("Updating \(n) package(s)…\n", stderr)
+            fputs("Updating \(localeCount(n)) package(s)…\n", stderr)
             let run = runShellScript(script)
             if run.status != 0 {
                 fputs("error: \(terminalSafe(commandFailureMessage(status: run.status, stderr: run.stderr)))\n", stderr)
@@ -319,7 +319,7 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
     let system = result.dataItems.filter { $0.leftoverStatus == .system }
     let bytes = orphans.reduce(0) { addBytes($0, $1.sizeBytes) }
     print()
-    print(C.bold("LEFTOVERS: leftover data and PATH overlays (\(orphans.count) items, \(humanSize(bytes)))"))
+    print(C.bold("LEFTOVERS: leftover data and PATH overlays (\(localeCount(orphans.count)) items, \(humanSize(bytes)))"))
     if orphans.isEmpty {
         print(C.green("  Nothing found: no leftover data or overlays."))
     }
@@ -366,7 +366,7 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
     }
     if !system.isEmpty {
         print()
-        print(C.dim("System-owned data (not counted as reclaimable): \(system.count) items"))
+        print(C.dim("System-owned data (not counted as reclaimable): \(localeCount(system.count)) items"))
     }
     // The total is a sum over the rows that carry a byte count. A row whose
     // size query failed is in the item count and not in the bytes, so the
@@ -376,7 +376,7 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
     }
     if !unmeasured.isEmpty {
         print()
-        print(C.dim("\(unmeasured.count) item(s) could not be sized and are missing from the total below"))
+        print(C.dim("\(localeCount(unmeasured.count)) item(s) could not be sized and are missing from the total below"))
     }
     if !orphans.isEmpty {
         print()
@@ -397,14 +397,14 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
     let nRemove = verdicts.filter { $0.tierKind == .remove }.count
     let nReview = verdicts.filter { $0.tierKind == .review }.count
     print()
-    print(C.bold("STALE: unused installed software (\(verdicts.count) items)"))
+    print(C.bold("STALE: unused installed software (\(localeCount(verdicts.count)) items)"))
     if verdicts.isEmpty {
         // The other three sections say so instead of printing a table with no
         // rows: a header and a rule read as a report about nothing.
         print(C.green("  Nothing found: no unused installed software.")
             + (includeSystem ? "" : C.dim(" System apps are hidden; --include-system shows them.")))
         if !result.outdated.isEmpty {
-            print(C.dim("  \(result.outdated.count) package(s) have a newer version. See: appattic outdated"))
+            print(C.dim("  \(localeCount(result.outdated.count)) package(s) have a newer version. See: appattic outdated"))
         }
         return
     }
@@ -444,14 +444,14 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
     print()
     print(C.dim("  Tiers: KEEP = in use · REVIEW = idle, check before deleting · REMOVE = stale & easy to reinstall"))
     if !result.outdated.isEmpty {
-        print(C.dim("  \(result.outdated.count) package(s) have a newer version. See: appattic outdated"))
+        print(C.dim("  \(localeCount(result.outdated.count)) package(s) have a newer version. See: appattic outdated"))
     }
 }
 
 func printOutdated(_ result: ScanResult) {
     let pkgs = result.outdated
     print()
-    print(C.bold("OUTDATED: newer version available (\(pkgs.count) packages)"))
+    print(C.bold("OUTDATED: newer version available (\(localeCount(pkgs.count)) packages)"))
     if pkgs.isEmpty {
         print(C.green("  Nothing found. Installed packages look up to date, or no package manager responded."))
         return
@@ -482,7 +482,7 @@ func printOutdated(_ result: ScanResult) {
 func printPackages(_ result: ScanResult) {
     let pkgs = filterPackages(result.packages, filter: .all)
     print()
-    print(C.bold("PACKAGES: distro orphans and language globals (\(pkgs.count))"))
+    print(C.bold("PACKAGES: distro orphans and language globals (\(localeCount(pkgs.count)))"))
     if pkgs.isEmpty {
         if result.incomplete {
             print(C.yellow("  Nothing found, but a package check failed: this list is incomplete."))
@@ -516,7 +516,7 @@ func confirmUpdate(count: Int, assumeYes: Bool) -> Bool {
         fputs("       pass --yes to run it unattended, or --dry-run to print the script\n", stderr)
         Foundation.exit(2)
     }
-    fputs("Update \(count) package(s)? [y/N] ", stderr)
+    fputs("Update \(localeCount(count)) package(s)? [y/N] ", stderr)
     fflush(stderr)
     guard let line = readLine() else { return false }
     let answer = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

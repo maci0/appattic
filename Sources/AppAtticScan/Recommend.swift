@@ -182,9 +182,9 @@ public func staleReclaimableBytes(_ items: [SoftwareItem]) -> Int {
 /// rows only, so the number matches what cleanup can actually reclaim.
 public func overviewStaleTotalLabel(count: Int, bytes: Int) -> String {
     if bytes > 0 {
-        return "\(count) · \(humanSize(bytes))"
+        return "\(localeCount(count)) · \(humanSize(bytes))"
     }
-    return "\(count)"
+    return localeCount(count)
 }
 
 func newestActivity(_ items: [DataItem]) -> Date? {

@@ -233,10 +233,10 @@ static QString outdatedVersionLabel(const Finding &f) {
 static QString scanSummaryMessage(int leftovers, int stale, int outdated, int packages, const QString &when) {
     return QStringLiteral("Scanned %1 · %2 leftovers, %3 stale, %4 outdated, %5 packages")
         .arg(when.isEmpty() ? QStringLiteral("now") : when)
-        .arg(leftovers)
-        .arg(stale)
-        .arg(outdated)
-        .arg(packages);
+        .arg(localeCount(leftovers))
+        .arg(localeCount(stale))
+        .arg(localeCount(outdated))
+        .arg(localeCount(packages));
 }
 
 /* The settings path is under the account home, so the account name is in it.
@@ -969,7 +969,7 @@ private slots:
             );
         } else {
             statusBar()->showMessage(
-                QStringLiteral("%1 plugin findings").arg(m_findings.size())
+                QStringLiteral("%1 plugin findings").arg(localeCount(m_findings.size()))
             );
         }
         fillCurrent();
@@ -1017,7 +1017,7 @@ private slots:
                 ScriptKind::Delete,
                 script,
                 QStringLiteral("Delete %1 selected items? This runs the uninstall script now.")
-                    .arg(cleanupMarkCount()),
+                    .arg(localeCount(cleanupMarkCount())),
                 QStringLiteral("Delete")
             );
             return;
@@ -1037,7 +1037,7 @@ private slots:
             showScriptSheet(
                 ScriptKind::Update,
                 script,
-                QStringLiteral("Update %1 selected packages?").arg(updateMarkCount()),
+                QStringLiteral("Update %1 selected packages?").arg(localeCount(updateMarkCount())),
                 QStringLiteral("Update")
             );
             return;
@@ -1057,7 +1057,8 @@ private slots:
             showScriptSheet(
                 ScriptKind::MarkManual,
                 script,
-                QStringLiteral("Mark %1 packages as manually installed?").arg(m_markedManual.size()),
+                QStringLiteral("Mark %1 packages as manually installed?")
+                    .arg(localeCount(m_markedManual.size())),
                 QStringLiteral("Mark Manual")
             );
             return;
@@ -2761,7 +2762,7 @@ private:
         m_actionBar->setVisible(
             n > 0 && page != Page::Overview && page != Page::Settings && page != Page::DiskUsage
         );
-        m_actionCount->setText(QStringLiteral("%1 selected").arg(n));
+        m_actionCount->setText(QStringLiteral("%1 selected").arg(localeCount(n)));
         // A marked row with no measurement (`bytes < 0`) makes the total a
         // partial sum. Say so instead of printing the part that did measure as
         // the whole selection.
@@ -3026,16 +3027,16 @@ private:
                     const QString head = QStringLiteral(
                         "The script was stopped after %1 minutes without finishing. "
                         "Commands before the stop may have already run."
-                    ).arg(kScriptTimeoutMinutes);
+                    ).arg(localeCount(kScriptTimeoutMinutes));
                     err = err.isEmpty() ? head : head + QStringLiteral("\n") + err;
                 } else if (err.isEmpty()) {
                     err = QStringLiteral(
                         "The script failed (exit %1). Commands before the failure may have already run."
-                    ).arg(code);
+                    ).arg(localeCount(code));
                 } else {
                     err = QStringLiteral(
                         "The script failed (exit %1). Commands before the failure may have already run.\n%2"
-                    ).arg(code).arg(err);
+                    ).arg(localeCount(code)).arg(err);
                 }
                 showError(err);
                 if (stopped) statusBar()->showMessage(QStringLiteral("Script stopped."));

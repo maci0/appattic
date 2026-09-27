@@ -140,7 +140,7 @@ final class ShadowTests: XCTestCase {
         // Stored text that a rebuild would word differently, so equality can
         // only come from the reuse branch.
         let storedWhat = "Leftover cache written by an older scan."
-        let storedWhy = "Broken PATH command. 2 leftover names. The tool is gone."
+        let storedWhy = "Broken PATH command. \(localeCount(2)) leftover names. The tool is gone."
         XCTAssertNotEqual(storedWhat, freshWhat)
         XCTAssertNotEqual(storedWhy, freshWhy)
         XCTAssertTrue(leftoverWhatLooksCurrent(storedWhat), storedWhat)

@@ -1195,6 +1195,36 @@ static int checkDiskTreeCollation() {
     return 0;
 }
 
+static int checkLocaleGrouping() {
+    // A count inside a sentence carries the locale's own grouping, so 1234567
+    // reads "1.234.567" in German instead of a bare "1234567" inside a German
+    // message. The expectation is read back from the locale rather than
+    // hardcoded, so the check still holds on a build whose CLDR data has no
+    // German rules and falls back to the C locale's digits.
+    const QLocale german(QLocale::German, QLocale::Germany);
+    const QLocale saved = QLocale();
+    QLocale::setDefault(german);
+    const QString grouped = localeCount(1234567);
+    const QString negative = localeCount(-1234);
+    QLocale::setDefault(QLocale::C);
+    const QString plain = localeCount(1234567);
+    QLocale::setDefault(saved);
+    if (grouped != german.toString(Q_INT64_C(1234567))) {
+        std::fprintf(stderr, "count: German grouping is %s, want %s\n",
+            qPrintable(grouped), qPrintable(german.toString(Q_INT64_C(1234567))));
+        return 1;
+    }
+    if (negative != german.toString(Q_INT64_C(-1234))) {
+        std::fprintf(stderr, "count: German negative count is %s\n", qPrintable(negative));
+        return 1;
+    }
+    if (plain != QStringLiteral("1234567")) {
+        std::fprintf(stderr, "count: the C locale must not group (%s)\n", qPrintable(plain));
+        return 1;
+    }
+    return 0;
+}
+
 static int checkDiskUsage() {
     QTemporaryDir tmp;
     if (!tmp.isValid()) {
@@ -1467,6 +1497,7 @@ int main() {
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
         checkDiskUsage(), checkScanCache(), checkSettings(),
+        checkLocaleGrouping(),
         checkLegacySettingsMigration(),
     };
     for (const int rc : checks) {

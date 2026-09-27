@@ -64,7 +64,7 @@ final class ConfigTests: XCTestCase {
             ["  /tmp/Whisky", "  /tmp/Caches/Steam"]
         )
         let count = try XCTUnwrap(config.lines.first { $0.hasPrefix("ignoredLeftoverPaths:") })
-        XCTAssertEqual(count, "ignoredLeftoverPaths: 2")
+        XCTAssertEqual(count, "ignoredLeftoverPaths: \(localeCount(2))")
         // Each entry follows the count it belongs to, so the list cannot be read
         // as a continuation of the line above it.
         let countIndex = try XCTUnwrap(config.lines.firstIndex(of: count))

@@ -936,7 +936,7 @@ void DiskPage::updateChrome() {
                 d->filterMatches == 0
                     ? QStringLiteral("No folders match “%1”.").arg(d->filter.trimmed())
                     : QStringLiteral("%1 folders match “%2”.")
-                          .arg(d->filterMatches)
+                          .arg(localeCount(d->filterMatches))
                           .arg(d->filter.trimmed())
             );
         } else {

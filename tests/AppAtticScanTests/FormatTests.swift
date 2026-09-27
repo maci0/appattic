@@ -16,6 +16,24 @@ final class FormatTests: XCTestCase {
     }
 
 
+    func testLocaleCount() {
+        // A count carries the locale's grouping, so 1234567 reads "1.234.567"
+        // in German and "1,234,567" in English. The expectation comes from a
+        // formatter built for the same locale rather than from a literal, so
+        // the check holds on a machine whose locale is neither of those.
+        let f = NumberFormatter()
+        f.locale = .current
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        XCTAssertEqual(localeCount(1234567), f.string(from: NSNumber(value: 1234567)))
+        XCTAssertEqual(localeCount(-1234), f.string(from: NSNumber(value: -1234)))
+        XCTAssertEqual(localeCount(0), f.string(from: NSNumber(value: 0)))
+        // Below the grouping threshold the value is its own digits, which is
+        // what every count in a small report prints.
+        XCTAssertEqual(localeCount(2), "2")
+    }
+
+
     func testAddBytesSaturates() {
         XCTAssertEqual(addBytes(10, 20), 30)
         XCTAssertEqual(addBytes(Int.max, 1), Int.max)

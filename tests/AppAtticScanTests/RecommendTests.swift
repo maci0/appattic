@@ -622,8 +622,8 @@ final class RecommendTests: XCTestCase {
             SoftwareItem(name: "D", kind: "app", path: "/D.app", source: "system", size_bytes: 80, data_bytes: 10, tier: "system"),
         ]
         XCTAssertEqual(staleReclaimableBytes(items), 175)
-        XCTAssertEqual(overviewStaleTotalLabel(count: 2, bytes: 175), "2 · \(humanSize(175))")
-        XCTAssertEqual(overviewStaleTotalLabel(count: 2, bytes: 0), "2")
+        XCTAssertEqual(overviewStaleTotalLabel(count: 2, bytes: 175), "\(localeCount(2)) · \(humanSize(175))")
+        XCTAssertEqual(overviewStaleTotalLabel(count: 2, bytes: 0), localeCount(2))
     }
 
     func testScanJSONKeepsSoftwareDataPaths() {

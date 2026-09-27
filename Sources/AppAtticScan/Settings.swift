@@ -167,7 +167,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
             "settings file: \(settingsPath)\(settingsFileExists ? "" : " (missing, using defaults)")",
             "includeSystem: \(includeSystem) [\(source)]",
             "confirmDelete: \(confirmDelete)",
-            "ignoredLeftoverPaths: \(ignoredLeftoverPaths.count)",
+            "ignoredLeftoverPaths: \(localeCount(ignoredLeftoverPaths.count))",
         ]
         // The count cannot be wrong in a way a reader can see. The entries are
         // what a user compares against the paths a report prints, so they are

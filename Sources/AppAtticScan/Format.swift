@@ -33,6 +33,35 @@ var localeDecimalSeparator: String {
     return separator
 }
 
+/// Cached against the locale it was built from, for the reason
+/// `localeDecimalSeparator` above gives, and used under the same lock since a
+/// `NumberFormatter` is not safe to drive from two threads at once.
+private let countFormatterLock = NSLock()
+private var cachedCountFormatter: (locale: String, formatter: NumberFormatter)?
+
+/// A whole count in `Locale.current`'s own grouping. `"\(n)"` interpolates
+/// without reading the locale, so a German report prints "1234 items" where
+/// "1.234 Elemente" belongs, and every locale gets ASCII digits regardless of
+/// what its own number formatting uses. The Qt shell has the same helper
+/// under the same name, so both windows label one scan the same way.
+public func localeCount(_ n: Int) -> String {
+    countFormatterLock.lock()
+    defer { countFormatterLock.unlock() }
+    let id = Locale.current.identifier
+    let formatter: NumberFormatter
+    if let cached = cachedCountFormatter, cached.locale == id {
+        formatter = cached.formatter
+    } else {
+        let f = NumberFormatter()
+        f.locale = .current
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        cachedCountFormatter = (id, f)
+        formatter = f
+    }
+    return formatter.string(from: NSNumber(value: n)) ?? "\(n)"
+}
+
 /// One decimal place without `String(format:)` (~1.2 µs/call from locale +
 /// varargs overhead). Rounds half away from zero the way `%.1f` prints.
 func oneDecimal(_ n: Double) -> String {
