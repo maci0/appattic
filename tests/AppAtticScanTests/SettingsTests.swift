@@ -185,6 +185,21 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(try loadSettings(from: url).ignoredLeftoverPaths, ["/tmp/A", "/tmp/Whisky"])
     }
 
+    func testIgnoredPathWithTrailingSlashThrows() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-slash-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        // Matching is exact, so a trailing slash never matches the path a
+        // report prints and the leftover it names stays in every report.
+        try Data(#"{"ignoredLeftoverPaths":["/tmp/Foo/"]}"#.utf8).write(to: url)
+        XCTAssertThrowsError(try loadSettings(from: url)) { error in
+            guard case SettingsError.invalid(_, let reason) = error else {
+                return XCTFail("expected invalid, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("trailing slash"), reason)
+            XCTAssertTrue(reason.contains("/tmp/Foo/"), reason)
+        }
+    }
+
     func testEffectiveIncludeSystemPrefersCLIFlag() {
         XCTAssertFalse(effectiveIncludeSystem(cliFlag: false, settings: .default))
         XCTAssertTrue(effectiveIncludeSystem(cliFlag: true, settings: .default))

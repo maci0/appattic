@@ -496,6 +496,23 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
             if span < Double(staleDays) {
                 return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "\(spanNote(sw)): not enough history to judge usage")
             }
+            // The same two guards the last-used path applies: a span of
+            // history is only a weak usage signal, so a formula holding large
+            // or unmeasured user data is REVIEW, exactly as an app would be.
+            if !sw.dataMeasured {
+                return Verdict(
+                    software: sw,
+                    tier: StaleTier.review.rawValue,
+                    reason: "\(spanNote(sw)) but holds data that could not be measured: review before removing"
+                )
+            }
+            if sw.dataBytes >= dataKeepThreshold {
+                return Verdict(
+                    software: sw,
+                    tier: StaleTier.review.rawValue,
+                    reason: "\(spanNote(sw)) but holds significant data: review before removing"
+                )
+            }
             return Verdict(
                 software: sw,
                 tier: StaleTier.remove.rawValue,

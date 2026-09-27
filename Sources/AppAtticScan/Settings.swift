@@ -329,6 +329,13 @@ public func loadSettings(from url: URL = defaultSettingsURL()) throws -> AppAtti
                 + "use the full path, the one the report prints"
         )
     }
+    if let bad = settings.ignoredLeftoverPaths.first(where: { $0.hasSuffix("/") }) {
+        throw SettingsError.invalid(
+            path: path,
+            reason: "ignoredLeftoverPaths entry \"\(bad)\" has a trailing slash; "
+                + "use the full path, the one the report prints"
+        )
+    }
     return settings
 }
 

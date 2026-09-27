@@ -103,6 +103,39 @@ final class RecommendTests: XCTestCase {
         XCTAssertLessThan(90, staleDays)
     }
 
+    func testLongHistoryFormulaWithSignificantDataIsReview() {
+        let sw = Software(
+            name: "jq",
+            kind: "formula",
+            path: "/opt/homebrew/bin/jq",
+            source: "brew-formula",
+            dataBytes: dataKeepThreshold,
+            isLeaf: true,
+            bins: ["jq"],
+            historySpanDays: 400
+        )
+        let v = evaluate(sw)
+        XCTAssertEqual(v.tier, "review")
+        XCTAssertTrue(v.reason.contains("significant data"), v.reason)
+    }
+
+    func testLongHistoryFormulaWithUnmeasuredDataIsReview() {
+        let sw = Software(
+            name: "jq",
+            kind: "formula",
+            path: "/opt/homebrew/bin/jq",
+            source: "brew-formula",
+            dataBytes: 0,
+            dataMeasured: false,
+            isLeaf: true,
+            bins: ["jq"],
+            historySpanDays: 400
+        )
+        let v = evaluate(sw)
+        XCTAssertEqual(v.tier, "review")
+        XCTAssertTrue(v.reason.contains("could not be measured"), v.reason)
+    }
+
     func testBrewCaskUnknownUsageIsReviewNotRemove() {
         let sw = Software(name: "Sketch", kind: "app", path: "/Applications/Sketch.app", source: "brew-cask", caskName: "sketch", historySpanDays: 400)
         XCTAssertEqual(evaluate(sw).tier, "review")

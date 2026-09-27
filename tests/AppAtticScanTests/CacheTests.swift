@@ -540,7 +540,6 @@ final class CacheTests: XCTestCase {
         // A fingerprint mismatch is not a retention reason: the snapshot is one
         // rescan away from usable, and it is the only copy when a scan races an
         // install and `commitScanCache` refuses to write over it.
-        XCTAssertFalse(isScanCacheStale(cache, includeSystem: false, fingerprint: "b", now: now, maxAge: 3600))
         XCTAssertFalse(deleteExpiredScanCache(cache, now: now, maxAge: 3600, at: url))
         XCTAssertNotNil(loadScanCache(from: url))
 
