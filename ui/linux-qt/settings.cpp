@@ -88,14 +88,18 @@ AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable, QSt
     }
     // The legacy file holds the ignore list: absolute paths under the
     // account's own home directory. QSettings wrote it at the umask default
-    // (`0644`), so every local account on the machine could read them, and
-    // nothing reads the file once settings.json exists, so the paths stay
-    // there after the migration for as long as the file is left alone.
-    // Narrowing the mode is the same move persistSettings makes on the file it
-    // writes, and it takes nothing away from the owner, who is the one the
-    // migration-error message tells to edit this file.
+    // (`0644`), so every local account on the machine could read them. Once the
+    // migration lands in settings.json the caller deletes the file outright
+    // (removeLegacySettingsFile), so the mode here covers the window between
+    // the read and that delete, and the case where the migration is blocked
+    // and the file stays as the one the error message tells the user to edit.
     restrictOwnerOnlyFile(qs.fileName());
     return s;
+}
+
+bool removeLegacySettingsFile(const QString &path) {
+    if (path.isEmpty() || !QFile::exists(path)) return true;
+    return QFile::remove(path);
 }
 
 bool parseSettingsJson(const QByteArray &raw, AppSettings *out, QString *err) {

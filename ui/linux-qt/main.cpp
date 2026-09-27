@@ -3192,7 +3192,14 @@ private:
                 return;
             }
             applyLoadedSettings(s);
-            if (hadLegacy) persistSettings();
+            if (hadLegacy && persistSettings()) {
+                // The values are in settings.json, which is owner-only, so the
+                // old file is a second copy of the account's own paths under a
+                // name nothing reads any more. Delete it here rather than
+                // leaving it for the user to find: a migration that did not
+                // reach disk keeps it, because then it is the only copy.
+                removeLegacySettingsFile(legacyPath);
+            }
             return;
         }
         if (!f.open(QIODevice::ReadOnly)) {
@@ -3211,8 +3218,12 @@ private:
         applyLoadedSettings(s);
     }
 
-    void persistSettings() {
-        if (m_settingsError) return;
+    /// True when the settings reached disk. The migration needs the answer:
+    /// it deletes the legacy file only after the copy that replaced it is
+    /// written, so a failed write leaves the old file as the only copy of the
+    /// account's paths.
+    bool persistSettings() {
+        if (m_settingsError) return false;
         AppSettings s;
         s.confirmDelete = m_confirmDelete;
         s.includeSystem = m_includeSystemOn;
@@ -3221,7 +3232,7 @@ private:
         const QFileInfo fi(path);
         if (!QDir().mkpath(fi.absolutePath())) {
             showError(settingsUnwritableMessage(path));
-            return;
+            return false;
         }
         /* Narrow the parent before the file lands in it, not after: mkpath
            creates at the umask default (0755), so an owner-only settings file
@@ -3233,18 +3244,19 @@ private:
         QSaveFile f(path);
         if (!f.open(QIODevice::WriteOnly)) {
             showError(settingsUnwritableMessage(path));
-            return;
+            return false;
         }
         const QByteArray raw = encodeSettingsJson(s);
         if (f.write(raw) != raw.size() || !f.commit()) {
             showError(settingsUnwritableMessage(path));
-            return;
+            return false;
         }
         restrictPrivateDataFile(path);
         m_settingsError = false;
         m_errorBar->hide();
         m_error->clear();
         refreshIgnoredList();
+        return true;
     }
 
     /// One hidden path back in the list. The double click and the Show Again

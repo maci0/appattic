@@ -966,8 +966,10 @@ static int checkPrivacy() {
 
 /// The legacy QSettings file holds the ignore list, which is absolute paths
 /// under the account's own home, and QSettings wrote it readable by group and
-/// other. The migration is the only code that knows which file that is, so the
-/// mode is asserted there. The QSettings path is pointed at a temp dir first:
+/// other. The migration is the only code that knows which file that is, so
+/// the mode is asserted there, and so is the removal that follows it: once the
+/// values are in settings.json the old file is a second copy of those paths
+/// that nothing opens. The QSettings path is pointed at a temp dir first:
 /// the default one is the real ~/.config, which the test must not read or
 /// rewrite.
 static int checkLegacySettingsMigration() {
@@ -1006,6 +1008,11 @@ static int checkLegacySettingsMigration() {
             || !s.confirmDelete || reportedPath != legacyPath || worldReadable
         ? 1
         : 0;
+    // The removal is the caller's move after the values are written, so it is
+    // checked here as its own step: the file is gone, and a second call on a
+    // file that is not there is the wanted state rather than a failure.
+    const bool removed = rc == 0 && removeLegacySettingsFile(reportedPath)
+        && !QFile::exists(legacyPath) && removeLegacySettingsFile(reportedPath);
     QSettings::setDefaultFormat(savedFormat);
     if (rc != 0) {
         std::fprintf(stderr,
@@ -1016,6 +1023,10 @@ static int checkLegacySettingsMigration() {
             static_cast<unsigned>(perms & QFileDevice::ReadGroup ? 0040 : 0)
                 | static_cast<unsigned>(perms & QFileDevice::ReadOther ? 0004 : 0));
         return rc;
+    }
+    if (!removed) {
+        std::fprintf(stderr, "legacy: the migrated file was not removed\n");
+        return 1;
     }
     std::fprintf(stdout, "legacy: ok\n");
     return 0;

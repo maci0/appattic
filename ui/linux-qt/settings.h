@@ -31,6 +31,16 @@ bool legacyBoolValue(const QVariant &value, bool fallback, bool *readable);
 /// those values came from, which the caller has to name: a blocked migration is
 /// only fixable by editing that file, and saving settings does not clear it.
 AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable, QString *legacyPath);
+
+/// Delete the legacy QSettings file once its values are in settings.json.
+/// Nothing reads the file after a successful migration, and it holds the
+/// account's own paths, so leaving it behind keeps them on disk for a program
+/// that no longer opens it. Absent is the wanted state, so a file that is not
+/// there is not a failure. The caller runs this only after the new settings
+/// are on disk: a migration that could not be written leaves the old file as
+/// the copy the user has to edit.
+bool removeLegacySettingsFile(const QString &path);
+
 bool parseSettingsJson(const QByteArray &raw, AppSettings *out, QString *err);
 QByteArray encodeSettingsJson(const AppSettings &s);
 

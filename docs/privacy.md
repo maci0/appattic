@@ -51,7 +51,9 @@ macOS. `appattic config` prints the resolved path on this machine.
 No file is written at the umask default: every private file is created through
 `mkstemp` and renamed into place, so there is no window in which another local
 account can read it. The Qt window narrows a legacy `QSettings` file the same
-way when it carries the old ignore list over.
+way when it carries the old ignore list over, and deletes that file once the
+list is in `settings.json`; a migration that could not be written keeps it,
+because then it is the only copy of those paths.
 
 ## What leaves the machine
 
