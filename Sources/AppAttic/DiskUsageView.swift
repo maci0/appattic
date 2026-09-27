@@ -10,6 +10,10 @@ struct DiskUsageView: View {
     @State private var root: DiskUsageNode? = nil
     @State private var scanning = false
     @State private var status = ""
+    /// Reported once, by the next finished scan, next to its totals. A message
+    /// set before a scan is replaced by the scan's own "Scanning ..." line, and
+    /// the scan's result replaces that, so a notice has to wait for the result.
+    @State private var notice = ""
     @State private var path = FileManager.default.homeDirectoryForCurrentUser.path
     private let allocated = true
     private let oneFileSystem = true
@@ -53,11 +57,23 @@ struct DiskUsageView: View {
             .padding(Metrics.lg)
             .padding(Metrics.sm)
             HRule()
+            // A rescan (after a Trash, or a second root) keeps the tree on
+            // screen under a progress line. Replacing the page with one line
+            // of text took away the result the user was reading, and left a
+            // blank pane with no way back.
             if scanning {
-                Text(status.isEmpty ? "Scanning" : status)
-                    .font(.system(size: TypeScale.body))
-                    .foregroundColor(Color.appDim)
-                    .padding(Metrics.lg)
+                HStack {
+                    Text(status.isEmpty ? "Scanning…" : status)
+                        .font(.system(size: TypeScale.body))
+                        .foregroundColor(Color.appDim)
+                    Spacer()
+                    Button("Stop") { stopScan() }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                HRule()
+            }
+            if scanning && root == nil {
                 Spacer()
             } else if let root {
                 HStack {
@@ -91,9 +107,14 @@ struct DiskUsageView: View {
                             NSWorkspace.shared.open(url)
                             #endif
                         }
+                        // The tree under them is the one being replaced by the
+                        // running scan, so acting on a row now would act on a
+                        // result the window is about to redraw.
+                        .disabled(scanning)
                         Button("Move to Trash") {
                             pendingTrash = selected
                         }
+                        .disabled(scanning)
                     }
                     Spacer()
                     Text(status)
@@ -133,13 +154,20 @@ struct DiskUsageView: View {
                 }
             }
         }
-        .alert("Move to Trash?", isPresented: trashConfirmBinding) {
+        .alert(trashConfirmTitle, isPresented: trashConfirmBinding) {
             Button("Cancel") { pendingTrash = nil }
             Button("Move to Trash") {
                 if let node = pendingTrash { trash(node) }
                 pendingTrash = nil
             }
         }
+    }
+
+    /// The alert said only "Move to Trash?", so a user who had walked deep into
+    /// the tree could not tell which of several same-named rows it was about.
+    private var trashConfirmTitle: String {
+        guard let node = pendingTrash else { return "Move to Trash?" }
+        return "Move \(node.name) to Trash?"
     }
 
     private var trashConfirmBinding: Binding<Bool> {
@@ -149,12 +177,24 @@ struct DiskUsageView: View {
         )
     }
 
+    /// Rows drawn per folder. The cap keeps a folder with thousands of entries
+    /// from building thousands of views, but a silent cut reads as the whole
+    /// folder, so the rest are counted in a closing row.
+    private static let maxRowsPerFolder = 40
+
     @ViewBuilder
     func diskRows(_ node: DiskUsageNode, depth: Int) -> some View {
         diskRow(node, depth: depth)
-        let kids = Array(node.children.prefix(40))
+        let kids = Array(node.children.prefix(Self.maxRowsPerFolder))
         ForEach(Array(kids.enumerated()), id: \.offset) { _, child in
             diskRows(child, depth: depth + 1)
+        }
+        let hidden = node.children.count - kids.count
+        if hidden > 0 {
+            Text(String(repeating: "  ", count: depth + 1)
+                + "\(hidden) more \(hidden == 1 ? "entry" : "entries") not shown")
+                .font(.system(size: TypeScale.small))
+                .foregroundColor(Color.appDim)
         }
     }
 
@@ -186,7 +226,10 @@ struct DiskUsageView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             let tree = scanDiskUsage(root: rootPath, oneFileSystem: one, cancel: { ticket.isCancelled })
             DispatchQueue.main.async {
-                guard !ticket.isCancelled else { return }
+                // A scan that a newer one superseded says nothing: the newer
+                // run owns the state and will write it.
+                guard activeScan === ticket else { return }
+                activeScan = nil
                 root = tree
                 selected = tree
                 // The device list is read once when the view state is created,
@@ -196,18 +239,44 @@ struct DiskUsageView: View {
                 // enough to redo whenever the tree is re-measured.
                 volumes = listDiskVolumes()
                 scanning = false
-                status = "\(humanSize(tree.metric(allocatedSize: allocated))) · \(tree.items) items"
+                // A cancelled walk returns what it measured so far, so the tree
+                // is real but partial. Printing the same totals a finished scan
+                // prints would read as the whole disk.
+                let stopped = ticket.isCancelled
+                let totals = "\(humanSize(tree.metric(allocatedSize: allocated))) · \(tree.items) items"
+                status = [stopped ? "Scan stopped" : nil, notice, totals]
+                    .compactMap { $0 }
+                    .joined(separator: " · ")
+                notice = ""
             }
         }
     }
 
+    /// A stop returns the folders already measured rather than nothing, and
+    /// says the totals are partial, so the user can act on them or rescan.
+    func stopScan() {
+        guard scanning, let ticket = activeScan else { return }
+        ticket.cancel()
+        notice = "stopped early, totals are partial"
+    }
+
     func trash(_ node: DiskUsageNode) {
         let url = URL(fileURLWithPath: node.path)
+        let name = node.name
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-            if let p = root?.path { scan(p) }
+            notice = "Moved \(name) to Trash"
+            if let p = root?.path {
+                scan(p)
+            } else {
+                status = notice
+                notice = ""
+            }
         } catch {
-            status = redactHomePaths(error.localizedDescription)
+            // A bare NSError description ("The file doesn't exist.") names no
+            // action and no path, so the user is left guessing which row failed.
+            status = "Could not move \(name) to Trash: "
+                + redactHomePaths(error.localizedDescription)
         }
     }
 }

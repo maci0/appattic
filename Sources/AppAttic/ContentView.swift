@@ -270,6 +270,12 @@ struct ContentView: View {
                 TextField("Search", text: $vm.searchText)
                     .font(.system(size: TypeScale.body))
                     .frame(width: 200)
+                // The empty state offers "Clear search", but a search that
+                // still matches rows has no way back: the field holds the text
+                // and selecting and deleting it by hand is the only exit.
+                if !vm.searchText.isEmpty {
+                    Button("Clear") { vm.searchText = "" }
+                }
             }
             if selected == .packages {
                 packageFilterChips

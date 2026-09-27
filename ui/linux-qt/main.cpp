@@ -1022,7 +1022,11 @@ private slots:
             );
             return;
         }
-        runScript(script, QStringLiteral("Removing selected items…"));
+        runScript(
+            script,
+            QStringLiteral("Removing selected items…"),
+            removedMessage(cleanupMarkCount(), QStringLiteral("item"))
+        );
     }
 
     void confirmUpdate() {
@@ -1038,7 +1042,11 @@ private slots:
             );
             return;
         }
-        runScript(script, QStringLiteral("Updating selected packages…"));
+        runScript(
+            script,
+            QStringLiteral("Updating selected packages…"),
+            updatedMessage(updateMarkCount())
+        );
     }
 
     void confirmMarkManual() {
@@ -1054,7 +1062,29 @@ private slots:
             );
             return;
         }
-        runScript(script, QStringLiteral("Marking packages as manually installed…"));
+        runScript(
+            script,
+            QStringLiteral("Marking packages as manually installed…"),
+            markedMessage(m_markedManual.size())
+        );
+    }
+
+    /// "Removed 3 items. Scanning again…", with the one-item form spelled
+    /// out. The count is taken before the run clears the selection.
+    static QString removedMessage(int n, const QString &noun) {
+        if (n == 1) return QStringLiteral("Removed 1 %1. Scanning again…").arg(noun);
+        return QStringLiteral("Removed %1 %2. Scanning again…").arg(localeCount(n), noun);
+    }
+
+    static QString updatedMessage(int n) {
+        if (n == 1) return QStringLiteral("Updated 1 package. Scanning again…");
+        return QStringLiteral("Updated %1 packages. Scanning again…").arg(localeCount(n));
+    }
+
+    static QString markedMessage(int n) {
+        if (n == 1) return QStringLiteral("Marked 1 package as manually installed. Scanning again…");
+        return QStringLiteral("Marked %1 packages as manually installed. Scanning again…")
+            .arg(localeCount(n));
     }
 
 private:
@@ -1115,12 +1145,18 @@ private:
         dlg->deleteLater();
         if (rc == QDialog::Accepted && !runLabel.isEmpty()) {
             QString progress = QStringLiteral("Running selected actions…");
-            if (kind == ScriptKind::Delete) progress = QStringLiteral("Removing selected items…");
-            else if (kind == ScriptKind::Update) progress = QStringLiteral("Updating selected packages…");
-            else if (kind == ScriptKind::MarkManual) {
+            QString done;
+            if (kind == ScriptKind::Delete) {
+                progress = QStringLiteral("Removing selected items…");
+                done = removedMessage(cleanupMarkCount(), QStringLiteral("item"));
+            } else if (kind == ScriptKind::Update) {
+                progress = QStringLiteral("Updating selected packages…");
+                done = updatedMessage(updateMarkCount());
+            } else if (kind == ScriptKind::MarkManual) {
                 progress = QStringLiteral("Marking packages as manually installed…");
+                done = markedMessage(m_markedManual.size());
             }
-            runScript(script, progress);
+            runScript(script, progress, done);
         }
     }
     Page currentPage() const {
@@ -1283,6 +1319,10 @@ private:
 
     QTreeWidget *makeOverviewTree(const QString &trailing) {
         auto *t = new QTreeWidget;
+        // Every row here opens the page it came from. The rows carry their own
+        // tooltips (name, what, path), so the affordance is the pointer and
+        // the hint under the column title, not a widget tooltip.
+        t->setCursor(Qt::PointingHandCursor);
         t->setRootIsDecorated(false);
         t->setUniformRowHeights(true);
         t->setIndentation(0);
@@ -1320,6 +1360,14 @@ private:
         empty->setForegroundRole(QPalette::PlaceholderText);
         v->addWidget(h);
         v->addWidget(rule);
+        // The rows are links and nothing says so: a plain list row and a
+        // clickable one are drawn the same, and the whole point of the
+        // overview is the jump to the item's own page.
+        auto *hint = hintLabel(
+            QStringLiteral("Click a row to open it on its own page, with it selected")
+        );
+        hint->setContentsMargins(16, 4, 16, 4);
+        v->addWidget(hint);
         v->addWidget(tree, 1);
         v->addWidget(empty, 1);
         *emptyOut = empty;
@@ -2903,7 +2951,7 @@ private:
         return out;
     }
 
-    void runScript(const QString &script, const QString &progress) {
+    void runScript(const QString &script, const QString &progress, const QString &done) {
         if (m_scanning) return;
         delete m_script;
         m_script = new ScriptProcess(this);
@@ -2947,7 +2995,7 @@ private:
             if (m_table->isVisible()) rebuildInspector();
         });
         connect(m_script, &ScriptProcess::finished, this,
-                [this](int code, bool stopped, const QByteArray &output) {
+                [this, done](int code, bool stopped, const QByteArray &output) {
             m_scanning = false;
             m_rescan->setEnabled(true);
             if (m_scanBar) m_scanBar->hide();
@@ -2998,7 +3046,11 @@ private:
                     m_errorBar->hide();
                     m_error->clear();
                 }
-                statusBar()->showMessage(QStringLiteral("Finished. Scanning again…"));
+                // "Finished" named no action and no count, so a run that
+                // removed an app the user expected to keep read the same as
+                // one that removed nothing they had looked at. The rows
+                // vanishing was the only signal the script had run.
+                statusBar()->showMessage(done);
                 m_marked.clear();
                 m_markedManual.clear();
                 rescan();

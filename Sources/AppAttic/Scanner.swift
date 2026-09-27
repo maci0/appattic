@@ -16,6 +16,10 @@ final class ScannerViewModel {
     var selectedMarkManual: Set<String> = []
     var searchText = ""
     var statusText = ""
+    /// What a finished script run did, carried into the status line of the
+    /// rescan that follows it. The rescan writes `statusText` itself, so a
+    /// message set before it would be replaced before it was ever read.
+    var pendingNote = ""
     var ignoredLeftovers: Set<String> = []
     var progressMessage = "Starting scan…"
 
@@ -278,7 +282,11 @@ final class ScannerViewModel {
                 vm.scanData = result
                 vm.pruneSelection()
                 vm.isScanning = false
-                vm.statusText = "scanned \(formatDate(result.scanned_at)) · \(formatSeconds(result.duration_s))s"
+                let note = vm.pendingNote
+                vm.pendingNote = ""
+                vm.statusText = note.isEmpty
+                    ? "scanned \(formatDate(result.scanned_at)) · \(formatSeconds(result.duration_s))s"
+                    : "\(note). Scanned \(formatDate(result.scanned_at))"
                 if result.incomplete == true {
                     // No cache is written for this scan, and the outdated and
                     // unused-package lists are missing whatever the failed
@@ -560,19 +568,38 @@ final class ScannerViewModel {
                     }
                     switch clear {
                     case .cleanup:
+                        let count = vm.cleanupSelectionCount
                         vm.selectedLeftovers = []
                         vm.selectedApps = remainingPendingAppPaths(
                             selected: vm.selectedApps,
                             software: vm.scanData?.software ?? []
                         )
                         vm.selectedPackages = []
+                        // A successful run then a rescan left the window saying
+                        // only "scanned <time>", the same line a plain Rescan
+                        // prints. The rows vanishing was the only sign the
+                        // script had run, and an app the user did not expect to
+                        // go read as a scan that found nothing.
+                        var note = count == 1
+                            ? "Removed 1 selected item"
+                            : "Removed \(count) selected items"
                         if !vm.selectedApps.isEmpty {
-                            vm.statusText = "Steam or CrossOver still needs to finish uninstall. Those items stay selected."
+                            note +=
+                                ". Steam or CrossOver still needs to finish uninstall; those items stay selected"
                         }
+                        vm.pendingNote = note
                     case .update:
+                        let count = vm.selectedOutdated.count
                         vm.selectedOutdated = []
+                        vm.pendingNote = count == 1
+                            ? "Updated 1 package"
+                            : "Updated \(count) packages"
                     case .markManual:
+                        let count = vm.selectedMarkManual.count
                         vm.selectedMarkManual = []
+                        vm.pendingNote = count == 1
+                            ? "Marked 1 package as manually installed"
+                            : "Marked \(count) packages as manually installed"
                     }
                     // The script just removed files, upgraded packages, or
                     // changed install state: exactly what the snapshot
