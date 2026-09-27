@@ -409,11 +409,11 @@ final class ScriptPreviewTests: XCTestCase {
     func testBrewUninstallCommandsSkipAlreadyRemovedPackages() {
         XCTAssertEqual(
             uninstallCommand(source: "brew-formula", name: "jq", path: "/opt/homebrew/bin/jq", caskName: nil, steamAppId: nil),
-            "if brew list --formula jq; then brew uninstall jq; fi"
+            "if brew list --formula jq >/dev/null 2>&1; then brew uninstall jq; fi"
         )
         XCTAssertEqual(
             uninstallCommand(source: "brew-cask", name: "Firefox", path: "/Applications/Firefox.app", caskName: "firefox", steamAppId: nil),
-            "if brew list --cask firefox; then brew uninstall --cask firefox; fi"
+            "if brew list --cask firefox >/dev/null 2>&1; then brew uninstall --cask firefox; fi"
         )
     }
 
@@ -440,7 +440,7 @@ final class ScriptPreviewTests: XCTestCase {
             caskName: nil,
             steamAppId: nil
         )
-        XCTAssertEqual(flatpak, "if flatpak info org.mozilla.Firefox; then flatpak uninstall -y org.mozilla.Firefox; fi")
+        XCTAssertEqual(flatpak, "if flatpak info org.mozilla.Firefox >/dev/null 2>&1; then flatpak uninstall -y org.mozilla.Firefox; fi")
         XCTAssertFalse(flatpak.contains("rm -rf"), flatpak)
 
         let snap = uninstallCommand(
@@ -450,7 +450,7 @@ final class ScriptPreviewTests: XCTestCase {
             caskName: nil,
             steamAppId: nil
         )
-        XCTAssertEqual(snap, "if snap list firefox; then snap remove firefox; fi")
+        XCTAssertEqual(snap, "if snap list firefox >/dev/null 2>&1; then snap remove firefox; fi")
         XCTAssertFalse(snap.contains("rm -rf"), snap)
 
         let image = uninstallCommand(
@@ -490,7 +490,7 @@ final class ScriptPreviewTests: XCTestCase {
             source: "flatpak",
             pkg_id: "org.mozilla.Firefox"
         )
-        XCTAssertEqual(uninstallCommand(for: item), "if flatpak info org.mozilla.Firefox; then flatpak uninstall -y org.mozilla.Firefox; fi")
+        XCTAssertEqual(uninstallCommand(for: item), "if flatpak info org.mozilla.Firefox >/dev/null 2>&1; then flatpak uninstall -y org.mozilla.Firefox; fi")
         XCTAssertEqual(
             uninstallCommand(
                 source: "flatpak",
@@ -499,7 +499,7 @@ final class ScriptPreviewTests: XCTestCase {
                 caskName: nil,
                 steamAppId: nil
             ),
-            "if flatpak info firefox; then flatpak uninstall -y firefox; fi"
+            "if flatpak info firefox >/dev/null 2>&1; then flatpak uninstall -y firefox; fi"
         )
         let snap = SoftwareItem(
             name: "Code",
@@ -508,7 +508,7 @@ final class ScriptPreviewTests: XCTestCase {
             source: "snap",
             pkg_id: "code"
         )
-        XCTAssertEqual(uninstallCommand(for: snap), "if snap list code; then snap remove code; fi")
+        XCTAssertEqual(uninstallCommand(for: snap), "if snap list code >/dev/null 2>&1; then snap remove code; fi")
     }
 
     func testScanDataRoundTripKeepsPkgIdForUninstall() {
@@ -526,7 +526,7 @@ final class ScriptPreviewTests: XCTestCase {
         XCTAssertEqual(restored.software[0].pkgId, "org.mozilla.Firefox")
         XCTAssertEqual(result.toScanData().software[0].pkg_id, "org.mozilla.Firefox")
         restored.verdicts = [Verdict(software: restored.software[0], tier: "remove", reason: "test")]
-        XCTAssertTrue(cleanupScript(restored).contains("if flatpak info org.mozilla.Firefox; then flatpak uninstall -y org.mozilla.Firefox; fi"))
+        XCTAssertTrue(cleanupScript(restored).contains("if flatpak info org.mozilla.Firefox >/dev/null 2>&1; then flatpak uninstall -y org.mozilla.Firefox; fi"))
         XCTAssertFalse(cleanupScript(restored).contains("then flatpak uninstall -y firefox; fi"))
     }
 
@@ -602,7 +602,7 @@ final class ScriptPreviewTests: XCTestCase {
         let pacman = withRootCmd(packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan")))
         XCTAssertEqual(
             pacman,
-            "if pacman -Qq jq; then rootcmd pacman -Rns jq; fi"
+            "if pacman -Qq jq >/dev/null 2>&1; then rootcmd pacman -Rns jq; fi"
         )
         XCTAssertTrue(try shScriptParses(pacman), pacman)
         XCTAssertTrue(callsRootHelper(pacman), pacman)
@@ -621,15 +621,15 @@ final class ScriptPreviewTests: XCTestCase {
     func testAURAndSnapEscalate() {
         for base in ["paru", "yay", "pikaur", "snap"] {
             XCTAssertTrue(commandNeedsRoot("\(base) --noconfirm -S vim"), base)
-            XCTAssertTrue(commandNeedsRoot("if \(base) list vim; then \(base) remove vim; fi"), base)
+            XCTAssertTrue(commandNeedsRoot("if \(base) list vim >/dev/null 2>&1; then \(base) remove vim; fi"), base)
         }
         XCTAssertEqual(
             withRootCmd("paru --noconfirm -S vim"),
             "rootcmd paru --noconfirm -S vim"
         )
         XCTAssertEqual(
-            withRootCmd("if snap list hello; then snap remove hello; fi"),
-            "if snap list hello; then rootcmd snap remove hello; fi"
+            withRootCmd("if snap list hello >/dev/null 2>&1; then snap remove hello; fi"),
+            "if snap list hello >/dev/null 2>&1; then rootcmd snap remove hello; fi"
         )
     }
 
@@ -648,15 +648,19 @@ final class ScriptPreviewTests: XCTestCase {
     }
 
     /// A PPA sources file is the one leftover under a packaged root that is
-    /// removable, and `shellQuote` wraps it, so the quoted spelling has to be
-    /// recognised. A comment names the same path and runs nothing.
+    /// removable. A comment names the same path and runs nothing.
     func testQuotedPpaRemovalEscalatesAndItsCommentDoesNot() {
         let rm = leftoverRemoveCommand(
             path: "/etc/apt/sources.list.d/deadsnakes.list",
             rootLabel: "/etc/apt/sources.list.d",
             extraPaths: []
         )
-        XCTAssertEqual(rm, "rm -rf '/etc/apt/sources.list.d/deadsnakes.list'")
+        // `shellQuote` wraps a value only where a byte needs it, and every byte
+        // of this path is shell-safe, so the command carries the path as
+        // written. What the spelling has to keep is that the file is removed
+        // rather than skipped as a packaged path, and that the command
+        // escalates.
+        XCTAssertEqual(rm, "rm -rf /etc/apt/sources.list.d/deadsnakes.list")
         XCTAssertTrue(commandNeedsRoot(rm), rm)
         XCTAssertEqual(withRootCmd(rm), "rootcmd " + rm)
         let skip = leftoverRemoveCommand(

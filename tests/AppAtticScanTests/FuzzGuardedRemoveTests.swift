@@ -109,7 +109,7 @@ final class FuzzGuardedRemoveTests: XCTestCase {
         }
         let guards = [
             "if test -e '/a b'; then rm -rf '/a b'; fi",
-            "if dpkg -s libfoo; then apt-get purge -y libfoo; fi",
+            "if dpkg -s libfoo >/dev/null 2>&1; then apt-get purge -y libfoo; fi",
         ]
         var rng = FuzzRandom(seed: 0x5EED_7A1E)
         for base in guards {

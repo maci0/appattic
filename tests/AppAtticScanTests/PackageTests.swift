@@ -47,7 +47,7 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(pkgs[0].manager, "dpkg")
         XCTAssertEqual(pkgs[0].kind, "orphan")
         XCTAssertEqual(pkgs[0].version, "1.0-1")
-        XCTAssertEqual(packageRemoveCommand(pkgs[0]), "if dpkg -s oldpkg; then apt-get purge -y oldpkg; fi")
+        XCTAssertEqual(packageRemoveCommand(pkgs[0]), "if dpkg -s oldpkg >/dev/null 2>&1; then apt-get purge -y oldpkg; fi")
         // An rc row is a Debian distro package, so it takes the apt manual
         // marker. Losing this hid the only corrective action on a config remnant.
         XCTAssertTrue(pkgs[0].canMarkManual)
@@ -217,41 +217,41 @@ final class PackageTests: XCTestCase {
     /// package is a no-op instead of a `set -e` abort that strands the
     /// packages below it in the script.
     func testPackageRemoveCommandsAreNamedAndQuoted() {
-        XCTAssertEqual(packageRemoveCommand(entry("libfoo", "pacman", "orphan")), "if pacman -Qq libfoo; then pacman -Rns libfoo; fi")
-        XCTAssertEqual(packageRemoveCommand(entry("libfoo0", "apt", "orphan")), "if dpkg -s libfoo0; then apt-get purge -y libfoo0; fi")
-        XCTAssertEqual(packageRemoveCommand(entry("libfoo", "dnf", "orphan")), "if rpm -q libfoo; then dnf remove -y libfoo; fi")
-        XCTAssertEqual(packageRemoveCommand(entry("libfoo", "zypper", "orphan")), "if rpm -q libfoo; then zypper --non-interactive rm libfoo; fi")
+        XCTAssertEqual(packageRemoveCommand(entry("libfoo", "pacman", "orphan")), "if pacman -Qq libfoo >/dev/null 2>&1; then pacman -Rns libfoo; fi")
+        XCTAssertEqual(packageRemoveCommand(entry("libfoo0", "apt", "orphan")), "if dpkg -s libfoo0 >/dev/null 2>&1; then apt-get purge -y libfoo0; fi")
+        XCTAssertEqual(packageRemoveCommand(entry("libfoo", "dnf", "orphan")), "if rpm -q libfoo >/dev/null 2>&1; then dnf remove -y libfoo; fi")
+        XCTAssertEqual(packageRemoveCommand(entry("libfoo", "zypper", "orphan")), "if rpm -q libfoo >/dev/null 2>&1; then zypper --non-interactive rm libfoo; fi")
         XCTAssertEqual(
             packageRemoveCommand(entry("typescript", "npm", "global")),
-            "if npm ls -g --depth=0 | grep -qF -- typescript@; then npm -g uninstall typescript; fi"
+            "if npm ls -g --depth=0 | grep -qF -- typescript@ >/dev/null 2>&1; then npm -g uninstall typescript; fi"
         )
         XCTAssertEqual(
             packageRemoveCommand(entry("nx", "pnpm", "global")),
-            "if pnpm ls -g --depth=0 | grep -qF -- nx@; then pnpm remove -g nx; fi"
+            "if pnpm ls -g --depth=0 | grep -qF -- nx@ >/dev/null 2>&1; then pnpm remove -g nx; fi"
         )
         XCTAssertEqual(
             packageRemoveCommand(entry("prettier", "bun", "global")),
-            "if bun pm ls -g | grep -qF -- prettier@; then bun remove -g prettier; fi"
+            "if bun pm ls -g | grep -qF -- prettier@ >/dev/null 2>&1; then bun remove -g prettier; fi"
         )
         XCTAssertEqual(
             packageRemoveCommand(entry("httpie", "pipx", "global")),
-            "if pipx list | grep -qF -- 'package httpie '; then pipx uninstall httpie; fi"
+            "if pipx list | grep -qF -- 'package httpie ' >/dev/null 2>&1; then pipx uninstall httpie; fi"
         )
         XCTAssertEqual(
             packageRemoveCommand(entry("ruff", "uv", "global")),
-            "if uv tool list | grep -qF -- 'ruff v'; then uv tool uninstall ruff; fi"
+            "if uv tool list | grep -qF -- 'ruff v' >/dev/null 2>&1; then uv tool uninstall ruff; fi"
         )
         XCTAssertEqual(
             packageRemoveCommand(entry("httpie", "pip", "global")),
-            "if pip show httpie; then pip uninstall -y --user httpie; fi"
+            "if pip show httpie >/dev/null 2>&1; then pip uninstall -y --user httpie; fi"
         )
         XCTAssertEqual(
             packageRemoveCommand(entry("file_server", "deno", "global")),
-            "if test -e ~/.deno/bin/file_server; then deno uninstall --global file_server; fi"
+            "if test -e ~/.deno/bin/file_server >/dev/null 2>&1; then deno uninstall --global file_server; fi"
         )
         XCTAssertEqual(
             packageRemoveCommand(entry("foo; rm /usr/bin/snap", "npm", "global")),
-            "if npm ls -g --depth=0 | grep -qF -- 'foo; rm /usr/bin/snap@'; then npm -g uninstall 'foo; rm /usr/bin/snap'; fi"
+            "if npm ls -g --depth=0 | grep -qF -- 'foo; rm /usr/bin/snap@' >/dev/null 2>&1; then npm -g uninstall 'foo; rm /usr/bin/snap'; fi"
         )
     }
 
@@ -308,7 +308,7 @@ final class PackageTests: XCTestCase {
                 entry("libkeep", "apt", "orphan"),
             ]
         )
-        XCTAssertTrue(script.contains("if pacman -Qq libfoo; then rootcmd pacman -Rns libfoo; fi"), script)
+        XCTAssertTrue(script.contains("if pacman -Qq libfoo >/dev/null 2>&1; then rootcmd pacman -Rns libfoo; fi"), script)
         XCTAssertTrue(script.contains("then npm -g uninstall typescript; fi"), script)
         XCTAssertTrue(script.contains("rootcmd apt-mark manual libkeep"), script)
         XCTAssertFalse(script.contains("rootcmd npm"), script)
