@@ -99,11 +99,69 @@ private func scalarIsZeroWidth(_ s: Unicode.Scalar) -> Bool {
     }
 }
 
-/// Terminal columns a string occupies. `String.count` counts grapheme
-/// clusters, so a CJK name from the filesystem pads to the wrong width and
-/// shifts every later column. One cluster is one glyph: a combining mark, a ZWJ
-/// sequence, or a skin-tone modifier rides on its base scalar's width instead
-/// of adding columns.
+/// Control scalars in a filesystem name neutralised, for text on its way to a
+/// terminal. SGR colour sequences are kept, so an already-painted cell keeps
+/// its colour.
+///
+/// A Linux filename may contain any byte but NUL, so a leftover directory
+/// called `Some\nApp` or a symlink named `x<ESC>]0;pwned<BEL>` arrives at the
+/// report verbatim. A newline breaks the row across two physical lines, and
+/// `displayWidth` counts both scalars as zero columns, so the second line
+/// lands under an unrelated column. An escape sequence is not drawn at all:
+/// the terminal executes it, which repaints the title bar or hides a row the
+/// user is about to tick. `shellComment` already flattens this set of scalars
+/// for the generated script; this is the same rule for the rendered table.
+public func sanitizeForTerminal(_ s: String) -> String {
+    // Pure-ASCII printables with no ESC are the common case and return as-is.
+    var needsPass = false
+    // `0xC2` leads every C1 control in UTF-8, so it has to trip the pass for
+    // the `0x80...0x9F` arm below to ever be reached.
+    for c in s.utf8 where c < 0x20 || c == 0x7F || c == 0xC2 {
+        needsPass = true
+        break
+    }
+    guard needsPass else { return s }
+
+    var out = String.UnicodeScalarView()
+    var it = s.unicodeScalars.makeIterator()
+    while let scalar = it.next() {
+        let v = scalar.value
+        if v == 0x1B {
+            // `ESC [ params m` is SGR, the one sequence the renderer emits and
+            // the only one that cannot change the screen beyond colour.
+            var look = it
+            if look.next() == "[", let first = look.next(), first.value >= 0x30, first.value <= 0x3F {
+                var ok = true
+                var param = first
+                while param.value != "m" {
+                    guard let next = look.next(), next.value >= 0x20, next.value <= 0x3F else { ok = false; break }
+                    param = next
+                }
+                if ok {
+                    out.append(scalar)
+                    out.append("[")
+                    out.append(first)
+                    while param.value != "m" {
+                        out.append(param)
+                        guard let next = look.next() else { break }
+                        param = next
+                    }
+                    out.append(param)
+                    it = look
+                    continue
+                }
+            }
+            out.append(" ")
+            continue
+        }
+        if v < 0x20 || v == 0x7F || (v >= 0x80 && v <= 0x9F) {
+            out.append(" ")
+        } else {
+            out.append(scalar)
+        }
+    }
+    return String(out)
+}
 public func displayWidth(_ s: String) -> Int {
     var width = 0
     for cluster in s {

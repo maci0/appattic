@@ -73,6 +73,26 @@ final class TextTests: XCTestCase {
         XCTAssertEqual(displayWidth("👍🏽"), 2)
     }
 
+    func testSanitizeForTerminalNeutralizesControlsButKeepsColor() {
+        // A Linux filename may hold any byte but NUL, so both of these reach
+        // the report as one cell.
+        XCTAssertEqual(sanitizeForTerminal("Some\nApp"), "Some App")
+        XCTAssertEqual(sanitizeForTerminal("x\u{1b}]0;pwned\u{7}"), "x 0;pwned ")
+        XCTAssertEqual(sanitizeForTerminal("a\tb"), "a b")
+        // C1 controls arrive as the two UTF-8 bytes 0xC2 0x9B.
+        XCTAssertEqual(sanitizeForTerminal("a\u{0085}b"), "a b")
+        // What it must not touch.
+        XCTAssertEqual(sanitizeForTerminal("plain/name"), "plain/name")
+        XCTAssertEqual(sanitizeForTerminal("Café 日本語 👩‍👩‍👧"), "Café 日本語 👩‍👩‍👧")
+        XCTAssertEqual(sanitizeForTerminal(""), "")
+        // SGR is the one sequence the renderer emits, so colour survives.
+        XCTAssertEqual(sanitizeForTerminal("\u{1b}[31mREMOVE\u{1b}[0m"), "\u{1b}[31mREMOVE\u{1b}[0m")
+        // A truncated or non-SGR escape is not a colour code and is dropped
+        // whole, so the terminal never executes it.
+        XCTAssertEqual(sanitizeForTerminal("\u{1b}[38;5;1mx"), "\u{1b}[38;5;1mx")
+        XCTAssertEqual(sanitizeForTerminal("\u{1b}[38;5;1"), " [38;5;1")
+    }
+
 
     func testCollatedBeforeOrdersByName() {
         XCTAssertTrue(collatedBefore("Alpha", "Beta", tieBreak: "/a", "/b"))

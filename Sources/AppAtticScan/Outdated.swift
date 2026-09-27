@@ -1163,11 +1163,15 @@ public func attachItunesMeta(
     catalog: [String: [String: Any]]? = nil,
     onFailure: ((String) -> Void)? = nil
 ) {
-    let ids = pkgs.filter { $0.manager == "app-store" && $0.name.allSatisfy(\.isNumber) }.map(\.name)
+    // A track id is ASCII digits. `isNumber` alone also accepts e.g. U+0669,
+    // so a non-ASCII-digit name would be looked up and have its `name`
+    // overwritten with a bundleId.
+    let isTrackID: (String) -> Bool = { $0.allSatisfy { $0.isNumber && $0.isASCII } }
+    let ids = pkgs.filter { $0.manager == "app-store" && isTrackID($0.name) }.map(\.name)
     let cat = catalog ?? itunesLookupBatch(ids, onFailure: onFailure)
     for p in pkgs where p.manager == "app-store" {
         guard let row = cat[p.name] else { continue }
-        if let bid = row["bundleId"] as? String, p.name.allSatisfy(\.isNumber) {
+        if let bid = row["bundleId"] as? String, isTrackID(p.name) {
             p.name = bid
         }
         if p.summary == nil {

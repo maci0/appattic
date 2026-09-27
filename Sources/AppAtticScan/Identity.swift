@@ -222,11 +222,14 @@ public func classifyLinuxSystemName(_ name: String) -> (String, String?) {
     if snapSystemNames.contains(n) {
         return ("system", nil)
     }
-    if n.hasPrefix("core") && n.dropFirst(4).allSatisfy(\.isNumber) {
+    // `isASCII` too: `Character.isNumber` is also true for Arabic-Indic and
+    // other non-ASCII digits, so `~/.config/core٩` would be classified exactly
+    // as `core42` and hidden from the report. Same rule as Zig `isAllDigits`.
+    if n.hasPrefix("core") && n.dropFirst(4).allSatisfy({ $0.isNumber && $0.isASCII }) {
         return ("system", nil)
     }
     let parts = n.split(separator: "-")
-    if n.hasPrefix("gnome-"), let last = parts.last, last.allSatisfy(\.isNumber) {
+    if n.hasPrefix("gnome-"), let last = parts.last, last.allSatisfy({ $0.isNumber && $0.isASCII }) {
         return ("system", nil)
     }
     return ("orphaned", nil)

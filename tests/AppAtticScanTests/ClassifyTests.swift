@@ -1358,6 +1358,16 @@ final class ClassifyTests: XCTestCase {
         XCTAssertTrue(orphanReason(rootLabel: ".local/state", kind: "dir").lowercased().contains("state"))
     }
 
+    // `Character.isNumber` is true for Arabic-Indic digits too, so a bare
+    // `allSatisfy(\.isNumber)` hid a real leftover as if it were `core42`.
+    func testClassifyLinuxSystemNameUsesASCIIDigitsOnly() {
+        XCTAssertEqual(classifyLinuxSystemName("core42").0, "system")
+        XCTAssertEqual(classifyLinuxSystemName("core").0, "system")
+        XCTAssertEqual(classifyLinuxSystemName("gnome-shell-42").0, "system")
+        XCTAssertEqual(classifyLinuxSystemName("core\u{0669}").0, "orphaned", "core٩")
+        XCTAssertEqual(classifyLinuxSystemName("gnome-shell-\u{0669}").0, "orphaned", "gnome-shell-٩")
+    }
+
     func testUserBinRootLabelCoversLinuxbrewAndHomebrew() {
         XCTAssertEqual(userBinRootLabel("/home/linuxbrew/.linuxbrew/bin"), "linuxbrew/bin")
         XCTAssertEqual(userBinRootLabel("/opt/homebrew/bin"), "homebrew/bin")

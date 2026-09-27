@@ -120,7 +120,9 @@ func isSteamSupportPackage(_ name: String) -> Bool {
     if n.contains("steam linux runtime") { return true }
     if n.hasPrefix("proton ") {
         let rest = n.dropFirst(7)
-        if rest.hasPrefix("experimental") || rest.hasPrefix("hotfix") || rest.first?.isNumber == true {
+        // ASCII digits only, so `Proton ٩` is not read as a numbered build.
+        if rest.hasPrefix("experimental") || rest.hasPrefix("hotfix")
+            || (rest.first.map { $0.isNumber && $0.isASCII } ?? false) {
             return true
         }
     }

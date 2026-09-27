@@ -79,7 +79,12 @@ public func listBrokenUserBinLinks(dirs: [String]? = nil) -> [DataItem] {
         let extra = links.map(\.path).filter { $0 != primary.path }.sorted()
         items.append(DataItem(
             path: primary.path,
-            name: primary.name,
+            // Every other name source strips bidi and zero-width scalars; this
+            // one reads the name straight off the filesystem, so a symlink
+            // called `Evil<U+202E>gnits` was the last way a reversed name
+            // reached the report. `path` and `extraPaths` keep the raw bytes:
+            // they are what the generated script deletes.
+            name: stripBidiControls(primary.name),
             rootLabel: userBinRootLabel(URL(fileURLWithPath: primary.path).deletingLastPathComponent().path),
             kind: "symlink",
             status: LeftoverStatus.orphaned.rawValue,

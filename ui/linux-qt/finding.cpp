@@ -64,9 +64,14 @@ QString redactHomePaths(const QString &text, const QString &home) {
     // composed while a path off a decomposed mount spells the same directory
     // with combining marks, and the two never match as literal text, so the
     // account name rides out in the status bar instead of being replaced.
+    // Only the matching run is normalized, though: returning the whole
+    // normalized message would re-spell every path in it, and the user is
+    // invited to read a path back and retype it into the script.
     const QRegularExpression re(
         QRegularExpression::escape(homePath) + QStringLiteral("(?=/|$|[\\s:\"',;])"));
-    QString out = pathIdentityKey(text);
+    const QString haystack = pathIdentityKey(text);
+    if (!haystack.contains(re)) return text;
+    QString out = haystack;
     out.replace(re, QStringLiteral("~"));
     return out;
 }

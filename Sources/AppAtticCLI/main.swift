@@ -279,8 +279,12 @@ func padCell(_ cell: String, to width: Int) -> String {
 }
 
 func renderTable(headers: [String], rows: [[String]]) -> String {
+    // Names come off the filesystem, where a newline or an ESC is a legal
+    // byte. Sanitize before measuring, so the column width and the printed
+    // cell come from the same text.
+    let clean = rows.map { $0.map(sanitizeForTerminal) }
     var widths = headers.map { visibleLen($0) }
-    for row in rows {
+    for row in clean {
         for (i, cell) in row.enumerated() where i < widths.count {
             widths[i] = max(widths[i], visibleLen(cell))
         }
@@ -288,7 +292,7 @@ func renderTable(headers: [String], rows: [[String]]) -> String {
     var lines: [String] = []
     lines.append(zip(headers, widths).map { padCell($0.0, to: $0.1) }.joined(separator: "  ").trimmingCharacters(in: .whitespaces))
     lines.append(widths.map { String(repeating: "-", count: $0) }.joined(separator: "  "))
-    for row in rows {
+    for row in clean {
         var cells: [String] = []
         for (i, cell) in row.enumerated() {
             cells.append(padCell(cell, to: i < widths.count ? widths[i] : 0))
