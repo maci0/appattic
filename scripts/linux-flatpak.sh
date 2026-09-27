@@ -152,20 +152,34 @@ prefetch_archive "zig-${FP_ARCH}-linux-${ZIG_VER}.tar.xz" \
 echo "staging sources in $WORK"
 rm -rf "$WORK"
 mkdir -p "$WORK"
-rsync -a \
-    --exclude '.git/' \
-    --exclude '.build/' \
-    --exclude '.deps/' \
-    --exclude '.scratch/' \
-    --exclude '.tmp-shots/' \
-    --exclude 'AppAttic.app/' \
-    --exclude 'core/out/' \
-    --exclude 'dist/' \
-    --exclude '.zig-cache/' \
-    --exclude '.zig-cache-local/' \
-    --exclude 'ui/linux-qt/build/' \
-    --exclude 'ui/linux-qt/build-release/' \
-    "$ROOT/" "$WORK/"
+# The staging step and the manifest's dir source have to leave out the same
+# paths: the manifest skips them when it copies the tree, so a shorter list here
+# only ships them twice. Reading the list from the manifest is what keeps the
+# two from drifting, which is how tests, docs, benchmarks, and .github came to
+# be staged into a build that does not need them.
+manifest_skips() {
+    awk '
+        /^[[:space:]]+skip:[[:space:]]*$/ { inside = 1; next }
+        inside && match($0, /^[[:space:]]*-[ ]/) {
+            if (indent == 0) { indent = RLENGTH - 1 }
+            if (RLENGTH - 1 != indent) { inside = 0; next }
+            sub(/^[[:space:]]*-[ ]/, "")
+            print
+            next
+        }
+        inside { inside = 0 }
+    ' "$MANIFEST"
+}
+staging_excludes=()
+while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    staging_excludes+=(--exclude "$entry")
+done < <(manifest_skips)
+if [[ "${#staging_excludes[@]}" -eq 0 ]]; then
+    echo "error: no skip list in $MANIFEST; the staging step would copy the whole tree" >&2
+    exit 1
+fi
+rsync -a "${staging_excludes[@]}" "$ROOT/" "$WORK/"
 
 BUILT_MANIFEST="$WORK/packaging/flatpak/${APP_ID}.yml"
 

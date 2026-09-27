@@ -11,6 +11,7 @@ ui/linux-qt/build-release
 .zig-cache
 .zig-cache-local
 .scratch
+.gauntlet
 dist
 __pycache__
 *.pyc

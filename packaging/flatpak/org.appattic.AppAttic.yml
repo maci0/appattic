@@ -16,7 +16,10 @@ finish-args:
   - --talk-name=org.freedesktop.Flatpak
   # QFile::moveToTrash goes through the file manager portal.
   - --talk-name=org.freedesktop.FileManager1
-rename-icon: appattic
+# flatpak exports the icon under the app id and writes Icon=org.appattic.AppAttic
+# into the desktop entry it puts on the host, so the icon in the prefix has to
+# carry that name. The appattic module below installs the extra copy.
+rename-icon: org.appattic.AppAttic
 modules:
   - name: wasmtime
     buildsystem: simple
@@ -73,6 +76,7 @@ modules:
         cmake -S ui/linux-qt -B _qt -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${FLATPAK_DEST}" -DWASMTIME_ROOT="${FLATPAK_DEST}"
         cmake --build _qt
         cmake --install _qt
+        install -Dm 644 packaging/appattic.svg "${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/org.appattic.AppAttic.svg"
     # Last module built, so the build-only inputs go here rather than in the
     # modules that provide them. The runtime links lib/libwasmtime.so and reads
     # the installed WASM modules; it never compiles anything.
