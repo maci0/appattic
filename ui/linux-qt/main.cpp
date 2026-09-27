@@ -84,10 +84,14 @@
 #include <QWidget>
 #include <QTemporaryDir>
 
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <sys/types.h>
 #include <utility>
+
+#include <unistd.h>
 
 static void resetWidgetPalette(QWidget *w) {
     if (!w) return;
@@ -123,6 +127,30 @@ static const int kScriptStopGraceMs = 1000;
 /// flag between plugins, so a normal quit returns at once; a subprocess wedged
 /// past its own timeout does not, and the wait has to end for the app to.
 static const int kScanThreadDrainMs = 8000;
+
+/// Put a script in its own process group, so a stop reaches everything it
+/// started. `QProcess::terminate` and `kill` signal the direct child only, and
+/// the direct child is `/bin/sh`; the apt, pacman, or flatpak process it is
+/// waiting on is a separate process and survives both. A stopped run would
+/// then report a clean stop while that process kept holding the dpkg lock and
+/// kept removing packages behind the window, and the next run would fail on the
+/// lock the stopped one left. The host's own subprocesses are grouped the same
+/// way (`core/host/hostexec.c`).
+static void isolateScriptProcessGroup(QProcess *proc) {
+    if (!proc) return;
+    proc->setChildProcessModifier([] { ::setpgid(0, 0); });
+}
+
+/// Signal a grouped script and everything below it. Falls back to the direct
+/// child when the group cannot be signalled, so a script whose group is gone
+/// still gets stopped.
+static void signalScriptGroup(QProcess *proc, int sig) {
+    if (!proc) return;
+    const qint64 pid = proc->processId();
+    if (pid > 0 && ::kill(-static_cast<pid_t>(pid), sig) == 0) return;
+    if (sig == SIGKILL) proc->kill();
+    else proc->terminate();
+}
 
 static bool isDarkPalette(const QPalette &p) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
@@ -854,7 +882,7 @@ public:
     ~MainWindow() override {
         if (m_scriptTimer) m_scriptTimer->stop();
         if (m_scriptProc) {
-            m_scriptProc->kill();
+            signalScriptGroup(m_scriptProc, SIGKILL);
             m_scriptProc->waitForFinished(3000);
             m_scriptProc = nullptr;
         }
@@ -2990,6 +3018,7 @@ private:
         auto *proc = new QProcess(this);
         m_scriptProc = proc;
         m_scriptPath = tmp.fileName();
+        isolateScriptProcessGroup(proc);
         proc->setProcessChannelMode(QProcess::MergedChannels);
         proc->setStandardInputFile(QProcess::nullDevice());
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
@@ -3097,9 +3126,9 @@ private:
         QProcess *proc = m_scriptProc;
         if (!proc) return;
         m_scriptStopped = true;
-        proc->terminate();
+        signalScriptGroup(proc, SIGTERM);
         if (proc->waitForFinished(kScriptStopGraceMs)) return;
-        proc->kill();
+        signalScriptGroup(proc, SIGKILL);
         proc->waitForFinished(kScriptStopGraceMs);
     }
 

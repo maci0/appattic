@@ -204,31 +204,71 @@ public let scriptRunTimeout: TimeInterval = 600
 /// by a process that is stuck rather than slow.
 private let processStopGrace: TimeInterval = 1
 
-/// SIGTERM, then SIGKILL if the process is still there a second later.
-/// Returns true when it left on the first signal. `exited` is the semaphore
-/// `runAndWait` and `runCommand` signalled the process's `terminationHandler`
-/// with.
-private func stopProcess(_ process: Process, exited: DispatchSemaphore) -> Bool {
-    process.terminate()
-    if exited.wait(timeout: .now() + processStopGrace) == .success { return true }
-    kill(process.processIdentifier, SIGKILL)
+/// Signal `process` and everything it started.
+///
+/// `Process` starts the child in this process's own group, so `terminate` and
+/// `kill` reach `/bin/sh` and nothing below it: the apt, pacman, or flatpak
+/// process `sh` is waiting on is a separate process and survives both. A
+/// stopped script would then report a clean stop while that process kept
+/// holding the package-manager lock and kept removing packages behind the
+/// window. The host makes the same pair for every subprocess it spawns
+/// (`core/host/hostexec.c`).
+///
+/// The group is only there if `isolateProcessGroup` won its race, so the
+/// group signal falls back to the direct child. A child that is not a group
+/// leader belongs to its parent's group, and no group carries the child's own
+/// id, so the group signal fails with `ESRCH` rather than reaching this
+/// process's group.
+private func signalProcessGroup(_ process: Process, _ sig: Int32) {
+    let pid = process.processIdentifier
+    if pid > 0, kill(-pid, sig) == 0 { return }
+    if sig == SIGKILL {
+        kill(pid, SIGKILL)
+    } else {
+        process.terminate()
+    }
+}
+
+/// Give `process` its own process group, so a stop can reach the commands it
+/// runs. `Process` has no hook for the child to do this before `exec`, so the
+/// call races the child: it loses once the child has exec'd, and the stop
+/// falls back to the direct child, which is what happened before.
+private func isolateProcessGroup(_ process: Process) {
+    let pid = process.processIdentifier
+    if pid > 0 { _ = setpgid(pid, pid) }
+}
+
+/// SIGTERM to the whole group, then SIGKILL if any of it is still there a
+/// second later. `exited` is the semaphore the caller's `terminationHandler`
+/// signalled the direct child's exit with, which is the only way to tell that
+/// a group whose `sh` died took its package manager with it or left it running.
+private func stopProcess(_ process: Process, exited: DispatchSemaphore) {
+    signalProcessGroup(process, SIGTERM)
+    if exited.wait(timeout: .now() + processStopGrace) == .success { return }
+    signalProcessGroup(process, SIGKILL)
     _ = exited.wait(timeout: .now() + processStopGrace)
-    return false
 }
 
 /// Run `process` and wait for it, escalating to SIGKILL if it ignores SIGTERM
 /// for a second. Returns true when it exited on its own within `timeout`,
-/// false when the deadline passed and the process was killed. The exit status
+/// false when the deadline passed and the process was stopped. The exit status
 /// is left on the process either way, so a timed-out run still has to be
 /// reported as the failure it is: commands before the deadline may already
 /// have run.
+///
+/// A deadline stop is `false` however quickly the stop landed. A `sh` that
+/// forwards SIGTERM to the command below it, or a package manager that exits
+/// on it, used to answer the wait inside the grace period and read as a script
+/// that finished; it was stopped, and the lines before the stop ran.
 @discardableResult
 public func runAndWait(_ process: Process, timeout: TimeInterval) throws -> Bool {
     let exited = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in exited.signal() }
     try process.run()
+    isolateProcessGroup(process)
     if exited.wait(timeout: .now() + timeout) == .success { return true }
-    return stopProcess(process, exited: exited)
+    stopProcess(process, exited: exited)
+    return false
 }
 
 /// Runs `cmd` without a shell and returns (status, stdout, stderr). Status 127
@@ -286,6 +326,7 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
         group.wait()
         return (127, "", error.localizedDescription)
     }
+    isolateProcessGroup(process)
     try? outPipe.fileHandleForWriting.close()
     try? errPipe.fileHandleForWriting.close()
     // Block on the exit notification instead of polling `isRunning`: the old
@@ -295,7 +336,7 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
     var timedOut = false
     if exited.wait(timeout: .now() + timeout) == .timedOut {
         timedOut = true
-        _ = stopProcess(process, exited: exited)
+        stopProcess(process, exited: exited)
     }
     process.waitUntilExit()
     // The exit above ends the direct child, but a descendant holding the write
@@ -402,7 +443,12 @@ public func runGeneratedScript(
         // A script blocked on a stale package lock, an unreachable mirror, or
         // a prompt nothing can answer would otherwise wait forever. What it
         // already did is not undone, so the message says so.
-        if status == 0 { status = scriptStoppedStatus }
+        //
+        // The status a stop produced says how the process was killed, not what
+        // went wrong: SIGTERM and SIGKILL arrive as 15 and 9, and which of the
+        // two landed depends on how the script was feeling. The deadline is
+        // the reason, and `scriptStoppedStatus` is the one that names it.
+        status = scriptStoppedStatus
         let note = scriptStoppedNote(timeout: timeout)
         stderr = stderr.isEmpty ? note : stderr + "\n" + note
     }
