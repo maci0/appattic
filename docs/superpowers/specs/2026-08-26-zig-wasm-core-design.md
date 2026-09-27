@@ -1,7 +1,7 @@
 # AppAttic Zig WASM core
 
 Date: 2026-08-26
-Updated: 2026-09-05
+Updated: 2026-09-27
 Status: Accepted
 
 ## Context
@@ -16,7 +16,7 @@ Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability
 
 ## Rule
 
-The Zig WASM core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. Core has no switch on `apt` vs `pacman` vs `npm`. Core does not own filesystem roots. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; Darwin and CI may inject fixtures via `APPATTIC_HOST_EXEC_FIXTURE`). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
+The core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. As built those parts sit around the Zig module rather than inside it: `core/src/core.zig` exports only `core_abi_version` (`core/src/abi.zig`), `core/host/embed.c` owns load/unload, coeffect tags and capability intercept, and the native shell owns grouping (`groupLinuxLeftovers`, `ui/linux-qt/finding.cpp:642`) and script concatenation (`cleanupScript`, `ui/linux-qt/main.cpp:2717`) behind the confirm boundary. Nothing on the load path switches on `apt` vs `pacman` vs `npm`; per-manager knowledge is one plugin per manager plus the `host.exec` allowlist (`core/host/hostexec.h:35`). No layer owns filesystem roots: a path plugin declares its own root and tags 0 when the root is absent. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; Darwin and CI may inject fixtures via `APPATTIC_HOST_EXEC_FIXTURE`). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
 
 `AppAtticScan` keeps building until a later port copies its tests into Zig. The core does not delete it. The Swift CLI (`appattic`) parses in `AppAtticScan` (`CLIParse.swift`); it is not a WASM guest. Linux Qt loads `appattic_core.wasm` through `core/host/embed.c`, and refuses to scan without it.
 
@@ -24,12 +24,12 @@ The Zig WASM core is a loader: ABI, inject/coeffects, capability intercept, left
 
 1. **Temporal composability** (ch. 1.1, 3.1). Every in-core mutation has an inverse. Unload reverts LIFO. Loading WASM is a tracked effect (ch. 6.4): drop the instance to unload.
 2. **Spatial composability** (ch. 1.1, 3.2). Plugins declare `inject`. Missing provider: INACTIVE, not an error loop.
-3. **Component = fiber** (ch. 4, 5.1.3). `inject` + `apply`. LOADING / ACTIVE / UNLOADING / INACTIVE.
+3. **Component = fiber** (ch. 4, 5.1.3). `inject` + `apply`. LOADING / ACTIVE / UNLOADING / INACTIVE are the paper's names; the built form of the one state that shows in output is a plugin whose coeffect is missing: tag 0, empty findings.
 4. **Declarative loader** (ch. 5.2). Entries: `id`, `url`, `isolate`, `intercept`, `config`, `disabled`.
 5. **Capability inject + interception** (ch. 6.3). Declared keys are all a plugin may use. Allowlists live on the host.
 6. **WASM sandbox** (ch. 6.3, 6.7). Untrusted code sees only embedder imports.
 7. **System boundary** (ch. 6.1). Disk, images, distro packages sit outside Γ. Withhold emission until confirm. Script is compensation, not a tracked inverse of `rm`.
-8. **Key identity** (ch. 6.6). Namespace `appattic.findings.<id>`. ABI integer 1.
+8. **Key identity** (ch. 6.6). ABI integer 1 (`ABI_VERSION`, `core/src/abi.zig:1`). No `appattic.findings.<id>` namespace exists: a finding is identified by its own `"id"` inside the plugin's result JSON, and the UI prefixes it with the plugin id, so ids from two plugins never collide (`uid()`, `ui/linux-qt/finding.h:52`).
 9. **Zig comptime** (ch. 6.4). Later, for typed inject accessors. Not in this record.
 
 The paper does not treat dialogs as plugins. Adaptation: plugin supplies confirm copy and script text. Native toolkit draws the alert and the sheet.
@@ -38,8 +38,9 @@ The paper does not treat dialogs as plugins. Adaptation: plugin supplies confirm
 
 | Layer | Owns | Does not own |
 |---|---|---|
-| Native shell | Windows, lists, inspector, buttons, alerts, sheet, running confirmed `sh` | CLI parsing, classify, root lists |
-| Zig core WASM | ABI, load/unload, intercept, merge/group findings, join scripts | Manager names, scan roots, brew/apt/snap parsers |
+| Native shell | Windows, lists, inspector, buttons, alerts, sheet, grouping findings, joining the confirmed `sh`, running it | CLI parsing, classify, root lists |
+| C host (`core/host/embed.c`) | ABI gate, load/unload, coeffect tags, capability intercept | Manager names, scan roots, brew/apt/snap parsers |
+| Zig core WASM (`core/src/core.zig`) | `core_abi_version` only | Everything else; the loading parts live in the C host and the native shell |
 | WASM plugins | Each manager, each leftover root, overlay/shadow, user-bin | Widgets |
 
 ## Plugin ABI (freeze = 1)
@@ -63,9 +64,12 @@ Result JSON:
   "engine": "snap",
   "findings": [],
   "script": null,
-  "dialog": { "title": "…", "body": "…" }
+  "dialog": { "title": "…", "body": "…" },
+  "note": "snap missing"
 }
 ```
+
+`note` is optional and present whenever a query command did not answer (refused, failed, timed out, or output truncated): `"<cmd> did not answer: <reason>"` per command, `; ` separated, capped at 8 (`core/src/querynote.zig`). A run where every command answered has no `note`, so an empty `findings` list means a clean scan rather than a silent one.
 
 `script` is null when nothing named. Host intercept rejects bulk wipes (`system prune`, `rmi -f`, `volume prune`, `snap remove --purge '*'`, `rm /usr/bin/snap`).
 
@@ -165,7 +169,7 @@ Not built. No `core/src/<id>.zig`, so no `.wasm` is built and the host load list
 
 User-global docker/podman leftovers. Both engines: tag findings with `engine`, do not merge IDs. Safety: never `system prune -af`, never unnamed bulk prune. `plugin_query` 0/1/2 = none/docker/podman.
 
-Queries (named objects only): `images -f dangling=true`, `volume ls -f dangling=true`, `ps -a -f status=exited`. Idle-days skipped (CLI CREATED is relative text, not a timestamp). Abandoned compose/pods and unnamed build cache are not queried this turn. Confirm script may include named `rmi <id>`, `volume rm <name>`, `rm <id>`. Live `host.exec` denies `rmi`, `rm`, `system prune`, `volume prune`.
+Queries (named objects only): `images -f dangling=true`, `volume ls -f dangling=true`, `ps -a -f status=exited`. Idle-days skipped (CLI CREATED is relative text, not a timestamp). Abandoned compose/pods are not queried this turn. The unnamed build cache is not queried either, but it is still reported as a `build-cache` finding with `"id": null`, `"status": "review"`, and no command, so the omission is visible in the list instead of reading as a clean scan. Confirm script may include named `rmi <id>`, `volume rm <name>`, `rm <id>`. Live `host.exec` denies `rmi`, `rm`, `system prune`, `volume prune`.
 
 ## snapd
 
@@ -198,12 +202,11 @@ Linux Qt already loads the WASM plugins. These remain in Swift for the macOS UI 
 
 ## Tests
 
-Host exit 0 loading the built plugin set (`core/build.sh`). JSON plugin ids match. No `system prune`, no `snap remove --purge '*'`, no `rm /usr/bin/snap`. Tag 0 yields empty findings.
+Host exit 0 loading the built plugin set (`core/build.sh` builds it; `scripts/linux-qt-link.sh --smoke` is the gate that loads it in CI). JSON plugin ids match. No `system prune`, no `snap remove --purge '*'`, no `rm /usr/bin/snap` (`core/host/tests/hostexec_test.c` asserts those). Tag 0 yields empty findings.
 
 ## Open questions
 
-- Both docker and podman: dual tagged lists vs Settings picker?
-- Stopped containers: default cleanup vs review-only?
-- `idleDays` default 30?
-- Shipping Wasmtime vs another embedder?
+Settled by this record, kept here only so a later change knows what was decided: both docker and podman are listed and tagged by `engine` (no Settings picker); stopped containers are review-only with a named `rm` after confirm; the embedder is the Wasmtime C API, which `core/build.sh` requires and fails the build without.
+
+- `idleDays` default 30? No `idleDays` field exists yet, so nothing is filtered by age today.
 - podman-docker shim vs Docker Desktop?
