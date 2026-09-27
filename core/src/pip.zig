@@ -83,7 +83,7 @@ fn nameIn(hits: []const PipOutdated, name: []const u8) bool {
     return false;
 }
 
-fn renderPip(globals: []const PipOutdated, outdated: []const PipOutdated) bool {
+fn renderPip(outdated: []const PipOutdated, globals: []const PipOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"pip\",\"engine\":\"pip\",\"findings\":[");
@@ -176,22 +176,7 @@ fn query_impl(present: i32) i32 {
     if (nq >= 0) n_out = parsePipOutdatedJSON(exec_out_buf[0..@intCast(nq)], &outdated);
     note.addTruncatedRows(n_out, outdated.len);
 
-    const n_parsed = n_glob + n_out;
-    while (true) {
-        if (renderPip(globals[0..n_glob], outdated[0..n_out])) {
-            note.addDroppedRows(n_parsed - (n_glob + n_out));
-            return 0;
-        }
-        if (n_glob > 0) {
-            n_glob -= 1;
-            continue;
-        }
-        if (n_out > 0) {
-            n_out -= 1;
-            continue;
-        }
-        return 1;
-    }
+    return note.renderShrinkingPair(renderPip, &outdated, &n_out, &globals, &n_glob);
 }
 
 comptime {
@@ -248,7 +233,7 @@ test "renderPip keeps a large user-site list" {
         const v = std.fmt.bufPrint(&vers[i], "1.0.{d}", .{i}) catch unreachable;
         hits[i] = .{ .name = n, .current = v, .latest = "" };
     }
-    try std.testing.expect(renderPip(&hits, &.{}));
+    try std.testing.expect(renderPip(&.{}, &hits));
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "pkg-00") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pkg-79") != null);

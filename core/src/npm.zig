@@ -100,19 +100,7 @@ fn query_impl(present: i32) i32 {
     if (nq >= 0) n_out = jsonscan.parseJsonNamedOutdated(exec_out_buf[0..@intCast(nq)], &outdated);
     note.addTruncatedRows(n_out, outdated.len);
 
-    const n_parsed = n + n_out;
-    while (true) {
-        if (renderNpm(hits[0..n], outdated[0..n_out])) {
-            note.addDroppedRows(n_parsed - (n + n_out));
-            return 0;
-        }
-        if (n_out > 0) {
-            n_out -= 1;
-            continue;
-        }
-        if (n == 0) return 1;
-        n -= 1;
-    }
+    return note.renderShrinkingPair(renderNpm, &hits, &n, &outdated, &n_out);
 }
 
 comptime {

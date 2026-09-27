@@ -158,22 +158,7 @@ fn query_impl(present: i32) i32 {
     if (nq >= 0) n_out = parseZypperListUpdates(exec_up_buf[0..@intCast(nq)], &outdated);
     note.addTruncatedRows(n_out, outdated.len);
 
-    const n_parsed = n_out + n_orph;
-    while (true) {
-        if (renderZypper(orphans[0..n_orph], outdated[0..n_out])) {
-            note.addDroppedRows(n_parsed - (n_out + n_orph));
-            return 0;
-        }
-        if (n_out > 0) {
-            n_out -= 1;
-            continue;
-        }
-        if (n_orph > 0) {
-            n_orph -= 1;
-            continue;
-        }
-        return 1;
-    }
+    return note.renderShrinkingPair(renderZypper, &orphans, &n_orph, &outdated, &n_out);
 }
 
 comptime {

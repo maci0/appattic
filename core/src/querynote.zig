@@ -56,6 +56,51 @@ pub const Log = struct {
         self.dropped_rows += dropped;
     }
 
+    /// Trim rows off the end of a parsed list until `render` fits it in the
+    /// result buffer, recording what the trimming cost. Returns 0 once the
+    /// render succeeds, 1 when the list is empty and it still does not.
+    pub fn renderShrinking(
+        self: *Log,
+        comptime render: anytype,
+        list: anytype,
+        n: *usize,
+    ) i32 {
+        const n_parsed = n.*;
+        while (true) {
+            if (render(list[0..n.*])) {
+                self.addDroppedRows(n_parsed - n.*);
+                return 0;
+            }
+            if (n.* == 0) return 1;
+            n.* -= 1;
+        }
+    }
+
+    /// `renderShrinking` for the plugins that parse two lists. `second` is
+    /// trimmed first, so the shorter-lived list of the two is what survives.
+    pub fn renderShrinkingPair(
+        self: *Log,
+        comptime render: anytype,
+        first: anytype,
+        n_first: *usize,
+        second: anytype,
+        n_second: *usize,
+    ) i32 {
+        const n_parsed = n_first.* + n_second.*;
+        while (true) {
+            if (render(first[0..n_first.*], second[0..n_second.*])) {
+                self.addDroppedRows(n_parsed - (n_first.* + n_second.*));
+                return 0;
+            }
+            if (n_second.* > 0) {
+                n_second.* -= 1;
+                continue;
+            }
+            if (n_first.* == 0) return 1;
+            n_first.* -= 1;
+        }
+    }
+
     /// Append the `note` field. Writes nothing when every command answered and
     /// no parser ran out of room, so a clean result keeps the shape it had
     /// before.

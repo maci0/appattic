@@ -272,19 +272,7 @@ fn query_impl(present: i32) i32 {
     }
     note.addTruncatedRows(n_out, outdated.len);
 
-    const n_parsed = n + n_out;
-    while (true) {
-        if (renderFlatpak(hits[0..n], outdated[0..n_out])) {
-            note.addDroppedRows(n_parsed - (n + n_out));
-            return 0;
-        }
-        if (n_out > 0) {
-            n_out -= 1;
-            continue;
-        }
-        if (n == 0) return 1;
-        n -= 1;
-    }
+    return note.renderShrinkingPair(renderFlatpak, &hits, &n, &outdated, &n_out);
 }
 
 comptime {

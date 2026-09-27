@@ -220,22 +220,7 @@ fn query_impl(present: i32) i32 {
         note.addTruncatedRows(n_orphans, orphans.len);
     }
 
-    const n_parsed = n_orphans + n_disabled;
-    while (true) {
-        if (renderSnapd(disabled[0..n_disabled], orphans[0..n_orphans])) {
-            note.addDroppedRows(n_parsed - (n_orphans + n_disabled));
-            return 0;
-        }
-        if (n_orphans > 0) {
-            n_orphans -= 1;
-            continue;
-        }
-        if (n_disabled > 0) {
-            n_disabled -= 1;
-            continue;
-        }
-        return 1;
-    }
+    return note.renderShrinkingPair(renderSnapd, &disabled, &n_disabled, &orphans, &n_orphans);
 }
 
 comptime {
