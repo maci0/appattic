@@ -452,9 +452,9 @@ final class PackagingTests: XCTestCase {
             contentsOf: root.appendingPathComponent(".github/workflows/linux.yml"),
             encoding: .utf8
         )
-        XCTAssertTrue(yaml.contains("actions/checkout@11d5960a326750d5838078e36cf38b85af677262"), yaml)
-        XCTAssertTrue(yaml.contains("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"), yaml)
-        XCTAssertTrue(yaml.contains("actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809"), yaml)
+        XCTAssertTrue(yaml.contains("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"), yaml)
+        XCTAssertTrue(yaml.contains("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"), yaml)
+        XCTAssertTrue(yaml.contains("actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"), yaml)
         XCTAssertFalse(yaml.contains("actions/checkout@v4\n"), yaml)
         XCTAssertFalse(yaml.contains("setup-swift@v2\n"), yaml)
         XCTAssertFalse(yaml.contains("upload-artifact@v4\n"), yaml)
@@ -465,14 +465,14 @@ final class PackagingTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(
-            release.contains("softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65"),
+            release.contains("softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64"),
             release
         )
         XCTAssertFalse(release.contains("action-gh-release@v2\n"), release)
         XCTAssertTrue(release.contains("persist-credentials: false"), release)
         XCTAssertTrue(release.contains("timeout-minutes:"), release)
         XCTAssertTrue(release.contains("github.ref_name"), release)
-        XCTAssertTrue(release.contains("actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809"), release)
+        XCTAssertTrue(release.contains("actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"), release)
         XCTAssertTrue(release.contains("linux-appimage.sh"), release)
         XCTAssertTrue(release.contains("fail_on_unmatched_files: true"), release)
         XCTAssertTrue(release.contains("concurrency:"), release)
