@@ -239,6 +239,19 @@ final class RecommendTests: XCTestCase {
         XCTAssertEqual(zt.source, "brew-cask")
     }
 
+    /// `norm` drops separators, so a normalised pretty title carries no word
+    /// boundary: "Google Chrome Canary" normalises to a string starting with
+    /// "Google Chrome". Matching on that alone claims the wrong cask, and the
+    /// stale script then uninstalls the wrong cask instead of the app.
+    func testCaskTitlePrefixDoesNotClaimADifferentApp() {
+        let app = AppRecord(path: "/Applications/Google Chrome.app", displayName: "Google Chrome", bundleId: "com.google.Chrome")
+        let brew = BrewSnapshot(available: true, casks: [Cask(name: "chrome-canary", titles: ["Google Chrome Canary"])])
+        let software = buildSoftware(apps: [app], brew: brew, dataItems: [], history: HistoryIndex(), includeDarwinNonApp: false)
+        let row = software.first { $0.name == "Google Chrome" }!
+        XCTAssertNil(row.caskName)
+        XCTAssertNotEqual(row.source, "brew-cask")
+    }
+
     func testCaskDescJoinsByArtifactBasename() {
         let app = AppRecord(path: "/Applications/Notepadnext.app", displayName: "Notepad Next", bundleId: "com.notepadnext.app")
         let brew = BrewSnapshot(available: true, casks: [Cask(name: "notepadnext", desc: "Notepad++-style editor", appNames: ["Notepadnext.app"])])

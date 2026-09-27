@@ -392,7 +392,7 @@ private let virtualFs: Set<String> = [
     "proc", "sysfs", "devtmpfs", "devpts", "cgroup", "cgroup2", "securityfs",
     "pstore", "bpf", "tracefs", "debugfs", "hugetlbfs", "mqueue", "ramfs",
     "autofs", "fusectl", "configfs", "rpc_pipefs", "binfmt_misc", "overlay",
-    "squashfs", "nsfs", "efivarfs",
+    "squashfs", "nsfs", "efivarfs", "tmpfs",
 ]
 
 public func listDiskVolumes(
@@ -451,7 +451,7 @@ public func listDiskVolumes(
                 bytesTotal: vals?.volumeTotalCapacity ?? 0,
                 bytesAvailable: vals?.volumeAvailableCapacity ?? 0,
                 isRoot: root == "/",
-                isHome: home == root || home.hasPrefix(root + "/")
+                isHome: home == root || home.hasPrefix(root == "/" ? "/" : root + "/")
             ))
         }
     }

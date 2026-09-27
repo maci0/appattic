@@ -169,18 +169,19 @@ public func decodeUTF8(_ data: Data) -> String {
 public func posixLowercased(_ s: String) -> String {
     // ASCII check first: works on small/non-contiguous strings too, where
     // `withContiguousStorageIfAvailable` gives up and would force the slow path.
-    guard !s.utf8.contains(where: { $0 >= 0x80 }) else {
-        return s.lowercased(with: Locale(identifier: "en_US_POSIX"))
-    }
-    let n = s.utf8.count
-    return withUnsafeTemporaryAllocation(of: UInt8.self, capacity: n) { buf in
-        var k = 0
-        for c in s.utf8 {
-            buf[k] = (c >= 0x41 && c <= 0x5A) ? c &+ 32 : c
-            k += 1
+    guard s.utf8.contains(where: { $0 >= 0x80 }) else {
+        let n = s.utf8.count
+        guard n > 0 else { return "" }
+        return withUnsafeTemporaryAllocation(of: UInt8.self, capacity: n) { buf in
+            var k = 0
+            for c in s.utf8 {
+                buf[k] = (c >= 0x41 && c <= 0x5A) ? c &+ 32 : c
+                k += 1
+            }
+            return String(decoding: UnsafeBufferPointer(start: buf.baseAddress, count: n), as: UTF8.self)
         }
-        return String(decoding: UnsafeBufferPointer(start: buf.baseAddress, count: n), as: UTF8.self)
     }
+    return s.lowercased(with: Locale(identifier: "en_US_POSIX"))
 }
 
 /// Read a file as UTF-8. Invalid sequences become U+FFFD, matching `runCommand`.

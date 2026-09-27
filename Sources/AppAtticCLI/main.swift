@@ -136,6 +136,10 @@ func runDiskCommand(_ opts: CLIOptions) {
     fputs("scanning \(root)\n", stderr)
     fflush(stderr)
     let tree = scanDiskUsage(root: root, oneFileSystem: !opts.allFileSystems)
+    // `scanDiskUsage` ranks by allocated blocks; the default report prints
+    // apparent size, so re-rank by the metric being shown or `--top N` slices
+    // the wrong rows.
+    tree.sortChildren(allocatedSize: opts.allocated)
     print(formatDiskTree(tree, allocatedSize: opts.allocated, top: opts.top), terminator: "")
     if let jsonPath = opts.json {
         do {

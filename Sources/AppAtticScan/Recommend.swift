@@ -196,11 +196,18 @@ func caskForApp(_ app: AppRecord, casks: [Cask], pathIndex: [String: String]) ->
         let lowered = Set(titles.filter { !$0.isEmpty }.map { $0.lowercased() })
         if !display.isEmpty, lowered.contains(display) { return c }
         if an.count < 6 { continue }
+        let cn = norm(c.name)
+        // `norm` drops separators, so once normalised a pretty title can extend
+        // the app name with no word boundary left to check ("Google Chrome" vs
+        // "Google Chrome Canary"). A longer title only names the same product
+        // when the cask name itself shares the app-name prefix, which is the
+        // form Homebrew uses for a variant ("zerotier-one" for ZeroTier One).
+        let caskNamesApp = cn.count >= 3 && (cn == an || an.hasPrefix(cn) || cn.hasPrefix(an))
         for t in titles {
             let tn = norm(t)
             if tn.isEmpty { continue }
             if an == tn { return c }
-            if min(an.count, tn.count) >= 6, tn.hasPrefix(an) || an.hasPrefix(tn) { return c }
+            if caskNamesApp, min(an.count, tn.count) >= 6, tn.hasPrefix(an) || an.hasPrefix(tn) { return c }
         }
     }
     return nil
