@@ -107,10 +107,15 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
 
         for (names[0..name_n]) |name| {
             if (n >= out.len) return n;
-            const stable_name = copySlice(name, paths, &used) orelse continue;
-            const link_path = joinPath(root.path, stable_name, paths, &used) orelse continue;
+            // Probe on a local cursor: a name that is not a dangling symlink
+            // leaves no path behind, so a root with more files than the store
+            // holds still reaches its last entry.
+            var probe = used;
+            const stable_name = copySlice(name, paths, &probe) orelse continue;
+            const link_path = joinPath(root.path, stable_name, paths, &probe) orelse continue;
             if (!isDanglingSymlink(link_path)) continue;
             out[n] = .{ .name = stable_name, .path = link_path, .root_label = root.label };
+            used = probe;
             n += 1;
         }
     }

@@ -22,11 +22,26 @@ pub const W = struct {
         self.raw("\"");
     }
 
+    /// ASCII byte that goes into the output unchanged.
+    fn plainAscii(c: u8) bool {
+        return c >= 0x20 and c < 0x80 and c != '"' and c != '\\';
+    }
+
     /// Escape for a JSON string body, without the surrounding quotes. Use
-    /// inside a string the writer has already opened.
+    /// inside a string the writer has already opened. Bytes that need no
+    /// escape are copied in runs: a path or a package name is mostly plain
+    /// ASCII, and one `raw` per byte made a finding cost one memcpy call per
+    /// character.
     pub fn escaped(self: *W, s: []const u8) void {
         var i: usize = 0;
         while (i < s.len) {
+            var run = i;
+            while (run < s.len and plainAscii(s[run])) run += 1;
+            if (run > i) {
+                self.raw(s[i..run]);
+                i = run;
+                if (i == s.len) return;
+            }
             const c = s[i];
             switch (c) {
                 '"' => {
@@ -50,12 +65,10 @@ pub const W = struct {
                     i += 1;
                 },
                 else => {
+                    // The run above consumed every other ASCII byte.
                     if (c < 0x20) {
                         const hex = "0123456789abcdef";
                         self.raw(&[_]u8{ '\\', 'u', '0', '0', hex[c >> 4], hex[c & 15] });
-                        i += 1;
-                    } else if (c < 0x80) {
-                        self.raw(&[_]u8{c});
                         i += 1;
                     } else {
                         const n = std.unicode.utf8ByteSequenceLength(c) catch {
@@ -251,6 +264,14 @@ test "json string escapes remaining C0 controls" {
     w.str("a\x01b\x1fc");
     const got = w.slice() orelse return error.Overflow;
     try std.testing.expectEqualStrings("\"a\\u0001b\\u001fc\"", got);
+}
+
+test "json string copies plain runs around the escapes" {
+    var buf: [64]u8 = undefined;
+    var w = W{ .buf = &buf };
+    w.str("plain/run\"next\\end\t/plain");
+    const got = w.slice() orelse return error.Overflow;
+    try std.testing.expectEqualStrings("\"plain/run\\\"next\\\\end\\t/plain\"", got);
 }
 
 test "json writer overflow sets failed" {

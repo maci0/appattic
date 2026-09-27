@@ -71,14 +71,18 @@ fn findShadowsNative(
             if (name.len == 0 or name[0] == '.') continue;
             if (!jsonbuf.isSafeIdent(name)) continue;
 
-            const overlay_path = joinPath(odir, name, path_store, &used) orelse continue;
+            // Probe on a local cursor: a name that turns out not to shadow
+            // anything leaves no path behind, so a root with more files than
+            // the store holds still reaches its last entry.
+            var probe = used;
+            const overlay_path = joinPath(odir, name, path_store, &probe) orelse continue;
             if (!isRegularFile(io, overlay_path)) continue;
             const resolved_overlay = resolvePathNative(io, overlay_path, &o_res) orelse continue;
 
             var packaged: ?[]const u8 = null;
             var same = false;
             for (packageDirs) |pdir| {
-                const pkg_path = joinPath(pdir, name, path_store, &used) orelse continue;
+                const pkg_path = joinPath(pdir, name, path_store, &probe) orelse continue;
                 if (!isRegularFile(io, pkg_path)) continue;
                 const resolved_pkg = resolvePathNative(io, pkg_path, &p_res) orelse continue;
                 if (std.mem.eql(u8, resolved_overlay, resolved_pkg)) {
@@ -96,6 +100,7 @@ fn findShadowsNative(
                 .path = overlay_path,
                 .shadows = packaged.?,
             };
+            used = probe;
             n += 1;
         }
     }
@@ -170,14 +175,17 @@ fn findShadowsExec(
 
         for (names[0..copied]) |name| {
             if (n >= out.len) return n;
-            const overlay_path = joinPath(odir, name, path_store, &used) orelse continue;
+            // Probe on a local cursor; only an accepted shadow keeps its
+            // paths. See findShadowsNative.
+            var probe = used;
+            const overlay_path = joinPath(odir, name, path_store, &probe) orelse continue;
             if (!fileExistsExec(overlay_path)) continue;
             const resolved_overlay = resolvePathExec(overlay_path, &ov_buf) orelse continue;
 
             var packaged: ?[]const u8 = null;
             var same = false;
             for (packageDirs) |pdir| {
-                const pkg_path = joinPath(pdir, name, path_store, &used) orelse continue;
+                const pkg_path = joinPath(pdir, name, path_store, &probe) orelse continue;
                 if (!fileExistsExec(pkg_path)) continue;
                 const resolved_pkg = resolvePathExec(pkg_path, &pkg_buf) orelse continue;
                 if (std.mem.eql(u8, resolved_overlay, resolved_pkg)) {
@@ -188,6 +196,7 @@ fn findShadowsExec(
             }
             if (same or packaged == null) continue;
             out[n] = .{ .name = name, .path = overlay_path, .shadows = packaged.? };
+            used = probe;
             n += 1;
         }
     }
@@ -328,6 +337,47 @@ test "findShadows skips symlink to packaged file" {
     const packages = [_][]const u8{package_rp[0..package_dir]};
     const n = findShadows(&overlays, &packages, &hits, &paths);
     try std.testing.expectEqual(@as(usize, 0), n);
+}
+
+test "findShadows reaches a later root after a long run of non-shadowing files" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "overlay-a");
+    try tmp.dir.createDirPath(io, "overlay-b");
+    try tmp.dir.createDirPath(io, "usr/bin");
+    // Names long enough that a handful of rejected candidates fills a small
+    // path store, so the first root is where an unbounded probe cursor would
+    // run the scan out before the second root is read.
+    var long_name: [176]u8 = undefined;
+    for (0..8) |i| {
+        const head = try std.fmt.bufPrint(long_name[0..16], "tool-{d}-", .{i});
+        @memset(long_name[head.len..], 'x');
+        const name = long_name[0 .. head.len + 160];
+        const sub = try std.fs.path.join(std.testing.allocator, &.{ "overlay-a", name });
+        defer std.testing.allocator.free(sub);
+        try tmp.dir.writeFile(io, .{ .sub_path = sub, .data = "a" });
+    }
+    try tmp.dir.writeFile(io, .{ .sub_path = "overlay-b/python3", .data = "#!/bin/sh\necho user\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "usr/bin/python3", .data = "#!/bin/sh\necho distro\n" });
+
+    var a_rp: [512]u8 = undefined;
+    var b_rp: [512]u8 = undefined;
+    var package_rp: [512]u8 = undefined;
+    const a_dir = try tmp.dir.realPathFile(io, "overlay-a", &a_rp);
+    const b_dir = try tmp.dir.realPathFile(io, "overlay-b", &b_rp);
+    const package_dir = try tmp.dir.realPathFile(io, "usr/bin", &package_rp);
+
+    var hits: [8]ShadowFinding = undefined;
+    var paths: [1024]u8 = undefined;
+    const overlays = [_][]const u8{ a_rp[0..a_dir], b_rp[0..b_dir] };
+    const packages = [_][]const u8{package_rp[0..package_dir]};
+    const n = findShadows(&overlays, &packages, &hits, &paths);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqualStrings("python3", hits[0].name);
+    try std.testing.expect(std.mem.endsWith(u8, hits[0].path, "/overlay-b/python3"));
+    try std.testing.expect(std.mem.endsWith(u8, hits[0].shadows, "/usr/bin/python3"));
 }
 
 test "plugin_query present JSON includes shadow finding" {
