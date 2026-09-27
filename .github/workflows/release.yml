@@ -30,12 +30,13 @@ jobs:
             .zig-cache
             .zig-cache-local
             dist/.appimage-tools
+          # No restore-keys fallback: a prefix that ignores the hash also
+          # ignores .zig-version, so it can hand back a cache a different Zig
+          # wrote.
           key: >-
             ${{ runner.os }}-appimage-${{
             hashFiles('scripts/dep-checksums.sha256', 'scripts/deps.sh',
             '.zig-version', 'core/src/**/*.zig') }}
-          restore-keys: |
-            ${{ runner.os }}-appimage-
       - name: Install Qt 6 and build tools
         run: sudo bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API

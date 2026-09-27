@@ -120,6 +120,10 @@ if [[ "$OS" == Darwin && "$HAVE_MAC_UI" -eq 1 ]]; then
     cp packaging/Info.plist AppAttic.app/Contents/Info.plist
     cp packaging/AppAttic.icns AppAttic.app/Contents/Resources/AppAttic.icns
     codesign --force --sign - AppAttic.app
+    # Bundle mtimes come from the copy, so zipping the .app twice gives two
+    # archives. Sign first: codesign rewrites the bundle, so touch has to be
+    # the last thing that writes to it.
+    find AppAttic.app -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} +
     echo "Built AppAttic.app"
     echo "Launch: open AppAttic.app"
     echo "CLI:    ./run.sh report"

@@ -158,6 +158,7 @@ rsync -a \
     --exclude '.deps/' \
     --exclude '.tmp-shots/' \
     --exclude 'AppAttic.app/' \
+    --exclude 'core/out/' \
     --exclude 'dist/' \
     --exclude '.zig-cache/' \
     --exclude '.zig-cache-local/' \

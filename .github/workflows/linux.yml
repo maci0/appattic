@@ -84,14 +84,15 @@ jobs:
             .zig-cache-local
           # The toolchain version files belong in the key: a restore of a
           # .build or .zig-cache written by another Swift or Zig is a build
-          # against a compiler this tree does not pin.
+          # against a compiler this tree does not pin. No restore-keys
+          # fallback for the same reason: a prefix that ignores the hash also
+          # ignores the toolchain, so it would hand back exactly the cache the
+          # key exists to keep out.
           key: >-
             ${{ runner.os }}-${{ github.job }}-${{
             hashFiles('Package.resolved', 'Package.swift', '.swift-version',
             '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
             'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ github.job }}-
       - name: Install Qt 6
         run: sudo bash scripts/linux-deps.sh --install
       - name: Distro deps
@@ -154,14 +155,15 @@ jobs:
             .zig-cache-local
           # The toolchain version files belong in the key: a restore of a
           # .build or .zig-cache written by another Swift or Zig is a build
-          # against a compiler this tree does not pin.
+          # against a compiler this tree does not pin. No restore-keys
+          # fallback for the same reason: a prefix that ignores the hash also
+          # ignores the toolchain, so it would hand back exactly the cache the
+          # key exists to keep out.
           key: >-
             ${{ runner.os }}-${{ github.job }}-${{
             hashFiles('Package.resolved', 'Package.swift', '.swift-version',
             '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
             'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ github.job }}-
       - name: Install Qt 6
         run: bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API
@@ -212,8 +214,6 @@ jobs:
             .zig-cache
             .zig-cache-local
           key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('.zig-version', 'core/src/**/*.zig') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ github.job }}-
       - name: Distro deps
         run: bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API

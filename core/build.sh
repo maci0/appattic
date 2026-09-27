@@ -112,6 +112,12 @@ fi
 
 zig fmt --check "$root/src" "$root/bench"
 
+# core/out is kept between runs and the packaging scripts bundle it by glob
+# (AppImage) or by pattern (cmake install). Without this, the output of a
+# removed or renamed plugin survives in the tree and ships in the artifact.
+# Only the full build clears it; test and test-core leave the artifacts alone.
+rm -f "$out"/*.wasm "$out"/*.cwasm
+
 zig_wasm() {
     zig build-exe \
         -target wasm32-freestanding \
