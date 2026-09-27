@@ -47,7 +47,11 @@ shellcheck -x -P SCRIPTDIR "$ROOT/build.sh" "$ROOT/run.sh" "$ROOT/core/build.sh"
 bash "$ROOT/scripts/check-version.sh" >/dev/null
 
 if ! command -v yamllint >/dev/null 2>&1; then
-    echo "error: yamllint missing" >&2
+    # The pin lives in deps.sh, which also fails when the workflow and that pin
+    # disagree, so name it here rather than sending the contributor to CI.
+    yl="$(bash "$ROOT/scripts/deps.sh" yamllint-version)"
+    echo "error: yamllint missing (CI lints with yamllint $yl)" >&2
+    echo "install: uv tool install \"yamllint==$yl\"" >&2
     exit 1
 fi
 yamllint -c "$ROOT/.yamllint" "$ROOT"/.github/workflows/*.yml "$ROOT"/packaging/flatpak/*.yml

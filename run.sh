@@ -76,13 +76,16 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     if BIN="$(find_bin appattic)"; then
         exec "$BIN" "$@"
     fi
+    # No build yet: the CLI's own help is not on disk, so send the contributor
+    # the same command list ./build.sh --help prints instead of a bare stub.
     cat <<'EOF'
 Usage: ./run.sh [command] [options]
        ./run.sh --ui [qt-args]
 
-Build with ./build.sh first. After a build, this is the appattic CLI.
+appattic is not built yet. Build it, then this is the appattic CLI.
 EOF
-    exit 0
+    echo
+    exec "$ROOT/build.sh" --help
 fi
 
 BIN="$(find_bin appattic)" || {

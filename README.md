@@ -195,6 +195,7 @@ Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downl
 ```bash
 bash scripts/deps.sh check              # pins vs download URLs vs Flatpak sha256
 bash scripts/deps.sh sbom out.json      # CycloneDX 1.5 inventory
+bash scripts/deps.sh yamllint-version   # the yamllint pin lint.sh names when it is missing
 ```
 
 `scripts/lint.sh` runs `check`, so a version bump that leaves a pin, a URL, or a Flatpak `sha256:` behind fails the local gate.

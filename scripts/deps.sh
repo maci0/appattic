@@ -26,11 +26,12 @@ YAMLLINT_VERSION="1.38.0"
 
 usage() {
     cat <<'EOF'
-Usage: bash scripts/deps.sh [check | sbom <out.json>]
+Usage: bash scripts/deps.sh [check | sbom <out.json> | yamllint-version]
 
-  check           default; pins must agree across dep-checksums.sha256,
-                  scripts/, packaging/flatpak/, and the table in this file
-  sbom <out.json> CycloneDX 1.5 inventory of fetched artifacts and SwiftPM pins
+  check             default; pins must agree across dep-checksums.sha256,
+                    scripts/, packaging/flatpak/, and the table in this file
+  sbom <out.json>   CycloneDX 1.5 inventory of fetched artifacts and SwiftPM pins
+  yamllint-version  the yamllint version CI installs, for scripts/lint.sh
 EOF
 }
 
@@ -494,6 +495,12 @@ case "$CMD" in
             exit 2
         fi
         run_sbom "$2"
+        ;;
+    yamllint-version)
+        # scripts/lint.sh names the pin when yamllint is missing, so the
+        # version stays declared here with the rest of the tool pins.
+        [[ $# -le 1 ]] || { usage >&2; exit 2; }
+        printf '%s\n' "$YAMLLINT_VERSION"
         ;;
     -h | --help | help)
         usage

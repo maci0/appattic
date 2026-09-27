@@ -26,6 +26,18 @@ if [[ -z "$ZIG_VER" ]]; then
     echo "error: empty .zig-version" >&2
     exit 1
 fi
+# The Swift note has to name the exact version, not a series: find-swift.sh
+# rejects anything but the one in .swift-version, so a preflight that said
+# "5.10" would pass a machine that scripts/check.sh then refuses.
+if [[ ! -f "$ROOT/.swift-version" ]]; then
+    echo "error: missing $ROOT/.swift-version; the required Swift version is declared there" >&2
+    exit 1
+fi
+SWIFT_VER="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
+if [[ -z "$SWIFT_VER" ]]; then
+    echo "error: empty .swift-version" >&2
+    exit 1
+fi
 
 usage() {
     cat <<'EOF'
@@ -34,8 +46,8 @@ Usage: scripts/linux-deps.sh [--install] [--install-swift] [--install-wasmtime] 
 
   (no flags)           Print Qt 6, Wasmtime, Swift, and shellcheck notes for this distro.
   --install            Install Qt 6 Widgets headers, cmake, ninja, pkg-config, clang (needs root).
-  --install-swift      Install Swift 5.10.1 (official Ubuntu 22.04 tarball)
-                       to /opt/swift, or .deps/swift without root.
+  --install-swift      Install the .swift-version toolchain (official Ubuntu 22.04
+                       tarball) to /opt/swift, or .deps/swift without root.
   --install-wasmtime   Install Wasmtime C API headers/libs (needed to embed appattic_core.wasm).
   --install-zig        Install the .zig-version toolchain only (no Qt, no wasmtime).
   --install-shellcheck  Install shellcheck (scripts/lint.sh needs it).
@@ -253,7 +265,7 @@ fi
 echo "Zig ${ZIG_VER}: checksummed tarball on every distro, never a distro package"
 echo "shellcheck: needed by scripts/lint.sh. bash $0 --install-shellcheck"
 echo "Wasmtime C API ${WASMTIME_VER}: bash $0 --install-wasmtime"
-echo "Swift 5.10: needed to compile the CLI and tests. Not shipped as a universal Linux binary."
+echo "Swift ${SWIFT_VER}: needed to compile the CLI and tests. Not shipped as a universal Linux binary."
 case "$family" in
     arch)
         echo "  Arch extra has no Swift compiler. AUR: swift-bin (or swiftly-bin)."
@@ -277,7 +289,7 @@ echo "After Qt 6 + Wasmtime + zig are installed: bash scripts/linux-qt-link.sh"
 if [[ "$family" == debian ]]; then
     ver="${VERSION_ID:-}"
     if [[ "$ver" == 24.04 ]]; then
-        echo "Ubuntu 24.04: Swift 5.10.1 tarball targets 22.04 (libpython3.10). Prefer swiftly, Dockerfile, or CI setup-swift."
+        echo "Ubuntu 24.04: Swift ${SWIFT_VER} tarball targets 22.04 (libpython3.10). Prefer swiftly, Dockerfile, or CI setup-swift."
     fi
 fi
 
@@ -489,16 +501,7 @@ if [[ "$INSTALL_WASMTIME" -eq 1 ]]; then
 fi
 
 install_swift_tarball() {
-    local ver
-    if [[ ! -f "$ROOT/.swift-version" ]]; then
-        echo "error: missing $ROOT/.swift-version; the required Swift version is declared there" >&2
-        exit 1
-    fi
-    ver="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
-    if [[ -z "$ver" ]]; then
-        echo "error: empty .swift-version" >&2
-        exit 1
-    fi
+    local ver="$SWIFT_VER"
     local dest=""
     if [[ -w /opt ]] || [[ "$(id -u)" -eq 0 ]]; then
         dest="/opt/swift"
