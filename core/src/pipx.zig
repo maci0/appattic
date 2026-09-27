@@ -4,6 +4,7 @@ const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
 
 const plugin_id = "pipx";
 const query_cmds = [_][]const u8{
@@ -197,12 +198,7 @@ test "parsePipxList empty junk" {
     try std.testing.expectEqual(@as(usize, 0), parsePipxList("nothing here", &buf));
 }
 
-fn packFuzzSlice(comptime s: []const u8) [4 + s.len]u8 {
-    var out: [4 + s.len]u8 = undefined;
-    std.mem.writeInt(u32, out[0..4], @intCast(s.len), .little);
-    @memcpy(out[4..], s);
-    return out;
-}
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const fuzz_pipx_json = packFuzzSlice(
     \\{"venvs":{"httpie":{"metadata":{"main_package":{"package":"httpie","package_version":"3.2.2"}}}}}

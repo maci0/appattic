@@ -6,6 +6,10 @@ const EnginePodman: i32 = 2;
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "container-runtime";
 const q_images = "images -f dangling=true";
@@ -374,4 +378,84 @@ test "plugin_query missing is empty findings" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "no container engine") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "system prune") == null);
+}
+
+// Seeds are the three `docker`/`podman` listings, each with its header row,
+// plus the rows a naive column count gets wrong: a line with too few columns,
+// and a container row whose COMMAND and STATUS have spaces in them.
+const fuzz_images = packFuzzSlice(
+    \\REPOSITORY   TAG      IMAGE ID       CREATED       SIZE
+    \\<none>       <none>   abc123def456   3 weeks ago   1.2GB
+    \\ubuntu       22.04    def456abc123   2 days ago    80MB
+);
+const fuzz_volumes = packFuzzSlice(
+    \\DRIVER    VOLUME NAME
+    \\local     my-volume
+    \\local     
+);
+const fuzz_containers = packFuzzSlice(
+    \\CONTAINER ID   IMAGE          COMMAND                  STATUS         NAMES
+    \\abc123def456   ubuntu:22.04   "/bin/sh -c sleep inf"   Exited (0)     my-container
+);
+const fuzz_broken = packFuzzSlice(
+    \\
+    \\only
+    \\two columns
+    \\abc123def456
+    \\abc123def456 img cmd status
+);
+const fuzz_unsafe = packFuzzSlice(
+    \\abc123def456 ubuntu ../../etc
+    \\abc123def456 img "c; rm -rf /" Exited my;name
+);
+const fuzz_junk = packFuzzSlice("\x00\x01\xff\nabc123def456\x00 img\n");
+const fuzz_empty = packFuzzSlice("");
+
+test "fuzz container runtime listing parsers" {
+    try std.testing.fuzz({}, fuzzContainerListings, .{ .corpus = &.{
+        &fuzz_images,
+        &fuzz_volumes,
+        &fuzz_containers,
+        &fuzz_broken,
+        &fuzz_unsafe,
+        &fuzz_junk,
+        &fuzz_empty,
+    } });
+}
+
+/// An id that reaches `docker rmi` or `docker rm` is either hex or a safe
+/// ident, and every field cut from a row is a span of the input. The image
+/// parser fills `name` from a literal rather than the row, so only `id` is
+/// checked for provenance there.
+fn fuzzContainerListings(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var images: [32]Hit = undefined;
+    const nimg = parseDanglingImages(text, &images);
+    try std.testing.expect(nimg <= images.len);
+    for (images[0..nimg]) |h| {
+        try std.testing.expect(sliceInside(text, h.id));
+        try std.testing.expect(isSafeImageId(h.id));
+    }
+
+    var volumes: [32]Hit = undefined;
+    const nvol = parseDanglingVolumes(text, &volumes);
+    try std.testing.expect(nvol <= volumes.len);
+    for (volumes[0..nvol]) |h| {
+        try std.testing.expect(sliceInside(text, h.id));
+        try std.testing.expect(sliceInside(text, h.name));
+        // The volume row has at least two columns, so the name is a token
+        // after the first, never the first itself.
+        try std.testing.expect(jsonbuf.isSafeIdent(h.id));
+    }
+
+    var containers: [32]Hit = undefined;
+    const ncon = parseExitedContainers(text, &containers);
+    try std.testing.expect(ncon <= containers.len);
+    for (containers[0..ncon]) |h| {
+        try std.testing.expect(sliceInside(text, h.id));
+        try std.testing.expect(sliceInside(text, h.name));
+        try std.testing.expect(isSafeImageId(h.id));
+    }
 }

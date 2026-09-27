@@ -4,6 +4,7 @@ const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
 
 const plugin_id = "brew";
 const query_cmd = "brew outdated --json=v2";
@@ -268,19 +269,8 @@ test "plugin_query missing is empty findings" {
     try std.testing.expect(std.mem.indexOf(u8, json, "brew missing") != null);
 }
 
-fn sliceInside(hay: []const u8, n: []const u8) bool {
-    if (n.len == 0) return true;
-    const h0 = @intFromPtr(hay.ptr);
-    const n0 = @intFromPtr(n.ptr);
-    return n0 >= h0 and n0 + n.len <= h0 + hay.len;
-}
-
-fn packFuzzSlice(comptime s: []const u8) [4 + s.len]u8 {
-    var out: [4 + s.len]u8 = undefined;
-    std.mem.writeInt(u32, out[0..4], @intCast(s.len), .little);
-    @memcpy(out[4..], s);
-    return out;
-}
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const fuzz_brew_both = packFuzzSlice(
     \\{"formulae":[{"name":"wget","installed_versions":["1.21.4"],"current_version":"1.24.5","pinned":false,"pinned_version":null}],"casks":[{"name":"visual-studio-code","installed_versions":["1.90.0"],"current_version":"1.92.1","pinned":false,"pinned_version":null}]}

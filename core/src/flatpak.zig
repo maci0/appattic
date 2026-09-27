@@ -3,6 +3,10 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "flatpak";
 const query_cmd = "flatpak uninstall --unused --dry-run";
@@ -358,4 +362,74 @@ test "plugin_query missing is empty findings" {
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "flatpak missing") != null);
+}
+
+// Seeds are `flatpak uninstall --dry-run` rows (numbered runtimes, `app/branch`
+// refs, and the ID/Name/Application header) and `flatpak remote-ls --updates`
+// rows, which are tab-separated rather than column-aligned.
+const fuzz_flatpak_unused = packFuzzSlice(
+    \\        ID                              Branch          Op
+    \\ 1. [-] org.gnome.Platform 23.08        23.08           r
+    \\ 2. [-] org.kde.Platform                    5.15-24.08   r
+    \\ 3. [-] org.example.App/x86_64         stable            r
+);
+const fuzz_flatpak_updates = packFuzzSlice(
+    \\org.gimp.GIMP\t2.10.36\tGNU Image Manipulation Program
+    \\org.gnome.Calculator\t44.0\tCalculator
+);
+const fuzz_flatpak_broken = packFuzzSlice(
+    \\1.
+    \\1. [-]
+    \\1. [-] 
+    \\/branchonly
+    \\app/
+);
+const fuzz_flatpak_unsafe = packFuzzSlice(
+    \\1. [-] org.app;rm -rf / stable
+    \\1. [-] $(id) stable
+    \\../../etc/stable
+);
+const fuzz_flatpak_junk = packFuzzSlice("1. [-] org.a\x00 stable\r\n\xff\tstable\n");
+const fuzz_flatpak_empty = packFuzzSlice("");
+
+test "fuzz flatpak listing parsers" {
+    try std.testing.fuzz({}, fuzzFlatpakListings, .{ .corpus = &.{
+        &fuzz_flatpak_unused,
+        &fuzz_flatpak_updates,
+        &fuzz_flatpak_broken,
+        &fuzz_flatpak_unsafe,
+        &fuzz_flatpak_junk,
+        &fuzz_flatpak_empty,
+    } });
+}
+
+fn fuzzFlatpakListings(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var unused: [32]FlatpakUnused = undefined;
+    const nun = parseFlatpakUnused(text, &unused);
+    try std.testing.expect(nun <= unused.len);
+    for (unused[0..nun]) |h| {
+        try std.testing.expect(jsonbuf.isSafeIdent(h.name));
+        try std.testing.expect(sliceInside(text, h.name));
+        // A branch is optional, but when present it is a safe ident taken
+        // from the same row.
+        if (h.branch.len > 0) {
+            try std.testing.expect(jsonbuf.isSafeIdent(h.branch));
+            try std.testing.expect(sliceInside(text, h.branch));
+        }
+    }
+
+    // Both texts are the same input here, so every field the update parser
+    // reports is a span of `text` whichever row it came from.
+    var outdated: [32]FlatpakOutdated = undefined;
+    const nout = parseFlatpakUpdates(text, text, &outdated);
+    try std.testing.expect(nout <= outdated.len);
+    for (outdated[0..nout]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(sliceInside(text, o.current));
+        try std.testing.expect(sliceInside(text, o.latest));
+    }
 }

@@ -3,6 +3,10 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "zypper";
 const query_cmd = "zypper --non-interactive packages --unneeded";
@@ -254,4 +258,87 @@ test "parseZypperListUpdates skips empty header" {
         @as(usize, 0),
         parseZypperListUpdates("S | Repository | Name | Current Version | Available Version\n--+----+----+\n", &buf),
     );
+}
+
+// Seeds are the two `zypper list-tables` shapes, the separator row, the header
+// row, and the rows that break a pipe splitter: a row with too few columns, a
+// row with no pipes at all, and a row with a name in the status column.
+const fuzz_zypper_updates = packFuzzSlice(
+    \\S | Repository | Name | Current Version | Available Version | Arch
+    \\--+------------+------+-----------------+--------------------+-------
+    \\v |      repo-oss | libfoo | 1.2.3 | 1.2.4 | x86_64
+);
+const fuzz_zypper_unneeded = packFuzzSlice(
+    \\S | Repository | Name | Version | Arch
+    \\--+------------+------+----------+-------
+    \\-- |        oss | libfoo | 1.2.3   | x86_64
+);
+const fuzz_zypper_broken = packFuzzSlice(
+    \\v | repo | libfoo
+    \\| | 
+    \\v ||| 1.0 | 2.0 |
+    \\s | repo | libbar | 1.0 | 2.0
+);
+const fuzz_zypper_unsafe = packFuzzSlice(
+    \\v | oss | libfoo;rm -rf / | 1.0 | 2.0
+    \\v | oss | $(id) | 1.0 | 2.0
+);
+const fuzz_zypper_junk = packFuzzSlice("|||||\n\x00\x01\nno pipes here");
+const fuzz_zypper_empty = packFuzzSlice("");
+
+test "fuzz zypper table parsers" {
+    try std.testing.fuzz({}, fuzzZypperTables, .{ .corpus = &.{
+        &fuzz_zypper_updates,
+        &fuzz_zypper_unneeded,
+        &fuzz_zypper_broken,
+        &fuzz_zypper_unsafe,
+        &fuzz_zypper_junk,
+        &fuzz_zypper_empty,
+    } });
+}
+
+/// `splitPipeCols` trims each cell in place and keeps at most `cols.len` of
+/// them, so a row with more pipes than columns must still yield cells that
+/// point into the input. Both parsers read a name that reaches a generated
+/// `zypper remove` line.
+fn fuzzZypperTables(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var outdated: [32]ZypperOutdated = undefined;
+    const nout = parseZypperListUpdates(text, &outdated);
+    try std.testing.expect(nout <= outdated.len);
+    for (outdated[0..nout]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(sliceInside(text, o.current));
+        try std.testing.expect(sliceInside(text, o.latest));
+        // Cells are trimmed, so none of them carries a leading or trailing
+        // space, and the row is only reported when the name is non-empty.
+        try std.testing.expect(o.name.len > 0);
+        try std.testing.expectEqualStrings(std.mem.trim(u8, o.name, " \t"), o.name);
+        // The header row is filtered by name, so a reported name is never the
+        // literal `Name` in any casing.
+        try std.testing.expect(!std.ascii.eqlIgnoreCase(o.name, "Name"));
+    }
+
+    var orphans: [32]ZypperOrphan = undefined;
+    const nord = parseZypperUnneeded(text, &orphans);
+    try std.testing.expect(nord <= orphans.len);
+    for (orphans[0..nord]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(sliceInside(text, o.version));
+        try std.testing.expectEqualStrings(std.mem.trim(u8, o.name, " \t"), o.name);
+    }
+
+    // The cell splitter itself: every cell it hands back is a span of the row.
+    var row = [_]u8{0} ** 256;
+    if (text.len > 0) @memcpy(row[0..text.len], text);
+    var cols: [8][]const u8 = undefined;
+    const ncol = splitPipeCols(&row, &cols);
+    try std.testing.expect(ncol <= cols.len);
+    for (cols[0..ncol]) |c| {
+        try std.testing.expect(sliceInside(&row, c));
+    }
 }

@@ -3,6 +3,10 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "gem";
 const query_cmd = "gem outdated";
@@ -136,4 +140,56 @@ test "plugin_query missing is empty findings" {
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "gem missing") != null);
+}
+
+// `gem outdated` rows are `name (current < latest)`, and the `*` marks a row
+// whose current version is a prerelease. The seeds cover the row, the marker,
+// and the three ways the bracket scan can come up short.
+const fuzz_gem_rows = packFuzzSlice(
+    \\rails (6.1.7 < 7.0.0)
+    \\* nokogiri (1.15.0 < 1.16.0)
+);
+const fuzz_gem_broken = packFuzzSlice(
+    \\rails (
+    \\rails (6.1.7
+    \\rails ( < )
+    \\rails 6.1.7 < 7.0.0)
+);
+const fuzz_gem_unsafe = packFuzzSlice(
+    \\rails;rm -rf / (1.0 < 2.0)
+    \\../../etc (1.0 < 2.0)
+    \\$(id) (1.0 < 2.0)
+);
+const fuzz_gem_junk = packFuzzSlice("rails (1.0\x00 < 2.0)\r\n\xff (1 < 2)");
+const fuzz_gem_empty = packFuzzSlice("");
+
+test "fuzz parseGemOutdated" {
+    try std.testing.fuzz({}, fuzzGemOutdated, .{ .corpus = &.{
+        &fuzz_gem_rows,
+        &fuzz_gem_broken,
+        &fuzz_gem_unsafe,
+        &fuzz_gem_junk,
+        &fuzz_gem_empty,
+    } });
+}
+
+fn fuzzGemOutdated(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var buf: [32]GemOutdated = undefined;
+    const n = parseGemOutdated(text, &buf);
+    try std.testing.expect(n <= buf.len);
+    for (buf[0..n]) |h| {
+        try std.testing.expect(jsonbuf.isSafeIdent(h.name));
+        try std.testing.expect(sliceInside(text, h.name));
+        try std.testing.expect(sliceInside(text, h.current));
+        try std.testing.expect(sliceInside(text, h.latest));
+        // A row is reported only when both versions survive the scan, and
+        // neither keeps the bracket framing.
+        try std.testing.expect(h.current.len > 0);
+        try std.testing.expect(h.latest.len > 0);
+        try std.testing.expect(std.mem.indexOfScalar(u8, h.name, '(') == null);
+        try std.testing.expect(std.mem.indexOfScalar(u8, h.name, ' ') == null);
+    }
 }

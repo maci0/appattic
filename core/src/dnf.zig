@@ -3,6 +3,10 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "dnf";
 const query_cmds = [_][]const u8{
@@ -288,4 +292,72 @@ test "runFirst names every command that did not answer" {
     try std.testing.expectEqual(@as(usize, 2), log.n);
     try std.testing.expectEqualStrings("appattic-no-such-cmd one", log.items[0][0]);
     try std.testing.expectEqualStrings("appattic-no-such-cmd two", log.items[1][0]);
+}
+
+// Seeds are `dnf check-update` and `dnf repoquery --unneeded` output, plus the
+// noise lines dnf prints on the same stream and the arch suffix both parsers
+// have to see through.
+const fuzz_dnf_upgrades = packFuzzSlice(
+    \\libfoo.x86_64    1.2.4-1.fc39      updates
+    \\libbar.noarch     0.1-1.fc39        baseos
+    \\Last metadata expired check.
+);
+const fuzz_dnf_unneeded = packFuzzSlice(
+    \\libfoo.x86_64
+    \\libbar.noarch
+    \\libbaz.aarch64
+);
+const fuzz_dnf_noise = packFuzzSlice(
+    \\Available Upgrades
+    \\Obsoleting Packages
+    \\Nothing to do.
+    \\last metadata expired
+);
+const fuzz_dnf_unsafe = packFuzzSlice(
+    \\libfoo;rm -rf / 1.0 updates
+    \\$(id) 1.0 baseos
+    \\../../etc 1.0 updates
+);
+const fuzz_dnf_junk = packFuzzSlice("libfoo\x00 1.0 updates\r\n\xff\nx86_64");
+const fuzz_dnf_empty = packFuzzSlice("");
+
+test "fuzz dnf listing parsers" {
+    try std.testing.fuzz({}, fuzzDnfListings, .{ .corpus = &.{
+        &fuzz_dnf_upgrades,
+        &fuzz_dnf_unneeded,
+        &fuzz_dnf_noise,
+        &fuzz_dnf_unsafe,
+        &fuzz_dnf_junk,
+        &fuzz_dnf_empty,
+    } });
+}
+
+/// `stripDnfArch` returns a prefix of the token it was given, so a reported
+/// name is still inside the input even when the arch is stripped, and the
+/// upgrade version is the second field, which must carry a digit.
+fn fuzzDnfListings(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var outdated: [32]DnfOutdated = undefined;
+    const nout = parseDnfUpgrades(text, &outdated);
+    try std.testing.expect(nout <= outdated.len);
+    for (outdated[0..nout]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(sliceInside(text, o.latest));
+        try std.testing.expect(o.latest.len > 0);
+        // A version is reported only when it has a digit, so stripping the
+        // arch never leaves a name that ends in a bare arch suffix.
+        try std.testing.expect(hasDigit(o.latest));
+    }
+
+    var orphans: [32]DnfOrphan = undefined;
+    const nord = parseDnfUnneeded(text, &orphans);
+    try std.testing.expect(nord <= orphans.len);
+    for (orphans[0..nord]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(o.name.len > 0);
+    }
 }

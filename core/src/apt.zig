@@ -3,6 +3,10 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "apt";
 const query_cmd = "apt-get -s autoremove";
@@ -390,4 +394,154 @@ test "plugin_query present JSON includes dpkg rc and ppa source" {
     try std.testing.expect(std.mem.indexOf(u8, json, "deadsnakes-ubuntu-ppa-noble.list") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"ppa\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "rm /etc/apt") == null);
+}
+
+// Seeds are real `apt` output: `dpkg -l` rc rows, an autoremove dry run, an
+// `apt list --upgradable` table, and an `ls -1` of a sources.list.d. The
+// mutations that matter to a hand-rolled line parser are the ones below:
+// truncated rows, a missing `[...]`, a bare `/` with no version after it, and
+// a row that starts with the `rc` marker but carries no name.
+const fuzz_apt_rc = packFuzzSlice("rc  libfoo 1.2.3-1\n" ++
+    "rc  libbar\n" ++
+    "rc\tlibbaz\t9.9\n" ++
+    "ii  keepme 1.0\n" ++
+    "rc   libquux 4.5-1\n");
+const fuzz_apt_autoremove = packFuzzSlice(
+    \\Remv libfoo [1.2.3-1]
+    \\Remv libbar [0.1]
+    \\Remv libfoo [1.2.3-1]
+    \\Remv  [1.0]
+    \\Remv
+);
+const fuzz_apt_upgradable = packFuzzSlice(
+    \\libfoo/bookworm-security 1.2.4 amd64 [upgradable from: 1.2.3]
+    \\libbar/stable 2.0 amd64 [upgradable from: 1.0]
+);
+const fuzz_apt_upgradable_broken = packFuzzSlice(
+    \\libfoo/ 1.2.4 amd64 [upgradable from: 1.2.3]
+    \\libbar/stable [upgradable from: ]
+    \\libbaz/stable 3.0 amd64 [upgradable from:
+);
+const fuzz_apt_ppa = packFuzzSlice(
+    \\google-chrome.list
+    \\deadsnakes-ubuntu-ppa-noble.list
+    \\ubuntu.sources
+    \\/etc/apt/sources.list.d/launchpad-ppa.list
+    \\
+);
+const fuzz_apt_unsafe = packFuzzSlice(
+    \\rc  libfoo;rm -rf / 1.0
+    \\Remv ../../etc [1.0]
+    \\evil$(id)/stable 9 amd64 [upgradable from: 1]
+);
+const fuzz_apt_junk = packFuzzSlice("rc\r\n\x00\x01\n \t\nRemv\xff");
+const fuzz_apt_empty = packFuzzSlice("");
+
+test "fuzz apt listing parsers" {
+    try std.testing.fuzz({}, fuzzAptListings, .{ .corpus = &.{
+        &fuzz_apt_rc,
+        &fuzz_apt_autoremove,
+        &fuzz_apt_upgradable,
+        &fuzz_apt_upgradable_broken,
+        &fuzz_apt_ppa,
+        &fuzz_apt_unsafe,
+        &fuzz_apt_junk,
+        &fuzz_apt_empty,
+    } });
+}
+
+/// The four parsers share one input and one set of properties: a name that
+/// reaches a generated `apt-get remove` line, and a version that reaches the
+/// same line. A name must pass `isSafeIdent`, and every field must be a slice
+/// of the input rather than a rebuilt or padded buffer. Each parser also has
+/// to leave the row count within `out` and never carry a field across rows.
+fn fuzzAptListings(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var rc: [32]DpkgRc = undefined;
+    const nrc = parseDpkgRc(text, &rc);
+    try std.testing.expect(nrc <= rc.len);
+    for (rc[0..nrc]) |r| {
+        try std.testing.expect(jsonbuf.isSafeIdent(r.name));
+        try std.testing.expect(sliceInside(text, r.name));
+        try std.testing.expect(sliceInside(text, r.version));
+    }
+
+    var orphans: [32]AptOrphan = undefined;
+    const nrem = parseAptAutoremove(text, &orphans);
+    try std.testing.expect(nrem <= orphans.len);
+    for (orphans[0..nrem]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(sliceInside(text, o.version));
+    }
+
+    var outdated: [32]AptOutdated = undefined;
+    const nup = parseAptUpgradable(text, &outdated);
+    try std.testing.expect(nup <= outdated.len);
+    for (outdated[0..nup]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(o.current.len > 0);
+        try std.testing.expect(sliceInside(text, o.current));
+        try std.testing.expect(sliceInside(text, o.latest));
+        // A row is only reported when the marker parsed to a version, and
+        // neither field may have kept the `[upgradable from: ...]` framing.
+        try std.testing.expect(std.mem.indexOfScalar(u8, o.current, '[') == null);
+        try std.testing.expect(o.current[o.current.len - 1] != ']');
+    }
+
+    var ppas: [32]PpaSource = undefined;
+    const nppa = parsePpaSources(text, &ppas);
+    try std.testing.expect(nppa <= ppas.len);
+    for (ppas[0..nppa]) |p| {
+        try std.testing.expect(jsonbuf.isSafeIdent(p.name));
+        try std.testing.expect(sliceInside(text, p.name));
+        try std.testing.expect(sliceInside(text, p.path));
+        // The name is the last path component, so it is a suffix of the line.
+        try std.testing.expect(p.path.len >= p.name.len);
+        try std.testing.expect(std.mem.endsWith(u8, p.path, p.name));
+    }
+
+    // Re-running on the same text is the same answer: no parser keeps a
+    // cursor or a row count between calls.
+    var rc2: [32]DpkgRc = undefined;
+    try std.testing.expectEqual(nrc, parseDpkgRc(text, &rc2));
+    var up2: [32]AptOutdated = undefined;
+    try std.testing.expectEqual(nup, parseAptUpgradable(text, &up2));
+    for (up2[0..nup], outdated[0..nup]) |a, b| {
+        try std.testing.expect(std.mem.eql(u8, a.name, b.name));
+        try std.testing.expect(std.mem.eql(u8, a.latest, b.latest));
+    }
+}
+
+// A `dpkg -l` row is `rc` plus a name, so a row that keeps the marker must
+// yield a name that is really there, and one that does not must yield
+// nothing. The version is the second field and may be absent.
+test "parseDpkgRc name is a field of the row" {
+    var buf: [8]DpkgRc = undefined;
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        parseDpkgRc("rc  libfoo 1.2.3-1\n", &buf),
+    );
+    try std.testing.expectEqualStrings("libfoo", buf[0].name);
+    try std.testing.expectEqualStrings("1.2.3-1", buf[0].version);
+
+    const no_version = parseDpkgRc("rc\tlibbar\n", &buf);
+    try std.testing.expectEqual(@as(usize, 1), no_version);
+    try std.testing.expectEqualStrings("libbar", buf[0].name);
+    try std.testing.expectEqualStrings("", buf[0].version);
+
+    // `dpkg -l` indents its status column, so leading whitespace is normal
+    // and must not hide the marker.
+    const indented = parseDpkgRc("  rc   libfoo 1.0-1\n", &buf);
+    try std.testing.expectEqual(@as(usize, 1), indented);
+    try std.testing.expectEqualStrings("libfoo", buf[0].name);
+    try std.testing.expectEqualStrings("1.0-1", buf[0].version);
+
+    const rejected = [_][]const u8{ "rc", "rc ", "rc  ", "rc  libfoo;rm", "rc  ../etc", "ir  libfoo" };
+    for (rejected) |row| {
+        try std.testing.expectEqual(@as(usize, 0), parseDpkgRc(row, &buf));
+    }
 }

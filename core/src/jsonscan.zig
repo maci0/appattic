@@ -17,6 +17,7 @@
 
 const std = @import("std");
 const jsonbuf = @import("jsonbuf.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
 
 pub const Dep = struct {
     name: []const u8,
@@ -396,19 +397,8 @@ test "isSafePkgName scoped" {
     try std.testing.expect(!jsonbuf.isSafePkgName("foo;rm"));
 }
 
-fn sliceInside(hay: []const u8, n: []const u8) bool {
-    if (n.len == 0) return true;
-    const h0 = @intFromPtr(hay.ptr);
-    const n0 = @intFromPtr(n.ptr);
-    return n0 >= h0 and n0 + n.len <= h0 + hay.len;
-}
-
-fn packFuzzSlice(comptime s: []const u8) [4 + s.len]u8 {
-    var out: [4 + s.len]u8 = undefined;
-    std.mem.writeInt(u32, out[0..4], @intCast(s.len), .little);
-    @memcpy(out[4..], s);
-    return out;
-}
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const fuzz_npm_obj = packFuzzSlice(
     \\{"name":"lib","dependencies":{"typescript":{"version":"5.4.5"},"prettier":{"version":"3.3.0"}}}

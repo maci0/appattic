@@ -3,6 +3,10 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "pacman";
 const query_cmd = "pacman -Qdt";
@@ -227,4 +231,87 @@ test "parsePacmanQu skips empty error warning" {
     var buf: [4]PacmanOutdated = undefined;
     try std.testing.expectEqual(@as(usize, 0), parsePacmanQu("", &buf));
     try std.testing.expectEqual(@as(usize, 0), parsePacmanQu("error: failed\nwarning: db\n", &buf));
+}
+
+// Seeds are `pacman -Qdt` and `pacman -Qu` output, plus the rows that break a
+// hand-rolled tokenizer: the arrow with nothing after it, a row carrying only
+// the name, and the `error:`/`warning:` lines the tool prints on the same
+// stream as its results.
+const fuzz_pacman_qdt = packFuzzSlice(
+    \\libfoo 6.0.1-1
+    \\libbar
+    \\warning: database file 'local' is missing or unreadable
+    \\error: failed to init transaction (invalid or corrupted repo (detected))
+);
+const fuzz_pacman_qu = packFuzzSlice(
+    \\libfoo 6.0.0-1 -> 6.0.1-1
+    \\libbar 0.1-1 -> 0.2-1 [ignored]
+    \\error: could not open
+);
+const fuzz_pacman_broken = packFuzzSlice(
+    \\libfoo -> 
+    \\ -> 1.0
+    \\libfoo ->
+    \\libfoo 1.0 ->
+);
+const fuzz_pacman_unsafe = packFuzzSlice(
+    \\libfoo;rm -rf / 1.0
+    \\$(id) 1.0 -> 2.0
+    \\../../etc 1.0-1 -> 2.0-1
+);
+const fuzz_pacman_junk = packFuzzSlice("libfoo\x00\x01 1.0\r\n\xff\xfe");
+const fuzz_pacman_empty = packFuzzSlice("");
+
+test "fuzz pacman listing parsers" {
+    try std.testing.fuzz({}, fuzzPacmanListings, .{ .corpus = &.{
+        &fuzz_pacman_qdt,
+        &fuzz_pacman_qu,
+        &fuzz_pacman_broken,
+        &fuzz_pacman_unsafe,
+        &fuzz_pacman_junk,
+        &fuzz_pacman_empty,
+    } });
+}
+
+/// Both parsers cut names that reach `pacman -R` lines, so a name must pass
+/// `isSafeIdent` and every field must be a slice of the input. The version of
+/// a `-Qdt` row is optional, but a `-Qu` row needs all three fields.
+fn fuzzPacmanListings(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var orphans: [32]PacmanOrphan = undefined;
+    const nord = parsePacmanQdt(text, &orphans);
+    try std.testing.expect(nord <= orphans.len);
+    for (orphans[0..nord]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(sliceInside(text, o.version));
+    }
+
+    var outdated: [32]PacmanOutdated = undefined;
+    const nout = parsePacmanQu(text, &outdated);
+    try std.testing.expect(nout <= outdated.len);
+    for (outdated[0..nout]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(sliceInside(text, o.current));
+        try std.testing.expect(sliceInside(text, o.latest));
+        // A `-Qu` row is only reported when both sides of the arrow tokenize,
+        // so no field may be empty.
+        try std.testing.expect(o.current.len > 0);
+        try std.testing.expect(o.latest.len > 0);
+    }
+
+    var orphans2: [32]PacmanOrphan = undefined;
+    try std.testing.expectEqual(nord, parsePacmanQdt(text, &orphans2));
+}
+
+// `pacman -Qqdt` prints names with no version at all, so a row of one field
+// is a result, not a partial line.
+test "parsePacmanQdt accepts a bare name" {
+    var buf: [8]PacmanOrphan = undefined;
+    try std.testing.expectEqual(@as(usize, 1), parsePacmanQdt("libfoo\n", &buf));
+    try std.testing.expectEqualStrings("libfoo", buf[0].name);
+    try std.testing.expectEqualStrings("", buf[0].version);
 }

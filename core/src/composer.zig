@@ -3,6 +3,10 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "composer";
 const query_cmd = "composer global outdated";
@@ -163,4 +167,51 @@ test "plugin_query missing is empty findings" {
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "composer missing") != null);
+}
+
+// `composer global outdated` rows are `name current ! latest description`,
+// with the `!` status mark optional depending on the version. The seeds cover
+// both shapes, the legend rows it prints, and rows cut short.
+const fuzz_composer_rows = packFuzzSlice(
+    \\laravel/installer 5.8.0 ! 5.10.0 Laravel application installer
+    \\phpunit/phpunit 9.5.0 9.6.0 Testing framework
+);
+const fuzz_composer_broken = packFuzzSlice(
+    \\laravel/installer
+    \\laravel/installer 5.8.0 !
+    \\laravel/installer 5.8.0 ! 
+);
+const fuzz_composer_unsafe = packFuzzSlice(
+    \\foo;rm -rf / 1.0 ! 2.0
+    \\foo 1.0 $(id)
+    \\../../etc 1.0 2.0
+);
+const fuzz_composer_junk = packFuzzSlice("foo/bar 1.0\x00 ! 2.0\r\n\xff 1.0 2.0");
+const fuzz_composer_empty = packFuzzSlice("");
+
+test "fuzz parseComposerOutdated" {
+    try std.testing.fuzz({}, fuzzComposerOutdated, .{ .corpus = &.{
+        &fuzz_composer_rows,
+        &fuzz_composer_broken,
+        &fuzz_composer_unsafe,
+        &fuzz_composer_junk,
+        &fuzz_composer_empty,
+    } });
+}
+
+fn fuzzComposerOutdated(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var buf: [32]ComposerOutdated = undefined;
+    const n = parseComposerOutdated(text, &buf);
+    try std.testing.expect(n <= buf.len);
+    for (buf[0..n]) |o| {
+        try std.testing.expect(jsonbuf.isSafeComposerName(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(sliceInside(text, o.current));
+        try std.testing.expect(sliceInside(text, o.latest));
+        try std.testing.expect(o.current.len > 0);
+        try std.testing.expect(o.latest.len > 0);
+    }
 }

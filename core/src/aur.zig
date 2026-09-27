@@ -3,6 +3,10 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "aur";
 const outdated_cmds = [_][]const u8{
@@ -122,4 +126,50 @@ test "helperFromCmd" {
     try std.testing.expectEqualStrings("paru", helperFromCmd("paru -Qua"));
     try std.testing.expectEqualStrings("yay", helperFromCmd("yay -Qua"));
     try std.testing.expectEqualStrings("pikaur", helperFromCmd("/usr/bin/pikaur -Qua"));
+}
+
+// Same line shape as `pacman -Qu`, so the seeds are the same with the AUR
+// noise lines: the arrow with nothing after it, and `error:`/`warning:` rows.
+const fuzz_aur_rows = packFuzzSlice(
+    \\libfoo 1.0-1 -> 2.0-1
+    \\libbar 0.1-1 -> 0.2-1 [ignored]
+);
+const fuzz_aur_broken = packFuzzSlice(
+    \\libfoo -> 
+    \\ -> 1.0
+    \\libfoo 1.0 ->
+);
+const fuzz_aur_unsafe = packFuzzSlice(
+    \\libfoo;rm -rf / 1.0 -> 2.0
+    \\$(id) 1.0 -> 2.0
+    \\../../etc 1.0-1 -> 2.0-1
+);
+const fuzz_aur_junk = packFuzzSlice("warning: x\nlibfoo\x00 1.0 -> 2.0\r\n\xff");
+const fuzz_aur_empty = packFuzzSlice("");
+
+test "fuzz parseAurQua" {
+    try std.testing.fuzz({}, fuzzAurQua, .{ .corpus = &.{
+        &fuzz_aur_rows,
+        &fuzz_aur_broken,
+        &fuzz_aur_unsafe,
+        &fuzz_aur_junk,
+        &fuzz_aur_empty,
+    } });
+}
+
+fn fuzzAurQua(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var buf: [32]AurOutdated = undefined;
+    const n = parseAurQua(text, &buf);
+    try std.testing.expect(n <= buf.len);
+    for (buf[0..n]) |o| {
+        try std.testing.expect(jsonbuf.isSafeIdent(o.name));
+        try std.testing.expect(sliceInside(text, o.name));
+        try std.testing.expect(sliceInside(text, o.current));
+        try std.testing.expect(sliceInside(text, o.latest));
+        try std.testing.expect(o.current.len > 0);
+        try std.testing.expect(o.latest.len > 0);
+    }
 }
