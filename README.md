@@ -141,6 +141,7 @@ export PATH="/opt/swift/usr/bin:$PATH"    # or: export PATH="$PWD/.deps/swift/us
 ./build.sh debug
 # or only the UI:
 bash scripts/linux-qt-link.sh
+bash scripts/verify-qt-link.sh   # assert the link proof; CI and both images run this too
 ```
 
 AppImage (portable Qt UI, no system Qt at runtime):

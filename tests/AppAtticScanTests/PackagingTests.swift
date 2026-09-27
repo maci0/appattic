@@ -108,6 +108,31 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(docker.contains("scripts/dep-checksums.sha256"), docker)
         XCTAssertTrue(docker.contains("/tmp/appattic/scripts/linux-deps.sh"), docker)
 
+        // The Qt 6 link proof has one definition, scripts/verify-qt-link.sh.
+        // CI jobs, both images, and scripts/check.sh --qt must all call it, and
+        // none may go back to inlining the assertions.
+        let dockerArch = try String(
+            contentsOf: root.appendingPathComponent("Dockerfile.arch"),
+            encoding: .utf8
+        )
+        let linuxYaml = try String(
+            contentsOf: root.appendingPathComponent(".github/workflows/linux.yml"),
+            encoding: .utf8
+        )
+        let verify = try String(
+            contentsOf: root.appendingPathComponent("scripts/verify-qt-link.sh"),
+            encoding: .utf8
+        )
+        for source in [docker, dockerArch, linuxYaml] {
+            XCTAssertTrue(source.contains("verify-qt-link.sh"), source)
+            XCTAssertFalse(source.contains("LINUX_QT_LINK=ok"), source)
+        }
+        XCTAssertTrue(verify.contains("LINUX_QT_LINK=ok"), verify)
+        XCTAssertTrue(verify.contains("LINUX_QT_SMOKE=ok"), verify)
+        XCTAssertTrue(verify.contains("plugin:path-shadow"), verify)
+        XCTAssertTrue(verify.contains("wasm: ok"), verify)
+        XCTAssertTrue(verify.contains("tables: ok"), verify)
+
         let yaml = try String(
             contentsOf: root.appendingPathComponent(".github/workflows/linux.yml"),
             encoding: .utf8
@@ -134,6 +159,8 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(release.contains("github.ref_name"), release)
         XCTAssertTrue(release.contains("actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809"), release)
         XCTAssertTrue(release.contains("linux-appimage.sh"), release)
+        XCTAssertTrue(release.contains("fail_on_unmatched_files: true"), release)
+        XCTAssertTrue(release.contains("concurrency:"), release)
     }
 
     func testLinuxQtLinkScriptRefusesDarwin() throws {
@@ -240,6 +267,7 @@ final class PackagingTests: XCTestCase {
             "scripts/lint.sh",
             "scripts/linux-deps.sh",
             "scripts/linux-qt-link.sh",
+            "scripts/verify-qt-link.sh",
             "scripts/linux-appimage.sh",
             "scripts/linux-flatpak.sh",
         ]

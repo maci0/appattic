@@ -9,6 +9,12 @@ on:
 permissions:
   contents: write
 
+# One release at a time per ref: a re-dispatch or a re-run must not race the
+# in-flight build into the same tag's release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   linux-appimage:
     runs-on: ubuntu-24.04
@@ -46,6 +52,7 @@ jobs:
           files: |
             dist/AppAttic-x86_64.AppImage
             dist/AppAttic-x86_64.AppImage.buildinfo
+          fail_on_unmatched_files: true
           generate_release_notes: true
 
   macos-ui:
@@ -72,3 +79,4 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist/AppAttic-macos-arm64.zip
+          fail_on_unmatched_files: true
