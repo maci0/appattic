@@ -97,14 +97,70 @@ zig_test() {
     zig test "$root/src/$1"
 }
 
+# A zig test on one small plugin is a second or two of mostly compiler startup,
+# so the suite is latency bound and a serial loop leaves every core but one
+# idle. One module per process, this many at a time. A core is held back from
+# the count so the editor and the test runner still have somewhere to run.
+detect_jobs() {
+    local n=1
+    if command -v nproc >/dev/null 2>&1; then
+        n="$(nproc 2>/dev/null || printf 1)"
+    elif command -v sysctl >/dev/null 2>&1; then
+        n="$(sysctl -n hw.ncpu 2>/dev/null || printf 1)"
+    fi
+    case "$n" in
+        ''|*[!0-9]*) n=1 ;;
+    esac
+    if [ "$n" -gt 2 ]; then
+        printf '%s\n' "$((n - 1))"
+    else
+        printf '1\n'
+    fi
+}
+JOBS="${APPATTIC_BUILD_JOBS:-$(detect_jobs)}"
+
+# Run "$1" once per remaining argument, at most $JOBS in flight, and report
+# failures in the order the list declared them. Each module writes its own
+# artifact and reads only the source tree and the shared zig cache, which is
+# built for concurrent use, so nothing here has to serialize.
+#
+# Waiting in list order rather than as each job happens to finish is deliberate:
+# the log stays diffable between runs, and a failed module names itself instead
+# of leaving the reader to attribute whichever line landed last.
+run_modules() {
+    local fn="$1"
+    shift
+    local m reaped=0 rc=0
+    local -a pids=()
+    local -a names=()
+    for m in "$@"; do
+        echo "-- $m"
+        "$fn" "$m" &
+        pids+=("$!")
+        names+=("$m")
+        while [ "$(( ${#pids[@]} - reaped ))" -ge "$JOBS" ]; do
+            if ! wait "${pids[$reaped]}"; then
+                echo "error: ${names[$reaped]} failed" >&2
+                rc=1
+            fi
+            reaped=$((reaped + 1))
+        done
+    done
+    while [ "$reaped" -lt "${#pids[@]}" ]; do
+        if ! wait "${pids[$reaped]}"; then
+            echo "error: ${names[$reaped]} failed" >&2
+            rc=1
+        fi
+        reaped=$((reaped + 1))
+    done
+    return "$rc"
+}
+
 # zig fmt plus every zig test, with no WASM or host build: the gate a
 # contributor runs when editing core/src, and what scripts/check.sh calls.
 if [ "${1:-}" = "test-core" ]; then
     zig fmt --check "$root/src" "$root/bench"
-    for m in "${test_modules[@]}"; do
-        echo "-- $m"
-        zig_test "$m"
-    done
+    run_modules zig_test "${test_modules[@]}"
     echo "zig: ${#test_modules[@]} modules ok"
     exit 0
 fi
@@ -117,6 +173,17 @@ zig fmt --check "$root/src" "$root/bench"
 # Only the full build clears it; test and test-core leave the artifacts alone.
 rm -f "$out"/*.wasm "$out"/*.cwasm "$out"/*.cwasm.tmp
 
+# One artifact name for every consumer of it: the emit below, the built list
+# and the host's try line. core.zig is the one source whose artifact is not
+# named after it, because the host loads it as appattic_core.wasm.
+wasm_artifact_name() {
+    if [ "${1%.zig}" = "core" ]; then
+        printf 'appattic_core.wasm\n'
+    else
+        printf '%s.wasm\n' "${1%.zig}"
+    fi
+}
+
 zig_wasm() {
     zig build-exe \
         -target wasm32-freestanding \
@@ -124,19 +191,13 @@ zig_wasm() {
         -rdynamic \
         -OReleaseSmall \
         -fstrip \
-        -femit-bin="$out/$2" \
+        -femit-bin="$out/$(wasm_artifact_name "$1")" \
         "$root/src/$1"
 }
 
-for src in "${wasm_sources[@]}"; do
-    dst="${src%.zig}.wasm"
-    if [ "$dst" = "core.wasm" ]; then dst="appattic_core.wasm"; fi
-    zig_wasm "$src" "$dst"
-done
+run_modules zig_wasm "${wasm_sources[@]}"
 
-for m in "${test_modules[@]}"; do
-    zig_test "$m"
-done
+run_modules zig_test "${test_modules[@]}"
 
 
 wasmtime_libdir() {
@@ -237,8 +298,7 @@ fi
 built="$out/host"
 try_line="$out/host $out/appattic_core.wasm"
 for src in "${wasm_sources[@]}"; do
-    dst="${src%.zig}.wasm"
-    if [ "$dst" = "core.wasm" ]; then dst="appattic_core.wasm"; fi
+    dst="$(wasm_artifact_name "$src")"
     built="$built $out/$dst"
     case "$dst" in
         appattic_core.wasm) ;;

@@ -40,7 +40,12 @@ if [[ "${1:-}" == "--ui" ]]; then
     shift
     if [[ "$APPATTIC_OS" == Linux ]]; then
         export APPATTIC_CORE_OUT="${APPATTIC_CORE_OUT:-$ROOT/core/out}"
-        for qt in "$ROOT/ui/linux-qt/build/appattic-qt" "$ROOT/ui/linux-qt/build/Debug/appattic-qt"; do
+        # build-release/ first: it is the tree ./build.sh release and the
+        # AppImage link into, so it is the binary a release build produced.
+        for qt in \
+            "$ROOT/ui/linux-qt/build-release/appattic-qt" \
+            "$ROOT/ui/linux-qt/build/appattic-qt" \
+            "$ROOT/ui/linux-qt/build/Debug/appattic-qt"; do
             if [[ -x "$qt" ]]; then
                 exec "$qt" "$@"
             fi

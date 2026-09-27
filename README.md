@@ -184,9 +184,13 @@ Qt discovery looks in the Debian multiarch directory, `/usr/lib`, and `/usr/lib6
 export PATH="/opt/swift/usr/bin:$PATH"    # or: export PATH="$PWD/.deps/swift/usr/bin:$PATH"
 ./build.sh debug
 # or only the UI:
-bash scripts/linux-qt-link.sh
-bash scripts/verify-qt-link.sh   # assert the link proof; CI and both images run this too
+bash scripts/linux-qt-link.sh            # Debug, into ui/linux-qt/build
+bash scripts/linux-qt-link.sh release    # Release, into ui/linux-qt/build-release
+bash scripts/verify-qt-link.sh           # assert the link proof; CI and both images run this too
+bash scripts/verify-qt-link.sh release   # assert the Release link proof instead
 ```
+
+`./build.sh [release|debug]` links the Qt UI in the same config it gives the CLI: `release` builds `ui/linux-qt/build-release`, `debug` builds `ui/linux-qt/build`. Each config keeps its own tree, so a release link never picks up a stale Debug binary. `./run.sh --ui` prefers `build-release/` and falls back to `build/`.
 
 AppImage (portable Qt UI, no system Qt at runtime):
 

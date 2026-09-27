@@ -23,6 +23,7 @@ case "$CONFIG" in
 Usage: ./build.sh [release|debug]
 
   ./build.sh [release|debug]   CLI (+ UI if Qt 6 / macOS)
+  ./build.sh release           Linux Qt UI into ui/linux-qt/build-release
   ./run.sh report              CLI after a build
   bash scripts/check.sh        fast: lint + Zig core + AppAtticScanTests + CLI
   bash scripts/check.sh --qt   full Linux CI parity, including Qt/WASM proof
@@ -87,7 +88,7 @@ elif [[ "$OS" == Linux ]]; then
     swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
     if [[ "$HAVE_QT" -eq 1 ]]; then
         echo "Building Linux Qt 6 UI…"
-        bash scripts/linux-qt-link.sh
+        bash scripts/linux-qt-link.sh "$CONFIG"
     else
         echo "Qt 6 not found (pkg-config Qt6Widgets). Building CLI only (${CONFIG})…"
         echo "Debian/Ubuntu: sudo apt install qt6-base-dev cmake ninja-build pkg-config clang" >&2
@@ -136,7 +137,11 @@ elif [[ "$OS" == Darwin ]]; then
     echo "Launch CLI: ./run.sh report"
     echo "UI skipped (AppAtticUI needs a Swift 6 compiler; see .swift-version and the macos CI job)."
 elif [[ "$OS" == Linux && "$HAVE_QT" -eq 1 ]]; then
-    echo "Linux UI: ui/linux-qt/build/appattic-qt"
+    if [[ "$CONFIG" == release ]]; then
+        echo "Linux UI: ui/linux-qt/build-release/appattic-qt"
+    else
+        echo "Linux UI: ui/linux-qt/build/appattic-qt"
+    fi
     echo "CLI:      ${CLI}"
     echo "Launch UI: ./run.sh --ui"
     echo "Launch CLI: ./run.sh report"

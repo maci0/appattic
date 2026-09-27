@@ -2,9 +2,10 @@
 # Compile AppAttic Qt 6 UI on Linux and prove the binary links Qt6, not Gtk,
 # then run headless --smoke (QT_QPA_PLATFORM=offscreen, else minimal).
 # Homebrew Qt on macOS is not a Linux Qt link. Exit 3 on non-Linux.
-# Usage: scripts/linux-qt-link.sh [--smoke]
+# Usage: scripts/linux-qt-link.sh [--smoke] [release|debug]
 #   (default)  build core/out WASM, link Qt binary, ldd gate, --smoke gate
 #   --smoke    skip cmake rebuild; re-run ldd + binary --smoke on existing build
+#   release    link the Release binary, into ui/linux-qt/build-release
 # Binary flags: --smoke / --version / --help (strict WASM load on --smoke only).
 set -euo pipefail
 
@@ -19,15 +20,18 @@ if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
 fi
 
 SMOKE_ONLY=0
+CONFIG=debug
 for arg in "$@"; do
     case "$arg" in
         --smoke) SMOKE_ONLY=1 ;;
+        release|debug) CONFIG="$arg" ;;
         -h|--help)
             cat <<'EOF'
-Usage: scripts/linux-qt-link.sh [--smoke]
+Usage: scripts/linux-qt-link.sh [--smoke] [release|debug]
 
   (default)  build core/out WASM, link Qt binary, ldd gate, --smoke gate
   --smoke    skip cmake rebuild; re-run ldd + binary --smoke on existing build
+  release    link the Release binary, into ui/linux-qt/build-release
 
 Binary flags: --smoke / --version / --help (strict WASM load on --smoke only).
 Exit 3 on non-Linux. Homebrew Qt on macOS is not a Linux Qt link.
@@ -36,11 +40,21 @@ EOF
             ;;
         *)
             echo "error: unknown argument: $arg" >&2
-            echo "Usage: scripts/linux-qt-link.sh [--smoke]" >&2
+            echo "Usage: scripts/linux-qt-link.sh [--smoke] [release|debug]" >&2
             exit 2
             ;;
     esac
 done
+
+# One build tree per config: a Release link into the Debug tree leaves a stale
+# Debug binary next to the new one, and find_binary below would pick whichever
+# it saw first. build-release/ is the tree scripts/linux-appimage.sh installs
+# from, so a release build and the AppImage compile the same objects once.
+if [[ "$CONFIG" == release ]]; then
+    BUILD_DIR="$ROOT/ui/linux-qt/build-release"
+else
+    BUILD_DIR="$ROOT/ui/linux-qt/build"
+fi
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
@@ -226,8 +240,8 @@ fi
 find_binary() {
   bin=""
   for c in \
-      "$ROOT/ui/linux-qt/build/appattic-qt" \
-      "$ROOT/ui/linux-qt/build/Debug/appattic-qt"; do
+      "$BUILD_DIR/appattic-qt" \
+      "$BUILD_DIR/Debug/appattic-qt"; do
       if [[ -f "$c" && -x "$c" ]]; then
           bin="$c"
           break
@@ -242,12 +256,12 @@ find_binary() {
 if [[ "$SMOKE_ONLY" -eq 0 ]]; then
   ensure_wasm_core
   require_wasm_artifacts
-  echo "building appattic-qt (Qt 6 Widgets + Wasmtime)…"
-  cmake -S "$ROOT/ui/linux-qt" -B "$ROOT/ui/linux-qt/build" \
+  echo "building appattic-qt ${CONFIG} (Qt 6 Widgets + Wasmtime)…"
+  cmake -S "$ROOT/ui/linux-qt" -B "$BUILD_DIR" \
       "${gen[@]}" \
-      -DCMAKE_BUILD_TYPE=Debug \
+      "-DCMAKE_BUILD_TYPE=$CONFIG" \
       -DWASMTIME_ROOT="$WASMTIME_DIR"
-  cmake --build "$ROOT/ui/linux-qt/build"
+  cmake --build "$BUILD_DIR"
 else
   require_wasm_artifacts
 fi
@@ -264,11 +278,11 @@ if absolute="$(readelf -d "$bin" | grep NEEDED | grep -o '\[/[^]]*\]' || true)" 
     exit 1
 fi
 wasmtime_ldpath
-proof="$ROOT/ui/linux-qt/build/LINUX_QT_LINK.txt"
+proof="$BUILD_DIR/LINUX_QT_LINK.txt"
 mkdir -p "$(dirname "$proof")"
 smoke_plat=""
 smoke_dump=""
-rm -rf "$ROOT/ui/linux-qt/build/shots"
+rm -rf "$BUILD_DIR/shots"
 
 # One driver for the dev gates: run the binary with a gate name, require the
 # proof line it prints.
@@ -334,7 +348,7 @@ try_smoke_xvfb() {
 }
 
 run_helper_tests() {
-    local tests="$ROOT/ui/linux-qt/build/appattic-qt-helper-tests"
+    local tests="$BUILD_DIR/appattic-qt-helper-tests"
     if [[ ! -x "$tests" ]]; then
         echo "error: helper tests not built ($tests); run without --smoke" >&2
         exit 1
@@ -358,7 +372,7 @@ run_smoke() {
         run_ui_check table '^tables-ui: ok \(rows=[1-9][0-9]* cols=[0-9]+ children=[0-9]+\)$'
         run_ui_check stream '^stream: ok \(updates=[1-9][0-9]* rows=[1-9][0-9]*'
         run_ui_check disk '^disk-stream: ok \(rows=[1-9][0-9]* segments=[1-9][0-9]*\)$'
-        run_ui_check shot '^shot: ok \(pages=[1-9][0-9]* ' "$ROOT/ui/linux-qt/build/shots"
+        run_ui_check shot '^shot: ok \(pages=[1-9][0-9]* ' "$BUILD_DIR/shots"
         echo "smoke: ok (offscreen)"
         return 0
     fi

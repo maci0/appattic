@@ -6,23 +6,36 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PROOF="${1:-$ROOT/ui/linux-qt/build/LINUX_QT_LINK.txt}"
+
+# The proof lands in the build tree of the config that produced it, so the
+# default has to follow the config: a caller that linked release would otherwise
+# verify the debug proof left over from an earlier run.
+if [[ $# -gt 0 ]]; then
+    case "$1" in
+        release) PROOF="$ROOT/ui/linux-qt/build-release/LINUX_QT_LINK.txt" ;;
+        debug) PROOF="$ROOT/ui/linux-qt/build/LINUX_QT_LINK.txt" ;;
+        *) PROOF="$1" ;;
+    esac
+else
+    PROOF="$ROOT/ui/linux-qt/build/LINUX_QT_LINK.txt"
+fi
 
 for arg in "$@"; do
     case "$arg" in
         -h|--help)
             cat <<'EOF'
-Usage: bash scripts/verify-qt-link.sh [path/to/LINUX_QT_LINK.txt]
+Usage: bash scripts/verify-qt-link.sh [release|debug|path/to/LINUX_QT_LINK.txt]
 
   Checks the Qt 6 link proof for the link, offscreen smoke, the path-shadow
   plugin, a non-zero WASM plugin count, and the table teardown counters.
+  A config name reads that config's proof; a path is read as given.
   Defaults to ui/linux-qt/build/LINUX_QT_LINK.txt.
 EOF
             exit 0
             ;;
         -*)
             echo "error: unknown argument: $arg" >&2
-            echo "Usage: bash scripts/verify-qt-link.sh [path/to/LINUX_QT_LINK.txt]" >&2
+            echo "Usage: bash scripts/verify-qt-link.sh [release|debug|path/to/LINUX_QT_LINK.txt]" >&2
             exit 2
             ;;
     esac
