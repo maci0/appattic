@@ -209,7 +209,15 @@ WASM_DEST="$APPDIR/usr/share/appattic"
 mkdir -p "$WASM_DEST"
 while IFS= read -r f; do
     [[ -f "$f" ]] || continue
-    cp -f "$f" "$WASM_DEST/"
+    # -p on a .wasm, and only on a .wasm: its precompiled image is validated
+    # against the size and mtime recorded in the sibling .cwasm.stamp, so a
+    # copy that gives the shipped .wasm the packaging time makes the pair look
+    # stale and every module is compiled again on first run. The .cwasm and
+    # .stamp are copies of their own bytes, which no copy rewrites.
+    case "$f" in
+        *.wasm) cp -pf "$f" "$WASM_DEST/" ;;
+        *) cp -f "$f" "$WASM_DEST/" ;;
+    esac
 done < <(printf '%s\n' "$CORE_OUT"/*.wasm "$CORE_OUT"/*.cwasm "$CORE_OUT"/*.cwasm.stamp \
     | LC_ALL=C sort)
 

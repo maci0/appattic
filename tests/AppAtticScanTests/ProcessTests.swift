@@ -1,6 +1,11 @@
 import Foundation
 import XCTest
 @testable import AppAtticScan
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 final class ProcessTests: XCTestCase {
     /// Slack on top of the production bound before a call counts as unbounded.
@@ -243,5 +248,48 @@ final class ProcessTests: XCTestCase {
         XCTAssertTrue(run.stderr.contains("before-sleep"), run.stderr)
         XCTAssertTrue(run.stderr.contains(scriptStoppedNote(timeout: 0.5)), run.stderr)
         XCTAssertLessThan(monotonicSeconds() - start, 0.5 + Self.timingSlack)
+    }
+
+    /// The search list `whichCommand` walks is built from PATH and the home
+    /// toolchain directories, and a long lived UI runs scans hours after it
+    /// started. A list from launch resolves a tool installed since against the
+    /// directories the machine had then, so the scan misses it, and the scan
+    /// cache fingerprint is built from the same lookups, so nothing invalidates
+    /// the snapshot either. `runFullScan` drops the list before it collects;
+    /// this pins the drop.
+    func testResetWhichSearchDirectoriesPicksUpAPathAddedAfterTheListWasBuilt() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("appattic-which-reset-\(UUID().uuidString)")
+        let first = root.appendingPathComponent("first")
+        let second = root.appendingPathComponent("second")
+        for dir in [first, second] {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        addTeardownBlock {
+            resetWhichSearchDirectories()
+            try? FileManager.default.removeItem(at: root)
+        }
+        // A name no per-user toolchain directory holds, so the only thing that
+        // can resolve it is the PATH entry the test put there.
+        let early = "appattic-which-reset-early"
+        let late = "appattic-which-reset-late"
+        for (dir, name) in [(first, early), (second, late)] {
+            let stub = dir.appendingPathComponent(name)
+            try "#!/bin/sh\nexit 0\n".write(to: stub, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+        }
+        let savedPath = ProcessInfo.processInfo.environment["PATH"]
+        addTeardownBlock {
+            if let savedPath { setenv("PATH", savedPath, 1) } else { unsetenv("PATH") }
+        }
+
+        setenv("PATH", first.path, 1)
+        resetWhichSearchDirectories()
+        XCTAssertEqual(whichCommand(early), first.appendingPathComponent(early).path)
+        XCTAssertNil(whichCommand(late), "the second directory is not on PATH yet")
+
+        setenv("PATH", second.path, 1)
+        resetWhichSearchDirectories()
+        XCTAssertEqual(whichCommand(late), second.appendingPathComponent(late).path)
     }
 }

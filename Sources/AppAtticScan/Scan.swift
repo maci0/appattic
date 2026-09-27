@@ -243,6 +243,11 @@ public func performScan(
     let t0 = clock()
     let result = ScanResult(scannedAt: now)
     resetScanCheckFailures()
+    // The `whichCommand` search list holds PATH and the installed nvm
+    // versions as of the last time it was built, and a long lived UI has run
+    // scans since. Every collector below resolves its tool through it, so a
+    // list from launch is a scan that misses what was installed since.
+    resetWhichSearchDirectories()
 
     progress("Scanning installed applications…")
     var found = apps ?? findApps(progress: progress)

@@ -26,13 +26,30 @@ public func whichCommand(_ name: String) -> String? {
 
 /// The directories `whichCommand` walks, de-duplicated, first-wins.
 ///
-/// Assembled once: it costs a `homeDirectoryForCurrentUser` lookup, a
+/// Assembled once per scan: it costs a `homeDirectoryForCurrentUser` lookup, a
 /// full `environment` copy, a PATH split and a readdir of every installed nvm
 /// version, and `runCommand` calls `whichCommand` once per subprocess it
 /// spawns (a scan runs hundreds). Only the directory list is cached, never a
-/// name-to-path result, so a tool installed while the app runs is still found.
+/// name-to-path result, so a tool installed while the app runs is still found
+/// as long as the list is rebuilt.
+///
+/// The list is its own key: nothing in it, and nothing a lookup of a name
+/// inside it, can tell the process that a directory was added, that PATH
+/// changed, or that another nvm version appeared. A long lived UI that kept
+/// the first list for its whole life would resolve `brew`, `mas` or a nvm tool
+/// against the directories the machine had at launch, and the scan cache
+/// fingerprint is built from those same lookups, so a tool installed since
+/// would leave the fingerprint unchanged and the stale snapshot serving.
+/// `runFullScan` calls `resetWhichSearchDirectories()` before it collects,
+/// which is the one point where the list has to be right.
 private let whichDirectoriesLock = NSLock()
 nonisolated(unsafe) private var cachedWhichDirectories: [String]? = nil
+
+func resetWhichSearchDirectories() {
+    whichDirectoriesLock.lock()
+    cachedWhichDirectories = nil
+    whichDirectoriesLock.unlock()
+}
 
 private func whichSearchDirectories() -> [String] {
     whichDirectoriesLock.lock()
