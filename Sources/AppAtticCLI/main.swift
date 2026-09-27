@@ -170,26 +170,30 @@ enum C {
 }
 
 func visibleLen(_ s: String) -> Int {
-    if !C.enabled { return s.count }
+    if !C.enabled { return displayWidth(s) }
     let re = try! NSRegularExpression(pattern: #"\u{1b}\[[0-9;]*m"#)
-    return re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "").count
+    return displayWidth(re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: ""))
+}
+
+func padCell(_ cell: String, to width: Int) -> String {
+    let pad = max(0, width - visibleLen(cell))
+    return pad == 0 ? cell : cell + String(repeating: " ", count: pad)
 }
 
 func renderTable(headers: [String], rows: [[String]]) -> String {
-    var widths = headers.map(\.count)
+    var widths = headers.map { visibleLen($0) }
     for row in rows {
         for (i, cell) in row.enumerated() where i < widths.count {
             widths[i] = max(widths[i], visibleLen(cell))
         }
     }
     var lines: [String] = []
-    lines.append(zip(headers, widths).map { $0.0.padding(toLength: $0.1, withPad: " ", startingAt: 0) }.joined(separator: "  ").trimmingCharacters(in: .whitespaces))
+    lines.append(zip(headers, widths).map { padCell($0.0, to: $0.1) }.joined(separator: "  ").trimmingCharacters(in: .whitespaces))
     lines.append(widths.map { String(repeating: "-", count: $0) }.joined(separator: "  "))
     for row in rows {
         var cells: [String] = []
         for (i, cell) in row.enumerated() {
-            let pad = max(0, (i < widths.count ? widths[i] : 0) - visibleLen(cell))
-            cells.append(cell + String(repeating: " ", count: pad))
+            cells.append(padCell(cell, to: i < widths.count ? widths[i] : 0))
         }
         lines.append(cells.joined(separator: "  ").trimmingCharacters(in: .whitespaces))
     }

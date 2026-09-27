@@ -329,14 +329,24 @@ public func redactHomePaths(
     } else {
         homePath = processHome()
     }
-    if homePath.count > 1, text.contains(homePath), let redacted = redactHomePrefix(text, homePath: homePath) {
-        return redacted
-    }
-    if let rawHome, rawHome.count > 1, text.contains(rawHome),
-       let redacted = redactHomePrefix(text, homePath: rawHome) {
-        return redacted
+    for candidate in homePathSpellings(homePath) + (rawHome.map(homePathSpellings) ?? []) {
+        if candidate.count > 1, text.contains(candidate),
+           let redacted = redactHomePrefix(text, homePath: candidate) {
+            return redacted
+        }
     }
     return text
+}
+
+/// Spellings of a path that name the same path. macOS reports account and app
+/// names in NFD, while tools and pasted text print NFC, so a byte comparison
+/// finds no home prefix in a log line carrying an accented account name.
+private func homePathSpellings(_ path: String) -> [String] {
+    let nfc = path.precomposedStringWithCanonicalMapping
+    let nfd = path.decomposedStringWithCanonicalMapping
+    var out = [path]
+    for variant in [nfc, nfd] where variant != path { out.append(variant) }
+    return out
 }
 
 /// Replace every `homePath` occurrence in `text` that ends on a path boundary
@@ -722,6 +732,42 @@ func isSafeShellByte(_ c: UInt8) -> Bool {
         (c >= 0x30 && c <= 0x39) ||
         c == 0x5F || c == 0x40 || c == 0x25 || c == 0x2B || c == 0x3D ||
         c == 0x3A || c == 0x2C || c == 0x2E || c == 0x2F || c == 0x2D
+}
+
+/// East Asian Wide and Fullwidth blocks, which a terminal draws two columns
+/// wide. Ambiguous-width scalars (Latin-1 letters, box drawing) stay one column
+/// so the tables do not depend on the terminal's locale setting.
+private let wideColumnRanges: [ClosedRange<UInt32>] = [
+    0x1100...0x115F, 0x2E80...0x303E, 0x3041...0x33FF, 0x3400...0x4DBF,
+    0x4E00...0x9FFF, 0xA000...0xA4CF, 0xA960...0xA97F, 0xAC00...0xD7A3,
+    0xF900...0xFAFF, 0xFE10...0xFE19, 0xFE30...0xFE6F, 0xFF00...0xFF60,
+    0xFFE0...0xFFE6, 0x1B000...0x1B2FF, 0x1F1E6...0x1F1FF, 0x1F200...0x1F2FF,
+    0x1F300...0x1F64F, 0x1F900...0x1F9FF, 0x20000...0x2FFFD, 0x30000...0x3FFFD,
+]
+
+private func scalarIsZeroWidth(_ s: Unicode.Scalar) -> Bool {
+    switch s.properties.generalCategory {
+    case .nonspacingMark, .enclosingMark, .format, .control, .unassigned,
+         .lineSeparator, .paragraphSeparator:
+        return true
+    default:
+        return false
+    }
+}
+
+/// Terminal columns a string occupies. `String.count` counts grapheme
+/// clusters, so a CJK name from the filesystem pads to the wrong width and
+/// shifts every later column. One cluster is one glyph: a combining mark or a
+/// ZWJ sequence rides on its base scalar's width instead of adding columns.
+public func displayWidth(_ s: String) -> Int {
+    var width = 0
+    for cluster in s {
+        for scalar in cluster.unicodeScalars where !scalarIsZeroWidth(scalar) {
+            width += wideColumnRanges.contains { $0.contains(scalar.value) } ? 2 : 1
+            break
+        }
+    }
+    return width
 }
 
 public func shellQuote(_ value: String) -> String {

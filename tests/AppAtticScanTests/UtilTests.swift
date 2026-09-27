@@ -97,6 +97,17 @@ final class UtilTests: XCTestCase {
         XCTAssertEqual(posixLowercased("Straße"), "straße")
     }
 
+    func testDisplayWidthCountsTerminalColumns() {
+        XCTAssertEqual(displayWidth(""), 0)
+        XCTAssertEqual(displayWidth("abc"), 3)
+        // Combining acute rides on the e, so this is one column, not two.
+        XCTAssertEqual(displayWidth("Cafe\u{0301}"), 4)
+        XCTAssertEqual(displayWidth("Café"), 4)
+        XCTAssertEqual(displayWidth("日本語"), 6)
+        XCTAssertEqual(displayWidth("한국어"), 6)
+        XCTAssertEqual(displayWidth("👩‍👩‍👧"), 2)
+    }
+
     func testHumanSize() {
         XCTAssertEqual(humanSize(0), "0 B")
         XCTAssertEqual(humanSize(1023), "1023 B")
@@ -538,6 +549,23 @@ final class UtilTests: XCTestCase {
             "/home/alice2/secret"
         )
         XCTAssertEqual(redactHomePaths("/tmp/x", home: "/"), "/tmp/x")
+    }
+
+    func testRedactHomePathsAcrossNormalizationForms() {
+        // macOS reports the account path decomposed; tools print it composed.
+        let nfdHome = "/Users/Jose\u{0301}"
+        XCTAssertEqual(
+            redactHomePaths("rm: cannot remove '/Users/José/Downloads': Permission denied", home: nfdHome),
+            "rm: cannot remove '~/Downloads': Permission denied"
+        )
+        XCTAssertEqual(
+            redactHomePaths("rm: cannot remove '/Users/Jose\u{0301}/Downloads'", home: "/Users/José"),
+            "rm: cannot remove '~/Downloads'"
+        )
+        XCTAssertEqual(
+            redactHomePaths("/Users/Jose\u{0301}2/secret", home: nfdHome),
+            "/Users/Jose\u{0301}2/secret"
+        )
     }
 
     func testWriteOwnerOnlyFileIsOwnerReadable() throws {

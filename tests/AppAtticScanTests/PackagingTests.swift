@@ -119,7 +119,7 @@ final class PackagingTests: XCTestCase {
             contentsOf: root.appendingPathComponent(".github/workflows/linux.yml"),
             encoding: .utf8
         )
-        let verify = try String(
+        let verifyQtLink = try String(
             contentsOf: root.appendingPathComponent("scripts/verify-qt-link.sh"),
             encoding: .utf8
         )
@@ -127,11 +127,11 @@ final class PackagingTests: XCTestCase {
             XCTAssertTrue(source.contains("verify-qt-link.sh"), source)
             XCTAssertFalse(source.contains("LINUX_QT_LINK=ok"), source)
         }
-        XCTAssertTrue(verify.contains("LINUX_QT_LINK=ok"), verify)
-        XCTAssertTrue(verify.contains("LINUX_QT_SMOKE=ok"), verify)
-        XCTAssertTrue(verify.contains("plugin:path-shadow"), verify)
-        XCTAssertTrue(verify.contains("wasm: ok"), verify)
-        XCTAssertTrue(verify.contains("tables: ok"), verify)
+        XCTAssertTrue(verifyQtLink.contains("LINUX_QT_LINK=ok"), verifyQtLink)
+        XCTAssertTrue(verifyQtLink.contains("LINUX_QT_SMOKE=ok"), verifyQtLink)
+        XCTAssertTrue(verifyQtLink.contains("plugin:path-shadow"), verifyQtLink)
+        XCTAssertTrue(verifyQtLink.contains("wasm: ok"), verifyQtLink)
+        XCTAssertTrue(verifyQtLink.contains("tables: ok"), verifyQtLink)
 
         let yaml = try String(
             contentsOf: root.appendingPathComponent(".github/workflows/linux.yml"),
