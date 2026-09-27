@@ -46,17 +46,11 @@ else
     echo "note: zig not on PATH; checking the C host only" >&2
 fi
 
-# This list mirrors the one in core/build.sh. A flag added there and missed
-# here is a check that no longer proves what it says, so assert the hardening
-# flags are still there before running.
-# shellcheck disable=SC2016  # literal text to grep for, not an expansion
-for flag in '-ffile-prefix-map=$root=.' '-D_FORTIFY_SOURCE=2' '-Wl,-z,relro,-z,now'; do
-    if ! grep -qF -- "$flag" "$ROOT/core/build.sh"; then
-        echo "error: core/build.sh no longer carries '$flag'" >&2
-        echo "       keep build_host() in $0 in step with it" >&2
-        exit 1
-    fi
-done
+# The flags come from core/build-flags.sh, the lists core/build.sh compiles the
+# shipped artifacts with, so this check cannot drift into compiling something
+# the release never builds.
+# shellcheck source=../core/build-flags.sh
+. "$ROOT/core/build-flags.sh"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -77,42 +71,16 @@ export ZIG_LOCAL_CACHE_DIR="$tmp/zig-local"
 build_wasm() {
     local root="$1" out="$2"
     (cd "$root" && zig build-exe \
-        -target wasm32-freestanding \
-        -fno-entry \
-        -rdynamic \
-        -OReleaseSmall \
-        -fstrip \
+        "${zig_build_flags[@]}" \
         -femit-bin="$out" \
         src/core.zig)
 }
 
-# core/build.sh's cc flag block, with $root resolved to the tree being built.
 build_host() {
     local root="$1" out="$2"
-    local -a cflags=(-O2 -Wall -Wextra -fstack-protector-strong
-        -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fPIE
-        "-ffile-prefix-map=$root=." "-fdebug-prefix-map=$root=." "-fmacro-prefix-map=$root=.")
-    local -a ldflags=()
-    case "$(uname -s)" in
-        Linux)
-            ldflags=(-pie "-Wl,-z,relro,-z,now" "-Wl,-z,noexecstack")
-            cflags+=(-fstack-clash-protection)
-            case "$(uname -m)" in
-                x86_64)
-                    cflags+=(-fcf-protection=full)
-                    ldflags+=(-fcf-protection=full)
-                    ;;
-                aarch64|arm64)
-                    cflags+=(-mbranch-protection=standard)
-                    ;;
-            esac
-            ;;
-        Darwin) ldflags=("-Wl,-pie") ;;
-        *) ldflags=(-pie) ;;
-    esac
-    cc "${cflags[@]}" "${ldflags[@]}" \
-        -Werror -Wformat=2 -Wformat-security \
-        -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference \
+    appattic_host_flags "$root"
+    cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
+        "${cc_strict_warnings[@]}" \
         -I"$root/host" \
         "$root/host/hostexec.c" \
         "$root/host/tests/hostexec_test.c" \

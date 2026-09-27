@@ -164,7 +164,9 @@ cmake -S "$ROOT/ui/linux-qt" -B "$BUILD_DIR" \
     "${gen[@]}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DWASMTIME_ROOT="$WASMTIME_DIR"
-cmake --build "$BUILD_DIR"
+# --parallel so a host without ninja, where CMake falls back to Make and `make`
+# defaults to one job, still uses the cores.
+cmake --build "$BUILD_DIR" --parallel
 
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR"

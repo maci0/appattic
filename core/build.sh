@@ -42,6 +42,10 @@ mkdir -p "$ZIG_GLOBAL_CACHE_DIR" "$ZIG_LOCAL_CACHE_DIR"
 
 # shellcheck source=../scripts/find-zig.sh
 . "$root/../scripts/find-zig.sh"
+# Sourced before the first artifact is emitted: zig_build_flags is read at
+# source time, and every WASM module is built with it.
+# shellcheck source=build-flags.sh
+. "$root/build-flags.sh"
 if ! appattic_find_zig; then
     echo "zig missing. macOS: brew install zig. Linux: scripts/linux-deps.sh --install-zig" >&2
     echo "Then re-run $0" >&2
@@ -186,11 +190,7 @@ wasm_artifact_name() {
 
 zig_wasm() {
     zig build-exe \
-        -target wasm32-freestanding \
-        -fno-entry \
-        -rdynamic \
-        -OReleaseSmall \
-        -fstrip \
+        "${zig_build_flags[@]}" \
         -femit-bin="$out/$(wasm_artifact_name "$1")" \
         "$root/src/$1"
 }
@@ -245,34 +245,11 @@ case "$(uname -s)" in
     Linux) export APPATTIC_HOST_EXEC_FIXTURE=1 ;;
 esac
 
-cc_cflags=(-O2 -Wall -Wextra -fstack-protector-strong -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fPIE
-    "-ffile-prefix-map=$root=." "-fdebug-prefix-map=$root=." "-fmacro-prefix-map=$root=.")
-cc_ldflags=()
-case "$(uname -s)" in
-    Linux)
-        cc_ldflags=(-pie "-Wl,-z,relro,-z,now" "-Wl,-z,noexecstack")
-        cc_cflags+=(-fstack-clash-protection)
-        case "$(uname -m)" in
-            x86_64)
-                cc_cflags+=(-fcf-protection=full)
-                cc_ldflags+=(-fcf-protection=full)
-                ;;
-            aarch64|arm64)
-                cc_cflags+=(-mbranch-protection=standard)
-                ;;
-        esac
-        ;;
-    Darwin)
-        cc_ldflags=("-Wl,-pie")
-        ;;
-    *)
-        cc_ldflags=(-pie)
-        ;;
-esac
+# The C host flags, resolved against the tree being built.
+appattic_host_flags "$root"
 
 cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
-    -Werror -Wformat=2 -Wformat-security \
-    -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference \
+    "${cc_strict_warnings[@]}" \
     -I"$root/host" \
     "$root/host/hostexec.c" \
     "$root/host/tests/hostexec_test.c" \

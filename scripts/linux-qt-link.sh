@@ -214,7 +214,9 @@ if [[ "$SMOKE_ONLY" -eq 0 ]]; then
       "${gen[@]}" \
       "-DCMAKE_BUILD_TYPE=$CONFIG" \
       -DWASMTIME_ROOT="$WASMTIME_DIR"
-  cmake --build "$BUILD_DIR"
+  # --parallel so a host without ninja, where CMake falls back to Make and
+  # `make` defaults to one job, still uses the cores.
+  cmake --build "$BUILD_DIR" --parallel
 else
   require_wasm_artifacts
 fi

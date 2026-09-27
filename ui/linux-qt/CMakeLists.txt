@@ -123,6 +123,10 @@ target_link_libraries(appattic-qt PRIVATE Qt6::Widgets wasmtime Threads::Threads
 # The same value the CLI and the macOS UI print, read from Version.swift above.
 target_compile_definitions(appattic-qt PRIVATE APPATTIC_VERSION="${APPATTIC_VERSION}")
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    # core/build-flags.sh is the one shell-side list of these flags, shared by
+    # core/build.sh and scripts/verify-reproducible.sh. CMake cannot read it, so
+    # this block is the one copy that has to be kept in step by hand: a flag
+    # added there belongs here too.
     target_compile_options(appattic-qt PRIVATE
         -fstack-protector-strong
         -Wformat
