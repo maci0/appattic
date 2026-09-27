@@ -647,7 +647,10 @@ public:
         m_emptyDetail->setMinimumWidth(220);
         m_clearSearch = new QPushButton(QStringLiteral("Clear search"));
         m_clearSearch->hide();
-        m_emptyRetry = new QPushButton(QStringLiteral("Try Again"));
+        // "Rescan" is the name the toolbar button and the error copy use for
+        // this action. A second word for the same button reads as a different
+        // one.
+        m_emptyRetry = new QPushButton(QStringLiteral("Rescan"));
         m_emptyRetry->hide();
         eiv->addWidget(m_emptyTitle);
         eiv->addWidget(m_emptyDetail, 0, Qt::AlignHCenter);
@@ -1392,13 +1395,34 @@ private:
         m_ignoredList = new QListWidget;
         m_ignoredList->setFont(small);
         m_ignoredList->setToolTip(
-            QStringLiteral("Double-click a path to show that leftover in the list again")
+            QStringLiteral("Select a path, then press Show Again, to show that leftover in the list")
         );
         m_ignoredList->setMaximumHeight(rowPx(m_ignoredList) * 6 + 8);
         m_ignoredList->setMinimumWidth(220);
         aaApplySourceList(m_ignoredList);
         ilv->addWidget(m_ignoredEmpty);
         ilv->addWidget(m_ignoredList, 1);
+        // The double click is the quick way in, but it is a gesture nothing on
+        // screen names. The button is the visible way back, for a path the
+        // reader cannot double-click, and for a pointer or keyboard that
+        // never sends one.
+        auto *ignHint = hintLabel(
+            QStringLiteral(
+                "Select a path, then press Show Again, to show that leftover in the list."
+            )
+        );
+        ilv->addWidget(ignHint);
+        auto *ignButtons = new QHBoxLayout;
+        ignButtons->setContentsMargins(0, 0, 0, 0);
+        ignButtons->setSpacing(8);
+        m_showIgnored = new QPushButton(QStringLiteral("Show Again"));
+        m_showIgnored->setToolTip(
+            QStringLiteral("Show the selected ignored leftover in the list again")
+        );
+        m_showIgnored->setEnabled(false);
+        ignButtons->addWidget(m_showIgnored);
+        ignButtons->addStretch();
+        ilv->addLayout(ignButtons);
         m_clearIgnored = new QPushButton(QStringLiteral("Clear ignored leftovers"));
         m_clearIgnored->setToolTip(QStringLiteral("Show every ignored leftover in the list again"));
         ignCol.second->addWidget(ignListHost, 1);
@@ -1427,15 +1451,18 @@ private:
                 QStringLiteral("Shown in the list again: %1.").arg(localeCount(n))
             );
         });
+        connect(m_ignoredList, &QListWidget::currentItemChanged, this,
+                [this](QListWidgetItem *it, QListWidgetItem *) {
+                    if (m_showIgnored) m_showIgnored->setEnabled(it != nullptr);
+                });
+        connect(m_showIgnored, &QPushButton::clicked, this, [this] {
+            QListWidgetItem *it = m_ignoredList->currentItem();
+            if (!it) return;
+            restoreIgnoredLeftover(it->data(Qt::UserRole).toString(), it->text());
+        });
         connect(m_ignoredList, &QListWidget::itemActivated, this, [this](QListWidgetItem *it) {
             if (!it) return;
-            const QString key = it->data(Qt::UserRole).toString();
-            if (key.isEmpty() || !m_ignored.remove(key)) return;
-            persistSettings();
-            fillCurrent();
-            statusBar()->showMessage(
-                QStringLiteral("Shown in the list again: %1.").arg(it->text())
-            );
+            restoreIgnoredLeftover(it->data(Qt::UserRole).toString(), it->text());
         });
         return w;
     }
@@ -1575,7 +1602,10 @@ private:
         const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
         const QString pending = QStringLiteral("…");
         const QString blockedMark = QStringLiteral("-");
-        m_statInstalled->setText(QStringLiteral("Not scanned"));
+        // The Linux scan has no installed-app count to show, and a scan cannot
+        // fill this one in. "Not scanned" read as a failed measurement next to
+        // four real numbers; the marker says the value does not exist here.
+        m_statInstalled->setText(QStringLiteral("n/a"));
         m_statInstalled->setToolTip(
             QStringLiteral("This Linux scan does not count installed apps.")
         );
@@ -1987,7 +2017,10 @@ private:
             m_clearSearch->setVisible(
                 !m_search->text().trimmed().isEmpty() && !scanningEmpty && !scanFailed && !settingsBlocked
             );
-            m_emptyRetry->setVisible((scanFailed || settingsBlocked) && !scanningEmpty);
+            // A settings error is fixed by editing the file, and Rescan reads
+            // the same broken file again: offering the button there is a dead
+            // end next to copy that says to fix the file.
+            m_emptyRetry->setVisible(scanFailed && !scanningEmpty);
         } else {
             m_table->show();
             m_emptyPane->hide();
@@ -3185,9 +3218,20 @@ private:
         refreshIgnoredList();
     }
 
+    /// One hidden path back in the list. The double click and the Show Again
+    /// button both land here, so the two ways in say the same thing and do the
+    /// same work.
+    void restoreIgnoredLeftover(const QString &key, const QString &label) {
+        if (key.isEmpty() || !m_ignored.remove(key)) return;
+        persistSettings();
+        fillCurrent();
+        statusBar()->showMessage(QStringLiteral("Shown in the list again: %1.").arg(label));
+    }
+
     void refreshIgnoredList() {
         if (!m_ignoredList) return;
         m_ignoredList->clear();
+        if (m_showIgnored) m_showIgnored->setEnabled(false);
         m_ignoredEmpty->setVisible(m_ignored.isEmpty());
         m_ignoredList->setVisible(!m_ignored.isEmpty());
         if (m_ignored.isEmpty()) {
@@ -3220,7 +3264,7 @@ private:
         }
         m_ignoredList->setToolTip(
             localeCount(m_ignored.size())
-            + QStringLiteral(" hidden. Double-click a path to show that leftover in the list again.")
+            + QStringLiteral(" hidden. Select a path, then press Show Again, to show that leftover in the list.")
         );
         m_clearIgnored->setEnabled(true);
     }
@@ -3270,6 +3314,7 @@ private:
     QListWidget *m_ignoredList = nullptr;
     QLabel *m_ignoredEmpty = nullptr;
     QPushButton *m_clearIgnored = nullptr;
+    QPushButton *m_showIgnored = nullptr;
     QLabel *m_statInstalled = nullptr;
     QLabel *m_statLeftovers = nullptr;
     QLabel *m_statLeftoverData = nullptr;

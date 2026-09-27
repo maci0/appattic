@@ -397,6 +397,14 @@ final class ScannerViewModel {
         invalidateRowCache()
     }
 
+    func restoreIgnoredLeftover(_ path: String) {
+        guard ignoredLeftovers.contains(path) else { return }
+        var ignored = ignoredLeftovers
+        ignored.remove(path)
+        ignoredLeftovers = ignored
+        invalidateRowCache()
+    }
+
     func clearIgnoredLeftovers() {
         ignoredLeftovers = []
         invalidateRowCache()

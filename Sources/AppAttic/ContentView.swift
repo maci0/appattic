@@ -333,7 +333,7 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
             } else {
-                Button("Try Again") { vm.scan(includeSystem: includeSystem) }
+                Button("Rescan") { vm.scan(includeSystem: includeSystem) }
                     .padding(.top, 4)
             }
             Spacer()
@@ -1268,26 +1268,36 @@ struct ContentView: View {
                         Text(ignoredCountLabel)
                             .font(.system(size: TypeScale.small))
                             .foregroundColor(Color.appDim)
+                        Text("Click a path to show that leftover in the list again.")
+                            .font(.system(size: TypeScale.small))
+                            .foregroundColor(Color.appDim)
                         // Collated, not byte order: the Qt window sorts this
                         // same list with a QCollator, and a path with a
                         // non-ASCII name ("Über", "日本語") lands after every
                         // ASCII one in byte order, which reads as unordered to
                         // a German or Japanese user.
-                        ForEach(Array(vm.ignoredLeftovers
-                            .sorted {
-                                collatedBefore(ignoredPathLabel($0), ignoredPathLabel($1),
-                                               tieBreak: $0, $1)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(vm.ignoredLeftovers
+                                    .sorted {
+                                        collatedBefore(ignoredPathLabel($0), ignoredPathLabel($1),
+                                                       tieBreak: $0, $1)
+                                    }, id: \.self) { path in
+                                    Button(ignoredPathLabel(path)) {
+                                        vm.restoreIgnoredLeftover(path)
+                                        persistSettings()
+                                        vm.statusText = "Shown in the list again: "
+                                            + ignoredPathLabel(path) + "."
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(.system(size: TypeScale.monoSmall))
+                                    .foregroundColor(Color.appText)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
                             }
-                            .prefix(12)), id: \.self) { path in
-                            Text(ignoredPathLabel(path))
-                                .font(.system(size: TypeScale.monoSmall))
-                                .foregroundColor(Color.appText)
+                            .padding(4)
                         }
-                        if vm.ignoredLeftovers.count > 12 {
-                            Text("and \(vm.ignoredLeftovers.count - 12) more")
-                                .font(.system(size: TypeScale.small))
-                                .foregroundColor(Color.appDim)
-                        }
+                        .frame(maxHeight: 140)
                         Button("Clear ignored leftovers") {
                             vm.clearIgnoredLeftovers()
                             persistSettings()
