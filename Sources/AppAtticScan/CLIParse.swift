@@ -9,7 +9,7 @@ public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStr
     case unexpectedArgument(String)
     case conflictingFilters
     case yesNeedsUpdateCommand
-    case optionNeedsCommand(option: String, command: String)
+    case optionNeedsCommand(option: String, commands: [String])
 
     public var description: String {
         switch self {
@@ -32,8 +32,9 @@ public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStr
             return "--leftovers-only and --stale-only cannot be combined"
         case .yesNeedsUpdateCommand:
             return "--yes only applies to the update command"
-        case .optionNeedsCommand(let option, let command):
-            return "\(option) only applies to the \(command) command"
+        case .optionNeedsCommand(let option, let commands):
+            let noun = commands.count == 1 ? "command" : "commands"
+            return "\(option) only applies to the \(cliCommandNames(commands)) \(noun)"
         }
     }
 
@@ -117,8 +118,55 @@ let cliBooleanFlags: [(name: String, key: WritableKeyPath<CLIOptions, Bool>)] = 
     ("--stale-only", \.staleOnly),
 ]
 
+/// An option that only means something on some commands. Everywhere else it is
+/// a usage error, not a silent no-op, so a flag that would be ignored fails
+/// instead of running: `appattic stale --top 5` looks like it trims the table
+/// and does not.
+struct CLICommandScopedOption {
+    let name: String
+    let commands: [String]
+    let isSet: (CLIOptions) -> Bool
+
+    init(name: String, commands: [String], isSet: @escaping (CLIOptions) -> Bool) {
+        self.name = name
+        self.commands = commands
+        self.isSet = isSet
+    }
+}
+
+let cliCommandScopedOptions: [CLICommandScopedOption] = [
+    CLICommandScopedOption(
+        name: "--include-system",
+        commands: ["report", "leftovers", "stale", "outdated", "packages", "update", "config"]
+    ) { $0.includeSystem },
+    CLICommandScopedOption(
+        name: "--fresh",
+        commands: ["report", "leftovers", "stale", "outdated", "packages", "update"]
+    ) { $0.fresh },
+    CLICommandScopedOption(name: "--allocated", commands: ["disk"]) { $0.allocated },
+    CLICommandScopedOption(name: "--all-file-systems", commands: ["disk"]) { $0.allFileSystems },
+    CLICommandScopedOption(name: "--leftovers-only", commands: ["report"]) { $0.leftoversOnly },
+    CLICommandScopedOption(name: "--stale-only", commands: ["report"]) { $0.staleOnly },
+    CLICommandScopedOption(name: "--top", commands: ["report", "leftovers", "disk"]) { $0.top != nil },
+    CLICommandScopedOption(name: "--category", commands: ["report", "leftovers"]) { !$0.category.isEmpty },
+    CLICommandScopedOption(
+        name: "--dry-run",
+        commands: ["report", "leftovers", "stale", "outdated", "packages", "update"]
+    ) { $0.dryRun },
+]
+
 func cliCommandList() -> String {
     cliCommands.sorted().joined(separator: ", ")
+}
+
+/// "disk", "report and disk", "report, leftovers, and disk".
+func cliCommandNames(_ commands: [String]) -> String {
+    switch commands.count {
+    case 0: return ""
+    case 1: return commands[0]
+    case 2: return "\(commands[0]) and \(commands[1])"
+    default: return "\(commands.dropLast().joined(separator: ", ")), and \(commands[commands.count - 1])"
+    }
 }
 
 /// Closest command within `cliSuggestionDistance` edits, for a typo like `updat`.
@@ -168,11 +216,16 @@ commands:
 
 options:
   --json FILE         also write full results as JSON to FILE
-  --include-system    include OS system apps in the stale list
-  --fresh             ignore the last-scan cache and scan now
-  --dry-run           print a shell script for this command without running it
-  --top N             leftovers: only the N largest. disk: N largest entries per folder
-  --category CAT      filter leftovers by category (substring match, repeatable)
+  --include-system    on report, leftovers, stale, outdated, packages, update, config:
+                      include OS system apps in the stale list
+  --fresh             on report, leftovers, stale, outdated, packages, update: ignore
+                      the last-scan cache and scan now
+  --dry-run           on report, leftovers, stale, outdated, packages, update: print the
+                      shell script for this command without running it
+  --top N             on report and leftovers: only the N largest. on disk: N
+                      largest entries per folder
+  --category CAT      on report and leftovers: filter by category (substring
+                      match, repeatable)
   --leftovers-only    on report, skip stale, outdated, and packages
   --stale-only        on report, skip leftovers, outdated, and packages
   --no-color          disable ANSI color (also NO_COLOR or TERM=dumb)
@@ -182,9 +235,10 @@ options:
   --version, -v       print version and exit
   --help, -h          print this help and exit
 
-An option that says which command it belongs to ("on report", "on disk",
-"on update") is a usage error on every other command, so a flag that would be
-ignored fails instead of running.
+An option that names the commands it belongs to ("on report", "on disk", "on
+update") is a usage error on every other command, so a flag that would be
+ignored fails instead of running: 'appattic stale --top 5' exits 2 rather than
+printing the full table.
 
 Progress and status go to stderr. Reports and --dry-run scripts go to stdout.
 
@@ -374,17 +428,9 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     }
     // A flag that one command ignores on every other is a usage error, not a
     // silent no-op: `appattic report --allocated` looks like it changes the report.
-    if opts.allocated, opts.command != "disk", opts.parseError == nil {
-        opts.parseError = .optionNeedsCommand(option: "--allocated", command: "disk")
-    }
-    if opts.allFileSystems, opts.command != "disk", opts.parseError == nil {
-        opts.parseError = .optionNeedsCommand(option: "--all-file-systems", command: "disk")
-    }
-    if opts.leftoversOnly, opts.command != "report", opts.parseError == nil {
-        opts.parseError = .optionNeedsCommand(option: "--leftovers-only", command: "report")
-    }
-    if opts.staleOnly, opts.command != "report", opts.parseError == nil {
-        opts.parseError = .optionNeedsCommand(option: "--stale-only", command: "report")
+    for scoped in cliCommandScopedOptions {
+        guard opts.parseError == nil, scoped.isSet(opts), !scoped.commands.contains(opts.command) else { continue }
+        opts.parseError = .optionNeedsCommand(option: scoped.name, commands: scoped.commands)
     }
     return opts
 }

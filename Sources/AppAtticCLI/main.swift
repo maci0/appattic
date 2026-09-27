@@ -150,9 +150,9 @@ func runConfigCommand(_ opts: CLIOptions, settings: AppAtticSettings) {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let payload = try encoder.encode(config)
             try writeOwnerOnlyFile(payload, to: URL(fileURLWithPath: jsonPath))
-            fputs("JSON written to \(jsonPath)\n", stderr)
+            fputs("JSON written to \(redactHomePaths(jsonPath))\n", stderr)
         } catch {
-            fputs("error writing JSON: \(error.localizedDescription)\n", stderr)
+            fputs("error writing JSON: \(redactHomePaths(error.localizedDescription))\n", stderr)
             Foundation.exit(1)
         }
     }

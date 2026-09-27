@@ -183,8 +183,8 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertEqual(opts.category, ["caches", "browser"])
         XCTAssertNil(opts.error)
         // A command after the value is the command, not another category.
-        let trailing = parseCLIArguments(["--category", "caches", "stale"])
-        XCTAssertEqual(trailing.command, "stale")
+        let trailing = parseCLIArguments(["--category", "caches", "leftovers"])
+        XCTAssertEqual(trailing.command, "leftovers")
         XCTAssertEqual(trailing.category, ["caches"])
         XCTAssertNil(trailing.error)
         XCTAssertEqual(parseCLIArguments(["--category", "-x"]).parseError, .categoryRequiresValue)
@@ -245,6 +245,72 @@ final class CLIFlagTests: XCTestCase {
     func testConflictingFiltersStillWinOverPerCommandOptions() {
         XCTAssertEqual(parseCLIArguments(["disk", "--leftovers-only", "--stale-only"]).error, "--leftovers-only and --stale-only cannot be combined")
         XCTAssertEqual(parseCLIArguments(["report", "--yes", "--allocated"]).error, "--yes only applies to the update command")
+    }
+
+    /// `--top`, `--category`, and `--dry-run` change what a command prints, so
+    /// a command that would drop them is a usage error rather than a run that
+    /// quietly ignores the flag.
+    func testTopIsRejectedOnCommandsThatIgnoreIt() {
+        for command in ["config", "stale", "outdated", "packages", "update"] {
+            XCTAssertEqual(
+                parseCLIArguments([command, "--top", "5"]).error,
+                "--top only applies to the report, leftovers, and disk commands",
+                command
+            )
+        }
+        for args in [["--top", "5"], ["report", "--top", "5"], ["leftovers", "--top", "5"], ["disk", "--top", "5"]] {
+            XCTAssertNil(parseCLIArguments(args).error, args.joined(separator: " "))
+        }
+    }
+
+    func testCategoryIsRejectedOutsideLeftovers() {
+        for command in ["config", "stale", "outdated", "packages", "update", "disk"] {
+            XCTAssertEqual(
+                parseCLIArguments([command, "--category", "caches"]).error,
+                "--category only applies to the report and leftovers commands",
+                command
+            )
+        }
+        XCTAssertNil(parseCLIArguments(["--category", "caches"]).error)
+        XCTAssertNil(parseCLIArguments(["report", "--category", "caches"]).error)
+    }
+
+    /// `disk` and `config` return before the dry-run branch, so `--dry-run`
+    /// there printed a report instead of a script.
+    func testDryRunIsRejectedOnDiskAndConfig() {
+        for command in ["disk", "config"] {
+            XCTAssertEqual(
+                parseCLIArguments([command, "--dry-run"]).error,
+                "--dry-run only applies to the report, leftovers, stale, outdated, packages, and update commands",
+                command
+            )
+        }
+        for command in ["report", "leftovers", "stale", "outdated", "packages", "update"] {
+            XCTAssertNil(parseCLIArguments([command, "--dry-run"]).error, command)
+        }
+    }
+
+    /// `--include-system` changes a scan and is part of what `config` reports,
+    /// so only `disk` rejects it. `--fresh` is about the scan cache, which
+    /// `config` and `disk` never read.
+    func testScanFlagsAreRejectedWhereTheyChangeNothing() {
+        let scan = ["report", "leftovers", "stale", "outdated", "packages", "update"]
+        for command in scan {
+            XCTAssertNil(parseCLIArguments([command, "--include-system"]).error, command)
+            XCTAssertNil(parseCLIArguments([command, "--fresh"]).error, command)
+        }
+        XCTAssertNil(parseCLIArguments(["config", "--include-system"]).error)
+        for command in ["disk", "config"] {
+            XCTAssertEqual(
+                parseCLIArguments([command, "--fresh"]).error,
+                "--fresh only applies to the report, leftovers, stale, outdated, packages, and update commands",
+                command
+            )
+        }
+        XCTAssertEqual(
+            parseCLIArguments(["disk", "--include-system"]).error,
+            "--include-system only applies to the report, leftovers, stale, outdated, packages, update, and config commands"
+        )
     }
 
     func testHelpDocumentsThePerCommandOptionRule() {
