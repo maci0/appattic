@@ -937,6 +937,17 @@ static int checkPrivacy() {
     expandOk = expandOk
         && expandHomeUserPlaceholder(QStringLiteral("/home/user/.config/gone-app"), home)
             == QStringLiteral("/home/alice/.config/gone-app");
+    // Padded is the same directory, and `/` is a root like any other: both are
+    // read that way by `Sources/AppAtticScan/Paths.swift` and `core/host/
+    // hostexec.c`, so a value only this reader refused named a directory the
+    // scan never looked in.
+    qputenv("XDG_CONFIG_HOME", "  /srv/u/config  ");
+    qputenv("XDG_DATA_HOME", "/");
+    expandOk = expandOk
+        && expandHomeUserPlaceholder(QStringLiteral("/home/user/.config/gone-app"), home)
+            == QStringLiteral("/srv/u/config/gone-app")
+        && expandHomeUserPlaceholder(QStringLiteral("/home/user/.local/share/applications/foo.desktop"), home)
+            == QStringLiteral("/applications/foo.desktop");
     restoreXdg();
     if (!expandOk) {
         std::fprintf(stderr, "expand: /home/user and XDG root expansion\n");

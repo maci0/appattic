@@ -543,7 +543,10 @@ void appattic_host_restore_user_path(void) {
    core reported on `~/.config` while the CLI reported on `$XDG_CONFIG_HOME`.
    A value that is empty or relative is ignored and the default root stands,
    as the XDG Base Directory specification says and as `Sources/AppAtticScan/
-   Paths.swift` does. */
+   Paths.swift` does. Surrounding blanks are trimmed before the absolute check,
+   because both other readers do: a `XDG_CONFIG_HOME` that arrives padded is
+   one directory for the CLI and another for this host, and the report the
+   window prints names the one this host did not scan. */
 static const char *xdg_root_for(const char *arg, size_t *rel_len) {
     static const struct {
         const char *rel;
@@ -554,18 +557,29 @@ static const char *xdg_root_for(const char *arg, size_t *rel_len) {
         {"/.config", "XDG_CONFIG_HOME"},
         {"/.cache", "XDG_CACHE_HOME"},
     };
+    /* One buffer per root, and only ever read after fork(), from
+       rewrite_home_user_argv, so a single owner is enough. */
+    static char trimmed[sizeof kRoots / sizeof kRoots[0]][PATH_MAX];
     size_t i;
     if (strncmp(arg, APPATTIC_HOME_SENTINEL, APPATTIC_HOME_SENTINEL_LEN) != 0) return NULL;
     for (i = 0; i < sizeof kRoots / sizeof kRoots[0]; i++) {
         const size_t n = strlen(kRoots[i].rel);
         const char *v;
+        size_t len;
         if (strncmp(arg + APPATTIC_HOME_SENTINEL_LEN, kRoots[i].rel, n) != 0) continue;
         if (arg[APPATTIC_HOME_SENTINEL_LEN + n] != '\0' &&
             arg[APPATTIC_HOME_SENTINEL_LEN + n] != '/') continue;
         v = getenv(kRoots[i].env);
-        if (!v || v[0] != '/') continue;
+        if (!v) continue;
+        while (*v == ' ' || *v == '\t') v++;
+        len = strlen(v);
+        while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t')) len--;
+        if (len == 0 || len >= PATH_MAX) continue;
+        memcpy(trimmed[i], v, len);
+        trimmed[i][len] = '\0';
+        if (trimmed[i][0] != '/') continue;
         *rel_len = n;
-        return v;
+        return trimmed[i];
     }
     return NULL;
 }

@@ -67,6 +67,18 @@ final class PathsTests: XCTestCase {
             xdgDataHome(home: home, env: ["XDG_DATA_HOME": "/tmp/myshare"]),
             "/tmp/myshare"
         )
+        // Padded is the same directory, and a root of `/` is absolute, so both
+        // are used. `core/host/hostexec.c` and `ui/linux-qt/finding.cpp` read
+        // these four the same way, and a value one of the three refuses makes
+        // the window report on a directory the scan never looked in.
+        XCTAssertEqual(
+            xdgDataHome(home: home, env: ["XDG_DATA_HOME": "  /tmp/myshare  "]),
+            "/tmp/myshare"
+        )
+        XCTAssertEqual(
+            xdgConfigHome(home: home, env: ["XDG_CONFIG_HOME": "/"]),
+            "/"
+        )
         XCTAssertEqual(
             xdgConfigHome(home: home, env: ["XDG_CONFIG_HOME": ""]),
             "/home/x/.config"

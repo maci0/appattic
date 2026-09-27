@@ -237,6 +237,21 @@ static int check_xdg_root(void) {
         rmdir(tmpl);
         return fail("xdg: configured root was not scanned");
     }
+    /* Padded is the same directory: `Sources/AppAtticScan/Paths.swift` trims
+       before it checks for an absolute path, so a run that exports a padded
+       value scans one place in the CLI and another here. */
+    {
+        char padded[PATH_MAX];
+        snprintf(padded, sizeof padded, "  %s  ", tmpl);
+        setenv("XDG_CONFIG_HOME", padded, 1);
+        n = appattic_host_exec("ls -1 /home/user/.config", out, sizeof out);
+        out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+        if (n <= 0 || !strstr(out, "marker")) {
+            unlink(marker);
+            rmdir(tmpl);
+            return fail("xdg: padded value did not resolve to the configured root");
+        }
+    }
     /* A relative value is ignored, so the default root stands and the marker
        directory is not what gets listed. */
     setenv("XDG_CONFIG_HOME", "relative/config", 1);
