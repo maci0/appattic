@@ -72,6 +72,10 @@ public struct DiskVolume: Equatable, Sendable {
     public var isHome: Bool
 }
 
+/// Bytes per `st_blocks` unit. POSIX fixes the block count at 512-byte units
+/// on every platform this scans, and it is a spec constant, not a tunable.
+private let bytesPerBlock = 512
+
 private struct UnixMeta {
     var apparent: Int
     var allocated: Int
@@ -107,7 +111,7 @@ private func unixMetaFromStat(_ st: stat) -> UnixMeta {
     let isDir = (mode & Int32(S_IFMT)) == Int32(S_IFDIR) && !isLink
     return UnixMeta(
         apparent: Int(st.st_size),
-        allocated: Int(st.st_blocks) * 512,
+        allocated: addBytes(Int(st.st_blocks), bytesPerBlock),
         mtime: Date(timeIntervalSince1970: unixMtime(st)),
         isDir: isDir,
         isLink: isLink,

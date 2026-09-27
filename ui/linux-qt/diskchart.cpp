@@ -308,7 +308,12 @@ DiskNode *DiskChart::hitAt(const QPoint &pos) const {
             }
             continue;
         }
-        qreal a = std::fmod(ang - h.start + 360.0, 360.0);
+        // Slices accumulate from 90 degrees, so a late one starts past 360 and
+        // `ang - h.start` is negative. std::fmod keeps the sign of its first
+        // argument, so the wrap has to be added by hand; a negative angle then
+        // compared with `a <= h.span` matches every slice.
+        qreal a = std::fmod(ang - h.start, 360.0);
+        if (a < 0) a += 360.0;
         if (a <= h.span && h.outer > bestOuter) {
             best = h.node;
             bestOuter = h.outer;

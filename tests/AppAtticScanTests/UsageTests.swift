@@ -57,6 +57,25 @@ final class UsageTests: XCTestCase {
         XCTAssertTrue(index.everUsed.contains("myéapp"), "\(index.everUsed)")
     }
 
+    func testParseFishHistorySurvivesTimestampTooLongForAnInt() throws {
+        // 20 nines overflows the Int the timestamp is accumulated in, and a
+        // history file is user data, not a trusted source.
+        let text = """
+        - cmd: firefox
+          when: 99999999999999999999
+        - cmd: vim
+          when: 1717200000
+        """
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".fish")
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var index = HistoryIndex()
+        parseFishHistory(url.path, index: &index)
+        XCTAssertTrue(index.everUsed.contains("firefox"), "\(index.everUsed)")
+        XCTAssertNil(index.lastSeen["firefox"], "an unparseable when: is not a timestamp")
+        XCTAssertEqual(index.lastSeen["vim"], Date(timeIntervalSince1970: 1_717_200_000), "the next entry still parses")
+    }
+
     func testParsesApplicationBookmarks() throws {
         let xml = """
         <?xml version="1.0"?>

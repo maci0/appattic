@@ -240,7 +240,14 @@ func historyBytesAreASCII(_ bytes: [UInt8]) -> Bool {
     (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || b == 0x5F
 }
 
-func hxDigitsValue(_ b: [UInt8], _ i: Int, _ j: Int) -> Double {
+/// Longest digit run that still reads as a unix epoch: 11 digits reaches the
+/// year 5138, and a longer run is not a timestamp. History files are user
+/// data, so the run length is checked rather than trusted: 19 digits of them
+/// overflows the `Int` this accumulates in and takes the scan down with it.
+let hxMaxEpochDigits = 11
+
+func hxDigitsValue(_ b: [UInt8], _ i: Int, _ j: Int) -> Double? {
+    guard j > i, j - i <= hxMaxEpochDigits else { return nil }
     var v = 0
     var k = i
     while k < j {
@@ -383,7 +390,7 @@ func parseHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Set<St
                 cmdStart = trimmedStart
                 cmdEnd = stop
             } else {
-                ts = dateFromUnixEpoch(hxDigitsValue(bytes, tsStart, tsStart + tsCount))
+                ts = hxDigitsValue(bytes, tsStart, tsStart + tsCount).map(dateFromUnixEpoch)
             }
             var cs = cmdStart
             while cs < cmdEnd, hxTrimEdge(bytes[cs]) { cs += 1 }
@@ -450,7 +457,7 @@ func parseFishHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Se
                     var d = q
                     while d < stop, hxDigit(bytes[d]) { d += 1 }
                     if d > q, d == stop {
-                        let ts = dateFromUnixEpoch(hxDigitsValue(bytes, q, d))
+                        let ts = hxDigitsValue(bytes, q, d).map(dateFromUnixEpoch)
                         noteHistoryTime(ts, index: &index)
                         hxRecordCommand(bytes, ps, pe, ts: ts, index: &index, keep: keep)
                         pending = nil

@@ -107,8 +107,16 @@ struct FileMeta {
     bool isLnk = false;
 };
 
+/// Bytes per st_blocks unit: POSIX fixes the block count at 512-byte units on
+/// every platform this scans. A spec constant, not a tunable.
+constexpr qint64 kBytesPerBlock = 512;
+
 qint64 allocatedOf(uint64_t blocks) {
-    return qint64(blocks) * 512;
+    // Saturating multiply, like every other byte total here. Signed overflow is
+    // undefined and the scan would keep a wrapped negative size in the tree.
+    if (blocks > uint64_t(std::numeric_limits<qint64>::max() / kBytesPerBlock))
+        return std::numeric_limits<qint64>::max();
+    return qint64(blocks) * kBytesPerBlock;
 }
 
 bool metaFromStat(const struct stat &st, FileMeta *m) {
