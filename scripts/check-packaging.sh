@@ -43,6 +43,7 @@ METAINFO="packaging/${APP_ID}.metainfo.xml"
 MANPAGE="packaging/appattic-qt.1"
 MANIFEST="packaging/flatpak/${APP_ID}.yml"
 CMAKE="ui/linux-qt/CMakeLists.txt"
+MAIN="ui/linux-qt/main.cpp"
 
 fail() {
     echo "error: $1" >&2
@@ -67,7 +68,7 @@ metainfo_has() {
 
 # Every file the shipped metadata refers to has to exist before any of it can
 # be compared, so a missing one is named instead of read as an empty value.
-for required in "$DESKTOP" "$METAINFO" "$MANPAGE" "$MANIFEST" "$CMAKE"; do
+for required in "$DESKTOP" "$METAINFO" "$MANPAGE" "$MANIFEST" "$CMAKE" "$MAIN"; do
     [[ -f "$required" ]] || fail "missing $required"
 done
 
@@ -128,6 +129,16 @@ if [[ "$icon_name" != "$APP_ID" ]]; then
     [[ "$manifest_rename_icon" == "$APP_ID" ]] \
         || fail "$MANIFEST has no rename-icon: $APP_ID, which the desktop entry's Icon=$icon_name needs"
 fi
+
+# Qt publishes this as GTK_APPLICATION_ID and KDE_NET_WM_DESKTOP_FILE, and a
+# Wayland compositor reads it as the app id, so the name the window carries has
+# to be the desktop file that installs. Anything else leaves the window without
+# a taskbar icon on every platform, and the two names live in different files.
+window_desktop_file="$(sed -n 's/.*setDesktopFileName(QStringLiteral("\([^"]*\)")).*/\1/p' \
+    "$MAIN" | head -n 1)"
+[[ -n "$window_desktop_file" ]] || fail "$MAIN has no setDesktopFileName"
+[[ "$window_desktop_file" == "$(basename "$DESKTOP" .desktop)" ]] \
+    || fail "the window names desktop file '$window_desktop_file', the one that ships is $(basename "$DESKTOP" .desktop)"
 
 # The binary ships a man page, so the install has to ship it: a page that only
 # exists in the repository documents an installed command that has none.

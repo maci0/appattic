@@ -3408,12 +3408,12 @@ static void applyAppIdentity() {
     QApplication::setApplicationName(QStringLiteral("AppAttic"));
     QApplication::setApplicationDisplayName(QStringLiteral("AppAttic"));
     QApplication::setOrganizationName(QStringLiteral("AppAttic"));
-    // Wayland compositor looks up the header icon by this desktop-file id.
-    if (!qEnvironmentVariableIsEmpty("FLATPAK_ID")) {
-        QGuiApplication::setDesktopFileName(QStringLiteral("org.appattic.AppAttic"));
-    } else {
-        QGuiApplication::setDesktopFileName(QStringLiteral("appattic"));
-    }
+    // The desktop entry every format installs is named after the app id, and
+    // Qt publishes this as GTK_APPLICATION_ID and KDE_NET_WM_DESKTOP_FILE, so
+    // the panel groups the window and the Wayland compositor looks up its
+    // header icon by this name. Any other name, sandboxed or not, points at a
+    // desktop file nothing installs.
+    QGuiApplication::setDesktopFileName(QStringLiteral("org.appattic.AppAttic"));
     const QIcon icon = loadAppIcon();
     if (!icon.isNull()) QApplication::setWindowIcon(icon);
     if (QIcon::themeName().isEmpty()) {
