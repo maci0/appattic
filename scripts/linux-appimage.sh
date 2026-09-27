@@ -343,16 +343,20 @@ patch_apprun() {
         return 0
     fi
     rm -f "$apprun"
+    # POSIX sh, not bash: the image bundles no shell, so AppRun runs under
+    # whatever /bin/sh the host has (dash on Debian, ash on Alpine, bash on
+    # Fedora) and a machine without bash on PATH still starts. The CI --smoke
+    # runs on the build host, which has bash, so only the user sees the other
+    # case. No pipe here, so no pipefail; nounset stays off so a third-party
+    # linuxdeploy hook reading an unset var cannot abort startup.
     cat > "$apprun" <<'EOF'
-#!/usr/bin/env bash
-set -eo pipefail
-APPDIR="$(cd "$(dirname "$0")" && pwd)"
+#!/bin/sh
+set -e
+APPDIR=$(cd "$(dirname "$0")" && pwd)
 export APPATTIC_CORE_OUT="${APPDIR}/usr/share/appattic"
-# linuxdeploy hooks are third-party and read unset vars such as
-# XDG_CURRENT_DESKTOP; nounset stays off so they cannot abort startup.
 for hook in "${APPDIR}"/apprun-hooks/*.sh; do
-    [[ -e "$hook" ]] || continue
-    source "$hook"
+    [ -e "$hook" ] || continue
+    . "$hook"
 done
 exec "${APPDIR}/usr/bin/appattic-qt" "$@"
 EOF

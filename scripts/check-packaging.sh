@@ -165,6 +165,27 @@ update_url="$(sed -n 's/^UPDATE_URL=//p' scripts/linux-appimage.sh | head -n 1)"
 [[ "$update_url" == *'${UPDATE_ZSYNC#'* ]] \
     || fail "scripts/linux-appimage.sh builds UPDATE_URL from the image, not from UPDATE_ZSYNC"
 
+# The AppImage bundles no shell, so AppRun runs under whatever /bin/sh the
+# user's machine has. A bash shebang or a bashism there makes the image refuse
+# to start on a host with no bash, and the CI --smoke cannot see it: that runs
+# on the build host, which has bash. The body is the heredoc patch_apprun
+# writes, between the here-document opener and its terminator.
+appimage_script="scripts/linux-appimage.sh"
+apprun_body="$(sed -n "/^    cat > \"\$apprun\" <<'EOF'$/,/^EOF$/p" "$appimage_script" | sed '1d;$d')"
+[[ -n "$apprun_body" ]] || fail "$appimage_script has no AppRun here-document, so patch_apprun ships nothing"
+apprun_shebang="$(printf '%s\n' "$apprun_body" | sed -n '1p')"
+[[ "$apprun_shebang" == "#!/bin/sh" ]] \
+    || fail "the AppRun $appimage_script writes starts with '$apprun_shebang', not #!/bin/sh; the image bundles no shell, so it runs under the host's /bin/sh"
+if command -v shellcheck >/dev/null 2>&1; then
+    # SC1090 is the dynamic `. "$hook"`, which is the point of the loop.
+    if ! apprun_out="$(printf '%s\n' "$apprun_body" | shellcheck -s sh -e SC1090 - 2>&1)"; then
+        printf '%s\n' "$apprun_out" | sed 's/^/error: /' >&2
+        fail "the AppRun $appimage_script writes is not POSIX sh"
+    fi
+else
+    echo "note: shellcheck not found, the AppRun body was not checked for bashisms" >&2
+fi
+
 if command -v desktop-file-validate >/dev/null 2>&1; then
     if ! validate_out="$(desktop-file-validate "$DESKTOP" 2>&1)"; then
         printf '%s\n' "$validate_out" | sed 's/^/error: /' >&2
