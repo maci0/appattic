@@ -109,13 +109,16 @@ final class UtilTests: XCTestCase {
     }
 
     func testHumanSize() {
+        // Sizes print the locale's decimal separator, so the fraction is
+        // rebuilt from it rather than hardcoded as ".".
+        let dot = localeDecimalSeparator
         XCTAssertEqual(humanSize(0), "0 B")
         XCTAssertEqual(humanSize(1023), "1023 B")
-        XCTAssertEqual(humanSize(1024), "1.0 KB")
-        XCTAssertEqual(humanSize(1_048_576), "1.0 MB")
+        XCTAssertEqual(humanSize(1024), "1\(dot)0 KB")
+        XCTAssertEqual(humanSize(1_048_576), "1\(dot)0 MB")
         // 1048525 / 1024 = 1023.95, which %.1f would print as "1024.0 KB".
-        XCTAssertEqual(humanSize(1_048_525), "1.0 MB")
-        XCTAssertEqual(humanSize(1023 * 1024), "1023.0 KB")
+        XCTAssertEqual(humanSize(1_048_525), "1\(dot)0 MB")
+        XCTAssertEqual(humanSize(1023 * 1024), "1023\(dot)0 KB")
     }
 
     func testAddBytesSaturates() {

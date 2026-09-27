@@ -233,7 +233,7 @@ final class ScannerViewModel {
                 vm.scanData = result
                 vm.pruneSelection()
                 vm.isScanning = false
-                vm.statusText = "scanned \(formatDate(result.scanned_at)) · \(String(format: "%.1f", result.duration_s))s"
+                vm.statusText = "scanned \(formatDate(result.scanned_at)) · \(formatSeconds(result.duration_s))s"
             }
         }
     }

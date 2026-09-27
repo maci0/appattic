@@ -12,6 +12,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -25,19 +26,22 @@
 #include <cstring>
 
 static int verifyHelpers() {
+    // Sizes print the locale's decimal separator, so the expected string is
+    // built the same way instead of hardcoding ".".
+    const QString dot = QString(QLocale().decimalPoint());
     if (humanSize(0) != QLatin1String("0 B")) {
         std::fprintf(stderr, "humanSize(0) mismatch\n");
         return 1;
     }
-    if (humanSize(1024) != QLatin1String("1.0 KB")) {
+    if (humanSize(1024) != QStringLiteral("1") + dot + QLatin1String("0 KB")) {
         std::fprintf(stderr, "humanSize(1024) mismatch\n");
         return 1;
     }
-    if (humanSize(1048525) != QLatin1String("1.0 MB")) {
+    if (humanSize(1048525) != QStringLiteral("1") + dot + QLatin1String("0 MB")) {
         std::fprintf(stderr, "humanSize(1048525) should bump 1024.0 KB to 1.0 MB\n");
         return 1;
     }
-    if (humanSize(1023 * 1024) != QLatin1String("1023.0 KB")) {
+    if (humanSize(1023 * 1024) != QStringLiteral("1023") + dot + QLatin1String("0 KB")) {
         std::fprintf(stderr, "humanSize(1023 KiB) mismatch\n");
         return 1;
     }
@@ -537,10 +541,14 @@ static int checkTiming() {
         Finding crossed;
         crossed.mtime = QStringLiteral("2026-03-08T04:30:00Z");
         const QDateTime nyNow(QDate(2026, 9, 2), QTime(12, 0), ny);
-        if (modifiedLabel(crossed, nyNow) != QLatin1String("2026-03-07")) {
+        // Beyond the relative window the label is the local date in the user's
+        // own date format, so compare against that format.
+        const QString nyExpected = localeDateLabel(QDate(2026, 3, 7));
+        if (modifiedLabel(crossed, nyNow) != nyExpected) {
             std::fprintf(stderr,
-                "timing: UTC prefix must not win over local date (%s)\n",
-                modifiedLabel(crossed, nyNow).toUtf8().constData());
+                "timing: UTC prefix must not win over local date (%s, want %s)\n",
+                modifiedLabel(crossed, nyNow).toUtf8().constData(),
+                nyExpected.toUtf8().constData());
             return 1;
         }
         const QDateTime saturday(QDate(2026, 3, 7), QTime(23, 30), ny);

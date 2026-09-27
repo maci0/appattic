@@ -5,6 +5,9 @@ import AppAtticScan
 import AppKit
 #endif
 
+/// Cutoff past which a timestamp shows its date instead of a relative label.
+private let relativeDayLimit = 45
+
 private enum DateFmt {
     static let medium: DateFormatter = {
         let f = DateFormatter()
@@ -12,16 +15,37 @@ private enum DateFmt {
         f.timeStyle = .none
         return f
     }()
+
+    /// Locale-aware day counts: "Today", "Yesterday", "3 days ago", and the
+    /// plural forms a language actually needs (Polish has five).
+    static let days: DateComponentsFormatter = {
+        let f = DateComponentsFormatter()
+        f.allowedUnits = .day
+        f.unitsStyle = .named
+        f.maximumUnitCount = 1
+        return f
+    }()
 }
 
 func formatDate(_ iso: String?) -> String {
     guard let iso = iso, !iso.isEmpty else { return "-" }
     guard let d = parseISODate(iso) else { return String(iso.prefix(10)) }
-    guard let days = calendarDaysSince(d) else { return DateFmt.medium.string(from: d) }
-    if days <= 0 { return "Today" }
-    if days == 1 { return "Yesterday" }
-    if days < 45 { return "\(days) days ago" }
-    return DateFmt.medium.string(from: d)
+    guard let days = calendarDaysSince(d), days < relativeDayLimit else {
+        return DateFmt.medium.string(from: d)
+    }
+    // Anchor both ends at local midnight so the interval is a whole number of
+    // days, including across a daylight-saving change.
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: Date())
+    guard let then = calendar.date(byAdding: .day, value: -days, to: today) else {
+        return DateFmt.medium.string(from: d)
+    }
+    return DateFmt.days.string(from: then, to: today)
+}
+
+/// One decimal, with the locale's decimal separator and grouping.
+func formatSeconds(_ seconds: Double) -> String {
+    seconds.formatted(.number.precision(.fractionLength(1)))
 }
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
@@ -479,7 +503,7 @@ struct ContentView: View {
         if data.from_cache == true {
             return "\(when), cached"
         }
-        return "\(when), \(String(format: "%.1f", data.duration_s))s"
+        return "\(when), \(formatSeconds(data.duration_s))s"
     }
 
     func overviewStat(_ label: String, _ value: String, _ color: Color = Color.appText) -> some View {

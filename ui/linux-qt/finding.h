@@ -69,6 +69,7 @@ void restrictPrivateDataFile(const QString &path);
 QString shellQuote(const QString &s);
 bool scriptHasCommands(const QString &script);
 QString humanSize(qint64 bytes);
+QString localeDateLabel(const QDate &date);
 QString humanKind(const QString &kind);
 QString pluginScanLabel(const QString &pluginId);
 QString managerLabel(const Finding &f);

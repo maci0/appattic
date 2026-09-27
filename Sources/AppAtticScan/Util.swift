@@ -937,12 +937,22 @@ public func addBytes(_ a: Int, _ b: Int) -> Int {
     return overflow ? Int.max : sum
 }
 
-/// One decimal place without `String(format:)` (~1.2 µs/call from locale +
-/// varargs overhead). Rounds half away from zero the way `%.1f` prints.
+/// Decimal separator of the current locale, read once. `String(format:)` pays
+/// for locale setup on every call (~1.2 µs); the separator is a single lookup.
+let localeDecimalSeparator: String = {
+    let f = NumberFormatter()
+    f.locale = .current
+    f.numberStyle = .decimal
+    f.usesGroupingSeparator = false
+    return f.decimalSeparator ?? "."
+}()
+
+/// One decimal place without `String(format:)`. Rounds half away from zero the
+/// way `%.1f` prints, using the locale's decimal separator.
 func oneDecimal(_ n: Double) -> String {
     let neg = n < 0
     let tenths = Int((abs(n) * 10).rounded())
-    return (neg ? "-" : "") + "\(tenths / 10).\(tenths % 10)"
+    return (neg ? "-" : "") + "\(tenths / 10)\(localeDecimalSeparator)\(tenths % 10)"
 }
 
 public func humanSize(_ bytes: Int) -> String {

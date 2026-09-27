@@ -11,6 +11,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QLocale>
 #include <QMap>
 #include <QRegularExpression>
 #include <QSet>
@@ -169,6 +170,24 @@ bool scriptHasCommands(const QString &script) {
     return false;
 }
 
+/// One decimal place with the locale's decimal separator. `QString::number`
+/// and `QString::toString` stay in the C locale, which reads as thousands
+/// punctuation in German and French ("1.5 GB").
+static QString fixed1(double value) {
+    QString s = QString::number(value, 'f', 1);
+    s.replace(QLatin1Char('.'), QLocale().decimalPoint());
+    return s;
+}
+
+/// A date for a display column, in the user's own date order. The C locale
+/// carries no date format of its own (Qt synthesises "7 03 2026"), so it keeps
+/// ISO, which is the unambiguous form tools in that locale expect.
+QString localeDateLabel(const QDate &date) {
+    const QLocale loc;
+    if (loc.name() == QLatin1String("C")) return date.toString(Qt::ISODate);
+    return loc.toString(date, QLocale::ShortFormat);
+}
+
 QString humanSize(qint64 bytes) {
     if (bytes < 0) return QStringLiteral("unknown");
     double n = double(bytes);
@@ -183,12 +202,12 @@ QString humanSize(qint64 bytes) {
                 continue;
             }
             if (unit == 0) return QString::number(bytes) + QStringLiteral(" B");
-            return QString::number(n, 'f', 1) + QLatin1Char(' ') + QLatin1String(units[unit]);
+            return fixed1(n) + QLatin1Char(' ') + QLatin1String(units[unit]);
         }
         n /= 1024.0;
         unit += 1;
     }
-    return QString::number(n, 'f', 1) + QLatin1Char(' ') + QLatin1String(units[unit]);
+    return fixed1(n) + QLatin1Char(' ') + QLatin1String(units[unit]);
 }
 
 QString humanKind(const QString &kind) {
@@ -349,7 +368,7 @@ QString modifiedLabel(const Finding &f, const QDateTime &now) {
         const qint64 days = localDate.daysTo(now.toTimeZone(zone).date());
         const QString rel = relativeDayLabel(days);
         if (!rel.isEmpty()) return rel;
-        return localDate.toString(Qt::ISODate);
+        return localeDateLabel(localDate);
     }
     if (f.idleDays >= 0) {
         const QString rel = relativeDayLabel(f.idleDays);
