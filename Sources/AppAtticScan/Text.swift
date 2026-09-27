@@ -201,41 +201,6 @@ public func displayWidth(_ s: String) -> Int {
     return width
 }
 
-/// ASCII substring search without bridging to CFStringFind (`String.contains`
-/// costs ~1 µs via ICU + retain churn; this is ~20 ns). Exact: the fast path
-/// runs only when BOTH sides are fully ASCII (ICU literal search is byte-exact
-/// there); any non-ASCII byte anywhere takes the bridged slow path, including
-/// combining-mark edges where ICU and byte search can disagree.
-public func asciiContains(_ haystack: String, _ needle: String) -> Bool {
-    // Degenerate case delegates: empty-needle differs by platform (stdlib true,
-    // corelibs-Foundation false). All real callers pass literals.
-    guard !needle.isEmpty else { return haystack.contains(needle) }
-    let r = haystack.utf8.withContiguousStorageIfAvailable { h -> Int in
-        needle.utf8.withContiguousStorageIfAvailable { n -> Int in
-            for k in 0..<n.count {
-                if n[k] >= 0x80 { return -1 }
-            }
-            for k in 0..<h.count {
-                if h[k] >= 0x80 { return -1 }
-            }
-            if n.count == 1 {
-                return h.contains(n[0]) ? 1 : 0
-            }
-            guard h.count >= n.count else { return 0 }
-            var i = 0
-            while i + n.count <= h.count {
-                var k = 0
-                while k < n.count, h[i + k] == n[k] { k += 1 }
-                if k == n.count { return 1 }
-                i += 1
-            }
-            return 0
-        } ?? -1
-    } ?? -1
-    if r >= 0 { return r == 1 }
-    return haystack.contains(needle)
-}
-
 /// Single-ASCII-byte membership. `String.contains` routes through ICU
 /// (`CFStringFind`, ~1 µs); even the generic `UTF8View.contains` closure costs
 /// ~100 ns in retain churn. Hand-rolled contiguous scan: ~10 ns.

@@ -470,7 +470,7 @@ public final class Identity {
         if isUUID(core) { return ("system", nil) }
         let user = currentUsername()
         if !user.isEmpty, (low == user || normKey(user).map { n == $0 } == true) { return ("system", nil) }
-        if appleServiceNames.contains(n) || isDaemonName(low) || asciiContains(n, "ratelimiter") || asciiContains(n, "loginwindow") {
+        if appleServiceNames.contains(n) || isDaemonName(low) || n.contains("ratelimiter") || n.contains("loginwindow") {
             return ("system", nil)
         }
         if sharedRuntimeNames.contains(n) || sharedRuntimeNames.contains(low) { return ("system", nil) }

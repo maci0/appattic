@@ -125,34 +125,11 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         public let effect: String
     }
 
-    /// The merged value the scan and the report use.
-    public var includeSystem: Bool { includeSystemFlag || includeSystemFile }
-
-    private enum CodingKeys: String, CodingKey {
-        case settingsPath, settingsFileExists
-        case includeSystem, includeSystemFile, includeSystemFlag
-        case confirmDelete, ignoredLeftoverPaths, scanCachePath
-        case dataHome, configHome, cacheHome, stateHome, dataDirs
-        case environment
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(settingsPath, forKey: .settingsPath)
-        try c.encode(settingsFileExists, forKey: .settingsFileExists)
-        try c.encode(includeSystem, forKey: .includeSystem)
-        try c.encode(includeSystemFile, forKey: .includeSystemFile)
-        try c.encode(includeSystemFlag, forKey: .includeSystemFlag)
-        try c.encode(confirmDelete, forKey: .confirmDelete)
-        try c.encode(ignoredLeftoverPaths, forKey: .ignoredLeftoverPaths)
-        try c.encode(scanCachePath, forKey: .scanCachePath)
-        try c.encode(dataHome, forKey: .dataHome)
-        try c.encode(configHome, forKey: .configHome)
-        try c.encode(cacheHome, forKey: .cacheHome)
-        try c.encode(stateHome, forKey: .stateHome)
-        try c.encode(dataDirs, forKey: .dataDirs)
-        try c.encode(environment, forKey: .environment)
-    }
+    /// The merged value the scan and the report use, stored rather than
+    /// computed so it is encoded by the synthesized `Encodable` alongside the
+    /// two layers it merges. Both of those are `let`, so the stored copy cannot
+    /// drift from them.
+    public let includeSystem: Bool
 
     public init(
         settings: AppAtticSettings,
@@ -164,6 +141,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         self.settingsFileExists = FileManager.default.fileExists(atPath: settingsURL.path)
         self.includeSystemFile = settings.includeSystem
         self.includeSystemFlag = includeSystemFlag
+        self.includeSystem = includeSystemFlag || settings.includeSystem
         self.confirmDelete = settings.confirmDelete
         self.ignoredLeftoverPaths = settings.ignoredLeftoverPaths
         self.scanCachePath = defaultScanCacheURL().path

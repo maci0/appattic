@@ -245,9 +245,7 @@ bench("parse_fish_history", iters: 3) {
 }
 bench("parse_os_release", iters: 200) { parseOsRelease(osReleaseText).count }
 bench("posix_lower", iters: 20_000) { posixLowercased(oneName).count }
-bench("ascii_contains", iters: 20_000) {
-    (asciiContains(oneName, "product") ? 1 : 0) + (asciiHasByte(oneName, 0x2E) ? 1 : 0)
-}
+bench("ascii_has_byte", iters: 20_000) { asciiHasByte(oneName, 0x2E) ? 1 : 0 }
 bench("classify_shapes", iters: 20) {
     classifyNames.reduce(0) { $0 + (isBundleId($1) ? 1 : 0) + (isTeamId($1) ? 1 : 0) + (isUUID($1) ? 1 : 0) + (isDaemonName($1) ? 1 : 0) }
 }
