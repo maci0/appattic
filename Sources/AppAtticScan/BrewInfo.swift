@@ -557,8 +557,13 @@ public func brewPackageMeta(from data: [String: Any]) -> BrewPackageMeta {
 
 /// The two maps as a positional tuple. Both are `[String: String]`, so the
 /// order is the only thing telling them apart; `brewPackageMeta(from:)` names
-/// them and is what a caller should use. This stays for callers written
-/// against the tuple form.
+/// them and is what a caller should use.
+///
+/// Deprecated in 2.0.0 and removed in 3.0.0: a caller on the tuple form cannot
+/// read which map is which, which is the name `brewPackageMeta(from:)` gives
+/// it. The deprecation is a compile warning for one major before the removal,
+/// so a caller has a release to move in.
+@available(*, deprecated, renamed: "brewPackageMeta(from:)", message: "use brewPackageMeta(from:), which names summaries and titles")
 public func brewPackageMeta(_ data: [String: Any]) -> ([String: String], [String: String]) {
     let meta = brewPackageMeta(from: data)
     return (meta.summaries, meta.titles)
