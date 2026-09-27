@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import AppAtticScan
 
@@ -64,8 +65,11 @@ final class ConfigTests: XCTestCase {
         let config = EffectiveConfig(settings: .default, env: env)
         XCTAssertEqual(config.dataHome, "/xdg/data")
         XCTAssertEqual(config.configHome, "/xdg/config")
-        // A relative XDG path is ignored, so the report shows what the scan uses.
-        XCTAssertEqual(config.cacheHome, xdgCacheHome(env: env))
+        // A relative XDG path is ignored, so the report shows what the scan uses:
+        // the `.cache` fallback under the real home, spelled out rather than
+        // re-derived through `xdgCacheHome`.
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        XCTAssertEqual(config.cacheHome, (home as NSString).appendingPathComponent(".cache"))
         XCTAssertFalse(config.cacheHome.hasPrefix("relative"))
         XCTAssertEqual(config.stateHome, "/xdg/state")
         XCTAssertEqual(config.dataDirs, "/usr/share")

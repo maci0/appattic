@@ -235,13 +235,10 @@ final class CacheTests: XCTestCase {
             ofItemAtPath: entry.path
         )
         let line = pathMtimeStamp("flatpak-user", entry.path)
-        XCTAssertTrue(line.hasPrefix("flatpak-user:"), line)
         XCTAssertFalse(line.contains("missing"), line)
-        XCTAssertEqual(
-            line,
-            "flatpak-user:\(Date(timeIntervalSince1970: 100).timeIntervalSince1970.bitPattern)",
-            line
-        )
+        // The literal IEEE-754 bit pattern of 100.0, not the production
+        // expression rebuilt here: that would agree with any value it returns.
+        XCTAssertEqual(line, "flatpak-user:4636737291354636288", line)
         // Sub-second and pre-1970 mtimes must not collapse: a whole-second
         // stamp lets a package tree edited twice inside one second keep the
         // fingerprint it had before the edit, and the next run reuses a stale

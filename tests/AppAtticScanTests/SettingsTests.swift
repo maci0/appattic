@@ -11,11 +11,21 @@ final class SettingsTests: XCTestCase {
     }
 
     func testSettingsURLSitsBesideScanCache() {
-        XCTAssertEqual(
-            defaultSettingsURL().deletingLastPathComponent(),
-            defaultScanCacheURL().deletingLastPathComponent()
-        )
+        // The directory is spelled out rather than read back from
+        // defaultScanCacheURL(), which would agree with any value it returns.
+        let expectedDirectory: String
+        if PlatformOverride.isLinux {
+            expectedDirectory = (xdgDataHome() as NSString).appendingPathComponent("appattic")
+        } else {
+            let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Application Support")
+            expectedDirectory = support.appendingPathComponent("AppAttic", isDirectory: true).path
+        }
         XCTAssertEqual(defaultSettingsURL().lastPathComponent, "settings.json")
+        XCTAssertEqual(defaultScanCacheURL().lastPathComponent, "last-scan.json")
+        XCTAssertEqual(defaultSettingsURL().deletingLastPathComponent().path, expectedDirectory)
+        XCTAssertEqual(defaultScanCacheURL().deletingLastPathComponent().path, expectedDirectory)
     }
 
     func testSettingsRoundTrip() throws {
@@ -31,8 +41,27 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(loaded.confirmDelete)
         XCTAssertEqual(loaded.ignoredLeftoverPaths, ["/tmp/Foo", "/tmp/Bar"])
         let text = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertTrue(text.contains("\n"), text)
-        XCTAssertTrue(text.contains("/tmp/Foo"), text)
+        // Structured, not a substring probe: the on-disk JSON carries the same
+        // values, its keys are sorted, and paths are not escaped, so the file
+        // stays readable and hand-editable.
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        XCTAssertEqual(object["includeSystem"] as? Bool, true, text)
+        XCTAssertEqual(object["confirmDelete"] as? Bool, false, text)
+        XCTAssertEqual(object["ignoredLeftoverPaths"] as? [String], ["/tmp/Foo", "/tmp/Bar"], text)
+        // `.sortedKeys` means the top-level keys come out in order. Their
+        // indent is derived rather than assumed, so the check does not depend
+        // on the encoder's indent width; array items carry no " : " and are
+        // left out, and top-level keys are the least-indented ones that have one.
+        let keyLines = text.split(separator: "\n").filter { $0.contains(" : ") }
+        let indent = keyLines.map { $0.prefix(while: { $0 == " " }).count }.min() ?? -1
+        let keyOrder = keyLines.compactMap { line -> String? in
+            guard line.prefix(while: { $0 == " " }).count == indent else { return nil }
+            let trimmed = line.dropFirst(indent)
+            guard let end = trimmed.firstIndex(of: "\"") else { return nil }
+            return String(trimmed[..<end])
+        }
+        XCTAssertFalse(keyOrder.isEmpty, "no top-level key found, so the order check is vacuous")
+        XCTAssertEqual(keyOrder, keyOrder.sorted(), text)
         XCTAssertFalse(text.contains("\\/"), text)
         let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
         let mode = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? -1
@@ -200,11 +229,12 @@ final class SettingsTests: XCTestCase {
                 extra_paths: ["/tmp/Whisky.plist"]
             ),
         ]
-        XCTAssertTrue(visibleOrphanedLeftovers(leftovers, ignoring: []).map(\.path).contains("/tmp/Whisky"))
+        XCTAssertEqual(visibleOrphanedLeftovers(leftovers, ignoring: []).map(\.path), ["/tmp/Whisky"])
         XCTAssertTrue(visibleOrphanedLeftovers(leftovers, ignoring: ["/tmp/Whisky.plist"]).isEmpty)
         let data = sampleScanData(leftovers: leftovers)
         let script = cleanupScript(from: data, ignoringLeftovers: ["/tmp/Whisky.plist"])
-        XCTAssertFalse(script.contains("/tmp/Whisky"))
+        // No removal line for the hidden group, not merely no path in a comment.
+        XCTAssertFalse(script.contains("rm -rf"), script)
     }
 
     func testClearIgnoredLeftovers() throws {
@@ -247,6 +277,7 @@ final class SettingsTests: XCTestCase {
         let data = sampleScanData(
             leftovers: [
                 LeftoverItem(name: "Keep", path: "/tmp/Keep", root: "Caches", kind: "dir", status: "orphaned"),
+                LeftoverItem(name: "Owned", path: "/tmp/Owned", root: "Caches", kind: "dir", status: "owned"),
             ],
             software: [
                 SoftwareItem(name: "KeepMe", kind: "app", path: "/Apps/Keep.app", source: "app", tier: "keep"),
@@ -260,7 +291,7 @@ final class SettingsTests: XCTestCase {
             ]
         )
         let pruned = pruneCleanupSelection(
-            leftovers: ["/tmp/Keep"],
+            leftovers: ["/tmp/Keep", "/tmp/Owned"],
             apps: ["/Apps/Keep.app", "/Apps/Review.app", "/Apps/Remove.app"],
             outdated: ["brew-formula:jq", "brew-cask:sketchy", "app-store:Pages"],
             data: data,
@@ -295,7 +326,11 @@ final class SettingsTests: XCTestCase {
         let stderr = String(repeating: "installing\n", count: 200) + "E: Subprocess exited with error\n"
         let message = commandFailureMessage(status: 1, stderr: stderr)
         XCTAssertTrue(message.hasSuffix("E: Subprocess exited with error"), message)
-        XCTAssertLessThanOrEqual(message.count, 460)
+        // The cap is 400 characters of detail behind a 25-character prefix.
+        // Exactly, not "<= something": a bound looser than the real one passes
+        // even when nothing is capped.
+        XCTAssertEqual(message.count, 425, String(message.count))
+        XCTAssertLessThan(message.count, stderr.count, "the head of a long stderr must be dropped")
     }
 
     func testCommandFailureMessageRedactsHomePath() {
@@ -595,6 +630,9 @@ final class ResolveScanTests: XCTestCase {
         )
         XCTAssertFalse(resolved.fromCache)
         XCTAssertEqual(resolved.data.scanned_at, "2026-08-17T13:00:00Z")
+        // resolveScan samples the fingerprint once before the scan and once
+        // after; a single sample could not detect a move.
+        XCTAssertEqual(n, 2)
         let saved = try XCTUnwrap(loadScanCache(from: cacheURL))
         XCTAssertEqual(saved.fingerprint, "old")
         XCTAssertEqual(saved.data.scanned_at, "2026-08-17T12:00:00Z")
@@ -617,6 +655,7 @@ final class ResolveScanTests: XCTestCase {
             liveScan: { _ in sampleScanData(scannedAt: "2026-08-17T13:00:00Z") }
         )
         XCTAssertNil(loadScanCache(from: cacheURL))
+        XCTAssertEqual(n, 2)
     }
 
     func testDoesNotSaveIncompleteLiveScan() {

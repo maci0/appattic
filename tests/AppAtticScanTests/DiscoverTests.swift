@@ -318,8 +318,13 @@ final class DiscoverTests: XCTestCase {
         """
         try body.write(to: appsDir.appendingPathComponent("tempscanapp.desktop"), atomically: true, encoding: .utf8)
         let found = findLinuxApps(progress: { _ in }, desktopDirs: [appsDir.path])
-        XCTAssertTrue(found.contains { $0.displayName == "TempScanApp" })
-        XCTAssertFalse(found.contains { $0.path.hasPrefix("/Applications/") })
+        // The whole result, not a display-name probe: an extra entry fails
+        // here, and the path has to come from the directory that was scanned
+        // rather than a macOS location the Linux path must never produce.
+        XCTAssertEqual(found.map(\.displayName), ["TempScanApp"])
+        let path = try XCTUnwrap(found.first?.path)
+        XCTAssertTrue(path.hasPrefix(td.path), path)
+        XCTAssertFalse(path.hasPrefix("/Applications/"), path)
     }
 
     func testFlatpakDesktopDoesNotUseWrapperBinaryAsPath() throws {

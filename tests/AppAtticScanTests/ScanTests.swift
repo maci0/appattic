@@ -41,13 +41,13 @@ final class ScanTests: XCTestCase {
             skipLiveUsage: true
         )
         let orphans = result.orphanedItems
-        XCTAssertTrue(orphans.contains { $0.name == "DeadApp" })
+        XCTAssertEqual(orphans.map(\.name), ["DeadApp"])
         let script = cleanupScript(result)
         XCTAssertTrue(script.contains("rm -rf"))
         XCTAssertTrue(script.contains("DeadApp"))
         XCTAssertFalse(script.contains("\nbrew upgrade "))
         let data = result.toScanData()
-        XCTAssertGreaterThanOrEqual(data.totals.orphaned_items, 1)
+        XCTAssertEqual(data.totals.orphaned_items, 1)
     }
 
     func testSystemAppLeftoversOwnedWhenIncludeSystemOff() throws {
@@ -594,7 +594,7 @@ final class ScriptPreviewTests: XCTestCase {
     /// has to reach the user through `rootcmd`, and the wrapper goes inside the
     /// guard, because `rootcmd if ...; then ...; fi` hands `rootcmd` the words
     /// `if` and `<query>` and leaves a bare `then` for the shell to choke on.
-    func testGuardedRemovalStillEscalatesForPackageManagers() {
+    func testGuardedRemovalStillEscalatesForPackageManagers() throws {
         XCTAssertFalse(commandNeedsRoot(uninstallCommand(source: "flatpak", name: "Firefox", path: "/x/f.desktop", caskName: nil, steamAppId: nil)))
         XCTAssertTrue(commandNeedsRoot(
             packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan"))
@@ -604,7 +604,7 @@ final class ScriptPreviewTests: XCTestCase {
             pacman,
             "if pacman -Qq jq >/dev/null 2>&1; then rootcmd pacman -Rns jq; fi"
         )
-        XCTAssertTrue(shScriptParses(pacman), pacman)
+        XCTAssertTrue(try shScriptParses(pacman), pacman)
         XCTAssertTrue(callsRootHelper(pacman), pacman)
         // Wrapping again must not escalate twice.
         XCTAssertEqual(withRootCmd(pacman), pacman)
@@ -668,7 +668,7 @@ final class ScriptPreviewTests: XCTestCase {
 
     /// Every generated script that calls `rootcmd` has to define it. A missing
     /// helper is `sh: rootcmd: not found`, and under `set -e` that stops the run.
-    func testScriptsThatEscalateDefineRootcmd() {
+    func testScriptsThatEscalateDefineRootcmd() throws {
         let scripts = [
             packageActionScript(
                 remove: [PackageEntry(name: "jq", manager: "pacman", kind: "orphan")],
@@ -691,7 +691,7 @@ final class ScriptPreviewTests: XCTestCase {
         ]
         for script in scripts {
             XCTAssertTrue(script.contains("rootcmd() {"), script)
-            XCTAssertTrue(shScriptParses(script), script)
+            XCTAssertTrue(try shScriptParses(script), script)
         }
         // No escalation, no helper: a brew-only script must not carry one.
         let brew = packageActionScript(
@@ -704,7 +704,7 @@ final class ScriptPreviewTests: XCTestCase {
     /// Merging a cleanup script with an update script keeps exactly one
     /// `rootcmd` definition, and has one even when only the update half
     /// escalates.
-    func testMergedScriptCarriesOneRootHelper() {
+    func testMergedScriptCarriesOneRootHelper() throws {
         let cleanup = leftoverCleanupScript(
             [DataItem(
                 path: "/home/alice/.config/gone-app",
@@ -719,30 +719,28 @@ final class ScriptPreviewTests: XCTestCase {
         let merged = previewScript(cleanup: cleanup, update: update)
         XCTAssertEqual(merged.components(separatedBy: "rootcmd() {").count - 1, 1, merged)
         XCTAssertTrue(merged.contains(" --noconfirm -S 'vim'"), merged)
-        XCTAssertTrue(shScriptParses(merged), merged)
+        XCTAssertTrue(try shScriptParses(merged), merged)
     }
 }
 
 /// Ask the real shell to parse a generated script. A design that emits
 /// something `/bin/sh` rejects is a defect the unit tests above would not see.
-func shScriptParses(_ script: String) -> Bool {
+/// Throws rather than reporting `false`, so a temp-dir failure is not read as
+/// a syntax error by every caller.
+func shScriptParses(_ script: String) throws -> Bool {
     let dir = URL(fileURLWithPath: NSTemporaryDirectory())
         .appendingPathComponent("appattic-script-\(UUID().uuidString)")
-    do {
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let file = dir.appendingPathComponent("check.sh")
-        // `sh -n` parses without running: no command in the script executes.
-        try Data(script.utf8).write(to: file)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-n", file.path]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        return process.terminationStatus == 0
-    } catch {
-        return false
-    }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let file = dir.appendingPathComponent("check.sh")
+    // `sh -n` parses without running: no command in the script executes.
+    try Data(script.utf8).write(to: file)
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = ["-n", file.path]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+    return process.terminationStatus == 0
 }

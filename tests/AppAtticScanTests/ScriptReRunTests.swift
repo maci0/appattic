@@ -1,3 +1,4 @@
+import Dispatch
 import XCTest
 @testable import AppAtticScan
 
@@ -7,6 +8,14 @@ import XCTest
 /// line below it, and a wrapper that makes a line unparseable strands the
 /// whole script.
 final class ScriptReRunTests: XCTestCase {
+    /// Long enough for a `cxbottle` invocation, short enough that a child
+    /// waiting on a tty fails the test instead of wedging the suite.
+    private static let childTimeout: TimeInterval = 20
+
+    private final class Output {
+        var text = ""
+    }
+
     private func run(_ script: String, _ args: [String] = []) throws -> (Int32, String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -19,9 +28,22 @@ final class ScriptReRunTests: XCTestCase {
         try process.run()
         input.fileHandleForWriting.write(Data(script.utf8))
         try input.fileHandleForWriting.close()
-        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+
+        // readDataToEndOfFile blocks until EOF with no deadline, so the read
+        // runs on its own queue and the test kills the child if it overruns.
+        let output = Output()
+        let drained = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            output.text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            drained.signal()
+        }
+        if drained.wait(timeout: .now() + Self.childTimeout) == .timedOut {
+            process.terminate()
+            XCTFail("child did not exit within \(Self.childTimeout)s: \(script)")
+            _ = drained.wait(timeout: .now() + 5)
+        }
         process.waitUntilExit()
-        return (process.terminationStatus, text)
+        return (process.terminationStatus, output.text)
     }
 
     private func parses(_ script: String, file: StaticString = #filePath, line: UInt = #line) throws {
@@ -64,22 +86,35 @@ final class ScriptReRunTests: XCTestCase {
     /// take the rest of a multi-selection script down with it.
     func testEveryRemovalAndKeepLineParsesAlone() throws {
         var lines: [String] = []
+        var markManualLines = 0
         for manager in managers {
             lines.append(packageRemoveCommand(entry("libfoo", manager)))
             if let keep = packageMarkManualCommand(entry("libfoo", manager, "orphan")) {
+                markManualLines += 1
                 lines.append(withRootCmd(keep))
             }
         }
-        for source in ["brew-formula", "brew-cask", "flatpak", "snap", "appimage", "steam", "crossover"] {
+        // Only the distro managers take a mark-manual command; losing one would
+        // otherwise shorten the list below without failing anything.
+        XCTAssertEqual(markManualLines, 5)
+        let sources = ["brew-formula", "brew-cask", "flatpak", "snap", "appimage", "steam", "crossover"]
+        for source in sources {
             let cmd = uninstallCommand(
                 source: source, name: "App", path: "/opt/App", caskName: "app", steamAppId: "42", pkgId: "id"
             )
-            if scriptHasActionableCommands("#!/bin/sh\nset -e\n\(cmd)\n") {
-                lines.append(withRootCmd(cmd))
-            }
+            // Asserted, not filtered: a source that regresses to a comment would
+            // otherwise drop out of this check with nothing failing.
+            XCTAssertTrue(
+                scriptHasActionableCommands("#!/bin/sh\nset -e\n\(cmd)\n"),
+                "\(source) produced no actionable command: \(cmd)"
+            )
+            lines.append(withRootCmd(cmd))
         }
         lines.append(leftoverRemoveCommand(path: "/tmp/gone", rootLabel: "Application Support"))
         lines.append(leftoverRemoveCommand(path: "/tmp/gone", rootLabel: "LaunchAgents"))
+        // 14 removals, 5 mark-manual commands (pacman, apt, dpkg, dnf, zypper),
+        // 7 sources, 2 leftover roots.
+        XCTAssertEqual(lines.count, 28)
         for line in lines {
             try parses("set -e\n\(line)\n")
         }
@@ -120,8 +155,14 @@ final class ScriptReRunTests: XCTestCase {
     /// it. No `cxbottle` is needed to prove the guard: the bottle directory is
     /// already gone, so both runs must skip the delete and reach the end.
     func testCrossOverBottleDeleteOverAnAlreadyRemovedBottleIsANoOp() throws {
-        let missing = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("appattic-rerun-\(UUID().uuidString)/Bottles/Gone")
+        // Create the bottle and delete it, so "already removed" is a state this
+        // test established rather than a path nothing ever touched.
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("appattic-rerun-\(UUID().uuidString)")
+        let missing = root.appendingPathComponent("Bottles/Gone")
+        try FileManager.default.createDirectory(at: missing, withIntermediateDirectories: true)
+        try FileManager.default.removeItem(at: missing)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
 
         let cmd = crossoverDeleteCommand(bottleName: "Gone", bottlePath: missing.path)
