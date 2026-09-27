@@ -548,6 +548,28 @@ final class ScriptPreviewTests: XCTestCase {
         XCTAssertTrue(mixed.contains("brew upgrade wget"), mixed)
     }
 
+    func testStripShellHeaderDropsPreambleAndTrailingBlankLines() {
+        XCTAssertEqual(
+            stripShellHeader("#!/bin/sh\nset -e\n# AppAttic cleanup\n\nrm -rf /tmp/Foo\n"),
+            "rm -rf /tmp/Foo"
+        )
+        XCTAssertEqual(stripShellHeader("#!/bin/sh\nset -e\n"), "", "a script with only a preamble strips to nothing")
+        XCTAssertEqual(stripShellHeader(""), "")
+        XCTAssertEqual(
+            stripShellHeader("\n   \n   #!/bin/sh\n   set -o pipefail\n# c\n"),
+            ""
+        )
+    }
+
+    func testStripShellHeaderKeepsBodyComments() {
+        // A comment after the first command is content, not preamble.
+        XCTAssertEqual(
+            stripShellHeader("rm -rf x\n# do not delete this\n"),
+            "rm -rf x\n# do not delete this"
+        )
+        XCTAssertEqual(stripShellHeader("rm\n\nls\n"), "rm\n\nls", "an interior blank line is body")
+    }
+
     /// Every manager removal in a generated script runs under `set -e`. A run
     /// that already removed its target must not exit nonzero, or `set -e` stops
     /// the script there and the items after it never run.

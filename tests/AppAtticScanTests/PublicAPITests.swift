@@ -16,9 +16,8 @@ final class PublicAPITests: XCTestCase {
     func testQuickstartResolvesAgainstExportedSymbols() throws {
         let leftovers = visibleOrphanedLeftovers([item], ignoring: [])
         XCTAssertEqual(leftovers.count, 1)
-        for row in leftovers where row.leftoverStatus == .shadow {
-            XCTAssertEqual(row.shadows, "/usr/bin/python3")
-        }
+        XCTAssertEqual(leftovers[0].leftoverStatus, .shadow)
+        XCTAssertEqual(leftovers[0].shadows, "/usr/bin/python3")
 
         XCTAssertNotNil(parseCLIArguments(["--top", "-1"]).parseError)
         XCTAssertGreaterThan(scanCacheMaxAge, 0)
