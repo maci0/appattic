@@ -279,6 +279,9 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     tools->setToolButtonStyle(Qt::ToolButtonTextOnly);
     tools->setContextMenuPolicy(Qt::PreventContextMenu);
     d->crumb = new QLabel;
+    // The breadcrumb is a path read off the filesystem, and "Qt::AutoText"
+    // would render a directory named "<i>" as markup instead of as a name.
+    d->crumb->setTextFormat(Qt::PlainText);
     d->crumb->setTextInteractionFlags(Qt::TextSelectableByMouse);
     d->crumb->setContentsMargins(kSpaceSm, 0, kSpaceSm, 0);
     d->devicesBtn = new QPushButton(QStringLiteral("Devices"));
@@ -334,6 +337,9 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->progress->setTextVisible(false);
     d->progress->setMaximumHeight(6);
     d->progressLabel = new QLabel;
+    // Both this and `status` carry a path read off the filesystem, which is
+    // not markup.
+    d->progressLabel->setTextFormat(Qt::PlainText);
     d->progressLabel->setFont(aaSmallFont());
     d->progressLabel->setForegroundRole(QPalette::PlaceholderText);
     ph->addWidget(d->progress, 1);
@@ -372,6 +378,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     split->setSizes({520, 420});
     sv->addWidget(split, 1);
     d->status = new QLabel;
+    d->status->setTextFormat(Qt::PlainText);
     d->status->setFont(aaSmallFont());
     d->status->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceSm);
     d->status->setForegroundRole(QPalette::PlaceholderText);
@@ -483,7 +490,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                     if (label.isEmpty()) label = d->scanPath;
                     top = new QTreeWidgetItem(d->tree);
                     top->setText(0, label);
-                    top->setToolTip(0, d->scanPath);
+                    top->setToolTip(0, plainTooltip(d->scanPath));
                     top->setExpanded(true);
                 }
                 QTreeWidgetItem *item = makeValueItem(
@@ -675,7 +682,7 @@ void DiskPage::refreshVolumes() {
         it->setText(4, humanSize(used));
         it->setText(5, humanSize(v.bytesAvailable));
         it->setData(1, Qt::UserRole, v.rootPath);
-        it->setToolTip(1, v.device);
+        it->setToolTip(1, plainTooltip(v.device));
         const QFont nums = aaNumericFont();
         it->setFont(3, nums);
         it->setFont(4, nums);
@@ -776,7 +783,7 @@ static QTreeWidgetItem *makeValueItem(
     it->setText(2, humanSize(allocated));
     it->setText(3, diskContentsLabel(items, isDir));
     it->setText(4, diskModifiedLabel(mtime));
-    it->setToolTip(0, path);
+    it->setToolTip(0, plainTooltip(path));
     const QFont nums = aaNumericFont();
     it->setFont(1, nums);
     it->setFont(2, nums);

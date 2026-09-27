@@ -560,6 +560,9 @@ public:
         eh->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceSm);
         eh->setSpacing(kSpaceSm);
         m_error = new QLabel;
+        // Plain text: a failed run reports the path it failed on, and a path
+        // is not markup.
+        m_error->setTextFormat(Qt::PlainText);
         m_error->setWordWrap(true);
         auto *errDismiss = new QPushButton(QStringLiteral("Dismiss"));
         eh->addWidget(m_error, 1);
@@ -1681,9 +1684,9 @@ private:
                     it->setText(2, f.bytes >= 0 ? humanSize(f.bytes) : QStringLiteral("unknown"));
                 }
                 it->setData(0, Qt::UserRole, f.uid());
-                it->setToolTip(0, displayName(f));
-                it->setToolTip(1, whatText(f, page));
-                if (!f.path.isEmpty()) it->setToolTip(2, f.path);
+                it->setToolTip(0, plainTooltip(displayName(f)));
+                it->setToolTip(1, plainTooltip(whatText(f, page)));
+                if (!f.path.isEmpty()) it->setToolTip(2, plainTooltip(f.path));
                 if (page != Page::Outdated) {
                     it->setFont(2, numericFont());
                     it->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
@@ -2543,6 +2546,12 @@ private:
     QLabel *inspectorLabel(const QString &text, const QFont &font, const QColor &color) {
         auto *l = new QLabel(text);
         l->setFont(font);
+        // Plain text, not the AutoText default: the text carries a name read
+        // off the filesystem, and a leftover directory called "<b>Firefox</b>"
+        // is legal on Linux. Rich text renders it as bold Firefox with the
+        // tags swallowed, which is a second spelling of a name the user is
+        // about to be offered for removal.
+        l->setTextFormat(Qt::PlainText);
         l->setWordWrap(true);
         l->setTextInteractionFlags(Qt::TextSelectableByMouse);
         QPalette p = l->palette();
@@ -3231,7 +3240,7 @@ private:
         for (const auto &e : entries) {
             auto *it = new QListWidgetItem(e.first, m_ignoredList);
             it->setData(Qt::UserRole, e.second);
-            it->setToolTip(e.second);
+            it->setToolTip(plainTooltip(e.second));
         }
         m_ignoredList->setToolTip(
             localeCount(m_ignored.size())

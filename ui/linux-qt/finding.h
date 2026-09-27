@@ -140,8 +140,13 @@ bool leftoverIsIgnored(const Finding &f, const QSet<QString> &ignored);
 /// path, summary, reason, extra paths). Built on demand by the UI filter.
 /// Compare it against `searchFold(query)`, not a bare `toLower()`.
 QString searchHaystack(const Finding &f);
-/// Case form both sides of a search use: POSIX-independent lowercase in NFC,
-/// so a decomposed filename from the disk matches a precomposed query.
+/// Case form both sides of a search use: case-folded in NFC, so a decomposed
+/// filename from the disk matches a precomposed query and a supplementary
+/// character folds as one code point.
 QString searchFold(const QString &s);
+/// Item tooltips are drawn as rich text, and a name off the filesystem is not
+/// markup: a leftover directory called "<b>Firefox</b>" would pop up as bold
+/// Firefox. Converts a plain string to the escaped rich text a tooltip wants.
+QString plainTooltip(const QString &s);
 
 #endif

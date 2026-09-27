@@ -16,6 +16,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QTimeZone>
+#include <QtGui/QTextDocument>
 
 #include <atomic>
 #include <initializer_list>
@@ -46,31 +47,47 @@ QString pathIdentityKey(const QString &path) {
 
 /// Case form for comparing typed text against text read off the disk.
 ///
-/// `toLower()` alone is not enough: an exFAT, NTFS, or SMB share hands back
-/// decomposed filenames, a keyboard and a paste give the precomposed spelling,
-/// and "Café" and "Cafe" + U+0301 are different QStrings, so a search for
-/// "café" finds nothing. NFC is the form `pathIdentityKey` already uses for
-/// identity, so the search uses the same one. Diacritics are not stripped:
-/// "cafe" still does not match "Café".
+/// `toCaseFolded()` alone is not enough: an exFAT, NTFS, or SMB share hands
+/// back decomposed filenames, a keyboard and a paste give the precomposed
+/// spelling, and "Café" and "Cafe" + U+0301 are different QStrings, so a
+/// search for "café" finds nothing. NFC is the form `pathIdentityKey` already
+/// uses for identity, so the search uses the same one. Diacritics are not
+/// stripped: "cafe" still does not match "Café".
+///
+/// Case folding, not `toLower()`: the two differ on letters whose two case
+/// forms are distinct letters rather than the same letter, and a name spelled
+/// with one of them then never matches a search for the other. The final
+/// sigma is the case Qt gets different today: `toLower()` leaves ς alone,
+/// `toCaseFolded()` folds it to σ, so a name spelled "ὀδυσσεύς" is found by a
+/// search for "ὀδυσσεύσ".
 QString searchFold(const QString &s) {
-    return s.toLower().normalized(QString::NormalizationForm_C);
+    return s.toCaseFolded().normalized(QString::NormalizationForm_C);
+}
+
+QString plainTooltip(const QString &s) {
+    return Qt::convertFromPlainText(s);
 }
 
 QString redactHomePaths(const QString &text, const QString &home) {
     const QString homePath = pathIdentityKey(QDir::cleanPath(home.isEmpty() ? QDir::homePath() : home));
     if (homePath.size() <= 1) return text;
-    // The haystack is normalized too, not just the pattern: `$HOME` arrives
-    // composed while a path off a decomposed mount spells the same directory
-    // with combining marks, and the two never match as literal text, so the
-    // account name rides out in the status bar instead of being replaced.
-    // Only the matching run is normalized, though: returning the whole
-    // normalized message would re-spell every path in it, and the user is
-    // invited to read a path back and retype it into the script.
-    const QRegularExpression re(
-        QRegularExpression::escape(homePath) + QStringLiteral("(?=/|$|[\\s:\"',;])"));
-    const QString haystack = pathIdentityKey(text);
-    if (!haystack.contains(re)) return text;
-    QString out = haystack;
+    // The home path is matched in both canonical forms rather than the message
+    // being normalized: `$HOME` arrives composed while a path off a decomposed
+    // mount spells the same directory with combining marks, and the two never
+    // match as literal text, so the account name rides out in the status bar
+    // instead of being replaced. Normalizing the haystack instead would
+    // re-spell every path in it, and on a decomposed mount NFC and NFD are
+    // different files, so the user would be invited to copy back a path that
+    // does not exist.
+    QString pattern = QRegularExpression::escape(homePath);
+    const QString decomposed = homePath.normalized(QString::NormalizationForm_D);
+    if (decomposed != homePath) {
+        pattern = QStringLiteral("(?:") + pattern + QLatin1Char('|')
+            + QRegularExpression::escape(decomposed) + QLatin1Char(')');
+    }
+    const QRegularExpression re(pattern + QStringLiteral("(?=/|$|[\\s:\"',;])"));
+    if (!text.contains(re)) return text;
+    QString out = text;
     out.replace(re, QStringLiteral("~"));
     return out;
 }
@@ -943,7 +960,7 @@ static void addLeftoverAliasTokens(QSet<QString> *out, QString token) {
     // key and of a desktop-stem match come off a filesystem, and an exFAT,
     // NTFS, or SMB share hands back the decomposed spelling. Without it a
     // leftover and its .desktop file never meet.
-    token = token.toLower().normalized(QString::NormalizationForm_C);
+    token = searchFold(token);
     if (token.isEmpty()) return;
     out->insert(token);
     if (token == QLatin1String("firefox") || token == QLatin1String("firefoxwebbrowser")) {
@@ -993,7 +1010,7 @@ static QSet<QString> installedDesktopStems() {
         const QStringList files = d.entryList({QStringLiteral("*.desktop")}, QDir::Files);
         for (QString file : files) {
             if (file.endsWith(QLatin1String(".desktop"))) file.chop(8);
-            const QString low = file.toLower().normalized(QString::NormalizationForm_C);
+            const QString low = searchFold(file);
             if (low.isEmpty()) continue;
             stems.insert(low);
             const int dot = low.lastIndexOf(QLatin1Char('.'));

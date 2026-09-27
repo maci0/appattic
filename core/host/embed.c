@@ -17,11 +17,45 @@ typedef struct {
     int failed;
 } Err;
 
+/* Drop a UTF-8 sequence the buffer end cut in half.
+
+   The error text carries a path, and a path can hold any bytes. `snprintf`
+   stops at a byte boundary, so a message that runs past the buffer ends
+   mid-character; the Qt side decodes this buffer with `QString::fromUtf8`,
+   which turns the leftover continuation bytes into a replacement character
+   the user reads as corruption in the name of a directory that is fine. */
+static size_t utf8_sequence_length(unsigned char lead) {
+    if (lead >= 0xF0) return 4;
+    if (lead >= 0xE0) return 3;
+    if (lead >= 0xC0) return 2;
+    return 1;
+}
+
+static void trim_partial_utf8_tail(char *buf) {
+    const size_t n = strlen(buf);
+    if (n == 0) return;
+    size_t start = n;
+    while (start > 0 && ((unsigned char)buf[start - 1] & 0xC0) == 0x80) start--;
+    if (start == n) {
+        /* The last byte is not a continuation, so the string is complete
+           unless that byte is a lead byte whose continuations were cut. */
+        if (utf8_sequence_length((unsigned char)buf[n - 1]) > 1) buf[n - 1] = '\0';
+        return;
+    }
+    if (start == 0) { buf[0] = '\0'; return; }  /* nothing but continuations */
+    const unsigned char lead = (unsigned char)buf[start - 1];
+    const size_t need = utf8_sequence_length(lead);
+    /* need == 1 means the byte before the run is not a lead byte at all, so
+       the run is orphaned data of its own and goes either way. */
+    if (need == 1 || n - (start - 1) < need) buf[need == 1 ? start : start - 1] = '\0';
+}
+
 static void fail_msg(Err *e, const char *msg) {
     if (e->failed) return;
     e->failed = 1;
     if (e->buf && e->len) {
         snprintf(e->buf, e->len, "%s", msg);
+        trim_partial_utf8_tail(e->buf);
     }
 }
 
@@ -30,6 +64,7 @@ static void fail_error(Err *e, const char *what, wasmtime_error_t *err) {
     wasmtime_error_message(err, &msg);
     if (!e->failed && e->buf && e->len) {
         snprintf(e->buf, e->len, "%s: %.*s", what, (int)msg.size, msg.data);
+        trim_partial_utf8_tail(e->buf);
     }
     e->failed = 1;
     wasm_byte_vec_delete(&msg);
@@ -41,6 +76,7 @@ static void fail_trap(Err *e, const char *what, wasm_trap_t *trap) {
     wasm_trap_message(trap, &msg);
     if (!e->failed && e->buf && e->len) {
         snprintf(e->buf, e->len, "%s: %.*s", what, (int)msg.size, msg.data);
+        trim_partial_utf8_tail(e->buf);
     }
     e->failed = 1;
     wasm_byte_vec_delete(&msg);

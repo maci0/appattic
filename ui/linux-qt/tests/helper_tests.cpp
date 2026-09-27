@@ -192,6 +192,20 @@ static int verifyHelpers() {
         std::fprintf(stderr, "searchFold did not lowercase ASCII\n");
         return 1;
     }
+    // Case folding, not lowercasing: the final sigma lowercases to itself, so a
+    // name spelled with ς at the end of a word ("ὀδυσσεύς") was invisible to a
+    // search for the same word spelled with the medial sigma.
+    if (searchFold(QString::fromUtf8("\xCF\x82"))
+        != searchFold(QString::fromUtf8("\xCF\x83"))) {
+        std::fprintf(stderr, "searchFold did not case-fold the final sigma\n");
+        return 1;
+    }
+    // A name off the filesystem is not markup, and a tooltip is drawn as rich
+    // text, so the tag has to survive as text.
+    if (plainTooltip(QStringLiteral("<b>Firefox</b>")).contains(QLatin1String("<b>"))) {
+        std::fprintf(stderr, "plainTooltip left a tag unescaped\n");
+        return 1;
+    }
     if (scriptHasCommands(QStringLiteral("#!/bin/sh\nset -e\n# comment\n"))) {
         std::fprintf(stderr, "scriptHasCommands preamble-only should be empty\n");
         return 1;
@@ -899,6 +913,19 @@ static int checkPrivacy() {
     const QString neighbor = redactHomePaths(QStringLiteral("/home/alice2/secret"), home);
     if (!neighbor.contains(QLatin1String("/home/alice2"))) {
         std::fprintf(stderr, "redact: over-redacted neighbor home\n");
+        return 1;
+    }
+    // A decomposed mount spells a path with combining marks, and NFC and NFD
+    // are different directories there. Both spellings of the home path have to
+    // redact, and the paths around it have to come out spelled exactly as they
+    // went in, or the user copies back a name that does not exist.
+    const QString decomposedHome = QString::fromUtf8("/home/alic\x65\xCC\x81");
+    const QString nfdPath = QString::fromUtf8("/home/alic\x65\xCC\x81/caf\xC3\xA9");
+    const QString decomposed = redactHomePaths(
+        QString::fromUtf8("rm: cannot remove '") + nfdPath + QLatin1Char('\''),
+        decomposedHome);
+    if (decomposed != QString::fromUtf8("rm: cannot remove '~/caf\xC3\xA9'")) {
+        std::fprintf(stderr, "redact: decomposed home path not redacted in place (%s)\n", decomposed.toUtf8().constData());
         return 1;
     }
     // The XDG roots take precedence over the home fallback, so the home-only
