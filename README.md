@@ -148,7 +148,7 @@ bash scripts/test.sh DiskSizeTests/testDirectorySize           # one test
 bash scripts/lint.sh
 ```
 
-`scripts/test.sh` is the `swift test` to use: it carries `--disable-automatic-resolution` and, on macOS, `APPATTIC_NO_MAC_UI=1`. `swift test` builds every target in the package, and `AppAtticUI` needs a Swift 6 compiler while `.swift-version` pins 5.10.1, so a bare `swift test` fails to build on the pinned toolchain.
+`scripts/test.sh` is the `swift test` to use: it carries `--disable-automatic-resolution`, the toolchain check against `.swift-version`, and, on macOS, `APPATTIC_NO_MAC_UI=1`. The CI jobs call it, so a local run and a workflow run are the same run. `swift test` builds every target in the package, and `AppAtticUI` needs a Swift 6 compiler while `.swift-version` pins 5.10.1, so a bare `swift test` fails to build on the pinned toolchain.
 
 `swift test` and `swift build` need unrestricted permissions in sandboxed environments.
 

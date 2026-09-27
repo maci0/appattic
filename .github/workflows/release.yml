@@ -62,7 +62,7 @@ jobs:
       # AppImage, because the two workflows build in parallel. It runs before
       # the Qt install so a red suite stops the job before it spends the time.
       - name: Test scan library
-        run: swift test --filter AppAtticScanTests --disable-automatic-resolution
+        run: bash scripts/test.sh
       - name: Install Qt 6 and build tools
         run: sudo bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API

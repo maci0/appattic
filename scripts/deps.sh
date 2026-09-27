@@ -353,19 +353,26 @@ check_tool_pins() {
     done
 }
 
-# The Swift toolchain is declared twice: in .swift-version, and in every
-# setup-swift step. CI must build with the declared version, so a bump that
-# misses a workflow has to fail here rather than on the runner.
+# The Swift toolchain is declared in .swift-version and repeated in two
+# places per workflow: every setup-swift step, and the tag of a swift: job
+# container. CI must build with the declared version, so a bump that misses
+# either spelling has to fail here rather than on the runner. A container job
+# is the worse half to miss, because nothing in the job reads the pin back.
 check_workflow_swift_versions() {
-    local declared workflow step
+    local declared workflow pinned
     declared="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
     for workflow in "$ROOT"/.github/workflows/*.yml; do
         [[ -f "$workflow" ]] || continue
-        while IFS= read -r step; do
-            if [[ "$step" != "$declared" ]]; then
-                fail "${workflow#"$ROOT"/} pins setup-swift to $step, .swift-version says $declared"
+        while IFS= read -r pinned; do
+            if [[ "$pinned" != "$declared" ]]; then
+                fail "${workflow#"$ROOT"/} pins setup-swift to $pinned, .swift-version says $declared"
             fi
         done < <(sed -n 's/^[[:space:]]*swift-version:[[:space:]]*"\([^"]*\)".*/\1/p' "$workflow")
+        while IFS= read -r pinned; do
+            if [[ "$pinned" != "$declared" ]]; then
+                fail "${workflow#"$ROOT"/} runs a swift:$pinned job container, .swift-version says $declared"
+            fi
+        done < <(sed -n 's/^[[:space:]]*container:[[:space:]]*swift:\([0-9][0-9.]*\).*$/\1/p' "$workflow")
     done
 }
 

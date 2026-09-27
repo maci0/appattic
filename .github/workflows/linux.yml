@@ -33,7 +33,7 @@ jobs:
       # build stays in release.yml (macos-ui), which is disabled until it is
       # stable again.
       - name: Test scan library
-        run: swift test --filter AppAtticScanTests --disable-automatic-resolution
+        run: bash scripts/test.sh
       - name: Build CLI
         run: swift build -c debug --product appattic --disable-automatic-resolution
 
@@ -107,7 +107,12 @@ jobs:
           echo /opt/zig >> "$GITHUB_PATH"
           echo /usr/local/bin >> "$GITHUB_PATH"
       - name: Test scan library
-        run: swift test --filter AppAtticScanTests --disable-automatic-resolution
+        # scripts/test.sh, not the raw command: it carries the
+        # --disable-automatic-resolution flag, the AppAtticScanTests filter
+        # and a .swift-version check, and a contributor runs the same script.
+        # The version check is what the jammy container has no other way to
+        # enforce, since the job container is pinned by tag alone.
+        run: bash scripts/test.sh
         id: swift_test
       - name: Build CLI
         run: swift build -c debug --product appattic --disable-automatic-resolution
@@ -176,7 +181,7 @@ jobs:
           echo /opt/zig >> "$GITHUB_PATH"
           echo /usr/local/bin >> "$GITHUB_PATH"
       - name: Test scan library
-        run: swift test --filter AppAtticScanTests --disable-automatic-resolution
+        run: bash scripts/test.sh
         id: swift_test_jammy
       - name: Build CLI
         run: swift build -c debug --product appattic --disable-automatic-resolution
