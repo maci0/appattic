@@ -16,7 +16,6 @@ finish-args:
   - --talk-name=org.freedesktop.Flatpak
   # QFile::moveToTrash goes through the file manager portal.
   - --talk-name=org.freedesktop.FileManager1
-rename-desktop-file: appattic.desktop
 rename-icon: appattic
 modules:
   - name: wasmtime
@@ -25,10 +24,10 @@ modules:
       - install -d "${FLATPAK_DEST}/lib" "${FLATPAK_DEST}/include"
       - cp -a lib/libwasmtime.so* "${FLATPAK_DEST}/lib/"
       - cp -a include/. "${FLATPAK_DEST}/include/"
-    # The headers only exist so the appattic module can compile against
-    # wasmtime.h; the runtime links lib/libwasmtime.so and never reads them.
-    cleanup:
-      - /include
+    # /include is removed by the appattic module below, which is the last one
+    # to compile against wasmtime.h. flatpak-builder runs a module's cleanup
+    # before the next module is built, so cleaning up here would leave the
+    # appattic module without the header CMake looks for.
     sources:
       - type: archive
         only-arches:
@@ -48,9 +47,8 @@ modules:
       - install -d "${FLATPAK_DEST}/libexec/zig" "${FLATPAK_DEST}/bin"
       - cp -a zig lib "${FLATPAK_DEST}/libexec/zig/"
       - ln -s "${FLATPAK_DEST}/libexec/zig/zig" "${FLATPAK_DEST}/bin/zig"
-    cleanup:
-      - /libexec/zig
-      - /bin/zig
+    # core/build.sh compiles the WASM core in the appattic module, so the
+    # toolchain has to outlive this module. The appattic module removes it.
     sources:
       - type: archive
         only-arches:
@@ -75,6 +73,13 @@ modules:
         cmake -S ui/linux-qt -B _qt -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${FLATPAK_DEST}" -DWASMTIME_ROOT="${FLATPAK_DEST}"
         cmake --build _qt
         cmake --install _qt
+    # Last module built, so the build-only inputs go here rather than in the
+    # modules that provide them. The runtime links lib/libwasmtime.so and reads
+    # the installed WASM modules; it never compiles anything.
+    cleanup:
+      - /include
+      - /libexec/zig
+      - /bin/zig
     sources:
       - type: dir
         path: ../..

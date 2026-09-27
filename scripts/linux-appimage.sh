@@ -218,10 +218,10 @@ while IFS= read -r f; do
     cp -f "$f" "$WASM_DEST/"
 done < <(printf '%s\n' "$CORE_OUT"/*.wasm "$CORE_OUT"/*.cwasm | LC_ALL=C sort)
 
-DESKTOP="$ROOT/packaging/appattic.desktop"
+DESKTOP="$ROOT/packaging/org.appattic.AppAttic.desktop"
 ICON="$ROOT/packaging/appattic.svg"
 if [[ ! -f "$DESKTOP" || ! -f "$ICON" ]]; then
-    echo "error: missing packaging/appattic.desktop or packaging/appattic.svg" >&2
+    echo "error: missing packaging/org.appattic.AppAttic.desktop or packaging/appattic.svg" >&2
     exit 1
 fi
 

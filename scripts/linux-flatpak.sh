@@ -170,6 +170,14 @@ if ! grep -q "runtime-version: \"${KDE_RUNTIME}\"" "$WORK/packaging/flatpak/${AP
     echo "error: manifest runtime-version is not ${KDE_RUNTIME}" >&2
     exit 1
 fi
+# core/build.sh refuses a zig other than the one in .zig-version, so a bump that
+# reaches the manifest later than this check would fail inside the build rather
+# than here. The prefetch above already used $ZIG_VER.
+if ! grep -q -- "-linux-${ZIG_VER}\.tar\.xz" "$WORK/packaging/flatpak/${APP_ID}.yml"; then
+    echo "error: manifest does not fetch zig $ZIG_VER, the version in .zig-version" >&2
+    echo "       bump packaging/flatpak/${APP_ID}.yml and the checksums with .zig-version" >&2
+    exit 1
+fi
 
 mkdir -p "$DIST"
 rm -rf "$BUILD"

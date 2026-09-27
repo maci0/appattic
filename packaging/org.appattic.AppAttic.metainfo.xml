@@ -8,10 +8,10 @@
   <developer id="org.appattic">
     <name>AppAttic</name>
   </developer>
-  <!-- Flatpak renames appattic.desktop to the app id; the AppImage and the
-       plain CMake install keep the file name as it is in packaging/. -->
+  <!-- The desktop file is named after the component id, so the Flatpak, the
+       AppImage, and the plain CMake install all resolve the same launchable
+       without a rename at install time. -->
   <launchable type="desktop-id">org.appattic.AppAttic.desktop</launchable>
-  <launchable type="desktop-id">appattic.desktop</launchable>
   <url type="homepage">https://github.com/maci0/appattic</url>
   <description>
     <p>

@@ -241,8 +241,8 @@ if(_appattic_compile_options)
 endif()
 set_property(SOURCE tests/helper_tests.cpp APPEND PROPERTY COMPILE_OPTIONS -Werror)
 
-if(EXISTS "${APPATTIC_ROOT}/packaging/appattic.desktop")
-    install(FILES "${APPATTIC_ROOT}/packaging/appattic.desktop"
+if(EXISTS "${APPATTIC_ROOT}/packaging/org.appattic.AppAttic.desktop")
+    install(FILES "${APPATTIC_ROOT}/packaging/org.appattic.AppAttic.desktop"
         DESTINATION share/applications)
 endif()
 if(EXISTS "${APPATTIC_ROOT}/packaging/appattic.svg")
