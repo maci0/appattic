@@ -94,6 +94,19 @@ final class FuzzXMLUsageTests: XCTestCase {
         return dir.appendingPathComponent(name).path
     }
 
+    /// The text an attribute value can carry, folded the way the XML parser is
+    /// required to fold it: attribute-value normalization turns every tab, CR
+    /// and LF inside an attribute into a single space before the document
+    /// reaches a delegate, so `id="ged\tit"` is handed over as `ged it`. Every
+    /// key here is cut from an attribute value, so this is the text to look the
+    /// key up in; against the raw bytes the check would fail on documents that
+    /// are perfectly well formed.
+    private static func attributeNormalized(_ text: String) -> String {
+        text.replacingOccurrences(of: "\t", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+    }
+
     /// What both readers must hold for any document: a key is lowercased and
     /// trimmed, appears in the bytes the parser was handed, and is dated no
     /// later than the scan plus the clock-skew allowance.
@@ -102,7 +115,7 @@ final class FuzzXMLUsageTests: XCTestCase {
         in text: String,
         where_: String
     ) {
-        let lowercased = posixLowercased(text)
+        let lowercased = posixLowercased(FuzzXMLUsageTests.attributeNormalized(text))
         for (key, date) in hits {
             XCTAssertFalse(key.isEmpty, "empty key \(where_)")
             XCTAssertEqual(key, posixLowercased(key), "not lowercased: \(key.debugDescription) \(where_)")

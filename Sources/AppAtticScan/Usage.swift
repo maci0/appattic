@@ -138,8 +138,61 @@ final class XbelSink: NSObject, XMLParserDelegate {
     }
 }
 
+/// The bytes `XMLParser` is handed, with the one document shape it cannot
+/// survive on Linux neutralized.
+///
+/// A processing instruction with no data at all — `<?x?>`, no whitespace before
+/// the `?>`, which is what a writer emits when it truncates a prolog — makes
+/// corelibs-foundation pass the missing data to the delegate as a bad pointer,
+/// and the process dies inside `parse()`. Swift 5.10.1 takes the read down on
+/// `<?x?>` and parses `<?x ?>`, `<?x\n?>` and `<?x y?>` without complaint, so
+/// the fix is the space: the same instruction carrying empty data. Every
+/// element and attribute is then the one the bytes hold, and neither reader
+/// looks at a processing instruction. Both files these readers open are written
+/// by another program, so a truncated one must not be able to kill the scan.
+func xmlBytesWithoutBareProcessingInstruction(_ data: Data) -> Data {
+    let bytes = [UInt8](data)
+    var out: [UInt8] = []
+    out.reserveCapacity(bytes.count + 8)
+    var i = 0
+    while i < bytes.count {
+        if bytes[i] == 0x3C, i + 1 < bytes.count, bytes[i + 1] == 0x3F {
+            var j = i + 2
+            while j < bytes.count, xmlNameByte(bytes[j]) { j += 1 }
+            if j > i + 2, j + 1 < bytes.count, bytes[j] == 0x3F, bytes[j + 1] == 0x3E {
+                out.append(contentsOf: bytes[i..<j])
+                out.append(0x20)
+                out.append(contentsOf: bytes[j..<(j + 2)])
+                i = j + 2
+                continue
+            }
+        }
+        out.append(bytes[i])
+        i += 1
+    }
+    return Data(out)
+}
+
+/// `NameChar` enough for a processing-instruction target: what may follow `<?`
+/// before the target ends. Anything else — whitespace, another `<` — means this
+/// is not the shape above and the bytes are left alone.
+@inline(__always)
+private func xmlNameByte(_ b: UInt8) -> Bool {
+    (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || (b >= 0x30 && b <= 0x39)
+        || b == 0x5F || b == 0x2D || b == 0x2E || b == 0x3A
+}
+
+/// An `XMLParser` over the file at `path`, read here instead of by
+/// `XMLParser(contentsOf:)` so the bytes can be checked for the shape above. A
+/// missing or unreadable file is no parser, which both callers already read as
+/// no fields.
+func xmlParserForFile(_ path: String) -> XMLParser? {
+    guard let data = FileManager.default.contents(atPath: path) else { return nil }
+    return XMLParser(data: xmlBytesWithoutBareProcessingInstruction(data))
+}
+
 public func parseRecentlyUsedXbel(_ path: String, now: Date = Date()) -> [String: Date] {
-    guard let parser = XMLParser(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
+    guard let parser = xmlParserForFile(path) else { return [:] }
     let sink = XbelSink(now: now)
     parser.delegate = sink
     parser.shouldProcessNamespaces = true
@@ -184,7 +237,7 @@ final class GnomeStateSink: NSObject, XMLParserDelegate {
 }
 
 public func parseGnomeApplicationState(_ path: String, now: Date = Date()) -> [String: Date] {
-    guard let parser = XMLParser(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
+    guard let parser = xmlParserForFile(path) else { return [:] }
     let sink = GnomeStateSink(now: now)
     parser.delegate = sink
     parser.shouldResolveExternalEntities = false

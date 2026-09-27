@@ -120,6 +120,43 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(utcCalendar().component(.month, from: firefox), 5)
     }
 
+    /// A processing instruction with no data is the one document shape
+    /// `XMLParser` cannot survive on Linux, and a reader handed a file another
+    /// program wrote has to read around it rather than die on it: a truncated
+    /// `recently-used.xbel` or `application_state` is ordinary input, not an
+    /// attack the scan is allowed to lose to.
+    func testBareProcessingInstructionDoesNotKillTheReader() throws {
+        let xbel = """
+        <?xml version="1.0"?><?x?>
+        <xbel version="1.0" xmlns:bookmark="http://www.freedesktop.org/standards/desktop/bookmark">
+          <bookmark href="file:///tmp/doc.pdf" visited="2026-05-02T18:00:00Z">
+            <info>
+              <metadata>
+                <bookmark:applications>
+                  <bookmark:application name="Firefox" exec="firefox %u" count="1"/>
+                </bookmark:applications>
+              </metadata>
+            </info>
+          </bookmark>
+        </xbel>
+        """
+        let xbelPath = try writeTemp(xbel, suffix: ".xbel")
+        defer { try? FileManager.default.removeItem(atPath: xbelPath) }
+        XCTAssertNotNil(parseRecentlyUsedXbel(xbelPath)["firefox"], "the fields behind the instruction are still read")
+
+        let state = """
+        <application-state><?x?>\
+        <application id="org.example.app.desktop" last-seen="1717200000"/>\
+        </application-state>
+        """
+        let statePath = try writeTemp(state, suffix: ".xml")
+        defer { try? FileManager.default.removeItem(atPath: statePath) }
+        XCTAssertNotNil(
+            parseGnomeApplicationState(statePath)["org.example.app.desktop"],
+            "the fields behind the instruction are still read"
+        )
+    }
+
     func testMatchesBundleExecutable() {
         let app = AppRecord(
             path: "/Applications/Visual Studio Code.app",
