@@ -42,6 +42,13 @@
 #ifdef __linux__
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
+// The statx() wrapper and its STATX_* constants reach <sys/stat.h> in glibc
+// 2.28, so on an older glibc the call and the struct do not exist to compile
+// against. The fstatat fallback in fillMetaAt is what every Linux already has,
+// so the statx path is gated on the declarations being there and nothing else.
+#if defined(STATX_BLOCKS) && (!defined(__GLIBC__) || __GLIBC_PREREQ(2, 28))
+#define APPATTIC_HAVE_STATX 1
+#endif
 #endif
 #endif
 
@@ -146,10 +153,10 @@ bool fillMetaFd(int fd, FileMeta *m) {
 }
 
 bool fillMetaAt(int dirfd, const char *name, FileMeta *m) {
-#ifdef __linux__
-    // statx needs glibc 2.28 and Linux 4.11 for AT_NO_AUTOMOUNT; the kernel side
-    // is probed through stx_mask and the call falling through to fstatat below,
-    // which every Linux has.
+#ifdef APPATTIC_HAVE_STATX
+    // statx needs Linux 4.11 for AT_NO_AUTOMOUNT; the kernel side is probed
+    // through stx_mask and the call falling through to fstatat below, which
+    // every Linux has.
     struct statx stx;
     const unsigned mask = STATX_TYPE | STATX_MODE | STATX_NLINK | STATX_INO
         | STATX_SIZE | STATX_BLOCKS | STATX_MTIME;

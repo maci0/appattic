@@ -212,7 +212,7 @@ Linux: UI is Qt 6 Widgets. Install headers with `./scripts/linux-deps.sh` (optio
 
 You cannot cross-compile the Qt UI from macOS and call that a Linux link. Build on the Linux machine you will run, matching that distro. An Ubuntu-built binary is not assumed to start on Arch (glibc differs). Homebrew Qt on macOS is not Linux.
 
-Qt discovery looks in the Debian multiarch directory, `/usr/lib`, and `/usr/lib64`, so the same commands work on Fedora and openSUSE, where Qt 6 installs under `lib64`. The Qt window needs glibc 2.28 or newer (`statx`, in `ui/linux-qt/diskusage.cpp`); the CLI and `AppAtticScan` are pure Swift and link no C host, so they carry only the floor Swift itself has. musl is not a target: the AppImage, the Flatpak (`org.kde.Platform`), and `core/host` all build against glibc.
+Qt discovery looks in the Debian multiarch directory, `/usr/lib`, and `/usr/lib64`, so the same commands work on Fedora and openSUSE, where Qt 6 installs under `lib64`. The Qt window needs glibc 2.28 or newer because Qt 6 does; the window itself uses `statx` (`ui/linux-qt/diskusage.cpp`) only where the libc has the wrapper, and falls back to `fstatat` on an older glibc. The CLI and `AppAtticScan` are pure Swift and link no C host, so they carry only the floor Swift itself has. musl is not a target: the AppImage, the Flatpak (`org.kde.Platform`), and `core/host` all build against glibc.
 
 ```bash
 ./scripts/linux-deps.sh              # preflight: what is present, what is missing
