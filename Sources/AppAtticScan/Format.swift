@@ -109,7 +109,7 @@ public func humanDays(_ days: Double) -> String {
         return duration(.hour, max(Int(days * 24), 1))
     }
     if days < 28 {
-        return days >= 14 ? duration(.weekOfYear, Int(days / 7)) : duration(.day, Int(days))
+        return days >= 14 ? duration(.weekOfMonth, Int(days / 7)) : duration(.day, Int(days))
     }
     if days < 365 {
         return duration(.month, Int(days / 30))
@@ -133,8 +133,16 @@ private let durationFormatters: [Calendar.Component: (DateComponents) -> String?
     // loop to build an empty set of, which is what this arm used to name. The
     // pairs also give the array its type, so the literal does not leave the
     // element type to be decided by the loop body.
+    //
+    // The week is `weekOfMonth`, not `weekOfYear`. `allowedUnits` accepts only
+    // year, month, weekOfMonth, day, hour, minute and second; any other bit
+    // raises NSInternalInconsistencyException from the setter, so the old
+    // `.weekOfYear` here aborted the process the first time `humanDays`
+    // rendered a fortnight — before the test that called it could assert
+    // anything. `DateComponents` carries the same unit below, so the count is
+    // the field the formatter reads.
     let units: [(component: Calendar.Component, allowed: NSCalendar.Unit)] = [
-        (.hour, .hour), (.day, .day), (.weekOfYear, .weekOfYear), (.month, .month), (.year, .year),
+        (.hour, .hour), (.day, .day), (.weekOfMonth, .weekOfMonth), (.month, .month), (.year, .year),
     ]
     for unit in units {
         let f = DateComponentsFormatter()
@@ -151,7 +159,7 @@ private let durationFormatters: [Calendar.Component: (DateComponents) -> String?
 /// Abbreviations for a locale that has no data for the unit, so a missing CLDR
 /// entry costs the reader the localized word and not the whole label.
 private let asciiDurationUnits: [Calendar.Component: String] = [
-    .hour: "h", .day: "d", .weekOfYear: "w", .month: "mo", .year: "y",
+    .hour: "h", .day: "d", .weekOfMonth: "w", .month: "mo", .year: "y",
 ]
 
 private func duration(_ unit: Calendar.Component, _ count: Int) -> String {
