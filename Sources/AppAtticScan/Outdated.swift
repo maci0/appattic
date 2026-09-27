@@ -319,6 +319,9 @@ public func updateScript(_ pkgs: [OutdatedPkg]) -> String {
     return lines.joined(separator: "\n") + "\n"
 }
 
+/// `updateScript` over the wire form. `selectedIds` narrows the upgrade to the
+/// rows a user picked, matched on `OutdatedEntry.id` (`manager:name`); nil
+/// upgrades every updatable row, and an empty set upgrades none.
 public func updateScript(from data: ScanData, selectedIds: Set<String>? = nil) -> String {
     let pkgs = (data.outdated ?? []).compactMap { entry -> OutdatedPkg? in
         if let selectedIds, !selectedIds.contains(entry.id) { return nil }

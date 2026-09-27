@@ -24,6 +24,10 @@ public struct ScanCacheFile: Codable, Sendable {
     }
 }
 
+/// Where the scan cache lives: `last-scan.json` beside `settings.json`, under
+/// the XDG data directory on Linux and Application Support on macOS. Every
+/// cache function defaults to this path, so a caller only passes a URL when it
+/// keeps its own cache somewhere else.
 public func defaultScanCacheURL() -> URL {
     let fm = FileManager.default
     let base: URL
@@ -78,6 +82,11 @@ public func readScanCache(
     }
 }
 
+/// Write the cache, creating its directory and restricting the file to the
+/// account. The write is atomic and `from_cache` is forced to false, so what
+/// lands on disk is a live snapshot whatever the caller had set. Throws
+/// `AppAtticIOError` for every failure; a cache that is never written is a
+/// rescan, not a wrong answer.
 public func writeScanCache(_ cache: ScanCacheFile, to url: URL = defaultScanCacheURL()) throws {
     let dir = url.deletingLastPathComponent()
     do {

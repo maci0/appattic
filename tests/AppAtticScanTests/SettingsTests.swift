@@ -484,6 +484,39 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(exported.leftovers.count, 1)
     }
 
+    func testExportedScanDataKeepsACheckThatDidNotRunMissing() {
+        let data = ScanData(
+            scanned_at: "2026-08-17T12:00:00Z",
+            duration_s: 1,
+            brew_available: false,
+            totals: ScanTotals(
+                apps_installed: 0,
+                orphaned_items: 0,
+                orphaned_bytes: 0,
+                system_leftover_bytes: 0,
+                reclaimable_bytes: 0,
+                stale_apps: 0,
+                outdated_apps: nil
+            ),
+            leftovers: [],
+            software: [],
+            outdated: nil,
+            packages: nil
+        )
+        let exported = exportedScanData(from: data)
+        XCTAssertNil(exported.outdated)
+        XCTAssertNil(exported.packages)
+        XCTAssertNil(exported.totals.outdated_apps)
+    }
+
+    func testExportedScanDataKeepsAnEmptyListFromACheckThatRan() {
+        let data = sampleScanData()
+        let exported = exportedScanData(from: data)
+        XCTAssertEqual(exported.outdated?.count, 0)
+        XCTAssertEqual(exported.packages?.count, 0)
+        XCTAssertEqual(exported.totals.outdated_apps, 0)
+    }
+
     func testToggleListedSelectionDeselectClearsWholeSet() {
         let selected: Set = ["/a", "/b", "/c"]
         XCTAssertEqual(toggleListedSelection(selected: selected, visible: ["/a"]), [])

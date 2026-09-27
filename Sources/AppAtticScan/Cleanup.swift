@@ -629,6 +629,11 @@ public func cleanupScript(_ result: ScanResult, category: [String] = [], top: In
     return scriptWithHeader(header, body)
 }
 
+/// The live-object view of a `ScanData`: `dataItems`, `software`, `verdicts`,
+/// `outdated`, and `packages` rebuilt, with ignored leftover paths (the item
+/// path and its `extra_paths`) dropped. `now` is the scan time to fall back on
+/// when the payload carries no `scanned_at`, so a caller that must not read the
+/// clock passes the time it already has.
 public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [], now: Date = Date()) -> ScanResult {
     let result = ScanResult()
     result.scannedAt = parseISODate(data.scanned_at) ?? now
@@ -728,6 +733,11 @@ public func cleanupScript(from data: ScanData, ignoringLeftovers: Set<String> = 
     cleanupScript(scanResult(from: data, ignoringLeftovers: ignoringLeftovers, now: now))
 }
 
+/// The `ScanData` a report writes out: the round trip back to the wire form
+/// with totals recomputed from the rows that survived `ignoringLeftovers`, and
+/// `from_cache` stamped with where the scan came from. A check the input
+/// reported as not run stays not run, so an export never turns "unknown" into
+/// "nothing to report".
 public func exportedScanData(
     from data: ScanData,
     ignoringLeftovers: Set<String> = [],
@@ -735,6 +745,14 @@ public func exportedScanData(
     now: Date = Date()
 ) -> ScanData {
     var payload = scanResult(from: data, ignoringLeftovers: ignoringLeftovers, now: now).toScanData()
+    // `ScanResult` holds a list either way, so a round trip would report a
+    // check that never ran as one that found nothing. Put the nil back: an
+    // export says "not checked", not "nothing to report".
+    if data.outdated == nil {
+        payload.outdated = nil
+        payload.totals.outdated_apps = nil
+    }
+    if data.packages == nil { payload.packages = nil }
     payload.from_cache = fromCache
     return payload
 }

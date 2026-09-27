@@ -18,7 +18,9 @@ public struct ScanTotals: Codable, Sendable {
     public let system_leftover_bytes: Int
     public let reclaimable_bytes: Int
     public let stale_apps: Int
-    public let outdated_apps: Int?
+    /// Var, not let: an export restores the nil when the scan it came from had
+    /// no outdated check to count.
+    public var outdated_apps: Int?
 
     public init(
         apps_installed: Int,
@@ -363,8 +365,10 @@ public struct ScanData: Codable, Sendable {
     public let totals: ScanTotals
     public let leftovers: [LeftoverItem]
     public let software: [SoftwareItem]
-    public let outdated: [OutdatedEntry]?
-    public let packages: [PackageEntry]?
+    /// Var, not let, for the same reason as `ScanTotals.outdated_apps`: an
+    /// export restores the nil when the check it came from did not run.
+    public var outdated: [OutdatedEntry]?
+    public var packages: [PackageEntry]?
     public var from_cache: Bool?
     public var incomplete: Bool?
 

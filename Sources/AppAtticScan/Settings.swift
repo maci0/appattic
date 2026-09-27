@@ -82,6 +82,9 @@ public func settingsErrorUserMessage(_ error: Error) -> String {
 
 private let settingsJSONKeys: Set<String> = ["includeSystem", "confirmDelete", "ignoredLeftoverPaths"]
 
+/// Where `settings.json` lives: beside the scan cache, so one directory holds
+/// everything the app writes for the account. `loadSettings` and `saveSettings`
+/// both default to it.
 public func defaultSettingsURL() -> URL {
     defaultScanCacheURL().deletingLastPathComponent().appendingPathComponent("settings.json")
 }
