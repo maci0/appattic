@@ -4,12 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(_WIN32)
 #include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#endif
 
 static int fail(const char *msg) {
     fprintf(stderr, "hostexec_test: %s\n", msg);
@@ -18,7 +16,6 @@ static int fail(const char *msg) {
 
 /* PATH is a process global: applying the user tool dirs must be revertible, or
    a long-lived embedder keeps the rewritten PATH after the scan. */
-#if !defined(_WIN32)
 static int check_user_path_restores(void) {
     const char *before = getenv("PATH");
     char saved[4096];
@@ -130,7 +127,6 @@ static int check_user_path_concurrent(void) {
     }
     return 0;
 }
-#endif
 
 static int expect_allow(const char *cmd) {
     if (!appattic_host_exec_allowed(cmd)) {
@@ -789,10 +785,8 @@ int main(void) {
     if (rc != 0) return 1;
     rc |= check_host_exec_live_flag();
     if (rc != 0) return 1;
-#if !defined(_WIN32)
     rc |= check_user_path_restores();
     rc |= check_user_path_concurrent();
-#endif
     if (rc != 0) return 1;
     printf("hostexec_test: ok\n");
     return 0;

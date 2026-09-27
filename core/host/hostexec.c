@@ -8,7 +8,6 @@
 #include <string.h>
 #include <strings.h>
 
-#ifndef _WIN32
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -19,7 +18,6 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#endif
 
 #define MAX_CMD 512
 #define MAX_TOK 16
@@ -408,7 +406,6 @@ int appattic_host_in_flatpak(void) {
     return env_set("FLATPAK_ID");
 }
 
-#ifndef _WIN32
 #define USER_PATH_CAP 8192
 static int g_user_path_applied = 0;
 static char g_user_path[USER_PATH_CAP];
@@ -557,10 +554,6 @@ static void rewrite_home_user_argv(char **argv) {
         slot++;
     }
 }
-#else
-void appattic_host_apply_user_path(void) {}
-void appattic_host_restore_user_path(void) {}
-#endif
 
 static int use_fixture(void) {
     if (env_flag("APPATTIC_HOST_EXEC_LIVE")) return 0;
@@ -905,7 +898,6 @@ static int fixture_for(const char *cmdline, char *scratch, size_t scratchn, cons
     return 0;
 }
 
-#ifndef _WIN32
 static long monotonic_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return -1;
@@ -1080,7 +1072,6 @@ static int run_live(char **argv, char *out, size_t cap) {
     }
     return (int)n;
 }
-#endif
 
 int appattic_host_exec(const char *cmdline, char *out, size_t cap) {
     if (!out || cap == 0) return APPATTIC_HOST_EXEC_BAD;
@@ -1101,7 +1092,6 @@ int appattic_host_exec(const char *cmdline, char *out, size_t cap) {
         return take_complete_output(out, cap, 1);
     }
 
-#ifndef _WIN32
     char buf[MAX_CMD];
     char *argv[MAX_TOK + 1];
     int argc = parse_argv(cmdline, buf, sizeof buf, argv, MAX_TOK);
@@ -1122,8 +1112,4 @@ int appattic_host_exec(const char *cmdline, char *out, size_t cap) {
         }
     }
     return run_live(argv, out, cap);
-#else
-    (void)cmdline;
-    return APPATTIC_HOST_EXEC_FAIL;
-#endif
 }
