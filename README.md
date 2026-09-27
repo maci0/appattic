@@ -113,7 +113,7 @@ bash scripts/check.sh --qt
 
 swift build --target AppAtticScan -c debug --disable-automatic-resolution
 swift test --filter AppAtticScanTests --disable-automatic-resolution
-swift test --filter UtilTests --disable-automatic-resolution   # one class
+swift test --filter DiskSizeTests --disable-automatic-resolution   # one class
 ./core/build.sh test brew.zig                                  # one Zig plugin
 bash scripts/lint.sh
 ```
@@ -161,7 +161,7 @@ bash scripts/linux-appimage.sh
 # dist/AppAttic-x86_64.AppImage  (or aarch64 on arm64 hosts)
 ```
 
-`VERSION` is the current git tag without a leading `v`, or, on an untagged checkout, the version declared in `Sources/AppAtticScan/Util.swift`. That file is the only declaration: `ui/linux-qt/CMakeLists.txt` reads it with `string(REGEX MATCH)` rather than copying it, and the two copies that have to keep step are the newest `<release>` in `packaging/org.appattic.AppAttic.metainfo.xml` and `CFBundleShortVersionString` in `packaging/Info.plist`, which `build.sh` copies into the macOS bundle unchanged. `bash scripts/check-version.sh` is the one reader: it prints the declared version and fails when either copy disagrees, when `CFBundleVersion` is not a build number, or when CMake stops deriving. `bash scripts/check-version.sh --tag v1.2.3` also requires the tag to match. The release workflow runs the `--tag` form against the `v*` ref. The AppImage script then runs `--smoke` and fails if that does not print `SMOKE=ok`. Debug builds additionally take `--dev-check <table|stream|disk|shot>`: the CI gates and the offscreen page renders (`shot <dir>`), all compiled out with `NDEBUG`.
+`VERSION` is the current git tag without a leading `v`, or, on an untagged checkout, the version declared in `Sources/AppAtticScan/Version.swift`. That file is the only declaration: `ui/linux-qt/CMakeLists.txt` reads it with `string(REGEX MATCH)` rather than copying it, and the copies that have to keep step are the newest `<release>` in `packaging/org.appattic.AppAttic.metainfo.xml`, `CFBundleShortVersionString` and `CFBundleVersion` in `packaging/Info.plist` (which `build.sh` copies into the macOS bundle unchanged), and the version header in `packaging/appattic-qt.1`. `bash scripts/check-version.sh` is the one reader: it prints the declared version and fails when any copy disagrees, when `CFBundleVersion` is not a build number, or when CMake stops deriving. `bash scripts/check-version.sh --tag v1.2.3` also requires the tag to match. The release workflow runs the `--tag` form against the `v*` ref. The AppImage script then runs `--smoke` and fails if that does not print `SMOKE=ok`. Debug builds additionally take `--dev-check <table|stream|disk|shot>`: the CI gates and the offscreen page renders (`shot <dir>`), all compiled out with `NDEBUG`.
 
 Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downloads pinned linuxdeploy, linuxdeploy-plugin-qt, and appimagetool into `dist/.appimage-tools/` and checks SHA-256. WASM modules ship under `usr/share/appattic/`; `libwasmtime.so` sits next to the binary. It also writes `dist/AppAttic-<arch>.AppImage.sbom.json`, a CycloneDX 1.5 inventory of every pinned third-party artifact that went into the image. Regenerate it or check the pins yourself:
 
@@ -200,7 +200,7 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 
 | Path | Role |
 |------|------|
-| `Sources/AppAtticScan/` | Discover, usage, brew, leftovers, outdated, packages, recommend, full scan |
+| `Sources/AppAtticScan/` | Discover, usage, brew, leftovers, outdated, packages, recommend, full scan. One file per feature, plus the shared support modules it is built on: `Process` (subprocess, `which`), `Paths` (XDG, identity, redaction), `DiskSize` (`du`, directory walks), `Dates`, `Format`, `Text`, `ShellScript` (quoting for generated `sh`), `FilePermissions`, `Concurrency`, `Platform` (os-release, distro package manager), `Version` (the one version declaration) |
 | `Sources/AppAtticCLI/` | `appattic` command line |
 | `Sources/AppAttic/` | SwiftCrossUI app (AppKit on macOS) |
 | `ui/linux-qt/` | C++ Qt 6 Widgets shell (Linux). Window, findings, settings, WASM host paths, and smoke are separate files |

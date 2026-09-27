@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# The release version has one declaration (appAtticVersion in Util.swift) and
-# the packaging copies that have to keep in step: the newest AppStream
-# release, the macOS bundle Info.plist, and the appattic-qt man page.
-# CMakeLists.txt reads the declaration, so this is the place that checks the
-# copies and the derivation.
+# The release version has one declaration (appAtticVersion in Version.swift) and
+# the packaging copies that have to keep in step: the newest AppStream release,
+# the macOS bundle Info.plist, and the appattic-qt man page. CMakeLists.txt
+# reads the declaration, so this is the place that checks the copies and the
+# derivation.
 # Usage: bash scripts/check-version.sh [--tag TAG]
 #   prints the declared version on stdout
 #   --tag  also requires TAG (a v* ref name or a bare version) to match it
@@ -12,7 +12,7 @@ set -euo pipefail
 _script_dir="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$_script_dir/.." && pwd)"
 
-UTIL="$ROOT/Sources/AppAtticScan/Util.swift"
+VERSION_SRC="$ROOT/Sources/AppAtticScan/Version.swift"
 CMAKE="$ROOT/ui/linux-qt/CMakeLists.txt"
 METAINFO="$ROOT/packaging/org.appattic.AppAttic.metainfo.xml"
 PLIST="$ROOT/packaging/Info.plist"
@@ -35,7 +35,7 @@ Usage: bash scripts/check-version.sh [--tag TAG]
 
   Checks that the AppStream release, the macOS Info.plist, and the
   appattic-qt man page match appAtticVersion, and that CMakeLists.txt still
-  derives its version from Util.swift.
+  derives its version from Version.swift.
   Prints the declared version. With --tag, the tag must match it too.
 EOF
             exit 0
@@ -71,7 +71,7 @@ plist_string() {
     printf '%s\n' "$out"
 }
 
-swift_version="$(extract "appAtticVersion" "$UTIL" 's/^public let appAtticVersion = "\([^"]*\)"$/\1/p')"
+swift_version="$(extract "appAtticVersion" "$VERSION_SRC" 's/^public let appAtticVersion = "\([^"]*\)"$/\1/p')"
 # The newest release by version, not by position: an entry appended out of
 # order must not leave an older one looking like the release of record.
 meta_version="$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' "$METAINFO" 2>/dev/null | sort -V | tail -n 1)"
@@ -85,15 +85,15 @@ plist_version="$plist_short"
 man_version="$(extract "man page" "$MANPAGE" 's/^\.TH [^ ]* 1 "[^"]*" "[^ ]* \([^"]*\)" .*/\1/p')"
 
 # CMakeLists.txt has no version of its own: it reads appAtticVersion out of
-# $UTIL with string(REGEX MATCH). There is no copy of it to compare, so check
-# that the derivation is still there and that no literal crept back in.
+# $VERSION_SRC with string(REGEX MATCH). There is no copy of it to compare, so
+# check that the derivation is still there and that no literal crept back in.
 if grep -qE '^[[:space:]]*set\(APPATTIC_VERSION[[:space:]]+"[0-9]' "$CMAKE"; then
-    echo "error: $CMAKE declares APPATTIC_VERSION literally; it must read appAtticVersion from $UTIL" >&2
+    echo "error: $CMAKE declares APPATTIC_VERSION literally; it must read appAtticVersion from $VERSION_SRC" >&2
     exit 1
 fi
 if ! grep -qF 'public let appAtticVersion' "$CMAKE" \
     || ! grep -qF 'CMAKE_MATCH_1' "$CMAKE"; then
-    echo "error: $CMAKE no longer derives APPATTIC_VERSION from $UTIL" >&2
+    echo "error: $CMAKE no longer derives APPATTIC_VERSION from $VERSION_SRC" >&2
     echo "       keep the appAtticVersion regex and the CMAKE_MATCH_1 it reads" >&2
     exit 1
 fi
@@ -102,17 +102,17 @@ fi
 # that reports the wrong version, so each one is compared here.
 if [[ "$meta_version" != "$swift_version" ]]; then
     echo "error: version mismatch: AppStream release is $meta_version, appAtticVersion is $swift_version" >&2
-    echo "error: bump both in the same commit: $UTIL, $METAINFO" >&2
+    echo "error: bump both in the same commit: $VERSION_SRC, $METAINFO" >&2
     exit 1
 fi
 if [[ "$plist_version" != "$swift_version" ]]; then
     echo "error: version mismatch: CFBundleShortVersionString is $plist_version, appAtticVersion is $swift_version" >&2
-    echo "error: bump both in the same commit: $UTIL, $PLIST" >&2
+    echo "error: bump both in the same commit: $VERSION_SRC, $PLIST" >&2
     exit 1
 fi
 if [[ "$man_version" != "$swift_version" ]]; then
     echo "error: version mismatch: appattic-qt.1 header is $man_version, appAtticVersion is $swift_version" >&2
-    echo "error: bump both in the same commit: $UTIL, $MANPAGE" >&2
+    echo "error: bump both in the same commit: $VERSION_SRC, $MANPAGE" >&2
     exit 1
 fi
 
@@ -120,7 +120,7 @@ fi
 # is what Finder and macOS read, not appAtticVersion.
 if [[ "$plist_short" != "$swift_version" ]]; then
     echo "error: version mismatch: $PLIST CFBundleShortVersionString is $plist_short, appAtticVersion is $swift_version" >&2
-    echo "error: bump all three in the same commit: $UTIL, $METAINFO, $PLIST" >&2
+    echo "error: bump all three in the same commit: $VERSION_SRC, $METAINFO, $PLIST" >&2
     exit 1
 fi
 

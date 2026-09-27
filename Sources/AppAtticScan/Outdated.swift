@@ -643,6 +643,35 @@ func parseDnfUpgradesLine(_ s: Substring) -> (name: String, latest: String)? {
     } ?? nil
 }
 
+/// Headers from `dnf repoquery` / `dnf list --upgrades` / `dnf check-update`.
+public func isDnfListingNoise(_ line: String) -> Bool {
+    isDnfListingNoise(line[...])
+}
+
+func isDnfListingNoise(_ line: Substring) -> Bool {
+    // Operates on raw UTF-8: the hot dnf loop never materialises a String for
+    // noise lines (lowercased() alone costs ~1 µs/line).
+    line.utf8.withContiguousStorageIfAvailable { u -> Bool in
+        var s = 0
+        let e = u.count
+        while s < e, u[s] == 0x20 || u[s] == 0x09 { s += 1 }
+        func hasPrefix(_ p: [UInt8]) -> Bool {
+            guard e - s >= p.count else { return false }
+            for k in 0..<p.count {
+                var c = u[s + k]
+                if c >= 0x41, c <= 0x5A { c &+= 32 }
+                guard c == p[k] else { return false }
+            }
+            return true
+        }
+        return hasPrefix([0x6C, 0x61, 0x73, 0x74, 0x20, 0x6D, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61]) // last metadata
+            || hasPrefix([0x70, 0x61, 0x63, 0x6B, 0x61, 0x67, 0x65, 0x73]) // packages
+            || hasPrefix([0x66, 0x69, 0x6E, 0x64, 0x69, 0x6E, 0x67]) // finding
+            || hasPrefix([0x61, 0x76, 0x61, 0x69, 0x6C, 0x61, 0x62, 0x6C, 0x65, 0x20, 0x75, 0x70, 0x67, 0x72, 0x61, 0x64, 0x65]) // available upgrade
+            || hasPrefix([0x6F, 0x62, 0x73, 0x6F, 0x6C, 0x65, 0x74, 0x69, 0x6E, 0x67]) // obsoleting
+    } ?? false
+}
+
 public func parseDnfUpgrades(_ text: String, manager: String = "dnf") -> [OutdatedPkg] {
     var out: [OutdatedPkg] = []
     out.reserveCapacity(1024)

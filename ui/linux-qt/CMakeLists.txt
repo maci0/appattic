@@ -25,15 +25,15 @@ find_package(Threads REQUIRED)
 
 get_filename_component(APPATTIC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
-# The version lives in one place: appAtticVersion in AppAtticScan/Util.swift,
+# The version lives in one place: appAtticVersion in AppAtticScan/Version.swift,
 # which the CLI and the macOS UI print. Read it here instead of copying it, so
 # the Qt shell cannot ship a different number.
-file(READ "${APPATTIC_ROOT}/Sources/AppAtticScan/Util.swift" _appattic_version_source)
+file(READ "${APPATTIC_ROOT}/Sources/AppAtticScan/Version.swift" _appattic_version_source)
 string(REGEX MATCH "public let appAtticVersion = \"([0-9]+\\.[0-9]+\\.[0-9]+)\""
        _appattic_version_match "${_appattic_version_source}")
 if(NOT _appattic_version_match)
     message(FATAL_ERROR
-        "appAtticVersion not found in Sources/AppAtticScan/Util.swift. The Qt build "
+        "appAtticVersion not found in Sources/AppAtticScan/Version.swift. The Qt build "
         "reads the version from there; keep the declaration intact.")
 endif()
 set(APPATTIC_VERSION "${CMAKE_MATCH_1}")
@@ -119,7 +119,7 @@ target_include_directories(appattic-qt PRIVATE
 # Do not bake the configure-time source path into the binary. Runtime uses
 # APPATTIC_CORE_OUT, then paths relative to the executable (see coreOutDir).
 target_link_libraries(appattic-qt PRIVATE Qt6::Widgets wasmtime Threads::Threads)
-# The same value the CLI and the macOS UI print, read from Util.swift above.
+# The same value the CLI and the macOS UI print, read from Version.swift above.
 target_compile_definitions(appattic-qt PRIVATE APPATTIC_VERSION="${APPATTIC_VERSION}")
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(appattic-qt PRIVATE

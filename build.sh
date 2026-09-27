@@ -27,7 +27,7 @@ Usage: ./build.sh [release|debug]
   bash scripts/check.sh        fast: lint + AppAtticScanTests + CLI
   bash scripts/check.sh --qt   full Linux CI parity, including Qt/WASM proof
   bash scripts/lint.sh
-  swift test --filter UtilTests --disable-automatic-resolution
+  swift test --filter DiskSizeTests --disable-automatic-resolution
   ./core/build.sh test brew.zig
 EOF
         exit 0

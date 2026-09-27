@@ -68,7 +68,7 @@ cc -O2 -Wall -Wextra -Werror -Wformat=2 -Wformat-security \
     -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference \
     -I "$ROOT/core/host" \
     "$ROOT/core/host/hostexec.c" \
-    "$ROOT/core/host/hostexec_test.c" \
+    "$ROOT/core/host/tests/hostexec_test.c" \
     -o "$tmp/hostexec_test"
 case "$(uname -s)" in
     Linux) APPATTIC_HOST_EXEC_FIXTURE=1 "$tmp/hostexec_test" ;;

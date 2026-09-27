@@ -196,7 +196,7 @@ cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
     -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference \
     -I"$root/host" \
     "$root/host/hostexec.c" \
-    "$root/host/hostexec_test.c" \
+    "$root/host/tests/hostexec_test.c" \
     -o "$out/hostexec_test"
 "$out/hostexec_test"
 

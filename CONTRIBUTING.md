@@ -6,7 +6,7 @@ Setup, tests, and layout: [README.md](README.md).
 ./build.sh --help
 bash scripts/check.sh          # fast: lint + AppAtticScanTests + CLI
 bash scripts/check.sh --qt     # full Linux CI parity, including Qt/WASM proof
-swift test --filter UtilTests --disable-automatic-resolution
+swift test --filter DiskSizeTests --disable-automatic-resolution
 ./core/build.sh test brew.zig
 ```
 
@@ -22,7 +22,7 @@ Swift 5.10.1 is `.swift-version`. Zig 0.16.0 is `.zig-version`. `./build.sh` fai
 
 The version is declared in three files, and `bash scripts/check-version.sh` fails when they disagree. It runs in `scripts/lint.sh`, so CI catches a partial bump. Bump all three in one commit:
 
-- `Sources/AppAtticScan/Util.swift`, `appAtticVersion` (what `appattic --version` prints, and what `ui/linux-qt/CMakeLists.txt` reads at configure time for `APPATTIC_VERSION`)
+- `Sources/AppAtticScan/Version.swift`, `appAtticVersion` (what `appattic --version` prints, and what `ui/linux-qt/CMakeLists.txt` reads at configure time for `APPATTIC_VERSION`)
 - `packaging/org.appattic.AppAttic.metainfo.xml`, a new `<release>` with its date and a consumer-facing `<description>`
 - `packaging/Info.plist`, `CFBundleShortVersionString` (what macOS reads; `build.sh` copies the file into `AppAttic.app` unchanged). Its `CFBundleVersion` is the build number beside that version, not the version itself: raise it on every release, including patches, or macOS treats the new bundle as the one already installed.
 

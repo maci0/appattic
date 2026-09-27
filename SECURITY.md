@@ -16,8 +16,8 @@ AppAttic is a local CLI and desktop UI. It does not listen on a network port, au
 - **Untrusted Homebrew casks** stay listed and are not updated (`Sources/AppAtticScan/BrewInfo.swift`, `Outdated.swift`). Named apt/pacman/AUR/dnf/yum/zypper upgrades run only after confirm, as a reviewed `/bin/sh` script, never through `host.exec`. Distro lines use `pkexec` or `sudo` (`rootcmd`). App Store, Snap, pip, gem, and composer stay report-only.
 - **WASM `host.exec`** (Linux Qt core) allowlists read-only package-manager queries and denies destructive argv (`core/host/hostexec.c`). Cleanup still happens in a host `/bin/sh` script the UI runs, not through `host.exec`.
 - **WASM modules** in the core-out directory are loaded by `*.wasm` glob and checked for ABI version 1 only. They are not signed and there is no filename allowlist, so anyone who can write into that directory controls what the core loads (`ui/linux-qt/corehost.cpp`).
-- **Local state and generated scripts** are owner-only: `settings.json` and `last-scan.json` are written atomically then `0600` (`Util.swift` `restrictPrivateDataFile`), and each generated script is `0600` (`writeOwnerOnlyFile`) or created exclusively (`QTemporaryFile`). The temp directory itself is the shared world-writable one, so the mode and the exclusive create are the whole control.
-- **Generated scripts** quote paths and names (`shellQuote` in `Sources/AppAtticScan/Util.swift`). Quoting is not a substitute for a wrong leftover classification.
+- **Local state and generated scripts** are owner-only: `settings.json` and `last-scan.json` are written atomically then `0600` (`FilePermissions.swift` `restrictPrivateDataFile`), and each generated script is `0600` (`writeOwnerOnlyFile`) or created exclusively (`QTemporaryFile`). The temp directory itself is the shared world-writable one, so the mode and the exclusive create are the whole control.
+- **Generated scripts** quote paths and names (`shellQuote` in `Sources/AppAtticScan/ShellScript.swift`). Quoting is not a substitute for a wrong leftover classification.
 
 ## Out of scope for this file
 

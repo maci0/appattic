@@ -199,7 +199,7 @@ public func scanDiskUsage(
     return node
 }
 
-// Shared with Util.walkLogicalBytes; file-private would hide it from that caller.
+// Shared with DiskSize.walkLogicalBytes; file-private would hide it from that caller.
 let childDirFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
 
 private func walkDiskFd(
