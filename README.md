@@ -113,10 +113,10 @@ Environment:
 | `NO_COLOR` | CLI | Disable ANSI color when set to a non-empty value. Set but empty is not a disable. |
 | `TERM` | CLI | `dumb` disables ANSI color, the same as `NO_COLOR` and `--no-color`. Any other value changes nothing. |
 | `COLORFGBG` | CLI | Terminal background as `fg;bg`. Picks the light or dark status colors; unset uses the light set, which is the readable one on a white background. |
-| `XDG_DATA_HOME` | Linux | Absolute data root; parent of `appattic/settings.json`, `last-scan.json`, and user desktop entries. |
-| `XDG_CONFIG_HOME` | Linux | Absolute configuration root scanned for leftovers and usage history. |
-| `XDG_CACHE_HOME` | Linux | Absolute cache root scanned for leftovers. |
-| `XDG_STATE_HOME` | Linux | Absolute state root scanned for leftovers. |
+| `XDG_DATA_HOME` | Linux | Absolute data root; parent of `appattic/settings.json`, `last-scan.json`, and user desktop entries. The Linux window scans it for leftovers too. |
+| `XDG_CONFIG_HOME` | Linux | Absolute configuration root scanned for leftovers and usage history, by the CLI and by the Linux window. |
+| `XDG_CACHE_HOME` | Linux | Absolute cache root scanned for leftovers, by the CLI and by the Linux window. |
+| `XDG_STATE_HOME` | Linux | Absolute state root scanned for leftovers, by the CLI and by the Linux window. |
 | `XDG_DATA_DIRS` | Linux | Colon-separated absolute data roots searched for desktop entries. Unset, empty, or a list whose entries are all relative uses `/usr/local/share:/usr/share`; relative entries in a longer list are dropped, and `appattic config` prints the list that survives. |
 | `FLATPAK_ID` | Linux Qt and the core host | Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags and package-manager queries go through `/run/host` and `flatpak-spawn --host`. Unset or empty is a normal host run. |
 

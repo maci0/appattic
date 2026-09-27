@@ -79,7 +79,7 @@ AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable, QSt
         // Migrating writes this list into settings.json, which the JSON loader
         // refuses to read back if an entry is not absolute. Report the key and
         // let the caller stop, the same way an unreadable boolean stops it.
-        if (!p.startsWith(QLatin1Char('/'))) {
+        if (!p.startsWith(QLatin1Char('/')) || p.endsWith(QLatin1Char('/'))) {
             if (unreadable) unreadable->append(QStringLiteral("ignoredLeftovers"));
             break;
         }
@@ -160,6 +160,10 @@ bool parseSettingsJson(const QByteArray &raw, AppSettings *out, QString *err) {
             // other rejects is a file the user cannot reason about.
             if (!p.startsWith(QLatin1Char('/'))) {
                 if (err) *err = QStringLiteral("ignoredLeftoverPaths entry \"%1\" is not an absolute path; use the full path, the one the report prints").arg(p);
+                return false;
+            }
+            if (p.endsWith(QLatin1Char('/'))) {
+                if (err) *err = QStringLiteral("ignoredLeftoverPaths entry \"%1\" has a trailing slash; use the full path, the one the report prints").arg(p);
                 return false;
             }
             seen.insert(p);

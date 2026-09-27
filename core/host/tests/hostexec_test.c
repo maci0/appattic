@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <limits.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -195,8 +197,66 @@ static int check_host_exec_live_flag(void) {
     return 0;
 }
 
+/* A run that exports XDG_CONFIG_HOME scans that directory, not ~/.config, so
+   the argv the core sends has to name it. Live exec, because the rewrite
+   happens in the forked child, after the fixture branch has answered. */
+static int check_xdg_root(void) {
+    char tmpl[] = "/tmp/appattic-xdg-XXXXXX";
+    char marker[512];
+    char out[4096];
+    /* The suite runs under APPATTIC_HOST_EXEC_FIXTURE=1 and the cases after
+       this one need it, so both switches are put back as they were. */
+    const char *saved_live = getenv("APPATTIC_HOST_EXEC_LIVE");
+    const char *saved_fixture = getenv("APPATTIC_HOST_EXEC_FIXTURE");
+    const char *saved_xdg = getenv("XDG_CONFIG_HOME");
+    const bool had_live = saved_live != NULL;
+    const bool had_fixture = saved_fixture != NULL;
+    const bool had_xdg = saved_xdg != NULL;
+    char keep_live[32];
+    char keep_fixture[32];
+    char keep_xdg[PATH_MAX];
+    FILE *f;
+    int n;
+    if (saved_live) snprintf(keep_live, sizeof keep_live, "%s", saved_live);
+    if (saved_fixture) snprintf(keep_fixture, sizeof keep_fixture, "%s", saved_fixture);
+    if (saved_xdg) snprintf(keep_xdg, sizeof keep_xdg, "%s", saved_xdg);
+
+    if (!mkdtemp(tmpl)) return fail("xdg: mkdtemp");
+    snprintf(marker, sizeof marker, "%s/marker", tmpl);
+    f = fopen(marker, "w");
+    if (!f) return fail("xdg: marker write");
+    fclose(f);
+
+    setenv("APPATTIC_HOST_EXEC_LIVE", "1", 1);
+    unsetenv("APPATTIC_HOST_EXEC_FIXTURE");
+    setenv("XDG_CONFIG_HOME", tmpl, 1);
+    n = appattic_host_exec("ls -1 /home/user/.config", out, sizeof out);
+    out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+    if (n <= 0 || !strstr(out, "marker")) {
+        unlink(marker);
+        rmdir(tmpl);
+        return fail("xdg: configured root was not scanned");
+    }
+    /* A relative value is ignored, so the default root stands and the marker
+       directory is not what gets listed. */
+    setenv("XDG_CONFIG_HOME", "relative/config", 1);
+    n = appattic_host_exec("ls -1 /home/user/.config", out, sizeof out);
+    unlink(marker);
+    rmdir(tmpl);
+    if (n > 0) {
+        out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+        if (strstr(out, "marker")) return fail("xdg: relative value was used as a root");
+    }
+
+    if (had_xdg) setenv("XDG_CONFIG_HOME", keep_xdg, 1); else unsetenv("XDG_CONFIG_HOME");
+    if (had_live) setenv("APPATTIC_HOST_EXEC_LIVE", keep_live, 1); else unsetenv("APPATTIC_HOST_EXEC_LIVE");
+    if (had_fixture) setenv("APPATTIC_HOST_EXEC_FIXTURE", keep_fixture, 1); else unsetenv("APPATTIC_HOST_EXEC_FIXTURE");
+    return 0;
+}
+
 int main(void) {
     int rc = 0;
+    rc |= check_xdg_root();
     rc |= expect_allow("apt-get -s autoremove");
     rc |= expect_allow("apt-get --simulate autoremove");
     rc |= expect_allow("apt-get --dry-run autoremove");

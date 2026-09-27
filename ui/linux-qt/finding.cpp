@@ -78,8 +78,23 @@ QString redactHomePaths(const QString &text, const QString &home) {
 
 QString expandHomeUserPlaceholder(const QString &text, const QString &home) {
     const QString homePath = QDir::cleanPath(home.isEmpty() ? QDir::homePath() : home);
-    if (homePath.size() <= 1 || homePath == QLatin1String("/home/user")) return text;
     QString out = text;
+    // The XDG roots first, and before the home fallback: the core scanned
+    // `$XDG_CONFIG_HOME` when it was set, so a finding reported against
+    // `~/.config` would name a directory the run never looked at. An empty or
+    // relative value is ignored, as the XDG specification says.
+    static const struct { const char *rel; const char *env; } kXdgRoots[] = {
+        {"/.local/share", "XDG_DATA_HOME"},
+        {"/.local/state", "XDG_STATE_HOME"},
+        {"/.config", "XDG_CONFIG_HOME"},
+        {"/.cache", "XDG_CACHE_HOME"},
+    };
+    for (const auto &root : kXdgRoots) {
+        const QString value = QString::fromUtf8(qgetenv(root.env)).trimmed();
+        if (value.size() <= 1 || !value.startsWith(QLatin1Char('/'))) continue;
+        out.replace(QStringLiteral("/home/user") + QLatin1String(root.rel), value);
+    }
+    if (homePath.size() <= 1 || homePath == QLatin1String("/home/user")) return out;
     out.replace(QStringLiteral("/home/user/"), homePath + QLatin1Char('/'));
     const QString exact = QStringLiteral("/home/user");
     if (out.size() >= exact.size() && out.endsWith(exact)) {

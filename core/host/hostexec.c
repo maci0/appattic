@@ -537,15 +537,55 @@ void appattic_host_restore_user_path(void) {
     pthread_mutex_unlock(&g_user_path_lock);
 }
 
+/* The XDG roots the WASM path plugins name as `/home/user/<rel>`. A run that
+   exports one of these variables scans a different directory than the default
+   root, which is what the Swift scan library does, so without this the Linux
+   core reported on `~/.config` while the CLI reported on `$XDG_CONFIG_HOME`.
+   A value that is empty or relative is ignored and the default root stands,
+   as the XDG Base Directory specification says and as `Sources/AppAtticScan/
+   Paths.swift` does. */
+static const char *xdg_root_for(const char *arg, size_t *rel_len) {
+    static const struct {
+        const char *rel;
+        const char *env;
+    } kRoots[] = {
+        {"/.local/share", "XDG_DATA_HOME"},
+        {"/.local/state", "XDG_STATE_HOME"},
+        {"/.config", "XDG_CONFIG_HOME"},
+        {"/.cache", "XDG_CACHE_HOME"},
+    };
+    size_t i;
+    if (strncmp(arg, "/home/user", 10) != 0) return NULL;
+    for (i = 0; i < sizeof kRoots / sizeof kRoots[0]; i++) {
+        const size_t n = strlen(kRoots[i].rel);
+        const char *v;
+        if (strncmp(arg + 10, kRoots[i].rel, n) != 0) continue;
+        if (arg[10 + n] != '\0' && arg[10 + n] != '/') continue;
+        v = getenv(kRoots[i].env);
+        if (!v || v[0] != '/') continue;
+        *rel_len = n;
+        return v;
+    }
+    return NULL;
+}
+
 static void rewrite_home_user_argv(char **argv) {
     static char storage[MAX_TOK][PATH_MAX];
     const char *home = getenv("HOME");
     int slot = 0;
     int i;
-    if (!home || !home[0]) return;
     for (i = 0; argv[i] != NULL && slot < MAX_TOK; i++) {
         const char *a = argv[i];
         const char *rest;
+        size_t rel_len = 0;
+        const char *xdg = xdg_root_for(a, &rel_len);
+        if (xdg) {
+            if (snprintf(storage[slot], PATH_MAX, "%s%s", xdg, a + 10 + rel_len) >= PATH_MAX) continue;
+            argv[i] = storage[slot];
+            slot++;
+            continue;
+        }
+        if (!home || !home[0]) continue;
         if (strncmp(a, "/home/user", 10) != 0) continue;
         rest = a + 10;
         if (rest[0] != '\0' && rest[0] != '/') continue;

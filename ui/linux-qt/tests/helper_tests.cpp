@@ -837,16 +837,45 @@ static int checkPrivacy() {
         std::fprintf(stderr, "redact: over-redacted neighbor home\n");
         return 1;
     }
-    if (expandHomeUserPlaceholder(
-            QStringLiteral("/home/user/.config/gone-app"), home)
-        != QStringLiteral("/home/alice/.config/gone-app")) {
-        std::fprintf(stderr, "expand: /home/user path\n");
-        return 1;
-    }
-    if (expandHomeUserPlaceholder(
-            QStringLiteral("rm -rf /home/user/.config/gone-app"), home)
-        != QStringLiteral("rm -rf /home/alice/.config/gone-app")) {
-        std::fprintf(stderr, "expand: /home/user command\n");
+    // The XDG roots take precedence over the home fallback, so the home-only
+    // expectations below are pinned to an unset environment rather than to
+    // whatever the test machine exports.
+    const QByteArray savedXdgConfig = qgetenv("XDG_CONFIG_HOME");
+    const QByteArray savedXdgData = qgetenv("XDG_DATA_HOME");
+    const auto restoreXdg = [&] {
+        for (const auto &pair : {qMakePair("XDG_CONFIG_HOME", savedXdgConfig),
+                                 qMakePair("XDG_DATA_HOME", savedXdgData)}) {
+            if (pair.second.isEmpty()) {
+                qunsetenv(pair.first);
+            } else {
+                qputenv(pair.first, pair.second);
+            }
+        }
+    };
+    qunsetenv("XDG_CONFIG_HOME");
+    qunsetenv("XDG_DATA_HOME");
+    bool expandOk =
+        expandHomeUserPlaceholder(QStringLiteral("/home/user/.config/gone-app"), home)
+            == QStringLiteral("/home/alice/.config/gone-app")
+        && expandHomeUserPlaceholder(QStringLiteral("rm -rf /home/user/.config/gone-app"), home)
+            == QStringLiteral("rm -rf /home/alice/.config/gone-app");
+    // A configured root is the directory the core scanned, so that is the path
+    // a finding has to name, at the root and below it alike.
+    qputenv("XDG_CONFIG_HOME", "/srv/u/config");
+    qputenv("XDG_DATA_HOME", "/srv/u/data");
+    expandOk = expandOk
+        && expandHomeUserPlaceholder(QStringLiteral("/home/user/.config/gone-app"), home)
+            == QStringLiteral("/srv/u/config/gone-app")
+        && expandHomeUserPlaceholder(QStringLiteral("/home/user/.local/share/applications/foo.desktop"), home)
+            == QStringLiteral("/srv/u/data/applications/foo.desktop");
+    // A relative value is ignored, so the default root stands.
+    qputenv("XDG_CONFIG_HOME", "relative/config");
+    expandOk = expandOk
+        && expandHomeUserPlaceholder(QStringLiteral("/home/user/.config/gone-app"), home)
+            == QStringLiteral("/home/alice/.config/gone-app");
+    restoreXdg();
+    if (!expandOk) {
+        std::fprintf(stderr, "expand: /home/user and XDG root expansion\n");
         return 1;
     }
     if (expandHomeUserPlaceholder(QStringLiteral("/home/username/foo"), home)
@@ -1335,6 +1364,9 @@ static int checkSettings() {
              // hides nothing. The Swift loader refuses it; so does this one.
              QByteArray(R"({"ignoredLeftoverPaths":["~/.cache/Whisky"]})"),
              QByteArray(R"({"ignoredLeftoverPaths":["Whisky"]})"),
+             // A trailing slash is the same entry spelled differently, so it
+             // matches no reported path either. The Swift loader refuses it.
+             QByteArray(R"({"ignoredLeftoverPaths":["/home/u/.cache/Whisky/"]})"),
          }) {
         if (parseSettingsJson(bad, &s, &err)) {
             std::fprintf(stderr, "settings: bad settings.json accepted: %s\n", bad.constData());

@@ -65,8 +65,9 @@ QString jsonStr(const QJsonObject &o, const char *key);
 QString pathIdentityKey(const QString &path);
 QDateTime parseIsoInstant(const QString &value);
 QString redactHomePaths(const QString &text, const QString &home = QString());
-/// WASM path plugins list `/home/user/...`. host.exec rewrites that argv to $HOME;
-/// findings JSON still uses the placeholder until ingest.
+/// WASM path plugins list `/home/user/...`. host.exec rewrites that argv to the
+/// configured XDG root, or to $HOME when the variable is unset; findings JSON
+/// still uses the placeholder until ingest.
 QString expandHomeUserPlaceholder(const QString &text, const QString &home = QString());
 bool restrictOwnerOnlyFile(const QString &path);
 bool restrictOwnerOnlyDir(const QString &path);
