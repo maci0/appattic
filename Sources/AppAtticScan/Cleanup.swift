@@ -71,12 +71,20 @@ public func isSteamManagedPath(_ path: String) -> Bool {
     return p.contains("/steamapps/") || p.contains("/steam.appbundle/")
 }
 
+/// The handoff to the Steam client, which is what removes the game.
+///
+/// `|| true` because the status is about the handoff, not the removal: on a
+/// machine with no client `steam` is not on PATH and `open` has no handler,
+/// and under `set -e` that stops the script and strands every removal below
+/// it. Nothing here can ask whether the game is still installed, so a rerun
+/// asks again; the row stays selected after a run (`isHandoffUninstallCommand`)
+/// because the client, not this script, is what finishes the uninstall.
 public func steamUninstallCommand(appId: String) -> String {
     let uri = "steam://uninstall/\(appId)"
     if PlatformOverride.isLinux {
-        return "steam \(shellQuote(uri))"
+        return "steam \(shellQuote(uri)) || true"
     }
-    return "open \(shellQuote(uri))"
+    return "open \(shellQuote(uri)) || true"
 }
 
 public func uninstallCommand(

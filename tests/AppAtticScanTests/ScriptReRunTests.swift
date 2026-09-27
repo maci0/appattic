@@ -234,6 +234,49 @@ final class ScriptReRunTests: XCTestCase {
         XCTAssertEqual(second.1, "done", second.1)
     }
 
+    /// The Steam handoff, run twice, on a machine with no Steam client.
+    /// `steam` and `open` both exit nonzero when there is nothing to hand the
+    /// URI to, and under `set -e` that ends the script before the removals
+    /// below it. The client does the uninstalling, so its status says nothing
+    /// about what was removed, and a second run has to reach the same lines
+    /// the first one did.
+    func testSteamHandoffTwiceWithoutAClientDoesNotStrandTheScript() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("appattic-rerun-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let cmd = uninstallCommand(
+            source: "steam",
+            name: "Game",
+            path: "/home/u/.steam/steam/steamapps/common/Game",
+            caskName: nil,
+            steamAppId: "42"
+        )
+        XCTAssertTrue(cmd.contains("steam://uninstall/42"), cmd)
+        XCTAssertTrue(cmd.hasSuffix("|| true"), "an untrapped handoff strands the script: \(cmd)")
+
+        // The stub is named for the binary the line runs, which is the client
+        // on Linux and `open` on macOS, and fails the way neither is found.
+        let bin = root.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let name = try XCTUnwrap(cmd.split(separator: " ").first.map(String.init), cmd)
+        let stub = bin.appendingPathComponent(name)
+        try "#!/bin/sh\nexit 127\n".write(to: stub, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+        let savedPath = ProcessInfo.processInfo.environment["PATH"]
+        addTeardownBlock {
+            if let savedPath { setenv("PATH", savedPath, 1) } else { unsetenv("PATH") }
+        }
+        setenv("PATH", "\(bin.path):\(savedPath ?? "")", 1)
+
+        let script = "set -e\n\(cmd)\nprintf done"
+        for attempt in 1...2 {
+            let (status, text) = try run(script)
+            XCTAssertEqual(status, 0, "run \(attempt): \(text)")
+            XCTAssertEqual(text, "done", "run \(attempt): \(text)")
+        }
+    }
+
     /// The CrossOver bottle delete ran against a bottle that a previous run
     /// removed. `cxbottle --delete` exits nonzero on a bottle that is not
     /// there, and under `set -e` that ends the script before the lines after
