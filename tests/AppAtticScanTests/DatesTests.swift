@@ -228,5 +228,24 @@ final class DatesTests: XCTestCase {
         let german = TimestampFormat.date.string(from: instant)
         XCTAssertNotEqual(english, german, "the date formatter kept the old locale")
     }
+
+    /// A `DateFormatter` keeps the time zone it was built with, so a formatter
+    /// held from before a zone change dates every row in the zone the process
+    /// started in. The day count in `string(from:now:)` already reads
+    /// `Calendar.current`, so a stale formatter makes the relative label and
+    /// the absolute date disagree by a day.
+    func testTimestampFormatFollowsATimeZoneChange() throws {
+        let saved = TimeZone.current
+        defer { TimeZone.current = saved }
+        // 2026-03-08T04:30Z is the previous day in New York and the same day in
+        // Tokyo, so a formatter that keeps its startup zone prints a different
+        // date on each side of the switch.
+        let instant = Date(timeIntervalSince1970: 1_772_944_200)
+        TimeZone.current = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let newYork = TimestampFormat.date.string(from: instant)
+        TimeZone.current = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+        let tokyo = TimestampFormat.date.string(from: instant)
+        XCTAssertNotEqual(newYork, tokyo, "the date formatter kept the old time zone")
+    }
     #endif
 }

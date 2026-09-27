@@ -292,28 +292,40 @@ public func daysSince(_ date: Date?, now: Date = Date()) -> Double? {
 /// Day count past which a timestamp shows its date instead of a relative label.
 public let relativeDayLimit = 45
 
-/// The display pair (`TimestampFormat`) for one `Locale.current`.
+/// The display pair (`TimestampFormat`) for one `Locale.current` and one
+/// `TimeZone.current`.
 ///
-/// A `DateFormatter` keeps the locale it was built with, so a pair built on the
-/// first call would print the old language for the rest of the session after
-/// the user switches. Building both on every call is too expensive for a table
-/// that formats a row per frame, so the pair is cached and replaced when
-/// `Locale.current` changes.
+/// A `DateFormatter` keeps both the locale and the zone it was built with, so a
+/// pair built on the first call would print the old language and the old zone
+/// for the rest of the session after the user switches either one. Building
+/// both on every call is too expensive for a table that formats a row per
+/// frame, so the pair is cached and replaced when either changes.
+///
+/// The zone is part of the key, not a detail, because the two halves of
+/// `string(from:now:)` read the zone from different places: the day count comes
+/// from `Calendar.current` on every call, while the fallback date comes from the
+/// cached formatter. A process that outlives a zone change (a laptop crossing a
+/// border, a `TZ` change under a running CLI) would otherwise decide "today" in
+/// the new zone and print the date in the old one, and the two disagree by a day
+/// for every row near local midnight.
 private final class LocaleScopedTimestamps {
     private let lock = NSLock()
     private var localeID: String?
+    private var zoneID: String?
     private var dateFormatter: DateFormatter?
     private var relativeClosure: ((Date, Date) -> String?)?
 
-    /// The formatters for the current locale, rebuilt on a locale change.
+    /// The formatters for the current locale and zone, rebuilt when either changes.
     func current() -> (date: DateFormatter, relativeDays: ((Date, Date) -> String?)?) {
         lock.lock()
         defer { lock.unlock() }
         let id = Locale.current.identifier
-        if let cached = dateFormatter, localeID == id { return (cached, relativeClosure) }
+        let zone = TimeZone.current.identifier
+        if let cached = dateFormatter, localeID == id, zoneID == zone { return (cached, relativeClosure) }
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .none
+        f.timeZone = .current
         #if canImport(Darwin)
         let r = DateComponentsFormatter()
         r.allowedUnits = .day
@@ -326,6 +338,7 @@ private final class LocaleScopedTimestamps {
         dateFormatter = f
         relativeClosure = relative
         localeID = id
+        zoneID = zone
         return (f, relative)
     }
 }
