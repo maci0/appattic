@@ -2,8 +2,8 @@
 # The release version has one declaration (appAtticVersion in Version.swift) and
 # the packaging copies that have to keep in step: the newest AppStream release,
 # the macOS bundle Info.plist, and the appattic-qt man page. CMakeLists.txt
-# reads the declaration, so this is the place that checks the copies and the
-# derivation.
+# reads the declaration, so this is the place that checks the copies, the
+# derivation, and that the version was not already released from another commit.
 # Usage: bash scripts/check-version.sh [--tag TAG]
 #   prints the declared version on stdout
 #   --tag  also requires TAG (a v* ref name or a bare version) to match it
@@ -34,8 +34,9 @@ while [[ $# -gt 0 ]]; do
 Usage: bash scripts/check-version.sh [--tag TAG]
 
   Checks that the AppStream release, the macOS Info.plist, and the
-  appattic-qt man page match appAtticVersion, and that CMakeLists.txt still
-  derives its version from Version.swift.
+  appattic-qt man page match appAtticVersion, that CMakeLists.txt still
+  derives its version from Version.swift, and that the declared version
+  is not a release already published from a different commit.
   Prints the declared version. With --tag, the tag must match it too.
 EOF
             exit 0
@@ -139,6 +140,35 @@ if [[ -n "$TAG" ]]; then
         echo "error: tag $TAG does not match the declared version $swift_version" >&2
         echo "       bump the version, or retag, before publishing" >&2
         exit 1
+    fi
+fi
+
+# A published version is immutable: one number is one set of bytes, so the same
+# version can never ship a second, different build. When the declared version is
+# already tagged, that tag has to be the commit under this tree; anything else
+# means the release is re-using a number users already have installed. Matching
+# the tag says nothing (that is a normal release build), pointing elsewhere is
+# the failure. The tags have to be in the clone for this to mean anything, which
+# is why the release workflow checks out the full history; a source tarball with
+# no tags is not a repository and is left alone.
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    published_tag=""
+    for candidate in "v$swift_version" "$swift_version"; do
+        if git -C "$ROOT" rev-parse -q --verify "refs/tags/$candidate" >/dev/null 2>&1; then
+            published_tag="$candidate"
+            break
+        fi
+    done
+    if [[ -n "$published_tag" ]]; then
+        tagged_commit="$(git -C "$ROOT" rev-list -n1 "$published_tag" 2>/dev/null || true)"
+        head_commit="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+        if [[ -n "$tagged_commit" && -n "$head_commit" && "$tagged_commit" != "$head_commit" ]]; then
+            echo "error: $published_tag is a published release, and it points at" >&2
+            echo "       ${tagged_commit:0:12}, not this commit (${head_commit:0:12})" >&2
+            echo "       a released version is immutable: bump appAtticVersion and its copies," >&2
+            echo "       or check out $published_tag to build the release that tag names" >&2
+            exit 1
+        fi
     fi
 fi
 

@@ -61,6 +61,7 @@ if [[ -z "$ZIG_VER" ]]; then
     exit 1
 fi
 MANIFEST="$ROOT/packaging/flatpak/${APP_ID}.yml"
+BUILT_MANIFEST="$WORK/packaging/flatpak/${APP_ID}.yml"
 DIST="$ROOT/dist"
 WORK="$DIST/flatpak-work"
 STATE="$DIST/flatpak-state"
@@ -166,7 +167,24 @@ rsync -a \
     --exclude 'ui/linux-qt/build-release/' \
     "$ROOT/" "$WORK/"
 
-if ! grep -q "runtime-version: \"${KDE_RUNTIME}\"" "$WORK/packaging/flatpak/${APP_ID}.yml"; then
+BUILT_MANIFEST="$WORK/packaging/flatpak/${APP_ID}.yml"
+
+# The manifest declares no version: flatpak-builder then names the installed app
+# 0, so `flatpak info` and `flatpak update` report a number no release ever had.
+# The single declaration is stamped into the copy that gets built, which cannot
+# drift from it. A manifest that does carry a version has to carry this one.
+VERSION="$(bash "$_script_dir/check-version.sh")"
+if grep -q '^version: ' "$BUILT_MANIFEST"; then
+    if ! grep -qx "version: \"$VERSION\"" "$BUILT_MANIFEST"; then
+        echo "error: $APP_ID manifest declares a version that is not $VERSION" >&2
+        echo "       appAtticVersion is the one declaration; drop the literal or match it" >&2
+        exit 1
+    fi
+else
+    printf 'version: "%s"\n' "$VERSION" >> "$BUILT_MANIFEST"
+fi
+
+if ! grep -q "runtime-version: \"${KDE_RUNTIME}\"" "$BUILT_MANIFEST"; then
     echo "error: manifest runtime-version is not ${KDE_RUNTIME}" >&2
     exit 1
 fi
@@ -203,7 +221,7 @@ flatpak-builder \
     --repo "$REPO" \
     --extra-sources "$EXTRA" \
     "$BUILD" \
-    "$WORK/packaging/flatpak/${APP_ID}.yml"
+    "$BUILT_MANIFEST"
 
 rm -f "$BUNDLE"
 echo "bundle: $BUNDLE"
