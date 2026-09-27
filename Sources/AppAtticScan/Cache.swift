@@ -108,8 +108,15 @@ public func writeScanCache(_ cache: ScanCacheFile, to url: URL = defaultScanCach
         // cordis-boundary: emission. The scan cache is the app's own state file
         // and the sole writer, so an atomic overwrite is the commit; there is no
         // inverse to hold (a stale cache only costs a rescan).
-        try raw.write(to: url, options: .atomic)
-        try restrictPrivateDataFile(at: url)
+        //
+        // `writeOwnerOnlyFile`, not `write(to:options:.atomic)` plus a chmod
+        // after it: the snapshot is every app path and every leftover path
+        // under the home directory, and the atomic rename publishes the file at
+        // the umask default before the mode is narrowed. That window is closed
+        // by `prepareStateDirectory` only for the app's own state directory, and
+        // a caller-supplied `to:` can name any parent. mkstemp creates at
+        // `0600`, so there is no window at any destination.
+        try writeOwnerOnlyFile(raw, to: url)
     } catch {
         throw AppAtticIOError.writeFailed(path: url.path, message: error.localizedDescription)
     }

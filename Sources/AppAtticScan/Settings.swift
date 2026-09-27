@@ -362,8 +362,15 @@ public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSett
         // cordis-boundary: emission. settings.json is the app's own state file
         // and its sole writer; the atomic overwrite is the commit. No inverse is
         // held because the file is the state, not a cached copy of it.
-        try raw.write(to: url, options: .atomic)
-        try restrictPrivateDataFile(at: url)
+        //
+        // `writeOwnerOnlyFile`, not `write(to:options:.atomic)` then a chmod:
+        // the ignore list is paths under the account's own home, and the atomic
+        // rename publishes the file at the umask default before the mode is
+        // narrowed. `prepareStateDirectory` above closes that window for the
+        // app's own state directory, and a caller-supplied `to:` can name any
+        // other parent. mkstemp creates at `0600`, so there is no window at any
+        // destination.
+        try writeOwnerOnlyFile(raw, to: url)
     } catch {
         throw SettingsError.unwritable(path: url.path, reason: error.localizedDescription)
     }

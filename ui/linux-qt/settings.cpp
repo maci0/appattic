@@ -1,5 +1,7 @@
 #include "settings.h"
 
+#include "finding.h"
+
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -84,6 +86,15 @@ AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable, QSt
         seen.insert(p);
         s.ignoredLeftoverPaths.append(p);
     }
+    // The legacy file holds the ignore list: absolute paths under the
+    // account's own home directory. QSettings wrote it at the umask default
+    // (`0644`), so every local account on the machine could read them, and
+    // nothing reads the file once settings.json exists, so the paths stay
+    // there after the migration for as long as the file is left alone.
+    // Narrowing the mode is the same move persistSettings makes on the file it
+    // writes, and it takes nothing away from the owner, who is the one the
+    // migration-error message tells to edit this file.
+    restrictOwnerOnlyFile(qs.fileName());
     return s;
 }
 

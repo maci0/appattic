@@ -16,6 +16,7 @@
 #include <QJsonObject>
 #include <QLocale>
 #include <QSet>
+#include <QSettings>
 #include <QString>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -887,6 +888,63 @@ static int checkPrivacy() {
     return 0;
 }
 
+/// The legacy QSettings file holds the ignore list, which is absolute paths
+/// under the account's own home, and QSettings wrote it readable by group and
+/// other. The migration is the only code that knows which file that is, so the
+/// mode is asserted there. The QSettings path is pointed at a temp dir first:
+/// the default one is the real ~/.config, which the test must not read or
+/// rewrite.
+static int checkLegacySettingsMigration() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "legacy: temp dir failed\n");
+        return 1;
+    }
+    const QSettings::Format savedFormat = QSettings::defaultFormat();
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp.path());
+    const QStringList ignored{QStringLiteral("/home/alice/.config/gone-app")};
+    const QString legacyPath = [&] {
+        QSettings qs(QStringLiteral("AppAttic"), QStringLiteral("AppAttic"));
+        qs.setValue(QStringLiteral("confirmDelete"), true);
+        qs.setValue(QStringLiteral("ignoredLeftovers"), ignored);
+        qs.sync();
+        return QFileInfo(qs.fileName()).absoluteFilePath();
+    }();
+    if (!QFile::setPermissions(
+            legacyPath,
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                | QFileDevice::ReadGroup | QFileDevice::ReadOther)) {
+        std::fprintf(stderr, "legacy: could not widen the fixture mode\n");
+        QSettings::setDefaultFormat(savedFormat);
+        return 1;
+    }
+    bool hadValues = false;
+    QStringList unreadable;
+    QString reportedPath;
+    const AppSettings s = migrateLegacyQSettings(&hadValues, &unreadable, &reportedPath);
+    const QFile::Permissions perms = QFileInfo(legacyPath).permissions();
+    const bool worldReadable = perms & (QFileDevice::ReadGroup | QFileDevice::ReadOther
+        | QFileDevice::WriteGroup | QFileDevice::WriteOther);
+    const int rc = !hadValues || !unreadable.isEmpty() || s.ignoredLeftoverPaths != ignored
+            || !s.confirmDelete || reportedPath != legacyPath || worldReadable
+        ? 1
+        : 0;
+    QSettings::setDefaultFormat(savedFormat);
+    if (rc != 0) {
+        std::fprintf(stderr,
+            "legacy: migration did not carry the values and narrow the file "
+            "(had=%d unreadable=%lld paths=%lld mode=%o)\n",
+            hadValues ? 1 : 0, static_cast<long long>(unreadable.size()),
+            static_cast<long long>(s.ignoredLeftoverPaths.size()),
+            static_cast<unsigned>(perms & QFileDevice::ReadGroup ? 0040 : 0)
+                | static_cast<unsigned>(perms & QFileDevice::ReadOther ? 0004 : 0));
+        return rc;
+    }
+    std::fprintf(stdout, "legacy: ok\n");
+    return 0;
+}
+
 static int writeFile(const QString &path, const QByteArray &body) {
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return 1;
@@ -1291,6 +1349,7 @@ int main() {
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
         checkDiskUsage(), checkScanCache(), checkSettings(),
+        checkLegacySettingsMigration(),
     };
     for (const int rc : checks) {
         if (rc != 0) return rc;
