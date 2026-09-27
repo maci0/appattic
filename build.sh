@@ -27,6 +27,7 @@ Usage: ./build.sh [release|debug]
   ./run.sh report              CLI after a build
   bash scripts/check.sh        fast: lint + Zig core + AppAtticScanTests + CLI
   bash scripts/check.sh --qt   full Linux CI parity, including Qt/WASM proof
+  bash scripts/check.sh --core  the same, minus the Swift steps (no toolchain)
   bash scripts/lint.sh
   bash scripts/test.sh DiskSizeTests        one test class
   ./core/build.sh test brew.zig

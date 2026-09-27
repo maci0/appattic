@@ -170,6 +170,10 @@ bash scripts/check.sh
 # fast: lint + Zig core tests + AppAtticScanTests + CLI debug build
 bash scripts/check.sh --qt
 # full Linux CI parity, including Qt/WASM proof
+bash scripts/check.sh --core
+# no Swift needed: lint + Zig core tests + reproducible artifacts.
+# Editing core/src/, core/host/ or packaging? Start here. The Swift steps
+# do not run, and the last line of the run says so.
 
 bash scripts/verify-reproducible.sh                          # two builds, diffed
 swift build --target AppAtticScan -c debug --disable-automatic-resolution

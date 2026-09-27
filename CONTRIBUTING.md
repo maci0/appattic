@@ -6,6 +6,7 @@ Setup, tests, and layout: [README.md](README.md).
 ./build.sh --help
 bash scripts/check.sh          # fast: lint + Zig core + AppAtticScanTests + CLI
 bash scripts/check.sh --qt     # full Linux CI parity, including Qt/WASM proof
+bash scripts/check.sh --core   # the same, minus every Swift step (see below)
 bash scripts/test.sh DiskSizeTests    # one class, or one test: Class/testName
 ./core/build.sh test brew.zig
 ./core/build.sh test-core
@@ -14,6 +15,13 @@ bash scripts/test.sh DiskSizeTests    # one class, or one test: Class/testName
 `core/build.sh` compiles and tests one module per process, one core at a time
 minus one (`APPATTIC_BUILD_JOBS` overrides). Output and failure reports stay in
 the module order the script declares, so a red line names the module that broke.
+
+`scripts/check.sh --core` runs the lint gate, the Zig core suite and the
+reproducible-artifact check without a Swift toolchain, for work in `core/src/`,
+`core/host/` or `packaging/`. It is not the CI gate: `AppAtticScanTests` and the
+CLI build do not run, and the last line of the run names both. The default
+`scripts/check.sh` still refuses to start without Swift, so an unrun test cannot
+pass unnoticed.
 
 PRs run `.github/workflows/linux.yml` (lint, Ubuntu tests, jammy, archlinux Qt link). The Ubuntu, jammy and macOS jobs call `bash scripts/test.sh` themselves, so use that script rather than `swift test`: it passes `--disable-automatic-resolution`, sets `APPATTIC_NO_MAC_UI=1` on macOS, and checks the toolchain against `.swift-version`. `swift test` builds every target in the package and `AppAtticUI` needs a Swift 6 compiler, which `.swift-version` (5.10.1) does not provide, so a bare `swift test` does not build on the pinned toolchain. `scripts/check.sh` runs the same script. The lint job checks out full history so `scripts/lint.sh` can reject AI tool credits in commit messages; a shallow clone sees fewer commits and says how many.
 
