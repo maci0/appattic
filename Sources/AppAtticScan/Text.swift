@@ -156,25 +156,27 @@ public func sanitizeForTerminal(_ s: String) -> String {
         let v = scalar.value
         if v == 0x1B {
             // `ESC [ params m` is SGR, the one sequence the renderer emits and
-            // the only one that cannot change the screen beyond colour.
+            // the only one that cannot change the screen beyond colour. The
+            // parameters are the 0x20...0x3F bytes and the `m` (0x6D) ends the
+            // sequence: it is the terminator, not another parameter, so it is
+            // the one byte the run of parameters stops before.
             var look = it
             if look.next() == "[", let first = look.next(), first.value >= 0x30, first.value <= 0x3F {
-                var ok = true
-                var param = first
-                while param.value != 0x6D {
-                    guard let next = look.next(), next.value >= 0x20, next.value <= 0x3F else { ok = false; break }
-                    param = next
+                var params: [Unicode.Scalar] = [first]
+                var closed = false
+                while let next = look.next() {
+                    if next.value == 0x6D {
+                        closed = true
+                        break
+                    }
+                    guard next.value >= 0x20, next.value <= 0x3F else { break }
+                    params.append(next)
                 }
-                if ok {
+                if closed {
                     out.append(scalar)
                     out.append("[")
-                    out.append(first)
-                    while param.value != 0x6D {
-                        out.append(param)
-                        guard let next = look.next() else { break }
-                        param = next
-                    }
-                    out.append(param)
+                    out.append(contentsOf: params)
+                    out.append("m")
                     it = look
                     continue
                 }

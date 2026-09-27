@@ -37,7 +37,10 @@ final class TextTests: XCTestCase {
         // two as different strings.
         let nfc = "Café"
         let nfd = "Cafe\u{0301}"
-        XCTAssertNotEqual(nfc, nfd)
+        // The two are the same String — Swift compares canonically — and
+        // different bytes, which is what the fold has to bring together.
+        XCTAssertEqual(nfc, nfd)
+        XCTAssertNotEqual(Array(nfc.utf8), Array(nfd.utf8))
         XCTAssertEqual(posixFolded(nfc), posixFolded(nfd))
         XCTAssertEqual(posixFolded(nfd), "café")
         XCTAssertTrue(posixFolded(nfd).contains(posixFolded("CAFÉ")))
@@ -77,7 +80,9 @@ final class TextTests: XCTestCase {
         // A Linux filename may hold any byte but NUL, so both of these reach
         // the report as one cell.
         XCTAssertEqual(sanitizeForTerminal("Some\nApp"), "Some App")
-        XCTAssertEqual(sanitizeForTerminal("x\u{1b}]0;pwned\u{7}"), "x 0;pwned ")
+        // The ESC and the BEL are the controls; the `]0;pwned` between them
+        // is text the terminal only acts on behind the escape it lost.
+        XCTAssertEqual(sanitizeForTerminal("x\u{1b}]0;pwned\u{7}"), "x ]0;pwned ")
         XCTAssertEqual(sanitizeForTerminal("a\tb"), "a b")
         // C1 controls arrive as the two UTF-8 bytes 0xC2 0x9B.
         XCTAssertEqual(sanitizeForTerminal("a\u{0085}b"), "a b")
