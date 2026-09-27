@@ -1719,6 +1719,63 @@ final class ClassifyTests: XCTestCase {
         XCTAssertFalse(agent.contains("launchctl"), agent)
     }
 
+    func testScriptCommentsCannotInjectASecondLine() {
+        // A newline ends a `#` comment, so an app or folder carrying one used to
+        // append a command to the script the UI runs after a single preview.
+        XCTAssertEqual(shellComment("Plain Name"), "Plain Name")
+        XCTAssertEqual(shellComment("Game\nrm -rf ~"), "Game rm -rf ~")
+        XCTAssertEqual(shellComment("Game\r\nrm -rf ~"), "Game rm -rf ~")
+        XCTAssertEqual(shellComment("Game\rrm -rf ~"), "Game rm -rf ~")
+        XCTAssertEqual(shellComment("A\u{2028}rm -rf ~"), "A rm -rf ~")
+        XCTAssertEqual(shellComment("\nrm -rf ~"), "rm -rf ~")
+
+        let steam = uninstallCommand(
+            source: "steam",
+            name: "Game\nrm -rf ~",
+            path: "/home/u/.steam/steam/steamapps/common/Game",
+            caskName: nil,
+            steamAppId: nil
+        )
+        for line in steam.split(separator: "\n") {
+            XCTAssertTrue(line.hasPrefix("#"), "injected line: \(line)")
+        }
+
+        // A quoted name is already safe: the newline stays inside the single
+        // quotes, so the command stays one shell word sequence.
+        let brew = uninstallCommand(
+            source: "brew-formula",
+            name: "ok\nrm -rf ~",
+            path: "/opt/homebrew/Cellar/ok",
+            caskName: nil,
+            steamAppId: nil
+        )
+        XCTAssertTrue(brew.hasPrefix("if brew list --formula '"), brew)
+        XCTAssertTrue(brew.contains("'rm -rf ~'"), brew)
+
+        let ppa = packageRemoveCommand(PackageEntry(
+            name: "vendor",
+            manager: "apt\nrm -rf ~",
+            kind: "ppa"
+        ))
+        for line in ppa.split(separator: "\n") {
+            XCTAssertTrue(line.hasPrefix("#"), "injected line: \(line)")
+        }
+    }
+
+    func testPpaSourcesPathRejectsParentTraversal() {
+        XCTAssertTrue(isPpaSourcesPath("/etc/apt/sources.list.d/vendor.list"))
+        XCTAssertFalse(isPpaSourcesPath("/etc/apt/sources.list.d/../../root"))
+        XCTAssertFalse(isPpaSourcesPath("/etc/apt/sources.list.d"))
+        XCTAssertFalse(isPpaSourcesPath("/tmp/vendor.list"))
+        let cmd = leftoverRemoveCommand(
+            path: "/home/u/.local/bin/thing",
+            rootLabel: ".local/bin",
+            extraPaths: ["/etc/apt/sources.list.d/../../root"]
+        )
+        XCTAssertTrue(cmd.contains("/home/u/.local/bin/thing"), cmd)
+        XCTAssertFalse(cmd.contains("sources.list.d"), cmd)
+    }
+
     func testScanLaunchAgentsFindsMissingProgram() throws {
         PlatformOverride.linux = false
         defer { PlatformOverride.linux = nil }

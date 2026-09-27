@@ -113,10 +113,10 @@ public func uninstallCommand(
         return crossoverDeleteCommand(bottleName: name)
     }
     if isCrossOverPath(path) {
-        return "# \(name): uninstall from CrossOver. Do not delete \(path)"
+        return "# \(shellComment(name)): uninstall from CrossOver. Do not delete \(shellComment(path))"
     }
     if source == "steam" || isSteamManagedPath(path) {
-        return "# \(name): uninstall from Steam. Do not delete \(path)"
+        return "# \(shellComment(name)): uninstall from Steam. Do not delete \(shellComment(path))"
     }
     if isProtectedPackagedPath(path) {
         return "# skipped packaged path \(shellQuote(path))"
@@ -235,7 +235,7 @@ func commentedOutdatedLines(_ pkgs: [OutdatedPkg]) -> [String] {
         case "app-store":
             return "# App Store: \(quoted)"
         default:
-            return "# \(pkg.manager) \(quoted)"
+            return "# \(shellComment(pkg.manager)) \(quoted)"
         }
     }
 }
@@ -272,6 +272,16 @@ public func isProtectedPackagedPath(_ path: String) -> Bool {
         "/boot", "/dev", "/proc", "/sys", "/private", "/Library",
     ]
     return roots.contains { path == $0 || path.hasPrefix($0 + "/") }
+}
+
+/// A deb822/sources.list entry is removable even though it lives under `/etc`.
+/// A `..` segment would let the path walk back out of that directory, so the
+/// spelling has to be clean before the prefix is trusted. Matches Qt
+/// `isPpaSourcesPath`.
+public func isPpaSourcesPath(_ path: String) -> Bool {
+    let clean = (path as NSString).standardizingPath
+    guard !clean.contains("..") else { return false }
+    return clean.hasPrefix("/etc/apt/sources.list.d/")
 }
 
 public func commandNeedsRoot(_ cmd: String) -> Bool {
@@ -318,7 +328,7 @@ public func leftoverRemoveCommand(path: String, rootLabel: String, extraPaths: [
     }
     var seen = Set<String>()
     let paths = ([path] + extraPaths).filter {
-        seen.insert($0).inserted && (!isProtectedPackagedPath($0) || $0.hasPrefix("/etc/apt/sources.list.d/"))
+        seen.insert($0).inserted && (!isProtectedPackagedPath($0) || isPpaSourcesPath($0))
     }
     if paths.isEmpty {
         return "# skipped packaged path \(shellQuote(path))"
@@ -373,7 +383,7 @@ func appendRemoveVerdicts(_ lines: inout [String], result: ScanResult) {
     for v in result.verdicts where v.tierKind == .remove {
         let s = v.software
         lines.append("")
-        lines.append("# \(s.name) (\(s.source)) not used for a long time")
+        lines.append("# \(shellComment(s.name)) (\(shellComment(s.source))) not used for a long time")
         lines.append(uninstallCommand(
             source: s.source,
             name: s.name,

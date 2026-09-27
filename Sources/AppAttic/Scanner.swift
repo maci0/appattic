@@ -258,7 +258,7 @@ final class ScannerViewModel {
         }
         for app in appItems {
             lines.append("")
-            lines.append("# \(app.name)")
+            lines.append("# \(shellComment(app.name))")
             lines.append(uninstallCommand(for: app))
         }
         let pkgItems = allPackages.filter { selectedPackages.contains($0.id) }

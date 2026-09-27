@@ -797,6 +797,22 @@ public func guardedRemoveCommand(present: String, remove: String) -> String {
     "if \(present) >/dev/null 2>&1; then \(remove); fi"
 }
 
+/// Untrusted text (app names, paths, manager labels) for a `#` comment line in
+/// a generated script. A newline ends the comment, and everything after it is a
+/// command the script runs, so a folder named `Game\nrm -rf ~` would otherwise
+/// inject a line into the script the UI runs after one preview. `shellQuote`
+/// does not help here: a quoted newline is legal but the value is not quoted
+/// when it lands in a comment.
+public func shellComment(_ value: String) -> String {
+    let flattened = value
+        .replacingOccurrences(of: "\r\n", with: " ")
+        .replacingOccurrences(of: "\n", with: " ")
+        .replacingOccurrences(of: "\r", with: " ")
+        .replacingOccurrences(of: "\u{2028}", with: " ")
+        .replacingOccurrences(of: "\u{2029}", with: " ")
+    return flattened.trimmingCharacters(in: .whitespaces)
+}
+
 /// Cached process username: environment copy + trims + folds per call cost
 /// ~2 µs, and `classify` calls this per entry. The account name cannot change
 /// mid-scan.

@@ -124,7 +124,7 @@ public func packageRemoveCommand(_ entry: PackageEntry) -> String {
     case "deno":
         return "deno uninstall --global \(q)"
     default:
-        return "# \(entry.manager) \(q)"
+        return "# \(shellComment(entry.manager)) \(q)"
     }
 }
 
