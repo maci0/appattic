@@ -108,10 +108,10 @@ public func humanDays(_ days: Double) -> String {
     if days < 1 {
         return duration(.hour, max(Int(days * 24), 1))
     }
-    if days < 60 {
+    if days < 28 {
         return days >= 14 ? duration(.weekOfYear, Int(days / 7)) : duration(.day, Int(days))
     }
-    if days < 365 * 1.5 {
+    if days < 365 {
         return duration(.month, Int(days / 30))
     }
     return duration(.year, Int((days / 365).rounded()))
