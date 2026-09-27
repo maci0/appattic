@@ -154,6 +154,40 @@ public func clearScanCache(at url: URL = defaultScanCacheURL()) {
     try? FileManager.default.removeItem(at: url)
 }
 
+/// Delete the stored snapshot on request, whatever its age, and report whether
+/// a file was there to delete.
+///
+/// Age already drops a snapshot past `scanCacheMaxAge`, and a run that changes
+/// the machine drops it after it acts. Neither is a deletion the user asked
+/// for: this is the one that takes the account's own paths off the disk now,
+/// so it does not read the snapshot first (reading it is what would put the
+/// paths back in memory to decide whether they may go) and it treats absent as
+/// the wanted state. A removal that fails throws, because a snapshot that
+/// survived the erase is not an erased snapshot.
+@discardableResult
+public func eraseScanCache(at url: URL = defaultScanCacheURL()) throws -> Bool {
+    guard FileManager.default.fileExists(atPath: url.path) else { return false }
+    do {
+        try FileManager.default.removeItem(at: url)
+    } catch {
+        throw AppAtticIOError.writeFailed(path: url.path, message: error.localizedDescription)
+    }
+    return true
+}
+
+/// What an erase did, as the `--json` payload: the snapshot's own path, and
+/// whether one was there to delete. `erased: false` is a snapshot that was
+/// already gone, not a failure.
+public struct EraseResult: Codable, Sendable {
+    public let path: String
+    public let erased: Bool
+
+    public init(path: String, erased: Bool) {
+        self.path = path
+        self.erased = erased
+    }
+}
+
 /// Delete a snapshot past the retention bound, and report whether it did.
 ///
 /// The file is a full inventory of the account: every app path, every leftover

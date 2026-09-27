@@ -8,7 +8,7 @@ import XCTest
 final class FuzzCLIArgumentsTests: XCTestCase {
     /// Flags each command accepts. The generator only ever builds a vector
     /// from these, so a clean parse is the expected outcome, not a hope.
-    private static let validCommands = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk"]
+    private static let validCommands = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk", "erase"]
 
     private static let validVectors: [[String]] = [
         [], ["--version"], ["-v"], ["--help"], ["-h"], ["help"], ["help", "disk"], ["config"],
@@ -24,6 +24,8 @@ final class FuzzCLIArgumentsTests: XCTestCase {
         ["update", "--dry-run"],
         ["update", "--yes"],
         ["update", "-y", "--json", "/tmp/u.json"],
+        ["erase"],
+        ["erase", "--json", "/tmp/e.json"],
     ]
 
     /// Tokens that must produce a usage error wherever they appear. `--` is

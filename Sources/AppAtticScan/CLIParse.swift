@@ -107,7 +107,7 @@ public struct CLIOptions {
     }
 }
 
-let cliCommands: Set<String> = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk"]
+let cliCommands: Set<String> = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk", "erase"]
 
 /// Options that stand alone: the flag name and the field it sets. `cliHelpText`
 /// lists these; `parseCLIArguments` walks the table.
@@ -222,6 +222,7 @@ commands:
   outdated      installed packages with a newer version available
   packages      distro orphans and language globals
   disk [PATH]   folder sizes (like Disk Usage Analyzer). Optional PATH, default home
+  erase         delete the stored scan snapshot (the paths the last scan recorded)
   update        named package upgrades (prompts on a TTY; --dry-run prints the script). Not a full distro upgrade
 
   `--` ends the options: `appattic disk -- -backup` reads `-backup` as the PATH.
@@ -267,6 +268,7 @@ examples:
   appattic update --dry-run
   appattic update --yes
   appattic config
+  appattic erase
   appattic help
 
 settings.json (includeSystem, confirmDelete, ignored leftover paths):

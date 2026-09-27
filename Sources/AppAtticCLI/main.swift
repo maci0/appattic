@@ -27,6 +27,13 @@ enum AppAtticCLI {
             runDiskCommand(opts)
             return
         }
+        // Before the settings load, which can exit 2: erasing what the last
+        // scan stored is the one thing a user must still be able to do on a
+        // machine whose settings.json no longer parses.
+        if opts.command == "erase" {
+            runEraseCommand(opts)
+            return
+        }
         let settings: AppAtticSettings
         do {
             settings = try loadSettings()
@@ -151,6 +158,26 @@ func runConfigCommand(_ opts: CLIOptions, settings: AppAtticSettings) {
     }
     if let jsonPath = opts.json {
         writeJSONFile(config, to: jsonPath)
+    }
+}
+
+/// Delete the stored scan snapshot and report what happened. The line printed
+/// is redacted, so it can be pasted into a bug report without naming the
+/// account, and the JSON payload keeps the real path for a script that checks
+/// where the snapshot was.
+func runEraseCommand(_ opts: CLIOptions) {
+    let url = defaultScanCacheURL()
+    let erased: Bool
+    do {
+        erased = try eraseScanCache(at: url)
+    } catch {
+        fputs("error: \(redactHomePaths(error.localizedDescription))\n", stderr)
+        Foundation.exit(1)
+    }
+    let shown = redactHomePaths(url.path)
+    fputs(erased ? "removed \(shown)\n" : "no scan snapshot at \(shown)\n", stderr)
+    if let jsonPath = opts.json {
+        writeJSONFile(EraseResult(path: url.path, erased: erased), to: jsonPath)
     }
 }
 

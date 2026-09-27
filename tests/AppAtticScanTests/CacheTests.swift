@@ -548,6 +548,21 @@ final class CacheTests: XCTestCase {
         XCTAssertNil(loadScanCache(from: url))
     }
 
+    /// An erase is the user asking for the account's own paths to leave the
+    /// disk now, so it deletes a snapshot of any age and never reads it first.
+    /// A snapshot that was already gone is the wanted state, not a failure.
+    func testEraseScanCacheRemovesASnapshotOfAnyAge() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-erase-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let fresh = sampleScanData(scannedAt: "2026-08-20T12:29:00Z")
+        try writeScanCache(ScanCacheFile(fingerprint: "a", includeSystem: false, data: fresh), to: url)
+        XCTAssertNotNil(loadScanCache(from: url))
+
+        XCTAssertTrue(try eraseScanCache(at: url))
+        XCTAssertNil(loadScanCache(from: url))
+        XCTAssertFalse(try eraseScanCache(at: url))
+    }
+
     /// A scan that finds a snapshot past the retention bound rescans live and
     /// leaves the fresh one, not the expired inventory, on disk.
     func testResolveScanReplacesExpiredCacheWithTheLiveScan() throws {

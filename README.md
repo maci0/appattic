@@ -29,6 +29,7 @@ Swift 5.10.1 (`.swift-version`). `./build.sh` uses `swift` on PATH, then `/opt/s
 ./run.sh packages
 ./run.sh disk
 ./run.sh disk /var --top 20 --allocated
+./run.sh erase
 ./run.sh update --dry-run
 ```
 
@@ -74,6 +75,8 @@ APPATTIC_CORE_OUT: unset [searched next to the binary]
 ```
 
 Each ignored path is listed under its count, one per line, so a wrong entry is visible rather than a leftover that quietly never hides. The environment switches a run reads are listed the same way, each with the effect its value has and `unset` when it is not set, so a diff of two machines shows an override that is set as well as one that is not.
+
+`appattic erase` deletes the scan snapshot AppAttic saved, whatever its age, and reads nothing first to decide. The snapshot is a full list of the paths under your home directory, so this is the command that takes that copy off the disk. It runs before settings are read, so it works on a machine whose `settings.json` no longer parses, and it reports on stderr whether a snapshot was there (`appattic erase --json FILE` writes the same as JSON). It does not touch `settings.json`, which holds only your own settings and the paths you chose to ignore.
 
 `appattic update` asks for confirmation on a terminal. With stdin redirected (cron, CI, a pipeline) it stops with exit 2 unless you pass `--yes`, so an unattended upgrade is always something you asked for:
 
@@ -285,6 +288,7 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 | `tests/AppAtticScanTests/` | XCTest port of the old scanner cases, plus seeded mutation harnesses for the parsers that read foreign text: the CLI argv and `COLORFGBG`, package manager listings, `settings.json`, and ISO timestamps |
 | `DESIGN.md` | Native UI visual rules |
 | `docs/specs/` | Requirement and architecture records (index: [`docs/specs/README.md`](docs/specs/README.md)). The Zig WASM core record is accepted and implemented; the Swift scan port record is implemented and superseded, kept in `archive/` |
+| `docs/privacy.md` | What a scan reads, what is stored and where, what reaches the network, and how to export or erase it |
 | `core/` | Zig `wasm32` scan core (loader + plugins + C Wasmtime embedder). The Linux window runs on it |
 
 ## Notes

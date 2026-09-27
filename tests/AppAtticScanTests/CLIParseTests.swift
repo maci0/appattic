@@ -32,7 +32,7 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertEqual(serve.parseError, .unknownCommand("serve"))
         XCTAssertEqual(
             serve.error,
-            "unknown command: serve; try one of: config, disk, leftovers, outdated, packages, report, stale, update"
+            "unknown command: serve; try one of: config, disk, erase, leftovers, outdated, packages, report, stale, update"
         )
         let leaves = parseCLIArguments(["brew-leaves"])
         XCTAssertEqual(leaves.parseError, .unknownCommand("brew-leaves"))
@@ -59,6 +59,23 @@ final class CLIFlagTests: XCTestCase {
             parseCLIArguments(["config", "extra"]).parseError,
             .unexpectedArgument("extra")
         )
+    }
+
+    /// `erase` deletes the stored snapshot, so it scans nothing and reads no
+    /// setting: it takes no positional argument and no scan flag.
+    func testEraseCommand() {
+        XCTAssertEqual(parseCLIArguments(["erase"]).command, "erase")
+        XCTAssertNil(parseCLIArguments(["erase"]).error)
+        XCTAssertEqual(parseCLIArguments(["erase", "--json", "/tmp/e.json"]).json, "/tmp/e.json")
+        XCTAssertEqual(
+            parseCLIArguments(["erase", "extra"]).parseError,
+            .unexpectedArgument("extra")
+        )
+        XCTAssertEqual(
+            parseCLIArguments(["erase", "--top", "5"]).parseError,
+            .optionNeedsCommand(option: "--top", commands: ["report", "leftovers", "disk"])
+        )
+        XCTAssertTrue(cliHelpText.contains("erase"), cliHelpText)
     }
 
     func testUpdateCommand() {
