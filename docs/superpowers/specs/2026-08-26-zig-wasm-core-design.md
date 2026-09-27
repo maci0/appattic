@@ -16,7 +16,7 @@ Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability
 
 ## Rule
 
-The core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. As built those parts sit around the Zig module rather than inside it: `core/src/core.zig` exports only `core_abi_version` (`core/src/abi.zig`), `core/host/embed.c` owns load/unload, coeffect tags and capability intercept, and the native shell owns grouping (`groupLinuxLeftovers`, `ui/linux-qt/finding.cpp:642`) and script concatenation (`cleanupScript`, `ui/linux-qt/main.cpp:2717`) behind the confirm boundary. Nothing on the load path switches on `apt` vs `pacman` vs `npm`; per-manager knowledge is one plugin per manager plus the `host.exec` allowlist (`core/host/hostexec.h:35`). No layer owns filesystem roots: a path plugin declares its own root and tags 0 when the root is absent. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; Darwin and CI may inject fixtures via `APPATTIC_HOST_EXEC_FIXTURE`). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
+The core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. As built those parts sit around the Zig module rather than inside it: `core/src/core.zig` exports only `core_abi_version` (`core/src/abi.zig`), `core/host/embed.c` owns load/unload, coeffect tags and capability intercept, and the native shell owns grouping (`groupLinuxLeftovers`, `ui/linux-qt/finding.cpp:658`) and script concatenation (`cleanupScript`, `ui/linux-qt/main.cpp:2717`) behind the confirm boundary. Nothing on the load path switches on `apt` vs `pacman` vs `npm`; per-manager knowledge is one plugin per manager plus the `host.exec` allowlist (`core/host/hostexec.h:35`). No layer owns filesystem roots: a path plugin declares its own root and tags 0 when the root is absent. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; Darwin and CI may inject fixtures via `APPATTIC_HOST_EXEC_FIXTURE`). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
 
 `AppAtticScan` keeps building until a later port copies its tests into Zig. The core does not delete it. The Swift CLI (`appattic`) parses in `AppAtticScan` (`CLIParse.swift`); it is not a WASM guest. Linux Qt loads `appattic_core.wasm` through `core/host/embed.c`, and refuses to scan without it.
 
@@ -71,7 +71,7 @@ Result JSON:
 
 `note` is optional and present whenever a query command did not answer (refused, failed, timed out, or output truncated): `"<cmd> did not answer: <reason>"` per command, `; ` separated, capped at 8 (`core/src/querynote.zig`). A run where every command answered has no `note`, so an empty `findings` list means a clean scan rather than a silent one.
 
-`script` is null when nothing named. Host intercept rejects bulk wipes (`system prune`, `rmi -f`, `volume prune`, `snap remove --purge '*'`, `rm /usr/bin/snap`).
+`script` is null when nothing named. Host intercept rejects bulk wipes (`system prune`, `rmi -f`, `volume prune`, `snap remove --purge '*'`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`, `rm /usr/bin/flatpak`; `core/host/embed.c:513`).
 
 ## Inventory (in scope)
 
@@ -202,11 +202,13 @@ Linux Qt already loads the WASM plugins. These remain in Swift for the macOS UI 
 
 ## Tests
 
-Host exit 0 loading the built plugin set (`core/build.sh` builds it; `scripts/linux-qt-link.sh --smoke` is the gate that loads it in CI). JSON plugin ids match. No `system prune`, no `snap remove --purge '*'`, no `rm /usr/bin/snap` (`core/host/tests/hostexec_test.c` asserts those). Tag 0 yields empty findings.
+Host exit 0 loading the built plugin set (`core/build.sh` builds it; `scripts/linux-qt-link.sh --smoke` is the gate that loads it in CI). JSON plugin ids match. No `system prune`, no `snap remove --purge '*'`, no `rm -rf /usr/bin/snap`, no `apt-get purge -y` / `dpkg --purge` (`core/host/tests/hostexec_test.c` asserts those). Tag 0 yields empty findings.
 
-## Open questions
+## Settled and open questions
 
 Settled by this record, kept here only so a later change knows what was decided: both docker and podman are listed and tagged by `engine` (no Settings picker); stopped containers are review-only with a named `rm` after confirm; the embedder is the Wasmtime C API, which `core/build.sh` requires and fails the build without.
+
+Still open, and deliberately undecided by this record:
 
 - `idleDays` default 30? No `idleDays` field exists yet, so nothing is filtered by age today.
 - podman-docker shim vs Docker Desktop?

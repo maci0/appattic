@@ -232,7 +232,7 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 | `tests/AppAtticScanTests/` | XCTest port of the old scanner cases, plus seeded mutation harnesses for the parsers that read foreign text: the CLI argv and `COLORFGBG`, package manager listings, `settings.json`, and ISO timestamps |
 
 | `DESIGN.md` | Native UI visual rules |
-| `docs/superpowers/specs/` | Requirement and architecture records (both accepted, both implemented) |
+| `docs/superpowers/specs/` | Requirement and architecture records (index: [`docs/superpowers/specs/README.md`](docs/superpowers/specs/README.md)). The Zig WASM core record is accepted and implemented; the Swift scan port record is implemented and superseded, kept in `archive/` |
 | `core/` | Zig `wasm32` scan core (loader + plugins + C Wasmtime embedder). The Linux window runs on it |
 
 ## Notes
