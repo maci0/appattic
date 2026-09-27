@@ -106,8 +106,7 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic pacman. Review before running.\\n");
         for (orphans) |h| {
-            w.raw("pacman --noconfirm -Rns ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeNameGuard(&w, &q_buf, "pacman -Qq ", "pacman --noconfirm -Rns ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -180,6 +179,14 @@ test "plugin_query present JSON comes from pacman -Qdt fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "libbar") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pacman --noconfirm -Rns libfoo") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "if pacman -Qq libfoo; then pacman --noconfirm -Rns libfoo; fi") != null);
+    // The script line is guarded too, not just the row command: the script runs
+    // under `set -e`, and `pacman -Rns` on a package a previous run removed
+    // exits nonzero and strands every orphan listed after it.
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        json,
+        "# AppAttic pacman. Review before running.\\nif pacman -Qq libfoo; then pacman --noconfirm -Rns libfoo; fi\\n",
+    ) != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "-Syu") == null);
 }
 

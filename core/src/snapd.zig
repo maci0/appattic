@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const listing = @import("path_listing.zig");
@@ -115,6 +116,61 @@ const snap_list_all_fixture =
     \\
 ;
 
+/// Where snapd keeps the image file of one installed revision. `snap remove`
+/// takes that file away and exits nonzero when it is already gone, so this is
+/// the presence check: the same read the deno plugin makes of its own install
+/// dir. A name and a revision both come from `snap list --all` through
+/// `isSafeCmdIdent`, so neither holds a `/` and the join cannot leave the dir.
+const snap_file_dir = "/var/lib/snapd/snaps/";
+
+/// Room for one half of the guard below: the joined snapd file path, or the
+/// removal naming a snap and a revision, each quoted. A name or a revision
+/// longer than the package-name bound has no command to write, and the render
+/// says so rather than emitting a truncated one.
+const max_snap_cmd_len = 512;
+
+/// `if test -e <dir><name>_<rev>.snap; then snap remove <name> --revision
+/// <rev>; fi`. A removal naming two values, so neither half is one appended
+/// name, and the query is a path rather than a manager listing. Each quoted
+/// value gets its own buffer, since `shQuote` returns a slice of the one it
+/// wrote and the next call would overwrite it under the reader's feet.
+fn writeSnapRemove(w: *jsonbuf.W, name: []const u8, rev: []const u8) void {
+    var name_buf: [jsonbuf.max_pkg_name_len + 8]u8 = undefined;
+    var rev_buf: [jsonbuf.max_pkg_name_len + 8]u8 = undefined;
+    var file_buf: [max_snap_cmd_len]u8 = undefined;
+    const file = std.fmt.bufPrint(&file_buf, "{s}{s}_{s}.snap", .{ snap_file_dir, name, rev }) catch {
+        w.failed = true;
+        return;
+    };
+    var present: [max_snap_cmd_len]u8 = undefined;
+    const query = std.fmt.bufPrint(&present, "test -e {s}", .{jsonbuf.shQuote(&name_buf, file) orelse {
+        w.failed = true;
+        return;
+    }}) catch {
+        w.failed = true;
+        return;
+    };
+    var action: [max_snap_cmd_len]u8 = undefined;
+    const remove = std.fmt.bufPrint(
+        &action,
+        "snap remove {s} --revision {s}",
+        .{
+            jsonbuf.shQuote(&name_buf, name) orelse {
+                w.failed = true;
+                return;
+            },
+            jsonbuf.shQuote(&rev_buf, rev) orelse {
+                w.failed = true;
+                return;
+            },
+        },
+    ) catch {
+        w.failed = true;
+        return;
+    };
+    guard.writeWholeGuard(w, query, remove);
+}
+
 fn renderSnapd(
     disabled: []const DisabledRev,
     orphans: []const listing.Orphan,
@@ -134,10 +190,8 @@ fn renderSnapd(
         w.str(h.name);
         w.raw(",\"revision\":");
         w.str(h.revision);
-        w.raw(",\"status\":\"orphaned\",\"command\":\"snap remove ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
-        w.raw(" --revision ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.revision);
+        w.raw(",\"status\":\"orphaned\",\"command\":\"");
+        writeSnapRemove(&w, h.name, h.revision);
         w.raw("\"}");
     }
     for (orphans) |h| {
@@ -159,10 +213,7 @@ fn renderSnapd(
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic snapd. Review before running.\\n");
         for (disabled) |h| {
-            w.raw("snap remove ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
-            w.raw(" --revision ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.revision);
+            writeSnapRemove(&w, h.name, h.revision);
             w.raw("\\n");
         }
         for (orphans) |h| {
@@ -270,6 +321,21 @@ test "plugin_query present JSON comes from snap list --all fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "/home/user/snap/firefox") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "snap remove --purge") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "rm /usr/bin/snap") == null);
+    // Both the row command and the script line are guarded: `snap remove`
+    // exits nonzero for a revision it cannot find, so an unguarded line would
+    // stop a rerun of the script at the first already-removed revision and
+    // strand the rest.
+    const guard_line = "if test -e /var/lib/snapd/snaps/chromium_1846.snap; then " ++
+        "snap remove chromium --revision 1846; fi";
+    try std.testing.expect(std.mem.indexOf(u8, json, guard_line) != null);
+    // core22 is the first revision the script removes, so the header is
+    // followed by its guard and the script is a run of guarded lines.
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        json,
+        "# AppAttic snapd. Review before running.\\nif test -e /var/lib/snapd/snaps/core22_1033.snap; " ++
+            "then snap remove core22 --revision 1033; fi\\n",
+    ) != null);
 }
 
 test "plugin_query missing is empty findings" {

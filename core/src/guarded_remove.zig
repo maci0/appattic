@@ -24,6 +24,18 @@ fn composeRow(buf: []u8, row: Row, name: []const u8) ?[]const u8 {
     return buf[0..need];
 }
 
+/// `if <present>; then <action>; fi` where both halves are whole commands the
+/// caller has already built and quoted. For a removal that names more than one
+/// value, so neither half is a single appended name, and for a presence check
+/// that is a path rather than a manager query.
+pub fn writeWholeGuard(w: *jsonbuf.W, present: []const u8, action: []const u8) void {
+    w.raw("if ");
+    w.raw(present);
+    w.raw("; then ");
+    w.raw(action);
+    w.raw("; fi");
+}
+
 /// `if <present> <name>; then <remove> <name>; fi`, where `<present>` is a
 /// read-only query that exits 0 only while the package is still installed.
 ///
@@ -92,6 +104,16 @@ test "name guard quotes an injected name in both halves" {
     const got = w.slice() orelse return error.Overflow;
     try std.testing.expect(std.mem.indexOf(u8, got, "if test -e ~/.deno/bin/'x'\\''; reboot; '\\'''; then ") != null);
     try std.testing.expect(std.mem.indexOf(u8, got, "deno uninstall --global 'x'\\''; reboot; '\\'''; fi") != null);
+}
+
+test "whole guard takes both halves whole" {
+    var buf: [512]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    writeWholeGuard(&w, "test -e /var/lib/snapd/snaps/chromium_1846.snap", "snap remove chromium --revision 1846");
+    try std.testing.expectEqualStrings(
+        "if test -e /var/lib/snapd/snaps/chromium_1846.snap; then snap remove chromium --revision 1846; fi",
+        w.slice() orelse return error.Overflow,
+    );
 }
 
 test "row guard greps the manager listing the parsers already pin" {

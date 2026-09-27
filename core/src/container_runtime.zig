@@ -4,6 +4,7 @@ const plugin_abi = @import("plugin_abi.zig");
 const EngineDocker: i32 = 1;
 const EnginePodman: i32 = 2;
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const fuzzsupport = @import("fuzzsupport.zig");
@@ -134,9 +135,54 @@ fn execQuery(cmd: []const u8, buf: []u8) i32 {
     return rc;
 }
 
+/// How one kind of object is asked whether it is still there, and the named
+/// removal that answers when it is. The engine prints both spellings the same
+/// way, so one table covers docker and podman.
+const ObjectKind = struct {
+    /// The subcommand whose exit status says the object exists.
+    inspect: []const u8,
+    /// The removal, spelled after the engine name.
+    remove: []const u8,
+};
+
+const image_kind: ObjectKind = .{ .inspect = "image", .remove = "rmi" };
+const volume_kind: ObjectKind = .{ .inspect = "volume", .remove = "volume rm" };
+const container_kind: ObjectKind = .{ .inspect = "container", .remove = "rm" };
+
+/// `if <engine> <kind> inspect <id>; then <engine> <remove> <id>; fi`.
+///
+/// The generated script runs under `set -e`, and the engine refuses a removal
+/// it has nothing to remove: `rmi` on a gone image and `volume rm` on a gone
+/// volume both exit nonzero. A second run over targets the first run already
+/// removed would stop there and strand every line below it, so the guard makes
+/// an already-removed object a no-op. Same shape as the package plugins, from
+/// the same `guarded_remove.zig`, so the Swift `guardedRemoveCommand` and the
+/// Qt `rootcmd` escalation read all of them the same way.
+fn writeCtrGuard(
+    w: *jsonbuf.W,
+    q_buf: []u8,
+    p_buf: []u8,
+    r_buf: []u8,
+    engine: []const u8,
+    kind: ObjectKind,
+    id: []const u8,
+) void {
+    const present = std.fmt.bufPrint(p_buf, "{s} {s} inspect ", .{ engine, kind.inspect }) catch {
+        w.failed = true;
+        return;
+    };
+    const remove = std.fmt.bufPrint(r_buf, "{s} {s} ", .{ engine, kind.remove }) catch {
+        w.failed = true;
+        return;
+    };
+    guard.writeNameGuard(w, q_buf, present, remove, id);
+}
+
 fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, containers: []const Hit) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var p_buf: [64]u8 = undefined;
+    var r_buf: [64]u8 = undefined;
     w.raw("{\"plugin\":\"container-runtime\",\"engine\":");
     w.str(engine);
     w.raw(",\"findings\":[");
@@ -147,9 +193,7 @@ fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, cont
         w.raw("{\"kind\":\"dangling-image\",\"id\":");
         w.str(h.id);
         w.raw(",\"name\":\"<none>:<none>\",\"status\":\"orphaned\",\"command\":\"");
-        w.raw(engine);
-        w.raw(" rmi ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.id);
+        writeCtrGuard(&w, &q_buf, &p_buf, &r_buf, engine, image_kind, h.id);
         w.raw("\"}");
     }
     for (volumes) |h| {
@@ -160,9 +204,7 @@ fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, cont
         w.raw(",\"name\":");
         w.str(h.name);
         w.raw(",\"status\":\"orphaned\",\"command\":\"");
-        w.raw(engine);
-        w.raw(" volume rm ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.id);
+        writeCtrGuard(&w, &q_buf, &p_buf, &r_buf, engine, volume_kind, h.id);
         w.raw("\"}");
     }
     for (containers) |h| {
@@ -173,9 +215,7 @@ fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, cont
         w.raw(",\"name\":");
         w.str(h.name);
         w.raw(",\"status\":\"review\",\"command\":\"");
-        w.raw(engine);
-        w.raw(" rm ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.id);
+        writeCtrGuard(&w, &q_buf, &p_buf, &r_buf, engine, container_kind, h.id);
         w.raw("\"}");
     }
     if (!first) w.raw(",");
@@ -189,21 +229,15 @@ fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, cont
         w.raw(engine);
         w.raw("). Review before running.\\n");
         for (images) |h| {
-            w.raw(engine);
-            w.raw(" rmi ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.id);
+            writeCtrGuard(&w, &q_buf, &p_buf, &r_buf, engine, image_kind, h.id);
             w.raw("\\n");
         }
         for (volumes) |h| {
-            w.raw(engine);
-            w.raw(" volume rm ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.id);
+            writeCtrGuard(&w, &q_buf, &p_buf, &r_buf, engine, volume_kind, h.id);
             w.raw("\\n");
         }
         for (containers) |h| {
-            w.raw(engine);
-            w.raw(" rm ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.id);
+            writeCtrGuard(&w, &q_buf, &p_buf, &r_buf, engine, container_kind, h.id);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -378,6 +412,48 @@ test "plugin_query missing is empty findings" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "no container engine") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "system prune") == null);
+}
+
+// The script runs under `set -e`, and the engine exits nonzero when asked to
+// remove something it already removed. Unguarded lines make a second run of a
+// script that already ran stop on the first stale target, so every line after
+// it is stranded. The guard asks the engine whether the object is still there.
+test "every removal asks the engine before it removes, so a rerun skips" {
+    try std.testing.expectEqual(@as(i32, 0), query_impl(1));
+    const docker_json = result_buf[0..result_nbytes];
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        docker_json,
+        "if docker image inspect a1b2c3d4e5f6; then docker rmi a1b2c3d4e5f6; fi",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        docker_json,
+        "if docker volume inspect orphvol; then docker volume rm orphvol; fi",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        docker_json,
+        "if docker container inspect c0ffee123456; then docker rm c0ffee123456; fi",
+    ) != null);
+
+    try std.testing.expectEqual(@as(i32, 0), query_impl(2));
+    const podman_json = result_buf[0..result_nbytes];
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        podman_json,
+        "if podman image inspect a1b2c3d4e5f6; then podman rmi a1b2c3d4e5f6; fi",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        podman_json,
+        "if podman volume inspect orphvol; then podman volume rm orphvol; fi",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        podman_json,
+        "if podman container inspect c0ffee123456; then podman rm c0ffee123456; fi",
+    ) != null);
 }
 
 // Seeds are the three `docker`/`podman` listings, each with its header row,

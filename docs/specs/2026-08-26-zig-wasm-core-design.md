@@ -75,6 +75,8 @@ The `note` is a fact about the whole plugin result, not about one row. It travel
 
 `script` is null when nothing named. Host intercept rejects bulk wipes (`system prune`, `rmi -f`, `volume prune`, `snap remove --purge '*'`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`, `rm /usr/bin/flatpak`; `core/host/embed.c:559`).
 
+Every named removal a script runs is wrapped in `if <present>; then <remove>; fi` (`core/src/guarded_remove.zig`). The script runs under `set -e`, and a manager exits nonzero when asked to remove something it already removed, so an unguarded line would stop a rerun at the first target the first run took and strand every line below it. The presence check is a read and never escalates: a package query (`dpkg -s`, `pacman -Qq`, `flatpak info`, `pip show`), a file the removal takes away (`test -e /var/lib/snapd/snaps/<name>_<rev>.snap`), or an engine query (`docker image inspect`, `docker volume inspect`, `docker container inspect`).
+
 ## Inventory (in scope)
 
 Plugin membership lives in one place: the `wasm_sources` list in `core/build.sh`. One `core/src/<id>.zig` compiles to `core/out/<id>.wasm`; there is no manifest directory. Backlog ids are not in `wasm_sources`, so no `.wasm` is built for them. Query plugins call `host.exec`. Darwin leftover roots stay in Swift `AppAtticScan`.
