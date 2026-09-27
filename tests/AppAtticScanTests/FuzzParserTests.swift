@@ -403,9 +403,17 @@ final class FuzzOsReleaseTests: XCTestCase {
                         "key padded: \(key.debugDescription) \(where_)"
                     )
                     // Quote stripping removes the outer pair, so what is left
-                    // is still spelled out in the text.
+                    // is still spelled out in the text. An empty half is
+                    // spelled out by nothing, and `String.contains("")` is
+                    // false for every text, so the check only applies to a
+                    // value that has characters: `ID=` is a field with an
+                    // empty value and the duplicate-key test below pins it as
+                    // one, which is what makes it legitimate rather than lost.
                     XCTAssertTrue(text.contains(key), "key not in the text: \(key.debugDescription) \(where_)")
-                    XCTAssertTrue(text.contains(value), "value not in the text: \(value.debugDescription) \(where_)")
+                    XCTAssertTrue(
+                        value.isEmpty || text.contains(value),
+                        "value not in the text: \(value.debugDescription) \(where_)"
+                    )
                 }
             }
         }

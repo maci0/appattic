@@ -48,8 +48,13 @@ public func parseOsRelease(_ text: String) -> [String: String] {
         guard a < b, bytes[a] != 0x23 /* # */ else { return }
         var eq = a
         while eq < b, bytes[eq] != 0x3D /* = */ { eq += 1 }
-        // `eq == a` is a line whose key is empty, which is not a field either.
-        guard eq < b, a < eq else { return }
+        // The key ends at the `=`, so the whitespace in front of it is padding
+        // and not part of the name: `ID = ubuntu` is the `ID` field, and a key
+        // that kept the space would not answer the `ID` a caller looks up.
+        var ke = eq
+        while ke > a, bytes[ke - 1] == 0x20 || bytes[ke - 1] == 0x09 { ke -= 1 }
+        // `a == ke` is a line whose key is empty, which is not a field either.
+        guard eq < b, a < ke else { return }
         var (vs, ve) = (eq + 1, b)
         while vs < ve, bytes[vs] == 0x20 || bytes[vs] == 0x09 { vs += 1 }
         while ve > vs, bytes[ve - 1] == 0x20 || bytes[ve - 1] == 0x09 { ve -= 1 }
@@ -58,7 +63,7 @@ public func parseOsRelease(_ text: String) -> [String: String] {
             let l = bytes[ve - 1]
             if (f == 0x22 && l == 0x22) || (f == 0x27 && l == 0x27) { vs += 1; ve -= 1 }
         }
-        out[String(decoding: bytes[a..<eq], as: UTF8.self)] =
+        out[String(decoding: bytes[a..<ke], as: UTF8.self)] =
             String(decoding: bytes[vs..<ve], as: UTF8.self)
     }
     var i = 0
