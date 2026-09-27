@@ -304,7 +304,7 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
 /// a partial read: a scan that inherits a loaded host's uptime reports a
 /// truncated listing with the command's own exit status, which no caller
 /// treats as a failure.
-func runCommand(_ cmd: [String], timeout: TimeInterval, clock: MonotonicFn) -> (Int32, String, String) {
+func runCommand(_ cmd: [String], timeout: TimeInterval, clock: @escaping MonotonicFn) -> (Int32, String, String) {
     guard let exe = cmd.first else { return (127, "", "empty command") }
     let resolved: String
     if exe.hasPrefix("/") {

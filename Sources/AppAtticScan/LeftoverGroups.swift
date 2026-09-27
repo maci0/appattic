@@ -34,13 +34,13 @@ public func groupOrphanedLeftovers(_ items: [DataItem]) -> [DataItem] {
         // re-derive a group key it would discard: `leftoverGroupKey` runs
         // `entryLabel` and `norm` per call, and most rows of a real list are
         // not orphaned.
-        if item.leftoverStatus == .orphaned, item.rootLabel != "LaunchAgents",
-           let key = ownerOf[id] ?? leftoverGroupKey(item.name), mergeKeys.contains(key),
-           let group = buckets[key]
-        {
-            out.append(mergeOrphanGroup(group))
-            for member in group { consumed.insert(ObjectIdentifier(member)) }
-            continue
+        if item.leftoverStatus == .orphaned, item.rootLabel != "LaunchAgents" {
+            let key = ownerOf[id] ?? leftoverGroupKey(item.name)
+            if mergeKeys.contains(key), let group = buckets[key] {
+                out.append(mergeOrphanGroup(group))
+                for member in group { consumed.insert(ObjectIdentifier(member)) }
+                continue
+            }
         }
         out.append(item)
     }

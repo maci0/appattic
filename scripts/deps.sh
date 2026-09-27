@@ -243,6 +243,64 @@ check_vendored() {
     done <<<"$VENDORED"
 }
 
+# `flatpak build-bundle` puts the runtime in the bundle unless it is told not
+# to, so the runtime is in the released artifact and the runtime is the
+# largest third-party thing in it. It is not a download this tree verifies: the
+# manifest names a branch, and nothing here fetches its bytes, so it has no row
+# in dep-checksums.sha256 and no digest in the inventory. Leaving it out would
+# report a bundle that is mostly somebody else's software as if it were only
+# ours, so it is listed with the pin it actually has, and the branch is named
+# in appattic:pinned-by rather than left for a reader to infer from a missing
+# hash. The SDK is a build input and is not in the bundle, so it is not a row.
+#
+# Every manifest has to name a runtime, a branch for it, and an SDK. A manifest
+# that drops runtime-version resolves the runtime's default branch instead,
+# which moves the bytes in the bundle without touching anything this tree
+# checks, so the omission has to fail here rather than on the builder.
+check_flatpak_platform() {
+    local manifest rel key value
+    while IFS= read -r manifest; do
+        [[ -n "$manifest" ]] || continue
+        rel="${manifest#"$ROOT"/}"
+        for key in runtime runtime-version sdk; do
+            value="$(flatpak_manifest_value "$manifest" "$key")"
+            if [[ -z "$value" ]]; then
+                fail "$rel has no $key; the bundle ships the runtime, and an unnamed one is not pinned"
+            fi
+        done
+    done < <(flatpak_manifests)
+}
+
+flatpak_manifests() {
+    local manifest
+    for manifest in "$ROOT"/packaging/flatpak/*.yml; do
+        [[ -f "$manifest" ]] || continue
+        printf '%s\n' "$manifest"
+    done
+}
+
+# The value of one top-level key of a flatpak manifest, quotes stripped:
+# `runtime: org.kde.Platform` and `runtime-version: "6.10"` are the same answer
+# to the reader that asks for the runtime and for the branch it names.
+flatpak_manifest_value() {
+    local manifest="$1" key="$2"
+    sed -n "s/^${key}:[[:space:]]*\"\{0,1\}\([^\"}[:space:]]*\)\"\{0,1\}[[:space:]]*\$/\1/p" "$manifest"
+}
+
+# name|branch for every runtime a manifest names, read out of the manifest
+# itself: a second table here would be a third copy of the pin to keep in
+# step with the other two, and nothing would notice when they parted.
+flatpak_platform_rows() {
+    local manifest name branch
+    while IFS= read -r manifest; do
+        [[ -n "$manifest" ]] || continue
+        name="$(flatpak_manifest_value "$manifest" runtime)"
+        branch="$(flatpak_manifest_value "$manifest" runtime-version)"
+        [[ -n "$name" && -n "$branch" ]] || continue
+        printf '%s\t%s\n' "$name" "$branch"
+    done < <(flatpak_manifests)
+}
+
 # The Flatpak manifest carries its own sha256 field, which flatpak-builder
 # checks. Two copies of a hash drift, so both must be in dep-checksums.sha256.
 check_flatpak_hashes() {
@@ -572,6 +630,7 @@ run_check() {
     check_table_coverage
     check_vendored
     check_flatpak_hashes
+    check_flatpak_platform
     check_urls
     check_version_anchors
     check_artifact_versions_in_tree
@@ -582,7 +641,7 @@ run_check() {
         echo "deps: $FAILURES problem(s) with third-party pins" >&2
         return 1
     fi
-    echo "deps: pins ok ($(parse_checksums | awk -F'\t' '$1 == "OK"' | wc -l) artifacts, $(vendored_paths | wc -l) vendored, $(swiftpm_pins | wc -l) SwiftPM pins)"
+    echo "deps: pins ok ($(parse_checksums | awk -F'\t' '$1 == "OK"' | wc -l) artifacts, $(vendored_paths | wc -l) vendored, $(swiftpm_pins | wc -l) SwiftPM pins, $(flatpak_platform_rows | wc -l) runtimes)"
 }
 
 # Epoch seconds to ISO 8601 UTC. GNU date takes `-d @epoch`; BSD (macOS) has
@@ -634,6 +693,19 @@ run_sbom() {
         assert_json_safe "sbom swiftpm purl" "$purl"
         components+=("$(artifact_component "$identity" "$version" "$purl" "$location" "$rev" SHA-1 "")")
     done < <(swiftpm_pins | sort)
+
+    # The runtime the Flatpak bundle carries, which the other two loops cannot
+    # see: it is neither a download this tree pins nor a file it vendors. It
+    # ships in the bundle, so an inventory that stops at the toolchain and the
+    # vendored font reports a bundle that is mostly somebody else's software as
+    # if it were only ours.
+    local platform platform_branch
+    while IFS=$'\t' read -r platform platform_branch; do
+        [[ -n "$platform" ]] || continue
+        assert_json_safe "sbom runtime name" "$platform"
+        assert_json_safe "sbom runtime version" "$platform_branch"
+        components+=("$(platform_component "$platform" "$platform_branch")")
+    done < <(flatpak_platform_rows)
 
     # Vendored files are already in the binary, so an inventory that stops at
     # the downloaded artifacts would under-report what the release ships.
@@ -730,6 +802,29 @@ artifact_component() {
     printf '      ],\n'
     printf '      "externalReferences": [\n'
     printf '        { "type": "distribution", "url": "%s" }\n' "$url"
+    printf '      ]\n'
+    printf '    }'
+}
+
+# A Flatpak runtime: the branch the manifest names, and no hash. A branch is
+# not a digest, and nothing in this tree can produce one, so a hash field here
+# would be a number nobody could check against the bytes in the bundle. The
+# branch is recorded as a property instead, which is the difference a consumer
+# needs: a component that says how it is pinned can be resolved and compared,
+# and one that quietly carries no hash looks like an omission.
+platform_component() {
+    local name="$1" branch="$2" purl
+    purl="pkg:generic/$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')@${branch}"
+    printf '    {\n'
+    printf '      "type": "library",\n'
+    printf '      "name": "%s",\n' "$name"
+    printf '      "version": "%s",\n' "$branch"
+    printf '      "purl": "%s",\n' "$purl"
+    printf '      "properties": [\n'
+    printf '        { "name": "appattic:pinned-by", "value": "branch" }\n'
+    printf '      ],\n'
+    printf '      "externalReferences": [\n'
+    printf '        { "type": "distribution", "url": "https://flathub.org/apps/%s" }\n' "$name"
     printf '      ]\n'
     printf '    }'
 }

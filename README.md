@@ -249,10 +249,12 @@ bash scripts/linux-appimage.sh
 Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downloads pinned linuxdeploy, linuxdeploy-plugin-qt, and appimagetool into `dist/.appimage-tools/` and checks SHA-256. WASM modules ship under `usr/share/appattic/`; `libwasmtime.so` ships under `usr/lib/`, reached from the binary as `$ORIGIN/../lib`. `appimagetool` embeds update information pointing at the release's `.zsync`, which the release workflow publishes beside the image, so a downloaded AppImage can check for a newer release with AppImageUpdate. It also writes `dist/AppAttic-<arch>.AppImage.sbom.json`, a CycloneDX 1.5 inventory of every pinned third-party artifact that went into the image: the downloaded tools, the `Package.resolved` pins, and the third-party files vendored in the tree (the Michroma title font, `ui/linux-qt/fonts/`, SIL OFL 1.1, which the Qt resource compiles into the binary and `cmake --install` ships its license beside). Regenerate it or check the pins yourself:
 
 ```bash
-bash scripts/deps.sh check              # pins vs download URLs vs Flatpak sha256, vendored files vs their hashes and licenses
+bash scripts/deps.sh check              # pins vs download URLs vs Flatpak sha256 and runtime branch, vendored files vs their hashes and licenses
 bash scripts/deps.sh sbom out.json      # CycloneDX 1.5 inventory
 bash scripts/deps.sh yamllint-version   # the yamllint pin lint.sh names when it is missing
 ```
+
+`deps.sh check` also fails when a Flatpak manifest names no runtime, no `runtime-version`, or no SDK. The bundle carries the runtime, so an unnamed one is not a pin: without the branch, `flatpak-builder` resolves whatever the remote's default branch is and the bytes in the released artifact move with nothing in this tree changing. The runtime reaches the inventory as a component pinned by branch rather than by digest, and says so in `appattic:pinned-by`. Two things the inventory names but does not itemize, so a consumer reading it does not read more into it than it says: the runtime is one component for the whole KDE Platform, and the AppImage's Qt libraries are collected off the build host by `linuxdeploy-plugin-qt` and are not listed at all.
 
 `scripts/lint.sh` runs `check`, so a version bump that leaves a pin, a URL, or a Flatpak `sha256:` behind fails the local gate.
 

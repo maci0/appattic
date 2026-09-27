@@ -99,25 +99,77 @@ final class DependencyInventoryTests: XCTestCase {
     /// resolved to, so the two carry digests of different lengths. Both have
     /// to be there: a component with no hash is one a consumer cannot match
     /// against the bytes it was built from.
+    ///
+    /// A Flatpak runtime is the one component that cannot: `flatpak
+    /// build-bundle` puts the runtime in the bundle, and the manifest pins it
+    /// to a branch, which is a name and not a digest. It carries
+    /// appattic:pinned-by=branch instead, so the pin is on the component and a
+    /// hash nobody can check is not invented for it. A component with neither a
+    /// hash nor that property is the gap this asserts against: it reads like a
+    /// downloaded artifact whose digest was forgotten.
     func testEveryComponentIsHashedAndCarriesAnExternalReference() throws {
         let components = try sbomComponents()
         XCTAssertFalse(components.isEmpty)
         for component in components {
             let name = component["name"] as? String ?? "?"
+            let pinnedByBranch = (component["properties"] as? [[String: String]] ?? [])
+                .contains { $0["name"] == "appattic:pinned-by" && $0["value"] == "branch" }
             let hashes = component["hashes"] as? [[String: String]] ?? []
-            XCTAssertEqual(hashes.count, 1, "\(name) has no hash in the SBOM")
-            let alg = hashes.first?["alg"] ?? ""
-            let content = hashes.first?["content"] ?? ""
-            switch alg {
-            case "SHA-256":
-                XCTAssertEqual(content.count, 64, name)
-            case "SHA-1":
-                XCTAssertEqual(content.count, 40, "\(name) is not pinned to a commit revision")
-            default:
-                XCTFail("\(name) records hash algorithm '\(alg)'")
+            if pinnedByBranch {
+                XCTAssertEqual(
+                    hashes.count, 0,
+                    "\(name) is pinned by branch; a hash beside that is a number nothing can check"
+                )
+            } else {
+                XCTAssertEqual(hashes.count, 1, "\(name) has no hash in the SBOM")
+                let alg = hashes.first?["alg"] ?? ""
+                let content = hashes.first?["content"] ?? ""
+                switch alg {
+                case "SHA-256":
+                    XCTAssertEqual(content.count, 64, name)
+                case "SHA-1":
+                    XCTAssertEqual(content.count, 40, "\(name) is not pinned to a commit revision")
+                default:
+                    XCTFail("\(name) records hash algorithm '\(alg)'")
+                }
             }
             let refs = component["externalReferences"] as? [[String: String]] ?? []
             XCTAssertTrue(refs.first?["url"]?.hasPrefix("https://") == true, "\(name) has no https source")
+        }
+    }
+
+    /// The runtime the Flatpak bundle carries is the largest third-party thing
+    /// in that artifact, and the bundle ships an SBOM beside it, so a consumer
+    /// reading only the inventory has to find it there. The expected value is
+    /// read out of the manifest, so this fails if the generator stops carrying
+    /// the runtime, and also if it names a branch the manifest does not.
+    func testEveryFlatpakRuntimeIsAComponent() throws {
+        let dir = root.appendingPathComponent("packaging/flatpak")
+        let manifests = try FileManager.default
+            .contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasSuffix(".yml") }
+            .sorted()
+        XCTAssertFalse(manifests.isEmpty, "no Flatpak manifest to inventory a runtime from")
+        let components = try sbomComponents()
+        for name in manifests {
+            let text = try String(contentsOf: dir.appendingPathComponent(name), encoding: .utf8)
+            func value(_ key: String) -> String? {
+                for line in text.split(separator: "\n") where line.hasPrefix("\(key):") {
+                    return line
+                        .dropFirst(key.count + 1)
+                        .trimmingCharacters(in: .whitespaces)
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                }
+                return nil
+            }
+            let runtime = try XCTUnwrap(value("runtime"), "\(name) names no runtime")
+            let branch = try XCTUnwrap(value("runtime-version"), "\(name) names no runtime-version")
+            let matches = components.filter { $0["name"] as? String == runtime }
+            XCTAssertEqual(matches.count, 1, "\(runtime) is named in \(name) but the SBOM lists \(matches.count) component(s) for it")
+            XCTAssertEqual(
+                matches.first?["version"] as? String, branch,
+                "\(name) pins \(runtime) to \(branch), the SBOM says \(matches.first?["version"] as? String ?? "nothing")"
+            )
         }
     }
 
