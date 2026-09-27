@@ -117,42 +117,32 @@ public func humanDays(_ days: Double) -> String {
     return duration(.year, Int((days / 365).rounded()))
 }
 
-/// One formatter per unit, built once and never mutated, so parallel calls are
-/// safe. `DateComponents` carries the count, so a month stays a month instead
-/// of being reconciled against a fixed number of days.
+/// The localized duration label for a one-unit `DateComponents`, or nil when
+/// the platform has no formatter to give one.
 ///
 /// swift-corelibs-foundation declares `DateComponentsFormatter` but leaves it
-/// unimplemented, so the table is empty there and `duration` below takes its
-/// ASCII fallback for every unit. The formatter type is erased into a closure so
-/// it does not appear in this file's signatures off Darwin.
-private let durationFormatters: [Calendar.Component: (DateComponents) -> String?] = {
+/// unimplemented, so this is nil there and `duration` below takes its ASCII
+/// fallback for every unit. The formatter type is erased into a closure so it
+/// does not appear in this file's signatures off Darwin.
+///
+/// One formatter and not one per unit: the components carry the single unit to
+/// render, and the default `allowedUnits` (0) renders whatever it is handed,
+/// which is what `localizedString(from:unitsStyle:)` documents itself as doing
+/// — "the default formatter values, with the exception of the unitsStyle
+/// value". Setting `allowedUnits` per unit is what raised
+/// `NSInternalInconsistencyException` from the setter on macOS, aborting the
+/// process the first time `humanDays` rendered anything: the setter accepts
+/// only year, month, weekOfMonth, day, hour, minute and second, and the week
+/// unit the duration buckets need — named `weekOfMonth` in the Swift overlay,
+/// as the docs list it — is rejected there. A formatter with no units set
+/// cannot be rejected, and one built once and never mutated is safe to share.
+private let localizedDuration: ((DateComponents) -> String?)? = {
     #if canImport(Darwin)
-    var formatters: [Calendar.Component: (DateComponents) -> String?] = [:]
-    // Each unit with the calendar unit that names it: `allowedUnits` is an
-    // `NSCalendar.Unit`, and there is no `DateComponentsFormatter.Units` for the
-    // loop to build an empty set of, which is what this arm used to name. The
-    // pairs also give the array its type, so the literal does not leave the
-    // element type to be decided by the loop body.
-    //
-    // The week is `weekOfMonth`, not `weekOfYear`. `allowedUnits` accepts only
-    // year, month, weekOfMonth, day, hour, minute and second; any other bit
-    // raises NSInternalInconsistencyException from the setter, so the old
-    // `.weekOfYear` here aborted the process the first time `humanDays`
-    // rendered a fortnight — before the test that called it could assert
-    // anything. `DateComponents` carries the same unit below, so the count is
-    // the field the formatter reads.
-    let units: [(component: Calendar.Component, allowed: NSCalendar.Unit)] = [
-        (.hour, .hour), (.day, .day), (.weekOfMonth, .weekOfMonth), (.month, .month), (.year, .year),
-    ]
-    for unit in units {
-        let f = DateComponentsFormatter()
-        f.allowedUnits = unit.allowed
-        f.unitsStyle = .abbreviated
-        formatters[unit.component] = { f.string(from: $0) }
-    }
-    return formatters
+    let formatter = DateComponentsFormatter()
+    formatter.unitsStyle = .abbreviated
+    return { formatter.string(from: $0) }
     #else
-    return [:]
+    return nil
     #endif
 }()
 
@@ -165,7 +155,7 @@ private let asciiDurationUnits: [Calendar.Component: String] = [
 private func duration(_ unit: Calendar.Component, _ count: Int) -> String {
     var components = DateComponents()
     components.setValue(count, for: unit)
-    if let text = durationFormatters[unit]?(components) {
+    if let formatter = localizedDuration, let text = formatter(components) {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if !trimmed.isEmpty { return trimmed }
     }
