@@ -206,11 +206,6 @@ struct WalkedDirKey: Hashable {
     let dev: UInt64
     let ino: UInt64
 
-    init(dev: UInt64, ino: UInt64) {
-        self.dev = dev
-        self.ino = ino
-    }
-
     init(_ st: stat) {
         self.dev = UInt64(st.st_dev)
         self.ino = UInt64(st.st_ino)

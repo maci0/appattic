@@ -133,12 +133,6 @@ struct CLICommandScopedOption {
     let name: String
     let commands: [String]
     let isSet: (CLIOptions) -> Bool
-
-    init(name: String, commands: [String], isSet: @escaping (CLIOptions) -> Bool) {
-        self.name = name
-        self.commands = commands
-        self.isSet = isSet
-    }
 }
 
 let cliCommandScopedOptions: [CLICommandScopedOption] = [
