@@ -91,6 +91,7 @@ pub fn parseZypperUnneeded(text: []const u8, out: []ZypperOrphan) usize {
 
 fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"zypper\",\"engine\":\"zypper\",\"findings\":[");
     var first = true;
     for (orphans) |h| {
@@ -105,7 +106,7 @@ fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated)
             w.str(h.version);
         }
         w.raw(",\"status\":\"orphaned\",\"command\":\"zypper --non-interactive rm ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"zypper\"}");
     }
     for (outdated) |h| {
@@ -120,7 +121,7 @@ fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated)
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic zypper. Review before running.\\n");
         for (orphans) |h| {
             w.raw("zypper --non-interactive rm ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

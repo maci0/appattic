@@ -48,6 +48,7 @@ pub fn parseDenoGlobalList(text: []const u8, out: []DenoGlobal) usize {
 
 fn renderDeno(hits: []const DenoGlobal) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"deno\",\"engine\":\"deno\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
@@ -56,7 +57,7 @@ fn renderDeno(hits: []const DenoGlobal) bool {
         w.raw(",\"name\":");
         w.str(h.name);
         w.raw(",\"status\":\"global\",\"command\":\"deno uninstall --global ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"deno\"}");
     }
     w.raw("],\"script\":");
@@ -66,7 +67,7 @@ fn renderDeno(hits: []const DenoGlobal) bool {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic deno. Review before running.\\n");
         for (hits) |h| {
             w.raw("deno uninstall --global ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

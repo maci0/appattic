@@ -99,6 +99,7 @@ pub fn parsePipxList(text: []const u8, out: []PipxTool) usize {
 
 fn renderPipx(hits: []const PipxTool) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"pipx\",\"engine\":\"pipx\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
@@ -111,7 +112,7 @@ fn renderPipx(hits: []const PipxTool) bool {
             w.str(h.version);
         }
         w.raw(",\"status\":\"global\",\"command\":\"pipx uninstall ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"pipx\"}");
     }
     w.raw("],\"script\":");
@@ -121,7 +122,7 @@ fn renderPipx(hits: []const PipxTool) bool {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic pipx. Review before running.\\n");
         for (hits) |h| {
             w.raw("pipx uninstall ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

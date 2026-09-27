@@ -124,6 +124,7 @@ fn upgradePrefix(manager: []const u8) []const u8 {
 
 fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager: []const u8) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"dnf\",\"engine\":");
     w.str(manager);
     w.raw(",\"findings\":[");
@@ -138,7 +139,7 @@ fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager:
         w.str(h.name);
         w.raw(",\"status\":\"orphaned\",\"command\":\"");
         w.raw(rm);
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":");
         w.str(manager);
         w.raw("}");
@@ -157,7 +158,7 @@ fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager:
         w.raw(". Review before running.\\n");
         for (orphans) |h| {
             w.raw(rm);
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

@@ -45,6 +45,7 @@ pub fn parseUvToolList(text: []const u8, out: []UvTool) usize {
 
 fn renderUv(hits: []const UvTool) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"uv\",\"engine\":\"uv\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
@@ -57,7 +58,7 @@ fn renderUv(hits: []const UvTool) bool {
             w.str(h.version);
         }
         w.raw(",\"status\":\"global\",\"command\":\"uv tool uninstall ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"uv\"}");
     }
     w.raw("],\"script\":");
@@ -67,7 +68,7 @@ fn renderUv(hits: []const UvTool) bool {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic uv. Review before running.\\n");
         for (hits) |h| {
             w.raw("uv tool uninstall ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

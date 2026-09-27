@@ -139,6 +139,7 @@ fn execQuery(cmd: []const u8, tail: []const u8, buf: []u8) i32 {
 
 fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, containers: []const Hit) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"container-runtime\",\"engine\":");
     w.str(engine);
     w.raw(",\"findings\":[");
@@ -151,7 +152,7 @@ fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, cont
         w.raw(",\"name\":\"<none>:<none>\",\"status\":\"orphaned\",\"command\":\"");
         w.raw(engine);
         w.raw(" rmi ");
-        w.raw(h.id);
+        jsonbuf.rawShQuote(&w, &q_buf, h.id);
         w.raw("\"}");
     }
     for (volumes) |h| {
@@ -164,7 +165,7 @@ fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, cont
         w.raw(",\"status\":\"orphaned\",\"command\":\"");
         w.raw(engine);
         w.raw(" volume rm ");
-        w.raw(h.id);
+        jsonbuf.rawShQuote(&w, &q_buf, h.id);
         w.raw("\"}");
     }
     for (containers) |h| {
@@ -177,7 +178,7 @@ fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, cont
         w.raw(",\"status\":\"review\",\"command\":\"");
         w.raw(engine);
         w.raw(" rm ");
-        w.raw(h.id);
+        jsonbuf.rawShQuote(&w, &q_buf, h.id);
         w.raw("\"}");
     }
     if (!first) w.raw(",");
@@ -193,19 +194,19 @@ fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, cont
         for (images) |h| {
             w.raw(engine);
             w.raw(" rmi ");
-            w.raw(h.id);
+            jsonbuf.rawShQuote(&w, &q_buf, h.id);
             w.raw("\\n");
         }
         for (volumes) |h| {
             w.raw(engine);
             w.raw(" volume rm ");
-            w.raw(h.id);
+            jsonbuf.rawShQuote(&w, &q_buf, h.id);
             w.raw("\\n");
         }
         for (containers) |h| {
             w.raw(engine);
             w.raw(" rm ");
-            w.raw(h.id);
+            jsonbuf.rawShQuote(&w, &q_buf, h.id);
             w.raw("\\n");
         }
         w.raw("\"");

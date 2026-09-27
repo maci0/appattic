@@ -119,23 +119,24 @@ fn renderSnapd(
     orphans: []const listing.Orphan,
 ) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"snapd\",\"engine\":\"snap\",\"findings\":[");
     var first = true;
     for (disabled) |h| {
         if (!first) w.raw(",");
         first = false;
         w.raw("{\"kind\":\"disabled-revision\",\"id\":\"");
-        w.raw(h.name);
+        w.escaped(h.name);
         w.raw("_");
-        w.raw(h.revision);
+        w.escaped(h.revision);
         w.raw("\",\"name\":");
         w.str(h.name);
         w.raw(",\"revision\":");
         w.str(h.revision);
         w.raw(",\"status\":\"orphaned\",\"command\":\"snap remove ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw(" --revision ");
-        w.raw(h.revision);
+        jsonbuf.rawShQuote(&w, &q_buf, h.revision);
         w.raw("\"}");
     }
     for (orphans) |h| {
@@ -148,7 +149,7 @@ fn renderSnapd(
         w.raw(",\"path\":");
         w.str(h.path);
         w.raw(",\"rootLabel\":\"snap\",\"status\":\"orphaned\",\"command\":\"rm -rf ");
-        w.raw(h.path);
+        jsonbuf.rawShQuote(&w, &q_buf, h.path);
         w.raw("\"}");
     }
     w.raw("],\"script\":");
@@ -158,14 +159,14 @@ fn renderSnapd(
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic snapd. Review before running.\\n");
         for (disabled) |h| {
             w.raw("snap remove ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw(" --revision ");
-            w.raw(h.revision);
+            jsonbuf.rawShQuote(&w, &q_buf, h.revision);
             w.raw("\\n");
         }
         for (orphans) |h| {
             w.raw("rm -rf ");
-            w.raw(h.path);
+            jsonbuf.rawShQuote(&w, &q_buf, h.path);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -282,4 +283,19 @@ test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
+}
+
+test "renderSnapd shell-quotes a snap name and an orphan path" {
+    const disabled = [_]DisabledRev{.{ .name = "x'; reboot; '", .revision = "1; reboot; '" }};
+    const orphans = [_]listing.Orphan{.{ .name = "a b", .path = "/home/user/snap/a'; reboot; '" }};
+    try std.testing.expect(renderSnapd(&disabled, &orphans));
+    const json = result_buf[0..result_nbytes];
+    // The injected `;` is inside one single-quoted word, so the script that
+    // gets run under pkexec holds one argv entry per value.
+    try std.testing.expect(std.mem.indexOf(u8, json, "rm -rf '/home/user/snap/a'\\''; reboot; '\\'''") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "snap remove 'x'\\''; reboot; '\\''' --revision '1; reboot; '") != null);
+    // Unquoted, the name would have ended the word and run a second command.
+    try std.testing.expect(std.mem.indexOf(u8, json, "rm -rf /home/user/snap/a'; reboot; '") == null);
+    // The finding id is JSON, so a quote in the name must be escaped there too.
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"id\":\"x'; reboot; '_1; reboot; '\"") != null);
 }

@@ -79,6 +79,7 @@ pub fn parseBunGlobalList(text: []const u8, out: []BunGlobal) usize {
 
 fn renderBun(hits: []const BunGlobal) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"bun\",\"engine\":\"bun\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
@@ -91,7 +92,7 @@ fn renderBun(hits: []const BunGlobal) bool {
             w.str(h.version);
         }
         w.raw(",\"status\":\"global\",\"command\":\"bun remove -g ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"bun\"}");
     }
     w.raw("],\"script\":");
@@ -101,7 +102,7 @@ fn renderBun(hits: []const BunGlobal) bool {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic bun. Review before running.\\n");
         for (hits) |h| {
             w.raw("bun remove -g ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

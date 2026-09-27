@@ -84,6 +84,7 @@ fn nameIn(hits: []const PipOutdated, name: []const u8) bool {
 
 fn renderPip(globals: []const PipOutdated, outdated: []const PipOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"pip\",\"engine\":\"pip\",\"findings\":[");
     var first = true;
     for (globals) |h| {
@@ -99,7 +100,7 @@ fn renderPip(globals: []const PipOutdated, outdated: []const PipOutdated) bool {
             w.str(h.current);
         }
         w.raw(",\"status\":\"global\",\"command\":\"pip uninstall -y --user ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"pip\"}");
     }
     for (outdated) |h| {
@@ -131,7 +132,7 @@ fn renderPip(globals: []const PipOutdated, outdated: []const PipOutdated) bool {
         for (globals) |h| {
             if (nameIn(outdated, h.name)) continue;
             w.raw("pip uninstall -y --user ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");

@@ -176,6 +176,7 @@ pub fn parseFlatpakUpdates(updates_text: []const u8, installed_text: []const u8,
 
 fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"flatpak\",\"engine\":\"flatpak\",\"findings\":[");
     var first = true;
     for (hits) |h| {
@@ -193,16 +194,16 @@ fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated)
         // already removed this runtime would never reach the runtimes after it.
         // The presence query makes an already-removed runtime a no-op.
         w.raw(",\"status\":\"orphaned\",\"command\":\"if flatpak info ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         if (h.branch.len > 0) {
             w.raw("//");
-            w.raw(h.branch);
+            jsonbuf.rawShQuote(&w, &q_buf, h.branch);
         }
         w.raw(" >/dev/null 2>&1; then flatpak uninstall -y ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         if (h.branch.len > 0) {
             w.raw("//");
-            w.raw(h.branch);
+            jsonbuf.rawShQuote(&w, &q_buf, h.branch);
         }
         w.raw("; fi\",\"manager\":\"flatpak\"}");
     }
@@ -218,16 +219,16 @@ fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated)
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic flatpak. Review before running.\\n");
         for (hits) |h| {
             w.raw("if flatpak info ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             if (h.branch.len > 0) {
                 w.raw("//");
-                w.raw(h.branch);
+                jsonbuf.rawShQuote(&w, &q_buf, h.branch);
             }
             w.raw(" >/dev/null 2>&1; then flatpak uninstall -y ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             if (h.branch.len > 0) {
                 w.raw("//");
-                w.raw(h.branch);
+                jsonbuf.rawShQuote(&w, &q_buf, h.branch);
             }
             w.raw("; fi\\n");
         }

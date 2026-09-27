@@ -72,6 +72,7 @@ pub fn parsePacmanQdt(text: []const u8, out: []PacmanOrphan) usize {
 
 fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
+    var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"pacman\",\"engine\":\"pacman\",\"findings\":[");
     var first = true;
     for (orphans) |h| {
@@ -86,7 +87,7 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
             w.str(h.version);
         }
         w.raw(",\"status\":\"orphaned\",\"command\":\"pacman --noconfirm -Rns ");
-        w.raw(h.name);
+        jsonbuf.rawShQuote(&w, &q_buf, h.name);
         w.raw("\",\"manager\":\"pacman\"}");
     }
     for (outdated) |h| {
@@ -101,7 +102,7 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic pacman. Review before running.\\n");
         for (orphans) |h| {
             w.raw("pacman --noconfirm -Rns ");
-            w.raw(h.name);
+            jsonbuf.rawShQuote(&w, &q_buf, h.name);
             w.raw("\\n");
         }
         w.raw("\"");
