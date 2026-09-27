@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#include <initializer_list>
 #include <vector>
 
 static int homePathTag(const char *xdgEnv, const QString &rel);
@@ -73,6 +74,56 @@ static bool hostHasExecutable(const QString &name) {
     return !QStandardPaths::findExecutable(name, extra).isEmpty();
 }
 
+/* A plugin runs only when its host dependency answers. Three shapes cover
+   every stem: an executable on PATH, an XDG root (an absolute override wins),
+   or a home-relative directory. Anything else loads with tag 1. */
+struct ExecRule {
+    const char *stem;
+    std::initializer_list<const char *> names;
+};
+static const ExecRule kExecRules[] = {
+    {"snapd", {"snap"}},
+    {"pacman", {"pacman"}},
+    {"aur", {"paru", "yay", "pikaur"}},
+    {"apt", {"apt-get", "apt", "dpkg"}},
+    {"dnf", {"dnf5", "dnf", "yum"}},
+    {"zypper", {"zypper"}},
+    {"flatpak", {"flatpak"}},
+    {"npm", {"npm", "node"}},
+    {"pnpm", {"pnpm"}},
+    {"bun", {"bun"}},
+    {"pipx", {"pipx"}},
+    {"pip", {"pip", "pip3"}},
+    {"uv", {"uv"}},
+    {"brew", {"brew"}},
+    {"gem", {"gem"}},
+    {"composer", {"composer"}},
+    {"deno", {"deno"}},
+};
+
+struct XdgRule {
+    const char *stem;
+    const char *env;
+    const char *rel;
+};
+static const XdgRule kXdgRules[] = {
+    {"path_xdg_config", "XDG_CONFIG_HOME", ".config"},
+    {"path_xdg_data", "XDG_DATA_HOME", ".local/share"},
+    {"path_xdg_cache", "XDG_CACHE_HOME", ".cache"},
+    {"path_xdg_state", "XDG_STATE_HOME", ".local/state"},
+};
+
+struct HomeRule {
+    const char *stem;
+    std::initializer_list<const char *> dirs;
+};
+static const HomeRule kHomeRules[] = {
+    {"path_xdg_lib", {".local/lib"}},
+    {"path_var_app", {".var/app"}},
+    {"path_user_bin", {".local/bin", "bin"}},
+    {"path_shadow", {".local/bin", "bin", ".cargo/bin", ".local/share/applications"}},
+};
+
 static int pluginTag(const QString &wasmPath) {
     const QFileInfo fi(wasmPath);
     const QString stem = fi.completeBaseName();
@@ -81,103 +132,27 @@ static int pluginTag(const QString &wasmPath) {
         if (hostHasExecutable(QStringLiteral("docker"))) return 1;
         return 0;
     }
-    if (stem == QLatin1String("snapd")) {
-        return hostHasExecutable(QStringLiteral("snap")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_xdg_config")) {
-        return homePathTag("XDG_CONFIG_HOME", QStringLiteral(".config"));
-    }
-    if (stem == QLatin1String("path_xdg_data")) {
-        return homePathTag("XDG_DATA_HOME", QStringLiteral(".local/share"));
-    }
-    if (stem == QLatin1String("path_xdg_cache")) {
-        return homePathTag("XDG_CACHE_HOME", QStringLiteral(".cache"));
-    }
-    if (stem == QLatin1String("path_xdg_state")) {
-        return homePathTag("XDG_STATE_HOME", QStringLiteral(".local/state"));
-    }
-    if (stem == QLatin1String("path_xdg_lib")) {
-        return QDir::home().exists(QStringLiteral(".local/lib")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_var_app")) {
-        return QDir::home().exists(QStringLiteral(".var/app")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("path_shadow")) {
-        const QDir home = QDir::home();
-        if (home.exists(QStringLiteral(".local/bin"))) return 1;
-        if (home.exists(QStringLiteral("bin"))) return 1;
-        if (home.exists(QStringLiteral(".cargo/bin"))) return 1;
-        if (home.exists(QStringLiteral(".local/share/applications"))) return 1;
-        return 0;
-    }
-    if (stem == QLatin1String("path_user_bin")) {
-        if (QDir::home().exists(QStringLiteral(".local/bin"))) return 1;
-        if (QDir::home().exists(QStringLiteral("bin"))) return 1;
-        return 0;
-    }
     if (stem == QLatin1String("path_home_dot")) {
         return QDir::home().exists() ? 1 : 0;
     }
-    if (stem == QLatin1String("pacman")) {
-        return hostHasExecutable(QStringLiteral("pacman")) ? 1 : 0;
+    for (const XdgRule &r : kXdgRules) {
+        if (stem == QLatin1String(r.stem)) {
+            return homePathTag(r.env, QString::fromUtf8(r.rel));
+        }
     }
-    if (stem == QLatin1String("aur")) {
-        if (hostHasExecutable(QStringLiteral("paru"))) return 1;
-        if (hostHasExecutable(QStringLiteral("yay"))) return 1;
-        if (hostHasExecutable(QStringLiteral("pikaur"))) return 1;
+    for (const HomeRule &r : kHomeRules) {
+        if (stem != QLatin1String(r.stem)) continue;
+        for (const char *dir : r.dirs) {
+            if (QDir::home().exists(QString::fromUtf8(dir))) return 1;
+        }
         return 0;
     }
-    if (stem == QLatin1String("apt")) {
-        if (hostHasExecutable(QStringLiteral("apt-get"))) return 1;
-        if (hostHasExecutable(QStringLiteral("apt"))) return 1;
-        if (hostHasExecutable(QStringLiteral("dpkg"))) return 1;
+    for (const ExecRule &r : kExecRules) {
+        if (stem != QLatin1String(r.stem)) continue;
+        for (const char *name : r.names) {
+            if (hostHasExecutable(QString::fromUtf8(name))) return 1;
+        }
         return 0;
-    }
-    if (stem == QLatin1String("dnf")) {
-        if (hostHasExecutable(QStringLiteral("dnf5"))) return 1;
-        if (hostHasExecutable(QStringLiteral("dnf"))) return 1;
-        if (hostHasExecutable(QStringLiteral("yum"))) return 1;
-        return 0;
-    }
-    if (stem == QLatin1String("zypper")) {
-        return hostHasExecutable(QStringLiteral("zypper")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("flatpak")) {
-        return hostHasExecutable(QStringLiteral("flatpak")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("npm")) {
-        if (hostHasExecutable(QStringLiteral("npm"))) return 1;
-        if (hostHasExecutable(QStringLiteral("node"))) return 1;
-        return 0;
-    }
-    if (stem == QLatin1String("pnpm")) {
-        return hostHasExecutable(QStringLiteral("pnpm")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("bun")) {
-        return hostHasExecutable(QStringLiteral("bun")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("pipx")) {
-        return hostHasExecutable(QStringLiteral("pipx")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("pip")) {
-        if (hostHasExecutable(QStringLiteral("pip"))) return 1;
-        if (hostHasExecutable(QStringLiteral("pip3"))) return 1;
-        return 0;
-    }
-    if (stem == QLatin1String("uv")) {
-        return hostHasExecutable(QStringLiteral("uv")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("brew")) {
-        return hostHasExecutable(QStringLiteral("brew")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("gem")) {
-        return hostHasExecutable(QStringLiteral("gem")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("composer")) {
-        return hostHasExecutable(QStringLiteral("composer")) ? 1 : 0;
-    }
-    if (stem == QLatin1String("deno")) {
-        return hostHasExecutable(QStringLiteral("deno")) ? 1 : 0;
     }
     return 1;
 }

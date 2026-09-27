@@ -96,16 +96,8 @@ fn query_impl(present: i32) i32 {
     }
 }
 
-fn resultPtr() i32 {
-    return @intCast(@intFromPtr(&result_buf));
-}
-
-fn resultLen() i32 {
-    return @intCast(result_nbytes);
-}
-
 comptime {
-    plugin_abi.bind(plugin_id, query_impl, resultPtr, resultLen);
+    plugin_abi.bind(plugin_id, query_impl, &result_buf, &result_nbytes);
 }
 
 test "plugin_query present JSON includes AUR outdated from paru -Qua fixture" {

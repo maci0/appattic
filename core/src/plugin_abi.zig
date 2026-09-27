@@ -1,13 +1,15 @@
 const abi = @import("abi.zig");
 
 /// WASM ABI for one query plugin. Each plugin is a separate compilation;
-/// `comptime { plugin_abi.bind(id, queryImpl, resultPtr, resultLen); }` exports
-/// the guest symbols the host looks up. See path_listing.zig for the listing variant.
+/// `comptime { plugin_abi.bind(id, queryImpl, &result_buf, &result_nbytes); }`
+/// exports the guest symbols the host looks up, taking the result buffer and
+/// its length where the plugin keeps them. See path_listing.zig for the
+/// listing variant.
 pub fn bind(
     comptime id: []const u8,
     comptime queryImpl: anytype,
-    comptime resultPtr: anytype,
-    comptime resultLen: anytype,
+    comptime buf: anytype,
+    comptime n: anytype,
 ) void {
     const Impl = struct {
         fn plugin_abi_version() callconv(.c) i32 {
@@ -23,10 +25,10 @@ pub fn bind(
             return queryImpl(present);
         }
         fn result_ptr() callconv(.c) i32 {
-            return resultPtr();
+            return @intCast(@intFromPtr(buf));
         }
         fn result_len() callconv(.c) i32 {
-            return resultLen();
+            return @intCast(n.*);
         }
     };
     @export(&Impl.plugin_abi_version, .{ .name = "plugin_abi_version" });

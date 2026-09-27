@@ -1,5 +1,5 @@
 const std = @import("std");
-const abi = @import("abi.zig");
+const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
@@ -351,51 +351,19 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     }
 }
 
-pub fn resultPtr() i32 {
-    return @intCast(@intFromPtr(&result_buf));
-}
-
-pub fn resultLen() i32 {
-    return @intCast(result_nbytes);
-}
-
 pub fn resultSlice() []const u8 {
     return result_buf[0..result_nbytes];
-}
-
-pub fn abiVersion() i32 {
-    return abi.ABI_VERSION;
 }
 
 /// WASM ABI for one leftover-root plugin. Each `path_*.zig` is a separate
 /// compilation; `comptime { listing.bind(spec); }` exports the guest symbols.
 pub fn bind(comptime spec: Spec) void {
-    const Impl = struct {
-        fn plugin_abi_version() callconv(.c) i32 {
-            return abiVersion();
-        }
-        fn plugin_id_ptr() callconv(.c) i32 {
-            return @intCast(@intFromPtr(spec.id.ptr));
-        }
-        fn plugin_id_len() callconv(.c) i32 {
-            return @intCast(spec.id.len);
-        }
-        fn plugin_query(present: i32) callconv(.c) i32 {
+    const SpecQuery = struct {
+        fn run(present: i32) i32 {
             return query(spec, present);
         }
-        fn result_ptr() callconv(.c) i32 {
-            return resultPtr();
-        }
-        fn result_len() callconv(.c) i32 {
-            return resultLen();
-        }
     };
-    @export(&Impl.plugin_abi_version, .{ .name = "plugin_abi_version" });
-    @export(&Impl.plugin_id_ptr, .{ .name = "plugin_id_ptr" });
-    @export(&Impl.plugin_id_len, .{ .name = "plugin_id_len" });
-    @export(&Impl.plugin_query, .{ .name = "plugin_query" });
-    @export(&Impl.result_ptr, .{ .name = "result_ptr" });
-    @export(&Impl.result_len, .{ .name = "result_len" });
+    plugin_abi.bind(spec.id, SpecQuery.run, &result_buf, &result_nbytes);
 }
 
 test "parseListing orphans names not in keep" {

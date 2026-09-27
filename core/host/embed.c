@@ -666,27 +666,25 @@ static int wasm_run_locked(
         wasmtime_linker_delete(linker);
         return 1;
     }
-    wasmtime_extern_t core_abi, core_pabi;
-    if (must_export(ctx, &core, "core_abi_version", &core_abi, &e) ||
-        must_export(ctx, &core, "core_plugin_abi_version", &core_pabi, &e)) {
+    wasmtime_extern_t core_abi;
+    if (must_export(ctx, &core, "core_abi_version", &core_abi, &e)) {
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
         return 1;
     }
-    if (core_abi.kind != WASMTIME_EXTERN_FUNC || core_pabi.kind != WASMTIME_EXTERN_FUNC) {
+    if (core_abi.kind != WASMTIME_EXTERN_FUNC) {
         fail_msg(&e, "core exports must be functions");
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
         return 1;
     }
-    int32_t abi = 0, pabi = 0;
-    if (call_i32(ctx, &core_abi.of.func, &abi, &e) != 0 ||
-        call_i32(ctx, &core_pabi.of.func, &pabi, &e) != 0) {
+    int32_t abi = 0;
+    if (call_i32(ctx, &core_abi.of.func, &abi, &e) != 0) {
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
         return 1;
     }
-    if (abi != 1 || pabi != 1) {
+    if (abi != 1) {
         fail_msg(&e, "unsupported core abi");
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
@@ -713,7 +711,6 @@ static int wasm_run_locked(
     }
 
     wasmtime_extern_delete(&core_abi);
-    wasmtime_extern_delete(&core_pabi);
     wasmtime_store_delete(store);
     wasmtime_linker_delete(linker);
     return rc;
