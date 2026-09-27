@@ -371,7 +371,13 @@ final class PackageTests: XCTestCase {
             osRelease: "ID=arch\n"
         )
         XCTAssertTrue(cmds.contains { $0.contains("-Qdt") }, "\(cmds)")
-        XCTAssertTrue(cmds.contains { $0.contains("ls") || $0.joined(separator: " ").contains("ls -g") }, "\(cmds)")
+        // `--depth=0` is the property: an unbounded global list recurses into
+        // every dependency and reports them all as globals. A search for the
+        // bare `ls` element matched whichever query ran.
+        XCTAssertTrue(
+            cmds.contains { $0.dropFirst().starts(with: ["ls", "-g"]) && $0.contains("--depth=0") },
+            "\(cmds)"
+        )
         XCTAssertEqual(Set(pkgs.map(\.kind)), ["orphan", "global"])
         XCTAssertTrue(pkgs.contains { $0.name == "libfoo" && $0.manager == "pacman" })
         XCTAssertTrue(pkgs.contains { $0.name == "typescript" && $0.manager == "npm" })
@@ -410,7 +416,12 @@ final class PackageTests: XCTestCase {
                 cmdsLock.lock()
                 cmds.append(cmd)
                 cmdsLock.unlock()
-                return (0, "Remv libfoo0 [1.0]\n", "")
+                let bin = cmd.first.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
+                if bin == "apt-get" || bin == "apt" { return (0, "Remv libfoo0 [1.0]\n", "") }
+                if bin == "dpkg" { return (0, "", "") }
+                // Answering every command, as this stub used to, let the
+                // package name pass on a query the collector should not run.
+                return (1, "", "unexpected command: \(cmd.joined(separator: " "))")
             },
             osRelease: "ID=ubuntu\nID_LIKE=debian\n"
         )

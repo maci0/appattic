@@ -639,6 +639,7 @@ final class ClassifyTests: XCTestCase {
 
     func testDirKindSkipsLooseFiles() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         try FileManager.default.createDirectory(at: td, withIntermediateDirectories: true)
         let f = td.appendingPathComponent("default.store")
         try Data().write(to: f)
@@ -648,12 +649,14 @@ final class ClassifyTests: XCTestCase {
         XCTAssertTrue(includeScanEntry(d.path, kind: "dir"))
         XCTAssertTrue(includeScanEntry(f.path, kind: "mixed"))
         XCTAssertTrue(includeScanEntry(d.path, kind: "mixed"))
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testThresholdsMatchRecommend() {
         XCTAssertEqual(activeDays, 30)
         XCTAssertEqual(staleDays, 180)
+        // Both "significant data" tests feed this constant in as their input,
+        // so without a pin a change to it leaves them green.
+        XCTAssertEqual(dataKeepThreshold, 50 * 1024 * 1024)
     }
 
     func testScanLeftoversMeasuresOrphanedDirectoryBytes() throws {
@@ -1644,6 +1647,7 @@ final class ClassifyTests: XCTestCase {
 
     func testNestedFileMtimeBeatsStaleParent() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let parent = td.appendingPathComponent("OrphanApp")
         let sub = parent.appendingPathComponent("subdir")
         try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
@@ -1653,11 +1657,11 @@ final class ClassifyTests: XCTestCase {
         let dt = probeActivityMtime(parent.path)
         XCTAssertNotNil(dt)
         XCTAssertLessThan(daysSince(dt) ?? 99, 2)
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testDoesNotDescendIntoNodeModules() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let parent = td.appendingPathComponent("MaybeApp")
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
         let nm = parent.appendingPathComponent("node_modules/pkg")
@@ -1669,7 +1673,6 @@ final class ClassifyTests: XCTestCase {
         let dt = probeActivityMtime(parent.path)
         XCTAssertNotNil(dt)
         XCTAssertGreaterThan(daysSince(dt) ?? 0, Double(activeDays))
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testLaunchAgentOwnedWhenProgramBasenameStillInstalled() {
@@ -1905,9 +1908,29 @@ final class ClassifyTests: XCTestCase {
         XCTAssertTrue(found[0].path.hasSuffix("com.dead.app.plist"))
     }
 
-    func testScanLaunchAgentsSkippedOnLinux() {
+    func testScanLaunchAgentsSkippedOnLinux() throws {
         PlatformOverride.linux = true
         defer { PlatformOverride.linux = nil }
-        XCTAssertTrue(scanLaunchAgents(roots: ["/tmp"]).isEmpty)
+        // A root holding a plist the sibling test finds on Darwin. Passing a
+        // real directory such as `/tmp` made the assertion a statement about
+        // whatever that machine had in it: with the short-circuit moved, the
+        // walk still found nothing and the test stayed green.
+        let td = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agents-linux-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: td) }
+        try FileManager.default.createDirectory(at: td, withIntermediateDirectories: true)
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>com.dead.app</string>
+            <key>Program</key>
+            <string>/Applications/DeadMissing.app/Contents/MacOS/Dead</string>
+        </dict>
+        </plist>
+        """.write(to: td.appendingPathComponent("com.dead.app.plist"), atomically: true, encoding: .utf8)
+        XCTAssertTrue(scanLaunchAgents(roots: [td.path]).isEmpty)
     }
 }

@@ -50,10 +50,16 @@ final class DiskSizeTests: XCTestCase {
         for i in 0..<8 {
             try Data(repeating: 0x61, count: 1024).write(to: root.appendingPathComponent("f\(i).bin"))
         }
-        let (bytes, ok) = directoryByteSize(root.path, timeout: -1)
-        XCTAssertFalse(ok, "timeout is a partial measurement")
-        XCTAssertGreaterThanOrEqual(bytes, 0)
-        XCTAssertLessThan(bytes, 8 * 1024 + 1)
+        let (partialBytes, partialOK) = directoryByteSize(root.path, timeout: -1)
+        XCTAssertFalse(partialOK, "a deadline overrun is a partial measurement")
+        let (fullBytes, fullOK) = directoryByteSize(root.path, timeout: 60)
+        XCTAssertTrue(fullOK, "the same tree measures cleanly once the deadline is out of the way")
+        XCTAssertEqual(fullBytes, 8 * 1024)
+        // What a stopped walk reports is bounded by the real total. The lower
+        // bound used to be `bytes >= 0`, which holds for every Int a function
+        // can return and so asserted nothing.
+        XCTAssertLessThan(partialBytes, fullBytes, "a partial total cannot reach the whole tree")
+        XCTAssertLessThan(partialBytes, 8 * 1024 + 1)
     }
 
 

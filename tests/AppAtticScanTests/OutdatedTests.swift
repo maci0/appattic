@@ -58,7 +58,9 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(empty.isEmpty)
         XCTAssertEqual(calls[0].0, ["/opt/homebrew/bin/brew", "outdated", "--json=v2"])
         XCTAssertFalse(calls[0].0.contains("--greedy"))
-        XCTAssertGreaterThanOrEqual(calls[0].1, 60)
+        // Exactly, not `>= 60`: this call reaches the network, so a lower
+        // bound is satisfied by an unbounded wait too.
+        XCTAssertEqual(calls[0].1, 90, "brew outdated is bounded, not left open")
     }
 
     func testBrewInfoJSONYieldsDescAndCaskTitle() {
@@ -537,7 +539,10 @@ final class OutdatedTests: XCTestCase {
         result.outdated = [OutdatedPkg(name: "wget", manager: "brew-formula", currentVersion: "1.21.4", latestVersion: "1.24.5")]
         let script = cleanupScript(result)
         XCTAssertTrue(script.contains("# brew upgrade wget"))
-        XCTAssertFalse(script.contains("\nbrew upgrade wget\n"))
+        // Line by line, not by substring: `\nbrew upgrade wget\n` is only one
+        // spelling, and `brew upgrade wget 2>&1` or a second space still runs
+        // the upgrade.
+        XCTAssertFalse(scriptHasActionableCommands(script), script)
     }
 
     func testUntrustedCaskIsListedAndNotUpdatable() {
@@ -608,6 +613,12 @@ final class OutdatedTests: XCTestCase {
         // Every manager is "installed" and every command fails, so the check
         // is attempted on any distro and the result is an unknown, not an
         // empty outdated list.
+        //
+        // The failure set is process-global, so it is cleared on both sides:
+        // a leftover entry from another test would satisfy the assertion
+        // below without this scan recording anything.
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
         let result = performScan(
             includeSystem: false,
             apps: [],

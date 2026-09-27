@@ -159,6 +159,7 @@ final class UsageTests: XCTestCase {
 
     func testInnerExecutablePath() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let app = td.appendingPathComponent("iTerm.app")
         let mac = app.appendingPathComponent("Contents/MacOS")
         try FileManager.default.createDirectory(at: mac, withIntermediateDirectories: true)
@@ -166,7 +167,6 @@ final class UsageTests: XCTestCase {
         try Data().write(to: exe)
         XCTAssertEqual(innerExecutablePath(app.path, executable: "iTerm2"), exe.path)
         XCTAssertNil(innerExecutablePath(app.path, executable: "Missing"))
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testInnerMdlsDropsLastUsedEqualToCreation() {
@@ -631,12 +631,22 @@ final class UsageTests: XCTestCase {
 
     func testFlatpakVarAppMtime() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let varApp = td.appendingPathComponent(".var/app/org.mozilla.Firefox")
         try FileManager.default.createDirectory(at: varApp, withIntermediateDirectories: true)
-        let hits = parseFlatpakVarAppMtimes(td.appendingPathComponent(".var/app").path)
-        XCTAssertNotNil(hits["org.mozilla.firefox"])
-        XCTAssertNotNil(hits["firefox"])
-        try? FileManager.default.removeItem(at: td)
+        // A fixed mtime, and the clock the parser is handed: asserting the two
+        // keys exist passes for a parser that answered with the current time,
+        // or with the same date for every directory it walked.
+        let stamp = Date(timeIntervalSince1970: 1_787_011_200)
+        try FileManager.default.setAttributes([.modificationDate: stamp], ofItemAtPath: varApp.path)
+        let attrs = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: varApp.path))
+        let mtime = try XCTUnwrap(attrs[.modificationDate] as? Date)
+        let hits = parseFlatpakVarAppMtimes(
+            td.appendingPathComponent(".var/app").path,
+            now: mtime.addingTimeInterval(3600)
+        )
+        XCTAssertEqual(hits["org.mozilla.firefox"], mtime)
+        XCTAssertEqual(hits["firefox"], mtime)
     }
 
     func testUsageKeysFoldCapitalIOutsideTurkishLocale() {

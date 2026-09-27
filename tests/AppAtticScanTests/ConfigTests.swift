@@ -87,10 +87,16 @@ final class ConfigTests: XCTestCase {
         )
         let reported = config.dataDirs.split(separator: ":").map(String.init)
         let searched = xdgSystemDirList(env: env).map { "\($0)/applications" }
-        for dir in linuxDesktopDirs(home: "/home/x", env: env) {
-            if reported.contains(where: { dir == "\($0)/applications" }) {
-                XCTAssertTrue(searched.contains(dir), "\(dir) is reported but not searched")
-            }
+        // The comparison below only runs over the reported roots, so an empty
+        // report, or one holding nothing the search produces, would leave it
+        // with nothing to check and the test would pass on a list that never
+        // matched. Both are asserted first.
+        let candidates = linuxDesktopDirs(home: "/home/x", env: env)
+            .filter { dir in reported.contains { dir == "\($0)/applications" } }
+        XCTAssertFalse(reported.isEmpty, "nothing was reported: \(config.dataDirs)")
+        XCTAssertFalse(candidates.isEmpty, "no reported root is a searched desktop dir")
+        for dir in candidates {
+            XCTAssertTrue(searched.contains(dir), "\(dir) is reported but not searched")
         }
     }
 

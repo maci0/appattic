@@ -70,7 +70,6 @@ final class RecommendTests: XCTestCase {
             dataMtime: now.addingTimeInterval(-3 * 86400)
         )
         XCTAssertEqual(evaluate(sw, now: now).tier, "keep")
-        XCTAssertLessThanOrEqual(3, activeDays)
     }
 
     func testOldDataMtimeIsReviewNotRemove() {
@@ -100,7 +99,6 @@ final class RecommendTests: XCTestCase {
             caskName: "sketch"
         )
         XCTAssertEqual(evaluate(sw, now: now).tier, "review")
-        XCTAssertLessThan(90, staleDays)
     }
 
     func testLongHistoryFormulaWithSignificantDataIsReview() {
@@ -143,6 +141,7 @@ final class RecommendTests: XCTestCase {
 
     func testBrewCaskPkgDirIsTaggedCask() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let path = td.appendingPathComponent("quarto")
         try FileManager.default.createDirectory(at: path.appendingPathComponent("bin"), withIntermediateDirectories: true)
         let brew = BrewSnapshot(available: true, casks: [Cask(name: "quarto")])
@@ -159,11 +158,11 @@ final class RecommendTests: XCTestCase {
         XCTAssertEqual(hits.count, 1)
         XCTAssertEqual(hits[0].source, "brew-cask")
         XCTAssertEqual(hits[0].caskName, "quarto")
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testFormulaDirInApplicationsIsNotDuplicated() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let path = td.appendingPathComponent("wget")
         try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
         let brew = BrewSnapshot(available: true, formulas: [Formula(name: "wget")])
@@ -178,7 +177,6 @@ final class RecommendTests: XCTestCase {
         )
         XCTAssertTrue(software.filter { $0.source == "pkg/other" }.isEmpty)
         XCTAssertEqual(software.filter { $0.kind == "formula" }.map(\.name), ["wget"])
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testFormulaHistorySpanUsesInjectedNow() {

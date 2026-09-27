@@ -38,10 +38,16 @@ final class PackagingTests: XCTestCase {
         )
         // Every flag --help prints has to be in the man page, or the two
         // contradict each other.
-        for flag in ["--version", "--help", "-h", "--smoke"] {
+        for flag in ["--version", "--help", "--smoke"] {
             XCTAssertTrue(man.contains(flag), "man page is missing \(flag)")
             XCTAssertTrue(main.contains(flag), "runHelp is missing \(flag)")
         }
+        // `-h` is an alias, not a printed flag. Searching for it on its own
+        // passed on the `-h` inside `--help` in both files, so neither side
+        // had to mention the alias at all: the man page escapes it as `\-h`
+        // and main.cpp passes it as a quoted argument.
+        XCTAssertTrue(man.contains("\\-h"), "man page does not document the -h alias")
+        XCTAssertTrue(main.contains("\"-h\""), "main.cpp does not accept -h as an alias")
 
         let cmake = try String(
             contentsOf: root.appendingPathComponent("ui/linux-qt/CMakeLists.txt"),
