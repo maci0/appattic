@@ -307,11 +307,11 @@ final class SettingsTests: XCTestCase {
     /// These errors name the settings and cache files, which live under the
     /// account home, so their text reaches the terminal, the error bar, and
     /// any pasted bug report with the account name in it.
-    func testPersistenceErrorsDoNotCarryTheAccountPath() {
+    func testPersistenceErrorsDoNotCarryTheAccountPath() throws {
         // redactHomePaths matches the standardized home, so build the input
         // from that form or the comparison is between two spellings.
         let home = (FileManager.default.homeDirectoryForCurrentUser.path as NSString).standardizingPath
-        guard home.count > 1, home.contains("/") else { return }
+        try XCTSkipIf(home.count <= 1 || !home.contains("/"), "no redaction is attempted for a root-only home")
 
         let settings = SettingsError.unreadable(
             path: home + "/.local/share/appattic/settings.json",

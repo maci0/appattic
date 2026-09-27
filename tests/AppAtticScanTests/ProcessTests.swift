@@ -62,14 +62,23 @@ final class ProcessTests: XCTestCase {
         func liveThreads() throws -> Int {
             try FileManager.default.contentsOfDirectory(atPath: "/proc/self/task").count
         }
-        _ = runCommand(["/bin/sh", "-c", "sleep 30 & exit 0"], timeout: 5)
-        let after = try liveThreads()
-        for _ in 0..<8 {
-            _ = runCommand(["/bin/sh", "-c", "sleep 30 & exit 0"], timeout: 5)
+        func batch() {
+            for _ in 0..<8 {
+                _ = runCommand(["/bin/sh", "-c", "sleep 30 & exit 0"], timeout: 5)
+            }
         }
+        // /proc/self/task counts every thread in the process, so compare a
+        // steady-state batch against the next one instead of against the first:
+        // the GCD pool materializes lazily and its workers belong to whoever
+        // ran first. A leaked reader adds two threads per command, so the
+        // second batch's growth is where that shows up.
+        batch()
+        batch()
+        let afterWarm = try liveThreads()
+        batch()
         XCTAssertLessThanOrEqual(
-            try liveThreads(),
-            after + 1,
+            try liveThreads() - afterWarm,
+            1,
             "each command must release its pipe readers; eight more commands cannot add sixteen threads"
         )
     }

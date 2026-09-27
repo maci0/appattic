@@ -176,9 +176,9 @@ final class DiskUsageTests: XCTestCase {
 
     /// `appattic disk` defaults to the account home, so a typo there printed
     /// the account name to stderr before the message was redacted.
-    func testDiskRootErrorRedactsTheAccountHome() {
+    func testDiskRootErrorRedactsTheAccountHome() throws {
         let home = (FileManager.default.homeDirectoryForCurrentUser.path as NSString).standardizingPath
-        guard home.count > 1, home.contains("/") else { return }
+        try XCTSkipIf(home.count <= 1 || !home.contains("/"), "no redaction is attempted for a root-only home")
         let missing = DiskRootError.missing(path: home + "/nope")
         XCTAssertEqual(missing.description, "no such directory: ~/nope")
         XCTAssertFalse(missing.description.contains(home), missing.description)

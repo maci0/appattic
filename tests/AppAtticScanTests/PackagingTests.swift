@@ -321,20 +321,18 @@ final class PackagingTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
 
+        // `runCommand` resolves bash on PATH, drains both pipes on their own
+        // threads, and bounds the child. A hand-rolled Process that waits
+        // before reading deadlocks as soon as a script's output passes the pipe
+        // buffer, and never returns. Every script here derives ROOT from its own
+        // path, so the working directory does not need to be the checkout.
         func run(_ rel: String, _ args: [String]) throws -> (Int32, String, String) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.currentDirectoryURL = root
-            process.arguments = [root.appendingPathComponent(rel).path] + args
-            let out = Pipe()
-            let err = Pipe()
-            process.standardOutput = out
-            process.standardError = err
-            try process.run()
-            process.waitUntilExit()
-            let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            return (process.terminationStatus, stdout, stderr)
+            let shell = try XCTUnwrap(whichCommand("bash"), "bash is needed to run the shell scripts")
+            let (rc, stdout, stderr) = runCommand(
+                [shell, root.appendingPathComponent(rel).path] + args,
+                timeout: 60
+            )
+            return (rc, stdout, stderr)
         }
 
         let helpScripts = [
