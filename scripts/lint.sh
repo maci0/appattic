@@ -16,7 +16,8 @@ case "${1:-}" in
 Usage: bash scripts/lint.sh
 
   shellcheck on the shell scripts, yamllint on the YAML,
-  host C warnings-as-errors, host C under ASan + UBSan,
+  host C warnings-as-errors under every compiler on PATH,
+  host C under ASan + UBSan,
   hostexec warnings-as-errors, dependency pin consistency,
   zig fmt --check, no AI tool credit in commit messages
 EOF
@@ -67,9 +68,23 @@ if ! command -v yamllint >/dev/null 2>&1; then
     exit 1
 fi
 # --strict: without it yamllint exits 0 on warnings, so a rule downgraded to a
-# warning is a rule nothing fails on.
-yamllint --strict -c "$ROOT/.yamllint" "$ROOT"/.github/*.yml \
-    "$ROOT"/.github/workflows/*.yml "$ROOT"/packaging/flatpak/*.yml
+# warning is a rule nothing fails on. The file list is discovered, like the
+# shell list above: a workflow in a new directory, or a file written as .yaml
+# instead of .yml, would otherwise leave the gate without anyone noticing.
+# .yamllint is itself YAML and linted here, so a rule edit cannot break the
+# config the gate runs on.
+mapfile -t yaml_files < <(
+    find "$ROOT" \
+        \( -name .git -o -name .zig-cache -o -name .zig-cache-local \
+           -o -name .build -o -name .deps -o -name build -o -name dist \) -prune \
+        -o -type f \( -name '*.yml' -o -name '*.yaml' \) -print \
+        | LC_ALL=C sort
+)
+if [[ "${#yaml_files[@]}" -eq 0 ]]; then
+    echo "error: no YAML file found to check" >&2
+    exit 1
+fi
+yamllint --strict -c "$ROOT/.yamllint" "${yaml_files[@]}"
 
 echo "== dependency pins =="
 bash "$ROOT/scripts/deps.sh" check
@@ -78,13 +93,26 @@ if ! command -v cc >/dev/null 2>&1; then
     echo "error: cc missing" >&2
     exit 1
 fi
+# The same sources under every compiler on PATH. One compiler's silence is not
+# the other's: the two disagree on what they diagnose, so a gate that compiles
+# with whichever cc resolves to passes a defect the shipped toolchain warns
+# about. cc is the one that must exist; clang joins when present, and a host
+# without it says so rather than reporting a pass it did not earn. The CI lint
+# runner has both.
+compilers=(cc)
+if command -v clang >/dev/null 2>&1; then
+    compilers+=(clang)
+else
+    echo "note: clang missing, C sources are compiled with cc only" >&2
+    echo "      install: bash scripts/linux-deps.sh --install" >&2
+fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-# One warning set for both builds below, so the sanitizer build cannot drift
-# into compiling sources the plain build would have rejected. Every flag is
-# GCC 10+ and clang 10+, checked against both. core/build.sh and the Qt
-# CMakeLists carry a smaller set for the shipped binary; this gate is the
-# strictest of the three, so a warning here is a warning there too.
+# One warning set for every compile below, so no compiler in the loop and no
+# later build can drift into diagnosing less. Every flag is GCC 10+ and
+# clang 10+, checked against both. core/build.sh and the Qt CMakeLists carry a
+# smaller set for the shipped binary; this gate is the strictest of the three,
+# so a warning here is a warning there too.
 strict_cflags=(-Wall -Wextra -Werror
     -Wformat=2 -Wformat-security -Wshadow -Wstrict-prototypes -Wconversion
     -Wpedantic -Wnull-dereference
@@ -93,16 +121,50 @@ strict_cflags=(-Wall -Wextra -Werror
     -Wjump-misses-init -Wtautological-compare)
 cflags=(-O2 "${strict_cflags[@]}")
 # Every C file under core/host is compiled here, so a new one cannot join the
-# tree without also joining the gate. embed.c is the exception: it needs the
-# Wasmtime C API headers, which the lint job does not install. CMake compiles it
-# for the Qt app with -Wall -Wextra.
-skip_c="embed.c"
-for src in "$ROOT"/core/host/*.c "$ROOT"/core/host/tests/*.c; do
-    base="$(basename "$src")"
-    case " $skip_c " in
-        *" $base "*) continue ;;
-    esac
-    cc "${cflags[@]}" -I "$ROOT/core/host" -c "$src" -o "$tmp/${base%.c}.o"
+# tree without also joining the gate. Discovered, not listed: a new
+# subdirectory of core/host otherwise compiles with warnings nothing fails on.
+mapfile -t c_sources < <(
+    find "$ROOT/core/host" -type d \( -name build -o -name out \) -prune \
+        -o -type f -name '*.c' -print | LC_ALL=C sort
+)
+if [[ "${#c_sources[@]}" -eq 0 ]]; then
+    echo "error: no C source found under core/host to check" >&2
+    exit 1
+fi
+# embed.c is the Wasmtime loader, and it was the one source this gate skipped:
+# it needs the Wasmtime C API headers, and the lint job did not install them.
+# It is now installed there, so embed.c compiles here like every other source.
+# The flags are the ones the Qt CMakeLists already gives it for the shipped
+# binary, so the gate cannot demand more than the shipped build passes. A host
+# without the headers says which file went unchecked and how to get them.
+wasmtime_include=""
+for hint in "${WASMTIME_DIR:-}" /opt/wasmtime-c-api "$ROOT/.deps/wasmtime-c-api" \
+            /opt/homebrew /usr/local; do
+    if [[ -n "$hint" && -f "$hint/include/wasmtime.h" ]]; then
+        wasmtime_include="$hint/include"
+        break
+    fi
+done
+embed_cflags=(-O2 -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wshadow
+    -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference)
+if [[ -z "$wasmtime_include" ]]; then
+    echo "note: Wasmtime C API headers not found, embed.c not compiled here" >&2
+    echo "      install: bash scripts/linux-deps.sh --install-wasmtime" >&2
+fi
+for comp in "${compilers[@]}"; do
+    for src in "${c_sources[@]}"; do
+        base="$(basename "$src")"
+        obj="$tmp/${comp}-${base%.c}.o"
+        if [[ "$base" == embed.c ]]; then
+            if [[ -z "$wasmtime_include" ]]; then
+                continue
+            fi
+            "$comp" "${embed_cflags[@]}" -I "$ROOT/core/host" \
+                -I "$wasmtime_include" -c "$src" -o "$obj"
+            continue
+        fi
+        "$comp" "${cflags[@]}" -I "$ROOT/core/host" -c "$src" -o "$obj"
+    done
 done
 cc "${cflags[@]}" \
     -I "$ROOT/core/host" \

@@ -57,6 +57,14 @@ jobs:
         # yamllint shipped that morning", not "this tree passes". The pin is
         # repeated in scripts/deps.sh, which fails if the two disagree.
         run: uv tool install "yamllint==1.38.0"
+      - name: Install Wasmtime C API
+        # embed.c is the WASM loader, and the C gate compiles every source
+        # under core/host. Without these headers it is the one file the gate
+        # skips, which is the file most worth a warnings-as-errors pass. Same
+        # script and same checksummed version the test job installs.
+        run: |
+          sudo bash scripts/linux-deps.sh --install-wasmtime
+          echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
       - name: Install zig
         run: sudo bash scripts/linux-deps.sh --install-zig
       - name: Put zig on PATH
