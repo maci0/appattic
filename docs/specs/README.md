@@ -1,6 +1,6 @@
 # Specs
 
-Requirement and architecture records. Visual rules live in [`DESIGN.md`](../../../DESIGN.md).
+Requirement and architecture records. Visual rules live in [`DESIGN.md`](../../DESIGN.md).
 
 | Document | Status | Role |
 |----------|--------|------|
@@ -9,4 +9,4 @@ Requirement and architecture records. Visual rules live in [`DESIGN.md`](../../.
 
 Superseded records live in [`archive/`](archive/) and are kept for history.
 
-These records are canonical. [`core/README.md`](../../../core/README.md) repeats the host load list and the backlog table for contributor convenience; when the two disagree, the record here wins and the copy is brought back into line.
+These records are canonical. [`core/README.md`](../../core/README.md) repeats the host load list and the backlog table for contributor convenience; when the two disagree, the record here wins and the copy is brought back into line.

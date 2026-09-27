@@ -486,7 +486,7 @@ final class PackagingTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let zig = try String(
-            contentsOf: root.appendingPathComponent("docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md"),
+            contentsOf: root.appendingPathComponent("docs/specs/2026-08-26-zig-wasm-core-design.md"),
             encoding: .utf8
         )
         XCTAssertTrue(zig.contains("Status: Accepted"), zig)
@@ -507,7 +507,7 @@ final class PackagingTests: XCTestCase {
         XCTAssertFalse(zig.contains("Only these WASM modules"), zig)
 
         let swift = try String(
-            contentsOf: root.appendingPathComponent("docs/superpowers/specs/archive/2026-08-17-swift-scan-port-design.md"),
+            contentsOf: root.appendingPathComponent("docs/specs/archive/2026-08-17-swift-scan-port-design.md"),
             encoding: .utf8
         )
         XCTAssertTrue(swift.contains("ARCHIVED"), swift)
@@ -519,7 +519,7 @@ final class PackagingTests: XCTestCase {
         XCTAssertFalse(swift.contains("| `AppAttic` | executable | `AppAtticScan`, SwiftCrossUI"), swift)
 
         let index = try String(
-            contentsOf: root.appendingPathComponent("docs/superpowers/specs/README.md"),
+            contentsOf: root.appendingPathComponent("docs/specs/README.md"),
             encoding: .utf8
         )
         XCTAssertTrue(index.contains("archive/2026-08-17-swift-scan-port-design.md"), index)

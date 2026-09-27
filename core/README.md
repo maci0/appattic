@@ -1,6 +1,6 @@
 # Zig WASM core
 
-Design: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](../docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md).
+Design: [`docs/specs/2026-08-26-zig-wasm-core-design.md`](../docs/specs/2026-08-26-zig-wasm-core-design.md).
 
 Needs `zig` 0.16 (`.zig-version`) and, to run the host, the Wasmtime C API (`brew install zig wasmtime`, or `scripts/linux-deps.sh --install-wasmtime` on Linux). Test one plugin with `./core/build.sh test brew.zig`.
 
