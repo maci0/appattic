@@ -179,6 +179,14 @@ public func ensureRootHelper(_ script: String) -> String {
     return lines.joined(separator: "\n")
 }
 
+/// Drop trailing whitespace-only lines. The blank tail both strippers leave
+/// behind would otherwise pad the merged script with a run of empty lines.
+func trimTrailingBlankLines(_ lines: inout [String]) {
+    while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+        lines.removeLast()
+    }
+}
+
 public func stripShellHeader(_ script: String) -> String {
     var lines = script.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
     while let first = lines.first {
@@ -199,9 +207,7 @@ public func stripShellHeader(_ script: String) -> String {
         }
         break
     }
-    while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
-        lines.removeLast()
-    }
+    trimTrailingBlankLines(&lines)
     return lines.joined(separator: "\n")
 }
 
@@ -221,9 +227,7 @@ func stripShellPreambleOnly(_ script: String) -> String {
     while let first = lines.first, isShellPreamble(first) {
         lines.removeFirst()
     }
-    while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
-        lines.removeLast()
-    }
+    trimTrailingBlankLines(&lines)
     return lines.joined(separator: "\n")
 }
 
