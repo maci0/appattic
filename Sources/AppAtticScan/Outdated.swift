@@ -3,6 +3,35 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// Update checks that could not run in the scan now in flight, by manager name.
+/// A check that failed is not the answer "nothing is outdated", it is an
+/// unknown, and the two collapse into the same empty list. The scan cache
+/// keeps a scan for `scanCacheMaxAge`, so an unknown written to it is served as
+/// a verified "up to date" for a day. `performScan` reads the set and marks the
+/// scan incomplete, which is the flag `commitScanCache` already refuses to keep
+/// and `isScanCacheStale` already refuses to serve. Reset per scan, so a long
+/// lived process (the UI) cannot carry one scan's failure into the next.
+private let outdatedFailureLock = NSLock()
+nonisolated(unsafe) private var outdatedFailures: Set<String> = []
+
+func noteOutdatedCheckFailed(_ source: String) {
+    outdatedFailureLock.lock()
+    outdatedFailures.insert(source)
+    outdatedFailureLock.unlock()
+}
+
+func outdatedCheckFailures() -> [String] {
+    outdatedFailureLock.lock()
+    defer { outdatedFailureLock.unlock() }
+    return outdatedFailures.sorted()
+}
+
+func resetOutdatedCheckFailures() {
+    outdatedFailureLock.lock()
+    outdatedFailures.removeAll()
+    outdatedFailureLock.unlock()
+}
+
 // Per-line hot loops below use manual index walks instead of NSRegularExpression
 // plus `trimmingCharacters` (which alone costs ~2.2 µs/line). The byte walks
 // themselves allocate nothing; rows still build a result String.
@@ -1184,7 +1213,10 @@ public func queryFlatpak(
     // not a flaky remote (local `list` still succeeds then).
     if rc != 0, parseFlatpakUpdates(updates).isEmpty, installed.isEmpty {
         (rc, updates, installed) = pair(withMeta: false)
-        if rc != 0, parseFlatpakUpdates(updates).isEmpty { return [] }
+        if rc != 0, parseFlatpakUpdates(updates).isEmpty {
+            noteOutdatedCheckFailed("flatpak")
+            return []
+        }
     }
     return parseFlatpakUpdates(updates, installedText: installed)
 }
@@ -1207,7 +1239,10 @@ public func querySnap(
         if i == 0 { r1.value = (rc, out) } else { r2.value = (rc, out) }
     }
     let (rc, refresh) = r1.value
-    if rc != 0 { return [] }
+    if rc != 0 {
+        noteOutdatedCheckFailed("snap")
+        return []
+    }
     let (rc2, listed) = r2.value
     return parseSnapRefreshList(refresh, installedText: rc2 == 0 ? listed : "")
 }
@@ -1220,7 +1255,10 @@ public func queryApt(
     guard let path = which("apt") else { return [] }
     progress?("  · checking apt upgradable packages…")
     let (rc, out, _) = run([path, "list", "--upgradable"], 60)
-    if rc != 0 { return [] }
+    if rc != 0 {
+        noteOutdatedCheckFailed("apt")
+        return []
+    }
     return parseAptUpgradable(out)
 }
 
@@ -1233,7 +1271,10 @@ public func queryAur(
         guard let path = which(name) else { continue }
         progress?("  · checking AUR updates…")
         let (rc, out, _) = run([path, "-Qua"], 60)
-        if rc != 0 && rc != 1 { continue }
+        if rc != 0 && rc != 1 {
+            noteOutdatedCheckFailed("aur")
+            continue
+        }
         return parsePacmanQu(out).map { pkg in
             OutdatedPkg(
                 name: pkg.name,
@@ -1254,7 +1295,10 @@ public func queryPacman(
     guard let path = which("pacman") else { return [] }
     progress?("  · checking pacman updates…")
     let (rc, out, _) = run([path, "-Qu"], 60)
-    if rc != 0 && rc != 1 { return [] }
+    if rc != 0 && rc != 1 {
+        noteOutdatedCheckFailed("pacman")
+        return []
+    }
     return parsePacmanQu(out)
 }
 
@@ -1276,7 +1320,9 @@ public func queryDnf(
         if let pkgs = parsed(rc, out) { return pkgs }
     }
     let (rc, out, _) = run([path, "check-update"], 60)
-    return parsed(rc, out) ?? []
+    if let pkgs = parsed(rc, out) { return pkgs }
+    noteOutdatedCheckFailed(manager)
+    return []
 }
 
 public func queryZypper(
@@ -1287,7 +1333,10 @@ public func queryZypper(
     guard let path = which("zypper") else { return [] }
     progress?("  · checking zypper updates…")
     let (rc, out, _) = run([path, "--non-interactive", "list-updates"], 60)
-    if rc != 0 { return [] }
+    if rc != 0 {
+        noteOutdatedCheckFailed("zypper")
+        return []
+    }
     return parseZypperListUpdates(out)
 }
 

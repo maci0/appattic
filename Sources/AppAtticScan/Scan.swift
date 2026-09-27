@@ -12,9 +12,11 @@ public final class ScanResult {
     public var outdated: [OutdatedPkg]
     public var packages: [PackageEntry]
     public var appsInstalled: Int
-    /// The Homebrew outdated query failed. The rest of the scan ran, so this is
-    /// not "the scan was cut short": it gates scan-cache reuse and writes, so a
-    /// cached scan is retried instead of serving an outdated list.
+    /// An update check that could not run: the Homebrew query, or any manager
+    /// or store query below. The rest of the scan ran, so this is not "the scan
+    /// was cut short": it gates scan-cache reuse and writes, so a cached scan
+    /// is retried instead of serving an outdated list that is missing every
+    /// package the failed check would have reported.
     public var incomplete: Bool
 
     public init(
@@ -168,6 +170,7 @@ public func performScan(
 ) -> ScanResult {
     let t0 = clock()
     let result = ScanResult(scannedAt: now)
+    resetOutdatedCheckFailures()
 
     progress("Scanning installed applications…")
     var found = apps ?? findApps(progress: progress)
@@ -184,12 +187,20 @@ public func performScan(
 
     let brewInfo = brew ?? collectBrew(progress: progress, which: which, run: run)
     result.brewAvailable = brewInfo.available
-    result.incomplete = brewInfo.outdatedFailed
 
     progress("Checking for outdated packages…")
     let linuxPkgs = linuxOutdated ?? collectLinux(progress: progress, which: which, run: run)
     let masPkgs = appStoreOutdated ?? queryAppstore(result.apps, progress: progress, which: which, run: run)
     result.outdated = applyUntrustedCasks(brewInfo.outdated + linuxPkgs + masPkgs, refused: brewInfo.untrustedCasks)
+    // A check that could not run is an unknown, not an empty list. It reaches
+    // the scan cache through `incomplete`, so the next run retries instead of
+    // serving "up to date" for a day. Only the ones that were actually
+    // attempted count: a manager that is not installed never failed.
+    let failed = outdatedCheckFailures()
+    if !failed.isEmpty {
+        progress("  · update check unavailable: \(failed.joined(separator: ", "))")
+    }
+    result.incomplete = brewInfo.outdatedFailed || !failed.isEmpty
 
     progress("Scanning for leftover data…")
     if let leftoverItems {

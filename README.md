@@ -101,7 +101,7 @@ Environment:
 
 Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used.
 
-`report`, `leftovers`, `stale`, `outdated`, and `packages` reuse the last scan when it is still current. Pass `--fresh` to scan now. `update` always scans live and drops the last-scan cache after a successful upgrade.
+`report`, `leftovers`, `stale`, `outdated`, and `packages` reuse the last scan when it is still current. Pass `--fresh` to scan now. `update` always scans live and drops the last-scan cache after a successful upgrade. A scan that could not run every update check is not saved, so a failed check is retried on the next run instead of being served as "up to date" for a day.
 
 Linux CLI does not need Qt. Headless `report` works without a display.
 
@@ -242,5 +242,5 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 - Homebrew `outdated` is called without `--greedy`, so auto-updating casks are not flagged just because the bottle is older than the running app.
 - An untrusted Homebrew cask is still listed on Outdated. Other formula and cask descriptions still load. AppAttic will not trust the tap.
 - Named outdated upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf/yum, zypper) run from the Outdated page (confirm first) or `./run.sh update` (runs now; pass `--dry-run` to print the script). App Store and Snap stay report-only.
-- Missing package managers are skipped. A failed `brew outdated` (network) does not fail the scan.
+- Missing package managers are skipped. A failed update check (network, dead remote, broken `brew outdated`) does not fail the scan, but the scan is marked incomplete and the last-scan cache is not written, so a failed check is never served later as "up to date".
 - Review every path in a generated script before running it.

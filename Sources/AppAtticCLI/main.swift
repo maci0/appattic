@@ -58,6 +58,9 @@ enum AppAtticCLI {
         if let cacheFailure = resolved.cacheWriteFailure {
             fputs("warning: scan not cached: \(redactHomePaths(cacheFailure)); the next run rescans\n", stderr)
         }
+        if resolved.data.incomplete == true {
+            fputs("warning: an update check failed; the outdated list is incomplete and the scan is not cached\n", stderr)
+        }
         let ignored = Set(settings.ignoredLeftoverPaths)
         let result = scanResult(from: resolved.data, ignoringLeftovers: ignored, now: now)
         if let jsonPath = opts.json {

@@ -580,6 +580,46 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(result.outdated.contains { $0.name == "notepadnext" && $0.kind == "untrusted" })
     }
 
+    func testFailedUpdateCheckIsRecordedNotAnEmptyAnswer() {
+        resetOutdatedCheckFailures()
+        defer { resetOutdatedCheckFailures() }
+        let pkgs = queryApt(which: { $0 == "apt" ? "/usr/bin/apt" : nil }, run: { _, _ in (1, "", "") })
+        XCTAssertTrue(pkgs.isEmpty)
+        XCTAssertEqual(outdatedCheckFailures(), ["apt"])
+        // A check that answers is not a failure: same empty list, no record.
+        resetOutdatedCheckFailures()
+        let clean = queryApt(which: { $0 == "apt" ? "/usr/bin/apt" : nil }, run: { _, _ in (0, "", "") })
+        XCTAssertTrue(clean.isEmpty)
+        XCTAssertTrue(outdatedCheckFailures().isEmpty)
+    }
+
+    func testFailedUpdateCheckKeepsTheScanOutOfTheCache() throws {
+        // Every manager is "installed" and every command fails, so the check
+        // is attempted on any distro and the result is an unknown, not an
+        // empty outdated list.
+        let result = performScan(
+            includeSystem: false,
+            apps: [],
+            brew: BrewSnapshot(available: false),
+            leftoverItems: [],
+            leftoverAgents: [],
+            packages: [],
+            history: HistoryIndex(),
+            which: { _ in "/usr/bin/appattic-missing" as String? },
+            run: { _, _ in (1, "", "") },
+            skipLiveUsage: true
+        )
+        XCTAssertTrue(result.incomplete)
+        XCTAssertFalse(outdatedCheckFailures().isEmpty)
+        let data = result.toScanData()
+        XCTAssertEqual(data.incomplete, true)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-failed-check-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertFalse(try commitScanCache(includeSystem: false, data: data, before: "a", after: "a", to: url))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
     func testCleanupScriptCommentsAppStoreDoesNotUpgrade() {
         let result = ScanResult()
         result.outdated = [OutdatedPkg(name: "com.apple.iMovieApp", manager: "app-store", currentVersion: "10.4.3", latestVersion: "10.4.4", title: "iMovie")]
