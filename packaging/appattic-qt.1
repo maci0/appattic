@@ -134,10 +134,26 @@ Confirm-before-running and ignored leftover paths. Include-system-apps is a macO
 .I ignoredLeftoverPaths
 entry is not the full path a report prints, is named in an error and left unoverwritten, and the window opens with no settings until it is corrected.
 .TP
+.I ~/.local/share/appattic/last-scan.json
+The scan cache, a full list of the app and leftover paths the last scan found
+under your home directory. It is owner-only. A run that removes or updates
+something drops it, so the next run scans again, and so does a run more than 24
+hours after the one that wrote it.
+.B appattic erase
+removes it on demand, whatever its age, and reports on standard error whether
+there was one.
+.TP
 .I $XDG_CONFIG_HOME/AppAttic/AppAttic.conf
 Settings the window used before
 .I settings.json
-existed. They are copied over the first time the window starts without one. A value there that is neither true nor false is not copied: the window names the key and this file, and opens with no settings until you correct it. Delete it to start from the defaults.
+existed. They are copied over the first time the window starts without one, and
+a copy that lands in
+.I settings.json
+deletes this file, because the ignore list it holds is then in the new file and
+nothing opens this one again. A migration that could not be written leaves it,
+since it is then the only copy. A value there that is neither true nor false is
+not copied: the window names the key and this file, and opens with no settings
+until you correct it. Delete it to start from the defaults.
 .TP
 .I ../share/appattic/licenses
 License text for the third-party files compiled into the binary, such as the
