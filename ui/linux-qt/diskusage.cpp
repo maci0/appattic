@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -141,6 +142,9 @@ bool fillMetaFd(int fd, FileMeta *m) {
 
 bool fillMetaAt(int dirfd, const char *name, FileMeta *m) {
 #ifdef __linux__
+    // statx needs glibc 2.28 and Linux 4.11 for AT_NO_AUTOMOUNT; the kernel side
+    // is probed through stx_mask and the call falling through to fstatat below,
+    // which every Linux has.
     struct statx stx;
     const unsigned mask = STATX_TYPE | STATX_MODE | STATX_NLINK | STATX_INO
         | STATX_SIZE | STATX_BLOCKS | STATX_MTIME;
@@ -281,6 +285,11 @@ void visitEntry(
     pathPop(path, pathLen, saved);
 }
 
+#ifdef __linux__
+/// The kernel's `struct linux_dirent64`, the record getdents64 writes. Only
+/// its field offsets are used: records start at arbitrary offsets in the
+/// buffer, so casting the buffer to this type would dereference a misaligned
+/// pointer, which is undefined behavior and traps on strict-alignment targets.
 struct AppDirent64 {
     uint64_t d_ino;
     int64_t d_off;
@@ -288,6 +297,23 @@ struct AppDirent64 {
     unsigned char d_type;
     char d_name[1];
 };
+
+constexpr size_t kDirent64NameOffset = offsetof(AppDirent64, d_name);
+/// Shortest record that can carry a name and its terminator.
+constexpr unsigned kDirent64MinRecLen =
+    static_cast<unsigned>(kDirent64NameOffset) + 2;
+
+/// reclen and name of the record at `pos`, read without assuming alignment.
+struct Dirent64View {
+    unsigned short reclen;
+    const char *name;
+};
+
+inline Dirent64View viewDirent64(const char *buf, long pos) {
+    unsigned short reclen = 0;
+    memcpy(&reclen, buf + pos + offsetof(AppDirent64, d_reclen), sizeof reclen);
+    return Dirent64View{reclen, buf + pos + kDirent64NameOffset};
+}
 
 void walkDirFd(
     DiskNode *node,
@@ -317,14 +343,51 @@ void walkDirFd(
         long bpos = 0;
         while (bpos < nread) {
             if (isCancelled(*ctx->opts)) return;
-            auto *d = reinterpret_cast<AppDirent64 *>(buf + bpos);
-            if (d->d_reclen < 19 || bpos + d->d_reclen > nread) break;
-            bpos += d->d_reclen;
-            visitEntry(node, fd, d->d_name, path, pathLen, pathCap, ctx, defer);
+            const Dirent64View d = viewDirent64(buf, bpos);
+            if (d.reclen < kDirent64MinRecLen || bpos + d.reclen > nread) break;
+            bpos += d.reclen;
+            visitEntry(node, fd, d.name, path, pathLen, pathCap, ctx, defer);
         }
     }
     if (ctx->opts->dirDone) ctx->opts->dirDone(*node, ctx->opts->user);
 }
+#else
+void walkDirFd(
+    DiskNode *node,
+    int fd,
+    char *path,
+    size_t *pathLen,
+    size_t pathCap,
+    WalkShared *ctx,
+    std::vector<WalkJob> *defer
+) {
+    if (isCancelled(*ctx->opts)) return;
+    const qint64 dircount = ctx->dirs.fetch_add(1) + 1;
+    if (ctx->opts->progress && (dircount % 64 == 0)) {
+        std::lock_guard<std::mutex> lock(ctx->progressMu);
+        ctx->opts->progress(dircount, node->path, ctx->opts->user);
+    }
+    const int dupfd = dup(fd);
+    if (dupfd < 0) {
+        node->unreadable = true;
+        return;
+    }
+    DIR *dir = fdopendir(dupfd);
+    if (!dir) {
+        close(dupfd);
+        node->unreadable = true;
+        return;
+    }
+    errno = 0;
+    while (struct dirent *ent = readdir(dir)) {
+        if (isCancelled(*ctx->opts)) break;
+        visitEntry(node, fd, ent->d_name, path, pathLen, pathCap, ctx, defer);
+    }
+    if (errno != 0) node->unreadable = true;
+    closedir(dir);
+    if (ctx->opts->dirDone) ctx->opts->dirDone(*node, ctx->opts->user);
+}
+#endif
 
 void measureWalkFd(
     int fd,
@@ -387,10 +450,10 @@ void measureWalkFd(
         long bpos = 0;
         while (bpos < nread) {
             if (isCancelled(opts)) return;
-            auto *d = reinterpret_cast<AppDirent64 *>(buf + bpos);
-            if (d->d_reclen < 19 || bpos + d->d_reclen > nread) break;
-            bpos += d->d_reclen;
-            measureVisit(fd, d->d_name, rootDev, opts, seen, apparent, allocated);
+            const Dirent64View d = viewDirent64(buf, bpos);
+            if (d.reclen < kDirent64MinRecLen || bpos + d.reclen > nread) break;
+            bpos += d.reclen;
+            measureVisit(fd, d.name, rootDev, opts, seen, apparent, allocated);
         }
     }
 }

@@ -130,6 +130,7 @@ ensure_pkg_config_path() {
     local archdir d extra=""
     archdir="$(uname -m)"
     for d in "/usr/lib/${archdir}-linux-gnu/pkgconfig" \
+             "/usr/lib64/pkgconfig" \
              "/usr/lib/pkgconfig" \
              "/usr/share/pkgconfig"; do
         [[ -d "$d" ]] || continue
@@ -159,6 +160,7 @@ qt6_cmake_ok() {
     local archdir p
     archdir="$(uname -m)"
     for p in "/usr/lib/${archdir}-linux-gnu/cmake/Qt6/Qt6Config.cmake" \
+             "/usr/lib64/cmake/Qt6/Qt6Config.cmake" \
              "/usr/lib/cmake/Qt6/Qt6Config.cmake"; do
         [[ -f "$p" ]] && return 0
     done

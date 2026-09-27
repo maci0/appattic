@@ -156,6 +156,7 @@ echo "wasm: $wasm_count modules in core/out"
 for p in "/usr/lib/${HOST_ARCH}-linux-gnu/cmake" \
          /usr/lib/x86_64-linux-gnu/cmake \
          /usr/lib/aarch64-linux-gnu/cmake \
+         /usr/lib64/cmake \
          /usr/lib/cmake; do
     if [[ -d "$p/Qt6" ]]; then
         export CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:+$CMAKE_PREFIX_PATH:}$p"

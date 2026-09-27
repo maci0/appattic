@@ -74,6 +74,7 @@ ensure_pkg_config_path() {
     local archdir d extra=""
     archdir="$(uname -m)"
     for d in "/usr/lib/${archdir}-linux-gnu/pkgconfig" \
+             "/usr/lib64/pkgconfig" \
              "/usr/lib/pkgconfig" \
              "/usr/share/pkgconfig"; do
         [[ -d "$d" ]] || continue
@@ -103,6 +104,7 @@ qt6_cmake_ok() {
     local archdir p
     archdir="$(uname -m)"
     for p in "/usr/lib/${archdir}-linux-gnu/cmake/Qt6/Qt6Config.cmake" \
+             "/usr/lib64/cmake/Qt6/Qt6Config.cmake" \
              "/usr/lib/cmake/Qt6/Qt6Config.cmake"; do
         [[ -f "$p" ]] && return 0
     done
@@ -209,7 +211,7 @@ require_wasm_artifacts() {
   echo "wasm: core/out ready ($(find "$CORE_OUT" -maxdepth 1 -name '*.wasm' | LC_ALL=C sort | wc -l | tr -d ' ') modules)"
 }
 
-for p in /usr/lib/x86_64-linux-gnu/cmake /usr/lib/aarch64-linux-gnu/cmake /usr/lib/cmake; do
+for p in /usr/lib/x86_64-linux-gnu/cmake /usr/lib/aarch64-linux-gnu/cmake /usr/lib64/cmake /usr/lib/cmake; do
     if [[ -d "$p/Qt6" ]]; then
         export CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:+$CMAKE_PREFIX_PATH:}$p"
     fi
