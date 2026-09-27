@@ -344,7 +344,7 @@ fn render(comptime spec: Spec, hits: []const Orphan) bool {
         w.str(h.path);
         w.raw(",\"rootLabel\":");
         w.str(spec.root_label);
-        w.raw(",\"status\":\"orphaned\",");
+        w.raw(",\"status\":\"orphaned\"");
         jsonbuf.writeRmCommand(&w, &q_buf, "rm -rf ", h.path);
         w.raw("}");
     }

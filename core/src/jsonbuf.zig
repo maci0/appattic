@@ -194,20 +194,26 @@ pub fn rawShQuote(w: *W, buf: []u8, value: []const u8) void {
     w.raw(q);
 }
 
-/// `"command":<prefix><shell-quoted path>`, the one shape a path plugin's
+/// `,"command":"<prefix><shell-quoted path>"`, the one shape a path plugin's
 /// removal finding takes. `prefix` is `rm `, `rm -f ` or `rm -rf `.
 ///
-/// The quoted path is escaped rather than written raw: a value holding `'`
-/// comes back from `shQuote` as `'\''`, and that backslash is a JSON escape
-/// the host parser would reject.
+/// The comma is written here rather than by the caller: it belongs to this
+/// field, and a caller that wrote only the field's own bytes left the row
+/// unparseable — `path_shadow` did, and the Qt smoke dropped the whole plugin
+/// for it. The value is a JSON string, so it is quoted here too.
+///
+/// The quoted path is escaped inside that string: a value holding `'` comes
+/// back from `shQuote` as `'\''`, and that backslash is a JSON escape the host
+/// parser would reject.
 pub fn writeRmCommand(w: *W, buf: []u8, prefix: []const u8, path: []const u8) void {
     const quoted = shQuote(buf, path) orelse {
         w.failed = true;
         return;
     };
-    w.raw("\"command\":");
+    w.raw(",\"command\":\"");
     w.escaped(prefix);
     w.escaped(quoted);
+    w.raw("\"");
 }
 
 /// Global-install finding. `version` is left out when empty. `command` is the
@@ -408,6 +414,32 @@ test "json writer overflow sets failed" {
     var w = W{ .buf = &buf };
     w.str("hello");
     try std.testing.expect(w.slice() == null);
+}
+
+test "writeRmCommand is a valid JSON string field on its own" {
+    var out: [256]u8 = undefined;
+    var quote: [256]u8 = undefined;
+    var w = W{ .buf = &out };
+    w.raw("{\"kind\":\"symlink\"");
+    writeRmCommand(&w, &quote, "rm -f ", "/home/user/a b");
+    w.raw("}");
+    const got = w.slice() orelse return error.Overflow;
+    try std.testing.expect(isValidJson(got));
+    // The comma is the field's own, and the shell-quoted path stays inside one
+    // JSON string.
+    try std.testing.expect(std.mem.indexOf(u8, got, ",\"command\":\"rm -f '/home/user/a b'\"") != null);
+
+    // A path holding `'` comes back from shQuote as `'\''`; the backslash is
+    // doubled, so the value stays one JSON string the host can parse back.
+    var out2: [256]u8 = undefined;
+    var quote2: [256]u8 = undefined;
+    var w2 = W{ .buf = &out2 };
+    w2.raw("{\"kind\":\"symlink\"");
+    writeRmCommand(&w2, &quote2, "rm ", "/home/user/it's");
+    w2.raw("}");
+    const got2 = w2.slice() orelse return error.Overflow;
+    try std.testing.expect(isValidJson(got2));
+    try std.testing.expect(std.mem.indexOf(u8, got2, ",\"command\":\"rm '/home/user/it'\\\\''s'\"") != null);
 }
 
 test "writeOutdated JSON-escapes command and shell-quotes the name" {

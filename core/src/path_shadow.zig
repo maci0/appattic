@@ -419,6 +419,22 @@ test "plugin_query present JSON includes shadow finding" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"dialog\":") != null);
 }
 
+test "a rendered shadow finding is one parseable row" {
+    // query_impl only reaches the render with a row when the host answers its
+    // fixture commands, so the row shape is rendered here: the finding array
+    // is what the Qt smoke and the UI parse, and an unquoted `command` makes
+    // the whole document unparseable, not just its field.
+    const hits = [_]ShadowFinding{.{
+        .name = "python3",
+        .path = "/home/user/.local/bin/python3",
+        .shadows = "/usr/bin/python3",
+    }};
+    try std.testing.expect(renderShadows(&hits));
+    const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"command\":\"rm -f /home/user/.local/bin/python3\"") != null);
+}
+
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];

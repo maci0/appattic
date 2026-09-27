@@ -98,7 +98,7 @@ fn render(hits: []const BrokenLink) bool {
         w.str(h.path);
         w.raw(",\"rootLabel\":");
         w.str(h.root_label);
-        w.raw(",\"status\":\"orphaned\",");
+        w.raw(",\"status\":\"orphaned\"");
         jsonbuf.writeRmCommand(&w, &q_buf, "rm ", h.path);
         w.raw("}");
     }
