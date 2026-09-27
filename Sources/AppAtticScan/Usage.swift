@@ -201,11 +201,11 @@ public func parseFlatpakVarAppMtimes(_ root: String, now: Date = Date()) -> [Str
               isPlausibleLaunchDate(dt, now: now)
         else { continue }
         let key = posixLowercased(name)
-        if hits[key] == nil || dt > hits[key]! { hits[key] = dt }
+        recordNewest(key, dt, into: &hits)
         if key.contains(".") {
             let last = key.split(separator: ".").last.map(String.init) ?? ""
             if last.count >= 4, !genericProc.contains(last) {
-                if hits[last] == nil || dt > hits[last]! { hits[last] = dt }
+                recordNewest(last, dt, into: &hits)
             }
         }
     }
