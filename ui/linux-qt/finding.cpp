@@ -862,7 +862,11 @@ void enrichLeftoverSizes(
 static void addLeftoverAliasTokens(QSet<QString> *out, QString token) {
     if (token.startsWith(QLatin1Char('.'))) token = token.mid(1);
     token.replace(QLatin1Char('_'), QLatin1Char('-'));
-    token = token.toLower();
+    // NFC for the same reason `searchFold` gives it: both sides of a group
+    // key and of a desktop-stem match come off a filesystem, and an exFAT,
+    // NTFS, or SMB share hands back the decomposed spelling. Without it a
+    // leftover and its .desktop file never meet.
+    token = token.toLower().normalized(QString::NormalizationForm_C);
     if (token.isEmpty()) return;
     out->insert(token);
     if (token == QLatin1String("firefox") || token == QLatin1String("firefoxwebbrowser")) {
@@ -912,7 +916,7 @@ static QSet<QString> installedDesktopStems() {
         const QStringList files = d.entryList({QStringLiteral("*.desktop")}, QDir::Files);
         for (QString file : files) {
             if (file.endsWith(QLatin1String(".desktop"))) file.chop(8);
-            const QString low = file.toLower();
+            const QString low = file.toLower().normalized(QString::NormalizationForm_C);
             if (low.isEmpty()) continue;
             stems.insert(low);
             const int dot = low.lastIndexOf(QLatin1Char('.'));

@@ -2936,7 +2936,16 @@ private:
             if (code != 0) {
                 appendScriptOutput(proc->readAll());
                 QString err = redactHomePaths(QString::fromUtf8(m_scriptOutput).trimmed());
-                if (err.size() > 400) err = err.right(400);
+                if (err.size() > 400) {
+                    err = err.right(400);
+                    // QString::right counts UTF-16 units, so the cut can land
+                    // between the halves of an astral character and the banner
+                    // shows a replacement character. Same hazard the byte-level
+                    // cut above guards against, one level up.
+                    int drop = 0;
+                    while (drop < err.size() && err.at(drop).isLowSurrogate()) ++drop;
+                    if (drop > 0) err.remove(0, drop);
+                }
                 if (err.isEmpty()) {
                     err = QStringLiteral(
                         "The script failed (exit %1). Commands before the failure may have already run."
