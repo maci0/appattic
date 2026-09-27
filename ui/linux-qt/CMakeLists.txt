@@ -127,7 +127,13 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     # core/build.sh and scripts/verify-reproducible.sh. CMake cannot read it, so
     # this block is the one copy that has to be kept in step by hand: a flag
     # added there belongs here too.
-    target_compile_options(appattic-qt PRIVATE
+    # One list, applied to every target whose objects end up in the shipped
+    # binary. appattic-qt-core is an OBJECT library: target_compile_options on
+    # appattic-qt does not reach its translation units, so finding.cpp and
+    # diskusage.cpp would otherwise link into the release without the stack
+    # protector, without FORTIFY, and with the build path left in their debug
+    # info.
+    set(_appattic_hardening_cflags
         -fstack-protector-strong
         -Wformat
         -Wformat-security
@@ -144,24 +150,29 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     # KDE/Flatpak SDKs already pass -Wp,-D_FORTIFY_SOURCE=3. Re-defining it
     # with -Werror fails GCC 15.
     if(NOT DEFINED ENV{FLATPAK_DEST})
-        target_compile_options(appattic-qt PRIVATE
+        list(APPEND _appattic_hardening_cflags
             $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
             $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=2>
         )
     endif()
     if(UNIX AND NOT APPLE)
-        target_compile_options(appattic-qt PRIVATE -fstack-clash-protection)
-        target_link_options(appattic-qt PRIVATE
+        list(APPEND _appattic_hardening_cflags -fstack-clash-protection)
+        set(_appattic_hardening_ldflags
             -pie
             -Wl,-z,relro,-z,now
             -Wl,-z,noexecstack
         )
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
-            target_compile_options(appattic-qt PRIVATE -fcf-protection=full)
-            target_link_options(appattic-qt PRIVATE -fcf-protection=full)
+            list(APPEND _appattic_hardening_cflags -fcf-protection=full)
+            list(APPEND _appattic_hardening_ldflags -fcf-protection=full)
         elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
-            target_compile_options(appattic-qt PRIVATE -mbranch-protection=standard)
+            list(APPEND _appattic_hardening_cflags -mbranch-protection=standard)
         endif()
+    endif()
+    target_compile_options(appattic-qt PRIVATE ${_appattic_hardening_cflags})
+    target_compile_options(appattic-qt-core PRIVATE ${_appattic_hardening_cflags})
+    if(UNIX AND NOT APPLE)
+        target_link_options(appattic-qt PRIVATE ${_appattic_hardening_ldflags})
     endif()
     # Every C source this target compiles gets the strict set core/build.sh
     # already builds them with, so the two builds cannot disagree.
