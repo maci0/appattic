@@ -128,7 +128,12 @@ public func humanDays(_ days: Double) -> String {
 private let durationFormatters: [Calendar.Component: (DateComponents) -> String?] = {
     #if canImport(Darwin)
     var formatters: [Calendar.Component: (DateComponents) -> String?] = [:]
-    for unit in [.hour, .day, .weekOfYear, .month, .year] {
+    // The spelling is named: an array literal in a `for` whose element type is
+    // only decided by the body — `allowed.insert(unit)` — is an inference cycle
+    // the compiler refuses ("reference to member 'hour' cannot be resolved
+    // without a contextual type") wherever this arm is compiled, which is
+    // Darwin only.
+    for unit in [Calendar.Component.hour, .day, .weekOfYear, .month, .year] {
         let f = DateComponentsFormatter()
         var allowed: DateComponentsFormatter.Units = []
         allowed.insert(unit)

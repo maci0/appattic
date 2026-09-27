@@ -222,8 +222,13 @@ for comp in "${compilers[@]}"; do
             if [[ -z "$wasmtime_include" ]]; then
                 continue
             fi
+            # -isystem for the third-party headers: they are not this tree's
+            # to fix, and their own warnings — `wasi.h` under
+            # -Wstrict-prototypes, in a warnings-as-errors pass — would
+            # otherwise fail the gate on code the gate does not own. Our own
+            # sources are still checked with the strict set.
             "$comp" "${embed_cflags[@]}" -I "$ROOT/core/host" \
-                -I "$wasmtime_include" -c "$src" -o "$obj"
+                -isystem "$wasmtime_include" -c "$src" -o "$obj"
             continue
         fi
         "$comp" "${cflags[@]}" -I "$ROOT/core/host" -c "$src" -o "$obj"

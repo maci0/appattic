@@ -88,10 +88,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install Swift
-        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
-        with:
-          swift-version: "5.10.1"
       - name: Cache build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -121,6 +117,17 @@ jobs:
         run: |
           echo /opt/zig >> "$GITHUB_PATH"
           echo /usr/local/bin >> "$GITHUB_PATH"
+      # Last on the list is first on PATH, and `scripts/linux-deps.sh --install`
+      # and the zig step above both append /usr/local/bin to it. The runner
+      # image ships a newer Swift in that directory and `scripts/find-swift.sh`
+      # takes the first `swift` it finds, so the pinned toolchain is installed
+      # after them: anywhere earlier and this job builds against a compiler the
+      # tree does not pin (5.10.1 is what it needs, which is a 6.4 refusal in
+      # this job's history).
+      - name: Install Swift
+        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "5.10.1"
       - name: Test scan library
         # scripts/test.sh, not the raw command: it carries the
         # --disable-automatic-resolution flag, the AppAtticScanTests filter
