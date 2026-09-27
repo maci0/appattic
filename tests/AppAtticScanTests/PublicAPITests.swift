@@ -32,6 +32,23 @@ final class PublicAPITests: XCTestCase {
         XCTAssertEqual(try readScanCache(from: url).fingerprint, "ver:test")
     }
 
+    /// The README quickstart passes `ignoring:` explicitly, so nothing else
+    /// proves the default exists. It has to: the sibling entry points
+    /// (`scanResult`, `cleanupScript`, `exportedScanData`) all default their
+    /// ignore set, and a caller with no ignore list should not have to name
+    /// one to reach this function.
+    func testVisibleOrphanedLeftoversIgnoringDefaultsToEmpty() {
+        let orphan = LeftoverItem(
+            name: "Foo",
+            path: "/home/u/.config/Foo",
+            root: ".config",
+            kind: "dir",
+            status: "orphaned"
+        )
+        XCTAssertEqual(visibleOrphanedLeftovers([orphan]).map(\.path), [orphan.path])
+        XCTAssertEqual(visibleOrphanedLeftovers([orphan], ignoring: [orphan.path]), [])
+    }
+
     func testRunFullScanAcceptsTrailingProgressClosure() {
         // Referenced, not run: a live scan reads the real machine. Binding the
         // closure to the documented signature is the assertion; the type system

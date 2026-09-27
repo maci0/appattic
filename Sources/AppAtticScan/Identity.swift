@@ -204,6 +204,15 @@ public func expandNameAliases(_ n: String) -> Set<String> {
     return out
 }
 
+/// Whether a name belongs to a distro package rather than to an app that is
+/// gone, as `(classification, owningPackage)`.
+///
+/// `classification` is `"system"` for a name the system list or a system
+/// naming pattern claims, and `"orphaned"` otherwise, so an `"orphaned"` name
+/// is a leftover candidate. A name is system or orphaned by name alone: no
+/// package database is read, so `owningPackage` is nil on every path today and
+/// the slot is what tells a caller where the answer will appear if the
+/// classification starts consulting the database.
 public func classifyLinuxSystemName(_ name: String) -> (String, String?) {
     let n = posixLowercased(name)
     let nn = norm(name)

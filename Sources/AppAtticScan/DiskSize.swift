@@ -28,6 +28,11 @@ public func fileSize(_ path: String) -> Int {
     intFromSizeAttribute(try? FileManager.default.attributesOfItem(atPath: path)[.size])
 }
 
+/// `du` size of `path` and whether the measurement stands. The two results are
+/// `(bytes, measured)`: a path `du` could not read, or one it reported as
+/// missing, comes back as `(0, false)`, which is not the same as an empty
+/// directory. Rows carry that flag, so an unmeasured size is never shown as a
+/// size of zero.
 public func duSize(_ path: String, timeout: TimeInterval = 8, run: CommandRun = runCommand) -> (Int, Bool) {
     // One `attributesOfItem` answers both "does it exist" and "is it a
     // directory"; the previous `fileExists` + `fileSize` pair stat'ed twice.

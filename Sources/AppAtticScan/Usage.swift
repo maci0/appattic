@@ -58,6 +58,10 @@ public struct HistoryIndex {
 
 /// Last-used as usage, or nil when it sits within `windowSeconds` of the
 /// install date: a first run right after installing is not usage.
+///
+/// The two arguments are both `Date?`, so the order is the only thing telling
+/// them apart: the first is the last-used date, the second the install date.
+/// A call that swaps them compiles and inverts the answer.
 public func effectiveLastUsed(
     _ lastUsed: Date?,
     _ dateAdded: Date?,
@@ -915,6 +919,14 @@ func markRunning(_ apps: inout [AppRecord], runningComms: Set<String>?, run: Com
     }
 }
 
+/// Shell history lookup for an app or tool that has no app record, as
+/// `(lastUsed, everUsed)`.
+///
+/// `lastUsed` is the most recent timestamp any of `names` has in the index, or
+/// nil when none is there, and `everUsed` is true when the history names any of
+/// them at all, even with no usable timestamp. The two answer different
+/// questions: a nil `lastUsed` with `everUsed` true is a tool the history knows
+/// and could not date, which is not the same as one it has never seen.
 public func lastUsedFromHistory(_ names: [String], index: HistoryIndex) -> (Date?, Bool) {
     var best: Date?
     var ever = false

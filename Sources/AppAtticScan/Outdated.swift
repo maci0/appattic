@@ -889,6 +889,13 @@ public func indexItunesResults(_ data: [String: Any]) -> [String: [String: Any]]
     return out
 }
 
+/// The App Store id and category `mdls` reports for a bundle, as
+/// `(appStoreID, category)`.
+///
+/// Both are nil when the bundle has no App Store metadata, which is what a
+/// non-App-Store app returns. A caller uses the pair to tell a store app from a
+/// sideloaded one: an id is the only part that can say yes, and the category on
+/// its own never does.
 public func parseMdlsMas(_ text: String) -> (String?, String?) {
     var adam: String?
     var category: String?

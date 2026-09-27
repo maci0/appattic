@@ -32,6 +32,14 @@ let skipDescend: Set<String> = [
 
 let skipNestedRoots: Set<String> = ["Containers", "Group Containers", "WebKit"]
 
+/// The XDG base directories a Linux scan descends, as
+/// `(label, path, kind)` per root.
+///
+/// All three fields are positional, so the order is the only thing telling them
+/// apart: `label` is the short name a report shows, `path` is the directory to
+/// read, and `kind` is what the entries under it are (`"dir"` for a plain
+/// directory). Pass the kind to `includeScanEntry`, which needs it to tell a
+/// directory from a plist.
 public func xdgScanRoots(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     env: [String: String] = ProcessInfo.processInfo.environment
@@ -50,6 +58,10 @@ public func xdgScanRoots(
     ]
 }
 
+/// Every root a scan reads on this platform, as `(label, path, kind)`, in the
+/// same positional order as `xdgScanRoots`. A macOS root list and a Linux one
+/// are both returned by the same call, so a caller does not branch on the OS to
+/// enumerate them.
 public func scanRootsForPlatform() -> [(String, String, String)] {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     let xdg = xdgScanRoots(home: home)
@@ -73,6 +85,9 @@ public func scanRootsForPlatform() -> [(String, String, String)] {
     ] + xdg
 }
 
+/// The `~/.something` directories a scan reads, as `(path, kind)`. The kind is
+/// the constant `"leaf"` on every entry: these are directories named after a
+/// single app, so nothing under them is a bundle or a plist.
 public func homeDataLeaves() -> [(String, String)] {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     return homeDotData.map { ((home as NSString).appendingPathComponent($0), "leaf") }

@@ -91,7 +91,17 @@ public struct BrewSnapshot {
     }
 }
 
+/// The subprocess seam every collector takes as a `run:` parameter, so a test
+/// can answer a package manager instead of running it.
+///
+/// Arguments are the argv (never a shell string) and the timeout in seconds.
+/// The result is `(exitStatus, stdout, stderr)`, in that order: a non-zero
+/// status is a failed check, which callers report and never treat as an empty
+/// answer. `runCommand` is the real implementation.
 public typealias CommandRun = ([String], TimeInterval) -> (Int32, String, String)
+
+/// The `which:` seam: a program name to the path that runs it, or nil when the
+/// machine has no such program. `whichCommand` is the real implementation.
 public typealias WhichFn = (String) -> String?
 
 public struct UntrustedCask: Equatable, Sendable {

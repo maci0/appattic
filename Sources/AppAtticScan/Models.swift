@@ -155,7 +155,11 @@ public func isListedLeftoverStatus(_ status: String) -> Bool {
 }
 
 /// Orphaned leftover dirs and shadow overlays, minus ignored paths (item path and extra_paths).
-public func visibleOrphanedLeftovers(_ leftovers: [LeftoverItem], ignoring: Set<String>) -> [LeftoverItem] {
+///
+/// `ignoring` defaults to empty, the same as `scanResult`, `cleanupScript`, and
+/// `exportedScanData`, so a caller with no ignore list does not have to name one
+/// to reach the function.
+public func visibleOrphanedLeftovers(_ leftovers: [LeftoverItem], ignoring: Set<String> = []) -> [LeftoverItem] {
     let ignoredKeys = Set(ignoring.map(pathIdentityKey))
     return leftovers.filter { item in
         isListedLeftoverStatus(item.status)
