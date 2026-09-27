@@ -63,23 +63,6 @@ final class BrewInfoTests: XCTestCase {
         XCTAssertEqual(brewPackageMeta(from: [:]), BrewPackageMeta())
     }
 
-    /// The tuple form is deprecated in 2.0.0 and goes in 3.0.0. This pins what
-    /// it still hands back for as long as it ships, and is deleted with it.
-    func testDeprecatedBrewPackageMetaTupleFormStillMatchesNamedForm() {
-        let data: [String: Any] = [
-            "formulae": [["name": "wget", "full_name": "wget", "desc": "Internet file retriever"]],
-            "casks": [[
-                "token": "visual-studio-code",
-                "name": ["Visual Studio Code"],
-                "desc": "Open-source code editor",
-            ]],
-        ]
-        let meta = brewPackageMeta(from: data)
-        let (summaries, titles) = brewPackageMeta(data)
-        XCTAssertEqual(summaries, meta.summaries)
-        XCTAssertEqual(titles, meta.titles)
-    }
-
     func testCaskArtifactDictYieldsAppName() {
         XCTAssertEqual(caskArtifactAppNames(["Firefox.app"]), ["Firefox.app"])
         XCTAssertEqual(caskArtifactAppNames([["Source.app": "Firefox.app"]]), ["Firefox.app"])
