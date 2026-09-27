@@ -84,7 +84,17 @@ final class DiskSizeTests: XCTestCase {
         try XCTSkipIf(fd < 0, "filesystem refuses a name that is not UTF-8")
         close(fd)
         badName.removeLast()
-        defer { try? FileManager.default.removeItem(atPath: String(decoding: badName, as: UTF8.self)) }
+        // unlink(2) through the raw bytes, not FileManager.removeItem(atPath:):
+        // the name is 0xff, so the only String spelling of it carries U+FFFD,
+        // and on the pinned 5.10.1 Linux Foundation `fileExists(atPath:)` and
+        // `removeItem(atPath:)` trap with an illegal instruction in
+        // `FileManager.string(withFileSystemRepresentation:length:)` on a path
+        // holding one. The bytes are the file; use them.
+        defer {
+            _ = badName.withUnsafeBufferPointer { buf in
+                buf.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buf.count) { unlink($0) }
+            }
+        }
 
         let (bytes, ok) = directoryByteSize(root.path, timeout: 6)
         XCTAssertFalse(ok, "an undecodable entry means the walk is not complete")

@@ -200,16 +200,32 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertTrue(vols.contains { $0.rootPath == "/home" && $0.isHome })
     }
 
-    func testListDiskVolumesUnescapesOctalInMountPoint() {
-        // The kernel escapes space, tab, newline, and backslash as octal.
+    func testListDiskVolumesUnescapesOctalInMountPoint() throws {
+        // The kernel escapes space, tab, newline, and backslash as octal. The
+        // mount points have to be directories that exist: the reader measures
+        // each one with statvfs and drops a volume it cannot resolve, so a
+        // fabricated path would be refused before the unescaping was judged.
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-vols-\(UUID().uuidString)")
+        let spaced = base.appendingPathComponent("my disk")
+        let slashed = base.appendingPathComponent("back\\slash")
+        try FileManager.default.createDirectory(at: spaced, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: slashed, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let root = "/dev/sda1 / ext4 rw 0 0"
+        // The field the kernel writes is the escaped path, so the fixture
+        // spells the separators the way /proc/mounts does: \040 is the space
+        // and \134 is the backslash.
+        let escaped = base.path.replacingOccurrences(of: "\\", with: "\\134")
         let mounts = """
-        /dev/sda1 / rw ext4 rw 0 0
-        /dev/sdb1 /mnt/my\\040disk ext4 rw 0 0
-        /dev/sdc1 /mnt/back\\134slash ext4 rw 0 0
+        \(root)
+        /dev/sdb1 \(escaped)/my\\040disk ext4 rw 0 0
+        /dev/sdc1 \(escaped)/back\\134slash ext4 rw 0 0
         """
         let vols = listDiskVolumes(home: "/home/u", mountsText: mounts)
-        XCTAssertTrue(vols.contains { $0.rootPath == "/mnt/my disk" })
-        XCTAssertTrue(vols.contains { $0.rootPath == "/mnt/back\\slash" })
+        XCTAssertTrue(vols.contains { $0.rootPath == spaced.path }, "\(vols.map(\.rootPath))")
+        XCTAssertTrue(vols.contains { $0.rootPath == slashed.path }, "\(vols.map(\.rootPath))")
     }
     #endif
 }

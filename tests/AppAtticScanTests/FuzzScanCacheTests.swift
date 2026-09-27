@@ -217,7 +217,7 @@ final class FuzzScanCacheTests: XCTestCase {
                 let stamp = parseISODate(first.data.scanned_at)
                 if stamp == nil {
                     XCTAssertTrue(isScanCacheExpired(first, now: now), "unreadable stamp read as fresh: \(where_)")
-                } else if let age = stamp!.timeIntervalSince(now), age >= 0, age <= scanCacheMaxAge {
+                } else if stamp!.timeIntervalSince(now) >= 0, stamp!.timeIntervalSince(now) <= scanCacheMaxAge {
                     XCTAssertFalse(isScanCacheExpired(first, now: now), "a stamp inside the window read as expired: \(where_)")
                 }
 

@@ -882,7 +882,7 @@ final class ClassifyTests: XCTestCase {
         XCTAssertEqual(grouped[0].sizeBytes, 300)
     }
 
-    func testGroupOrphanedLeftoversMergesKagiOrion() {
+    func testGroupOrphanedLeftoversMergesKagiOrion() throws {
         let orion = DataItem(
             path: "/Users/x/Library/Application Support/Orion",
             name: "Orion",
@@ -1008,7 +1008,7 @@ final class ClassifyTests: XCTestCase {
         XCTAssertEqual(Set(grouped[0].extraPaths), [store.path, cookies.path])
     }
 
-    func testGroupOrphanedLeftoversMergesSameDnsVendorPrefix() {
+    func testGroupOrphanedLeftoversMergesSameDnsVendorPrefix() throws {
         let plist = DataItem(
             path: "/Users/x/Library/Preferences/com.sentinelone.SentinelAgent.plist",
             name: "com.sentinelone.SentinelAgent.plist",
@@ -1055,8 +1055,8 @@ final class ClassifyTests: XCTestCase {
         // of comparing nil's empty path list against the empty expectation.
         let sent = try XCTUnwrap(grouped.first { $0.rootLabel != "LaunchAgents" && entryLabel($0.name).lowercased().hasPrefix("com.sentinelone.") })
         XCTAssertEqual(sent.extraPaths.count, 2, sent.name)
-        let safari = try XCTUnwrap(grouped.first { $0.name.contains("csiro") })
-        XCTAssertTrue(safari.extraPaths.isEmpty, safari.extraPaths.joined(separator: " | "))
+        let csiro = try XCTUnwrap(grouped.first { $0.name.contains("csiro") })
+        XCTAssertTrue(csiro.extraPaths.isEmpty, csiro.extraPaths.joined(separator: " | "))
         let launchAgent = try XCTUnwrap(grouped.first { $0.rootLabel == "LaunchAgents" })
         XCTAssertTrue(launchAgent.extraPaths.isEmpty, launchAgent.extraPaths.joined(separator: " | "))
     }
@@ -1833,7 +1833,11 @@ final class ClassifyTests: XCTestCase {
         }
 
         // A quoted name is already safe: the newline stays inside the single
-        // quotes, so the command stays one shell word sequence.
+        // quotes, so the command stays one shell word sequence. The name is
+        // quoted whole, so that word is `'ok<newline>rm -rf ~'` and not two
+        // quoted lines: two words would ask brew for a formula named `rm -rf ~`,
+        // and a name whose quote closed before the newline is the injection
+        // this test exists for.
         let brew = uninstallCommand(
             source: "brew-formula",
             name: "ok\nrm -rf ~",
