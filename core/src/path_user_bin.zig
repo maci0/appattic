@@ -3,6 +3,7 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const pstore = @import("path_store.zig");
 
 const plugin_id = "path-user-bin";
 
@@ -24,11 +25,6 @@ pub const BrokenLink = struct {
     root_label: []const u8,
 };
 
-fn basenameOf(path: []const u8) []const u8 {
-    if (std.mem.lastIndexOfScalar(u8, path, '/')) |i| return path[i + 1 ..];
-    return path;
-}
-
 fn nameInKeep(name: []const u8) bool {
     var lines = std.mem.splitScalar(u8, keep, '\n');
     while (lines.next()) |raw| {
@@ -47,19 +43,6 @@ fn copySlice(slice: []const u8, store: []u8, used: *usize) ?[]const u8 {
     return store[start..used.*];
 }
 
-fn joinPath(dir: []const u8, name: []const u8, store: []u8, used: *usize) ?[]const u8 {
-    const need = dir.len + 1 + name.len;
-    if (used.* + need > store.len) return null;
-    const start = used.*;
-    @memcpy(store[used.*..][0..dir.len], dir);
-    used.* += dir.len;
-    store[used.*] = '/';
-    used.* += 1;
-    @memcpy(store[used.*..][0..name.len], name);
-    used.* += name.len;
-    return store[start..used.*];
-}
-
 fn listingNames(listing: []const u8, names: *[64][]const u8) usize {
     var n: usize = 0;
     var lines = std.mem.splitScalar(u8, listing, '\n');
@@ -67,7 +50,7 @@ fn listingNames(listing: []const u8, names: *[64][]const u8) usize {
         if (n >= names.len) break;
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0) continue;
-        const name = basenameOf(line);
+        const name = pstore.basenameOf(line);
         if (name.len == 0 or name[0] == '.') continue;
         if (!jsonbuf.isSafeIdent(name)) continue;
         if (nameInKeep(name)) continue;
@@ -112,7 +95,7 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
             // holds still reaches its last entry.
             var probe = used;
             const stable_name = copySlice(name, paths, &probe) orelse continue;
-            const link_path = joinPath(root.path, stable_name, paths, &probe) orelse continue;
+            const link_path = pstore.joinPath(root.path, stable_name, paths, &probe) orelse continue;
             if (!isDanglingSymlink(link_path)) continue;
             out[n] = .{ .name = stable_name, .path = link_path, .root_label = root.label };
             used = probe;

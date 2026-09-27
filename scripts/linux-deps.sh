@@ -138,50 +138,12 @@ run_as_root() {
     fi
 }
 
-ensure_pkg_config_path() {
-    local archdir d extra=""
-    archdir="$(uname -m)"
-    for d in "/usr/lib/${archdir}-linux-gnu/pkgconfig" \
-             "/usr/lib64/pkgconfig" \
-             "/usr/lib/pkgconfig" \
-             "/usr/share/pkgconfig"; do
-        [[ -d "$d" ]] || continue
-        if [[ -z "$extra" ]]; then
-            extra="$d"
-        else
-            extra="$extra:$d"
-        fi
-    done
-    if [[ -n "$extra" ]]; then
-        if [[ -z "${PKG_CONFIG_PATH:-}" ]]; then
-            export PKG_CONFIG_PATH="$extra"
-        else
-            export PKG_CONFIG_PATH="$extra:$PKG_CONFIG_PATH"
-        fi
-    fi
-}
-
-qt6_pkg_config_ok() {
-    ensure_pkg_config_path
-    pkg-config --exists Qt6Widgets 2>/dev/null && return 0
-    pkg-config --exists Qt6Core 2>/dev/null && return 0
-    return 1
-}
-
-qt6_cmake_ok() {
-    local archdir p
-    archdir="$(uname -m)"
-    for p in "/usr/lib/${archdir}-linux-gnu/cmake/Qt6/Qt6Config.cmake" \
-             "/usr/lib64/cmake/Qt6/Qt6Config.cmake" \
-             "/usr/lib/cmake/Qt6/Qt6Config.cmake"; do
-        [[ -f "$p" ]] && return 0
-    done
-    return 1
-}
+# shellcheck source=find-qt6.sh
+. "$_script_dir/find-qt6.sh"
 
 qt6_dev_ok() {
-    qt6_pkg_config_ok && return 0
-    qt6_cmake_ok && return 0
+    appattic_qt6_pkg_config_ok && return 0
+    appattic_qt6_cmake_ok && return 0
     return 1
 }
 
@@ -409,9 +371,9 @@ if [[ "$INSTALL_PKGS" -eq 1 ]]; then
         echo "error: Qt 6 still missing after install (pkg-config Qt6Widgets or Qt6Config.cmake)" >&2
         exit 1
     fi
-    if qt6_pkg_config_ok; then
+    if appattic_qt6_pkg_config_ok; then
         echo "Qt6Widgets: $(pkg-config --modversion Qt6Widgets 2>/dev/null || pkg-config --modversion Qt6Core)"
-    elif qt6_cmake_ok; then
+    elif appattic_qt6_cmake_ok; then
         echo "Qt6: cmake config present (no pkg-config .pc on this distro)"
     fi
     smoke_plugin=""
@@ -431,7 +393,7 @@ if [[ "$INSTALL_PKGS" -eq 1 ]]; then
     if [[ -n "$smoke_plugin" ]]; then
         echo "Qt offscreen plugin: $smoke_plugin"
     fi
-    if qt6_pkg_config_ok && pkg-config --exists Qt6Widgets; then
+    if appattic_qt6_pkg_config_ok && pkg-config --exists Qt6Widgets; then
         echo "Qt6Widgets: $(pkg-config --modversion Qt6Widgets)"
     fi
     if ! command -v cmake >/dev/null 2>&1; then

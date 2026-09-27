@@ -4,6 +4,7 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const pstore = @import("path_store.zig");
 
 const Io = std.Io;
 const Dir = Io.Dir;
@@ -19,24 +20,6 @@ pub const ShadowFinding = struct {
     path: []const u8,
     shadows: []const u8,
 };
-
-fn basenameOf(path: []const u8) []const u8 {
-    if (std.mem.lastIndexOfScalar(u8, path, '/')) |i| return path[i + 1 ..];
-    return path;
-}
-
-fn joinPath(dir: []const u8, name: []const u8, store: []u8, used: *usize) ?[]const u8 {
-    const need = dir.len + 1 + name.len;
-    if (used.* + need > store.len) return null;
-    const start = used.*;
-    @memcpy(store[used.*..][0..dir.len], dir);
-    used.* += dir.len;
-    store[used.*] = '/';
-    used.* += 1;
-    @memcpy(store[used.*..][0..name.len], name);
-    used.* += name.len;
-    return store[start..used.*];
-}
 
 fn resolvePathNative(io: Io, path: []const u8, buf: []u8) ?[]const u8 {
     const n = Dir.realPathFileAbsolute(io, path, buf) catch return null;
@@ -75,14 +58,14 @@ fn findShadowsNative(
             // anything leaves no path behind, so a root with more files than
             // the store holds still reaches its last entry.
             var probe = used;
-            const overlay_path = joinPath(odir, name, path_store, &probe) orelse continue;
+            const overlay_path = pstore.joinPath(odir, name, path_store, &probe) orelse continue;
             if (!isRegularFile(io, overlay_path)) continue;
             const resolved_overlay = resolvePathNative(io, overlay_path, &o_res) orelse continue;
 
             var packaged: ?[]const u8 = null;
             var same = false;
             for (packageDirs) |pdir| {
-                const pkg_path = joinPath(pdir, name, path_store, &probe) orelse continue;
+                const pkg_path = pstore.joinPath(pdir, name, path_store, &probe) orelse continue;
                 if (!isRegularFile(io, pkg_path)) continue;
                 const resolved_pkg = resolvePathNative(io, pkg_path, &p_res) orelse continue;
                 if (std.mem.eql(u8, resolved_overlay, resolved_pkg)) {
@@ -114,7 +97,7 @@ fn listingNames(listing: []const u8, names: *[64][]const u8) usize {
         if (n >= names.len) break;
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0) continue;
-        const name = basenameOf(line);
+        const name = pstore.basenameOf(line);
         if (name.len == 0 or name[0] == '.') continue;
         if (!jsonbuf.isSafeIdent(name)) continue;
         names[n] = name;
@@ -178,14 +161,14 @@ fn findShadowsExec(
             // Probe on a local cursor; only an accepted shadow keeps its
             // paths. See findShadowsNative.
             var probe = used;
-            const overlay_path = joinPath(odir, name, path_store, &probe) orelse continue;
+            const overlay_path = pstore.joinPath(odir, name, path_store, &probe) orelse continue;
             if (!fileExistsExec(overlay_path)) continue;
             const resolved_overlay = resolvePathExec(overlay_path, &ov_buf) orelse continue;
 
             var packaged: ?[]const u8 = null;
             var same = false;
             for (packageDirs) |pdir| {
-                const pkg_path = joinPath(pdir, name, path_store, &probe) orelse continue;
+                const pkg_path = pstore.joinPath(pdir, name, path_store, &probe) orelse continue;
                 if (!fileExistsExec(pkg_path)) continue;
                 const resolved_pkg = resolvePathExec(pkg_path, &pkg_buf) orelse continue;
                 if (std.mem.eql(u8, resolved_overlay, resolved_pkg)) {

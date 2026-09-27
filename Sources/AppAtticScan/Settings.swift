@@ -221,29 +221,29 @@ public func loadSettings(from url: URL = defaultSettingsURL()) throws -> AppAtti
             reason: "unknown key(s): \(unknown.sorted().joined(separator: ", "))"
         )
     }
+    let decoded: AppAtticSettings
     do {
-        let settings = try JSONDecoder().decode(AppAtticSettings.self, from: raw).normalized()
-        // An ignore entry is matched against the leftover path a scan reports,
-        // so a relative one, a `~` one, or one with a trailing slash never
-        // matches and the leftover the user hid stays in every report. Silent:
-        // nothing else in the file says the entry is wrong. Refuse it here,
-        // where the file is already strict about everything else.
-        if let bad = settings.ignoredLeftoverPaths.first(where: { !$0.hasPrefix("/") }) {
-            throw SettingsError.invalid(
-                path: path,
-                reason: "ignoredLeftoverPaths entry \"\(bad)\" is not an absolute path; "
-                    + "use the full path, the one the report prints"
-            )
-        }
-        return settings
-    } catch let error as SettingsError {
-        throw error
+        decoded = try JSONDecoder().decode(AppAtticSettings.self, from: raw)
     } catch {
         throw SettingsError.invalid(
             path: path,
             reason: "wrong type (includeSystem and confirmDelete must be true or false; ignoredLeftoverPaths must be an array of strings)"
         )
     }
+    let settings = decoded.normalized()
+    // An ignore entry is matched against the leftover path a scan reports, so
+    // a relative one, a `~` one, or one with a trailing slash never matches and
+    // the leftover the user hid stays in every report. Silent: nothing else in
+    // the file says the entry is wrong. Refuse it here, where the file is
+    // already strict about everything else.
+    if let bad = settings.ignoredLeftoverPaths.first(where: { !$0.hasPrefix("/") }) {
+        throw SettingsError.invalid(
+            path: path,
+            reason: "ignoredLeftoverPaths entry \"\(bad)\" is not an absolute path; "
+                + "use the full path, the one the report prints"
+        )
+    }
+    return settings
 }
 
 /// Write settings.json (pretty, sorted keys, normalized ignore list). Used by the UI.

@@ -3,6 +3,7 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const pstore = @import("path_store.zig");
 const fuzzsupport = @import("fuzzsupport.zig");
 
 pub const Orphan = struct {
@@ -101,11 +102,6 @@ pub fn specById(comptime id: []const u8) Spec {
 pub fn queryCommand(comptime spec: Spec) []const u8 {
     if (std.mem.indexOfAny(u8, spec.root, " \t") != null) return spec.query_cmd;
     return spec.query_cmd ++ " " ++ spec.root;
-}
-
-fn basenameOf(path: []const u8) []const u8 {
-    if (std.mem.lastIndexOfScalar(u8, path, '/')) |i| return path[i + 1 ..];
-    return path;
 }
 
 fn nameInKeep(name: []const u8, keep: []const u8) bool {
@@ -245,7 +241,7 @@ pub fn parseListing(
         if (n == out.len) break;
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0) continue;
-        const name = basenameOf(line);
+        const name = pstore.basenameOf(line);
         if (name.len == 0) continue;
         if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
         if (!jsonbuf.isSafeIdent(name)) continue;
@@ -638,7 +634,7 @@ fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
             // pointer into a dead frame.
             const in_store = sliceInside(&paths, hit.path);
             try std.testing.expect(in_store or sliceInside(text, hit.path));
-            try std.testing.expectEqualStrings(hit.name, basenameOf(hit.path));
+            try std.testing.expectEqualStrings(hit.name, pstore.basenameOf(hit.path));
             if (in_store) {
                 const joined = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ spec.root, hit.name });
                 defer std.testing.allocator.free(joined);

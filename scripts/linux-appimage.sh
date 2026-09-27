@@ -91,18 +91,9 @@ fail_dep() {
     exit 2
 }
 
-if [[ -z "${WASMTIME_DIR:-}" ]]; then
-    if [[ -f /opt/wasmtime-c-api/include/wasmtime.h ]]; then
-        export WASMTIME_DIR=/opt/wasmtime-c-api
-    elif [[ -f "$ROOT/.deps/wasmtime-c-api/include/wasmtime.h" ]]; then
-        export WASMTIME_DIR="$ROOT/.deps/wasmtime-c-api"
-    elif [[ -f /usr/local/include/wasmtime.h ]]; then
-        export WASMTIME_DIR=/usr/local
-    fi
-fi
-if [[ -z "${WASMTIME_DIR:-}" ]] || [[ ! -f "${WASMTIME_DIR}/include/wasmtime.h" ]]; then
-    fail_dep "wasmtime C API missing" "bash scripts/linux-deps.sh --install-wasmtime"
-fi
+# shellcheck source=find-wasmtime.sh
+. "$ROOT/scripts/find-wasmtime.sh"
+appattic_find_wasmtime || fail_dep "wasmtime C API missing" "bash scripts/linux-deps.sh --install-wasmtime"
 
 command -v cmake >/dev/null 2>&1 || fail_dep "cmake missing" "bash scripts/linux-deps.sh --install"
 command -v patchelf >/dev/null 2>&1 || fail_dep "patchelf missing" "bash scripts/linux-deps.sh --install"
