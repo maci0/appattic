@@ -103,6 +103,8 @@ target_link_libraries(appattic-qt-core PRIVATE Qt6::Widgets Threads::Threads)
 add_executable(appattic-qt
     main.cpp
     scanworker.h
+    scriptproc.h
+    scriptproc.cpp
     $<TARGET_OBJECTS:appattic-qt-core>
     settings.cpp
     corehost.cpp

@@ -4,6 +4,7 @@
 #include "finding.h"
 #include "findingmodel.h"
 #include "scanworker.h"
+#include "scriptproc.h"
 #include "settings.h"
 #include "smoke.h"
 #include "uistyle.h"
@@ -53,8 +54,6 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPlainTextEdit>
-#include <QProcess>
-#include <QProcessEnvironment>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRect>
@@ -71,7 +70,6 @@
 #include <QStyleHints>
 #include <QStyleOptionViewItem>
 #include <QStyledItemDelegate>
-#include <QTemporaryFile>
 #include <QThread>
 #include <QTimer>
 #include <QToolBar>
@@ -84,14 +82,10 @@
 #include <QWidget>
 #include <QTemporaryDir>
 
-#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <sys/types.h>
 #include <utility>
-
-#include <unistd.h>
 
 static void resetWidgetPalette(QWidget *w) {
     if (!w) return;
@@ -104,53 +98,10 @@ static QString packageChildMarkKey(const QString &parentUid, const QString &chil
 }
 
 
-/// Bytes of script output kept for the failure report. The report itself shows
-/// the last 400, so this only has to cover them with room for a whole line.
-static const int kScriptOutputCap = 64 * 1024;
-
-/// How long a generated cleanup, update, or mark-manual script may run before
-/// it is stopped. The same bound the Swift runner applies (`scriptRunTimeout`),
-/// and for the same reason: a script blocked on a stale dpkg lock, an
-/// unreachable mirror, or a prompt nothing can answer otherwise leaves every
-/// action disabled with only the busy bar to say so, and the window is unusable
-/// until the app is killed. These scripts are not rolled back, so a stop
-/// mid-run is reported as partial work, never as a clean failure.
-static const int kScriptTimeoutMs = 600000;
-
-/// How long a stopped script gets to exit before it is killed. `sh` and the
-/// package managers below it both handle SIGTERM, so this is only reached by a
-/// process that is stuck rather than slow. It blocks the window for at most one
-/// second, once, after the run has already spent ten minutes.
-static const int kScriptStopGraceMs = 1000;
-
 /// How long the destructor waits for the scan thread. A run notices the cancel
 /// flag between plugins, so a normal quit returns at once; a subprocess wedged
 /// past its own timeout does not, and the wait has to end for the app to.
 static const int kScanThreadDrainMs = 8000;
-
-/// Put a script in its own process group, so a stop reaches everything it
-/// started. `QProcess::terminate` and `kill` signal the direct child only, and
-/// the direct child is `/bin/sh`; the apt, pacman, or flatpak process it is
-/// waiting on is a separate process and survives both. A stopped run would
-/// then report a clean stop while that process kept holding the dpkg lock and
-/// kept removing packages behind the window, and the next run would fail on the
-/// lock the stopped one left. The host's own subprocesses are grouped the same
-/// way (`core/host/hostexec.c`).
-static void isolateScriptProcessGroup(QProcess *proc) {
-    if (!proc) return;
-    proc->setChildProcessModifier([] { ::setpgid(0, 0); });
-}
-
-/// Signal a grouped script and everything below it. Falls back to the direct
-/// child when the group cannot be signalled, so a script whose group is gone
-/// still gets stopped.
-static void signalScriptGroup(QProcess *proc, int sig) {
-    if (!proc) return;
-    const qint64 pid = proc->processId();
-    if (pid > 0 && ::kill(-static_cast<pid_t>(pid), sig) == 0) return;
-    if (sig == SIGKILL) proc->kill();
-    else proc->terminate();
-}
 
 static bool isDarkPalette(const QPalette &p) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
@@ -880,20 +831,10 @@ public:
     }
 
     ~MainWindow() override {
-        if (m_scriptTimer) m_scriptTimer->stop();
-        if (m_scriptProc) {
-            signalScriptGroup(m_scriptProc, SIGKILL);
-            m_scriptProc->waitForFinished(3000);
-            m_scriptProc = nullptr;
-        }
-        // The script is written with autoRemove off, so the two terminal paths
-        // above own the delete. Quitting mid-script is the third exit, and
-        // without it every quit in that window leaves an executable full of rm
-        // lines in the temp directory.
-        if (!m_scriptPath.isEmpty()) {
-            QFile::remove(m_scriptPath);
-            m_scriptPath.clear();
-        }
+        // A script still running is killed and its temp file removed by
+        // ~ScriptProcess, before this window's own teardown.
+        delete m_script;
+        m_script = nullptr;
         if (m_worker) {
             disconnect(m_worker, nullptr, this, nullptr);
             disconnect(this, nullptr, m_worker, nullptr);
@@ -2963,36 +2904,17 @@ private:
         return out;
     }
 
-    /// Keep the tail of what the script printed, capped. A package transaction
-    /// runs for as long as the package manager takes and says so on every file
-    /// it touches, so an unbounded buffer grows with the run in a window that
-    /// stays open afterwards. The error report shows the last lines, which is
-    /// where the failure is, so dropping the front costs the report nothing.
-    void appendScriptOutput(const QByteArray &chunk) {
-        m_scriptOutput += chunk;
-        if (m_scriptOutput.size() <= kScriptOutputCap) return;
-        m_scriptOutput = m_scriptOutput.right(kScriptOutputCap);
-        // The cut can land mid-character; the partial one at the front would
-        // decode to a replacement character in the report.
-        int start = 0;
-        while (start < m_scriptOutput.size()
-               && (static_cast<unsigned char>(m_scriptOutput.at(start)) & 0xC0) == 0x80) {
-            ++start;
-        }
-        m_scriptOutput.remove(0, start);
-    }
-
     void runScript(const QString &script, const QString &progress) {
         if (m_scanning) return;
-        QTemporaryFile tmp(QDir::temp().filePath(QStringLiteral("appattic-XXXXXX.sh")));
-        tmp.setAutoRemove(false);
-        if (!tmp.open()) {
-            showError(QStringLiteral("Could not write the script to run."));
+        delete m_script;
+        m_script = new ScriptProcess(this);
+        QString writeError;
+        if (!m_script->prepare(script, &writeError)) {
+            delete m_script;
+            m_script = nullptr;
+            showError(writeError);
             return;
         }
-        tmp.write(script.toUtf8());
-        tmp.close();
-        QFile::setPermissions(tmp.fileName(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
         m_scanning = true;
         // The run reads the selection, so the inspector's include boxes go
         // with it: they are the same control as the column-0 mark, which the
@@ -3015,34 +2937,18 @@ private:
            user confirms the preview (the commit point). A failure mid-run is
            reported as "commands before the failure may have already run"
            rather than faked as restored. */
-        auto *proc = new QProcess(this);
-        m_scriptProc = proc;
-        m_scriptPath = tmp.fileName();
-        isolateScriptProcessGroup(proc);
-        proc->setProcessChannelMode(QProcess::MergedChannels);
-        proc->setStandardInputFile(QProcess::nullDevice());
-        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-        env.insert(QStringLiteral("DEBIAN_FRONTEND"), QStringLiteral("noninteractive"));
-        env.insert(QStringLiteral("APT_LISTCHANGES_FRONTEND"), QStringLiteral("none"));
-        proc->setProcessEnvironment(env);
-        m_scriptOutput.clear();
-        m_scriptStopped = false;
-        if (!m_scriptTimer) {
-            m_scriptTimer = new QTimer(this);
-            m_scriptTimer->setSingleShot(true);
-            connect(m_scriptTimer, &QTimer::timeout, this, [this]() { stopScript(); });
-        }
-        m_scriptTimer->start(kScriptTimeoutMs);
-        connect(proc, &QProcess::readyRead, this, [this, proc] {
-            appendScriptOutput(proc->readAll());
+        connect(m_script, &ScriptProcess::failed, this, [this]() {
+            delete m_script;
+            m_script = nullptr;
+            m_scanning = false;
+            m_rescan->setEnabled(true);
+            if (m_scanBar) m_scanBar->hide();
+            showError(QStringLiteral("Could not run the script."));
+            refreshActionBar();
+            if (m_table->isVisible()) rebuildInspector();
         });
-        connect(proc, &QProcess::finished, this, [this, proc, path = tmp.fileName()](int code) {
-            m_scriptTimer->stop();
-            const bool stopped = m_scriptStopped;
-            m_scriptStopped = false;
-            if (m_scriptProc == proc) m_scriptProc = nullptr;
-            if (m_scriptPath == path) m_scriptPath.clear();
-            QFile::remove(path);
+        connect(m_script, &ScriptProcess::finished, this,
+                [this](int code, bool stopped, const QByteArray &output) {
             m_scanning = false;
             m_rescan->setEnabled(true);
             if (m_scanBar) m_scanBar->hide();
@@ -3054,14 +2960,13 @@ private:
                rows for what the script just removed. */
             removeScanCacheFile(scanCacheFilePath());
             if (stopped || code != 0) {
-                appendScriptOutput(proc->readAll());
-                QString err = redactHomePaths(QString::fromUtf8(m_scriptOutput).trimmed());
+                QString err = redactHomePaths(QString::fromUtf8(output).trimmed());
                 if (err.size() > 400) {
                     err = err.right(400);
                     // QString::right counts UTF-16 units, so the cut can land
                     // between the halves of an astral character and the banner
                     // shows a replacement character. Same hazard the byte-level
-                    // cut above guards against, one level up.
+                    // cut in ScriptProcess guards against, one level up.
                     int drop = 0;
                     while (drop < err.size() && err.at(drop).isLowSurrogate()) ++drop;
                     if (drop > 0) err.remove(0, drop);
@@ -3074,7 +2979,7 @@ private:
                     const QString head = QStringLiteral(
                         "The script was stopped after %1 minutes without finishing. "
                         "Commands before the stop may have already run."
-                    ).arg(kScriptTimeoutMs / 60000);
+                    ).arg(kScriptTimeoutMinutes);
                     err = err.isEmpty() ? head : head + QStringLiteral("\n") + err;
                 } else if (err.isEmpty()) {
                     err = QStringLiteral(
@@ -3099,37 +3004,10 @@ private:
                 m_markedManual.clear();
                 rescan();
             }
-            proc->deleteLater();
+            delete m_script;
+            m_script = nullptr;
         });
-        connect(proc, &QProcess::errorOccurred, this, [this, proc, path = tmp.fileName()](QProcess::ProcessError err) {
-            if (err != QProcess::FailedToStart) return;
-            m_scriptTimer->stop();
-            m_scriptStopped = false;
-            if (m_scriptProc == proc) m_scriptProc = nullptr;
-            if (m_scriptPath == path) m_scriptPath.clear();
-            QFile::remove(path);
-            m_scanning = false;
-            m_rescan->setEnabled(true);
-            if (m_scanBar) m_scanBar->hide();
-            showError(QStringLiteral("Could not run the script."));
-            refreshActionBar();
-            if (m_table->isVisible()) rebuildInspector();
-            proc->deleteLater();
-        });
-        proc->start(QStringLiteral("/bin/sh"), {tmp.fileName()});
-    }
-
-    /// The script deadline fired. Escalate to a kill and let the `finished`
-    /// handler report it, so the temp file, the busy bar, the buttons, and the
-    /// cache drop all happen on the one path that already gets them right.
-    void stopScript() {
-        QProcess *proc = m_scriptProc;
-        if (!proc) return;
-        m_scriptStopped = true;
-        signalScriptGroup(proc, SIGTERM);
-        if (proc->waitForFinished(kScriptStopGraceMs)) return;
-        signalScriptGroup(proc, SIGKILL);
-        proc->waitForFinished(kScriptStopGraceMs);
+        m_script->start();
     }
 
     void applySystemAppearance() {
@@ -3371,11 +3249,7 @@ private:
     QLabel *m_ovOutEmpty = nullptr;
     QThread *m_scanThread = nullptr;
     ScanWorker *m_worker = nullptr;
-    QProcess *m_scriptProc = nullptr;
-    QTimer *m_scriptTimer = nullptr;
-    bool m_scriptStopped = false;
-    QString m_scriptPath;
-    QByteArray m_scriptOutput;
+    ScriptProcess *m_script = nullptr;
     QVector<Finding> m_findings;
 #ifndef NDEBUG
     QString m_shotDir;
