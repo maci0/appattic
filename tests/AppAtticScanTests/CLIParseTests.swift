@@ -187,6 +187,60 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertEqual(parseCLIArguments(["report", "--json="]).error, "--json requires a file path")
     }
 
+    func testHelpAndVersionAreStillParsedAfterAParseError() {
+        let help = parseCLIArguments(["--nope", "--help"])
+        XCTAssertTrue(help.help)
+        XCTAssertEqual(help.parseError, .unknownOption("--nope"))
+        XCTAssertTrue(parseCLIArguments(["--top", "--help"]).help)
+        XCTAssertTrue(parseCLIArguments(["disk", "/a", "/b", "-h"]).help)
+        XCTAssertTrue(parseCLIArguments(["--nope", "-v"]).version)
+    }
+
+    func testTheFirstErrorWins() {
+        XCTAssertEqual(parseCLIArguments(["--nope", "serve"]).error, "unknown option: --nope")
+    }
+
+    func testDiskOnlyOptionsAreRejectedElsewhere() {
+        for args in [["report", "--allocated"], ["stale", "--allocated"], ["--allocated"]] {
+            XCTAssertEqual(
+                parseCLIArguments(args).error,
+                "--allocated only applies to the disk command",
+                args.joined(separator: " ")
+            )
+        }
+        XCTAssertEqual(
+            parseCLIArguments(["report", "--all-file-systems"]).error,
+            "--all-file-systems only applies to the disk command"
+        )
+        XCTAssertNil(parseCLIArguments(["disk", "/var", "--allocated"]).error)
+        XCTAssertNil(parseCLIArguments(["disk", "--all-file-systems"]).error)
+    }
+
+    func testReportOnlyOptionsAreRejectedElsewhere() {
+        for option in ["--leftovers-only", "--stale-only"] {
+            XCTAssertEqual(
+                parseCLIArguments(["disk", option]).error,
+                "\(option) only applies to the report command",
+                option
+            )
+            XCTAssertEqual(
+                parseCLIArguments(["update", option]).error,
+                "\(option) only applies to the report command",
+                option
+            )
+            XCTAssertNil(parseCLIArguments([option]).error, option)
+        }
+    }
+
+    func testConflictingFiltersStillWinOverPerCommandOptions() {
+        XCTAssertEqual(parseCLIArguments(["disk", "--leftovers-only", "--stale-only"]).error, "--leftovers-only and --stale-only cannot be combined")
+        XCTAssertEqual(parseCLIArguments(["report", "--yes", "--allocated"]).error, "--yes only applies to the update command")
+    }
+
+    func testHelpDocumentsThePerCommandOptionRule() {
+        XCTAssertTrue(cliHelpText.contains("usage error on every other command"), cliHelpText)
+    }
+
     func testHelpDocumentsExitCodesExamplesAndDiskPath() {
         XCTAssertTrue(cliHelpText.contains("exit codes:"), cliHelpText)
         XCTAssertTrue(cliHelpText.contains("usage error"), cliHelpText)

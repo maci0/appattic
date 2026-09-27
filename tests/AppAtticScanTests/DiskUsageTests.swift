@@ -67,6 +67,20 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertFalse(text.contains("small"), text)
     }
 
+    func testHiddenEntriesCountWhatTheTopSliceDrops() {
+        let root = DiskUsageNode(name: "root", path: "/tmp/root", apparent: 100, allocated: 100, isDir: true)
+        let shown = DiskUsageNode(name: "shown", path: "/tmp/root/shown", apparent: 50, allocated: 50, isDir: true)
+        let hidden = DiskUsageNode(name: "hidden", path: "/tmp/root/hidden", apparent: 40, allocated: 40, isDir: true)
+        // 3 children of the hidden subtree, none of which the tree would print.
+        hidden.children = (0..<3).map {
+            DiskUsageNode(name: "h\($0)", path: "/tmp/root/hidden/h\($0)", apparent: 1, allocated: 1)
+        }
+        root.children = [shown, hidden, DiskUsageNode(name: "third", path: "/tmp/root/third", apparent: 1)]
+        XCTAssertEqual(diskTreeHiddenEntries(root, top: 1), 2)
+        XCTAssertEqual(diskTreeHiddenEntries(root, top: 5), 0)
+        XCTAssertEqual(diskTreeHiddenEntries(root, top: 0), 3)
+    }
+
     func testDiskJSONRoundTripFields() throws {
         let node = DiskUsageNode(name: "a", path: "/a", apparent: 4, allocated: 8, items: 2, isDir: true)
         node.children = [DiskUsageNode(name: "b", path: "/a/b", apparent: 4, allocated: 8)]

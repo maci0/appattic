@@ -12,16 +12,16 @@ enum AppAtticCLI {
         let args = Array(CommandLine.arguments.dropFirst())
         let opts = parseCLIArguments(args)
         C.noColorFlag = opts.noColor
-        if opts.version {
-            print("appattic \(appAtticVersion)")
-            return
-        }
         if opts.help {
             print(cliHelpText)
             return
         }
         if let err = opts.error {
             failUsage(err)
+        }
+        if opts.version {
+            print("appattic \(appAtticVersion)")
+            return
         }
         if opts.command == "disk" {
             runDiskCommand(opts)
@@ -144,6 +144,12 @@ func runDiskCommand(_ opts: CLIOptions) {
     // the wrong rows.
     tree.sortChildren(allocatedSize: opts.allocated)
     print(formatDiskTree(tree, allocatedSize: opts.allocated, top: opts.top), terminator: "")
+    if let top = opts.top {
+        let hidden = diskTreeHiddenEntries(tree, top: top)
+        if hidden > 0 {
+            print(C.dim("  \(hidden) more \(hidden == 1 ? "entry" : "entries") not shown (--top \(top))"))
+        }
+    }
     if let jsonPath = opts.json {
         do {
             let data = try diskUsageJSON(tree)
@@ -271,7 +277,7 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
     if !rows.isEmpty {
         print(renderTable(headers: ["Name", "What", "Location", "Size", "Modified", "Why"], rows: rows))
         if let limit, orphans.count > limit {
-            print(C.dim("  …and \(orphans.count - limit) more (use --top N)"))
+            print(C.dim("  …and \(orphans.count - limit) more not shown (--top \(limit))"))
         }
     }
     if !system.isEmpty {

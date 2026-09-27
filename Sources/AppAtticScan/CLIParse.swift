@@ -9,6 +9,7 @@ public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStr
     case unexpectedArgument(String)
     case conflictingFilters
     case yesNeedsUpdateCommand
+    case optionNeedsCommand(option: String, command: String)
 
     public var description: String {
         switch self {
@@ -31,6 +32,8 @@ public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStr
             return "--leftovers-only and --stale-only cannot be combined"
         case .yesNeedsUpdateCommand:
             return "--yes only applies to the update command"
+        case .optionNeedsCommand(let option, let command):
+            return "\(option) only applies to the \(command) command"
         }
     }
 
@@ -178,6 +181,10 @@ options:
   --version, -v       print version and exit
   --help, -h          print this help and exit
 
+An option that says which command it belongs to ("on report", "on disk",
+"on update") is a usage error on every other command, so a flag that would be
+ignored fails instead of running.
+
 Progress and status go to stderr. Reports and --dry-run scripts go to stdout.
 
 exit codes:
@@ -261,6 +268,9 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     var opts = CLIOptions()
     var i = 0
     var positional: [String] = []
+    // A bad flag does not stop the scan: later tokens still count, so
+    // `appattic --nope --help` prints help and `appattic --nope leftovers`
+    // reports both problems. The first error is the one the user must fix.
     while i < args.count {
         let a = args[i]
         if let flag = cliBooleanFlags.first(where: { $0.name == a }) {
@@ -271,8 +281,8 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         if a == "--json" {
             i += 1
             guard i < args.count, !args[i].hasPrefix("-") else {
-                opts.parseError = .jsonRequiresPath
-                return opts
+                if opts.parseError == nil { opts.parseError = .jsonRequiresPath }
+                continue
             }
             opts.json = args[i]
             i += 1
@@ -281,8 +291,9 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         if a.hasPrefix("--json=") {
             let value = String(a.dropFirst("--json=".count))
             if value.isEmpty || value.hasPrefix("-") {
-                opts.parseError = .jsonRequiresPath
-                return opts
+                if opts.parseError == nil { opts.parseError = .jsonRequiresPath }
+                i += 1
+                continue
             }
             opts.json = value
             i += 1
@@ -291,8 +302,8 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         if a == "--top" {
             i += 1
             guard i < args.count, let n = Int(args[i]), n >= 0 else {
-                opts.parseError = .topRequiresNonNegativeInteger
-                return opts
+                if opts.parseError == nil { opts.parseError = .topRequiresNonNegativeInteger }
+                continue
             }
             opts.top = n
             i += 1
@@ -300,8 +311,9 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         }
         if a.hasPrefix("--top=") {
             guard let n = Int(a.dropFirst("--top=".count)), n >= 0 else {
-                opts.parseError = .topRequiresNonNegativeInteger
-                return opts
+                if opts.parseError == nil { opts.parseError = .topRequiresNonNegativeInteger }
+                i += 1
+                continue
             }
             opts.top = n
             i += 1
@@ -310,8 +322,8 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         if a == "--category" {
             i += 1
             guard i < args.count, !args[i].hasPrefix("-") else {
-                opts.parseError = .categoryRequiresValue
-                return opts
+                if opts.parseError == nil { opts.parseError = .categoryRequiresValue }
+                continue
             }
             opts.category.append(args[i])
             i += 1
@@ -320,16 +332,18 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         if a.hasPrefix("--category=") {
             let value = String(a.dropFirst("--category=".count))
             if value.isEmpty || value.hasPrefix("-") {
-                opts.parseError = .categoryRequiresValue
-                return opts
+                if opts.parseError == nil { opts.parseError = .categoryRequiresValue }
+                i += 1
+                continue
             }
             opts.category.append(value)
             i += 1
             continue
         }
         if a.hasPrefix("-") {
-            opts.parseError = .unknownOption(a)
-            return opts
+            if opts.parseError == nil { opts.parseError = .unknownOption(a) }
+            i += 1
+            continue
         }
         positional.append(a)
         i += 1
@@ -339,13 +353,13 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
             opts.command = first
             if first == "disk" {
                 if positional.count >= 2 { opts.diskPath = positional[1] }
-                if positional.count > 2 {
+                if positional.count > 2, opts.parseError == nil {
                     opts.parseError = .unexpectedArgument(positional[2])
                 }
-            } else if positional.count > 1 {
+            } else if positional.count > 1, opts.parseError == nil {
                 opts.parseError = .unexpectedArgument(positional[1])
             }
-        } else {
+        } else if opts.parseError == nil {
             opts.parseError = .unknownCommand(first)
         }
     }
@@ -354,6 +368,20 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     }
     if opts.yes && opts.command != "update" && opts.parseError == nil {
         opts.parseError = .yesNeedsUpdateCommand
+    }
+    // A flag that one command ignores on every other is a usage error, not a
+    // silent no-op: `appattic report --allocated` looks like it changes the report.
+    if opts.allocated, opts.command != "disk", opts.parseError == nil {
+        opts.parseError = .optionNeedsCommand(option: "--allocated", command: "disk")
+    }
+    if opts.allFileSystems, opts.command != "disk", opts.parseError == nil {
+        opts.parseError = .optionNeedsCommand(option: "--all-file-systems", command: "disk")
+    }
+    if opts.leftoversOnly, opts.command != "report", opts.parseError == nil {
+        opts.parseError = .optionNeedsCommand(option: "--leftovers-only", command: "report")
+    }
+    if opts.staleOnly, opts.command != "report", opts.parseError == nil {
+        opts.parseError = .optionNeedsCommand(option: "--stale-only", command: "report")
     }
     return opts
 }

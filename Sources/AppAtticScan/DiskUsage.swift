@@ -336,6 +336,19 @@ public func formatDiskTree(
     return lines.joined(separator: "\n") + "\n"
 }
 
+/// Entries a `--top N` tree leaves out. The tree itself is silent about the
+/// cut, so without this a sliced listing reads as the whole folder.
+public func diskTreeHiddenEntries(_ node: DiskUsageNode, top: Int) -> Int {
+    var hidden = 0
+    var stack: [DiskUsageNode] = [node]
+    while let n = stack.popLast() {
+        let shown = min(n.children.count, max(0, top))
+        hidden += n.children.count - shown
+        stack.append(contentsOf: n.children.prefix(shown))
+    }
+    return hidden
+}
+
 /// JSON for the disk tree, written straight into a byte buffer.
 ///
 /// The old shape built a `[String: Any]` per node and handed the whole tree to
