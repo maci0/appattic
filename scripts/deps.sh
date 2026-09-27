@@ -356,11 +356,12 @@ check_tool_pins() {
 
 # The Swift toolchain is declared in .swift-version and repeated in two
 # places per workflow: every setup-swift step, and the tag of a swift: job
-# container. CI must build with the declared version, so a bump that misses
-# either spelling has to fail here rather than on the runner. A container job
-# is the worse half to miss, because nothing in the job reads the pin back.
-check_workflow_swift_versions() {
-    local declared workflow pinned
+# container, and once more in the FROM of each Dockerfile. CI and the images
+# must build with the declared version, so a bump that misses any of those
+# spellings has to fail here rather than on the runner. A container job or an
+# image is the worse half to miss, because nothing in it reads the pin back.
+check_pinned_swift_versions() {
+    local declared workflow image pinned
     declared="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
     for workflow in "$ROOT"/.github/workflows/*.yml; do
         [[ -f "$workflow" ]] || continue
@@ -375,6 +376,14 @@ check_workflow_swift_versions() {
             fi
         done < <(sed -n 's/^[[:space:]]*container:[[:space:]]*swift:\([0-9][0-9.]*\).*$/\1/p' "$workflow")
     done
+    for image in "$ROOT/Dockerfile" "$ROOT/Dockerfile.arch"; do
+        [[ -f "$image" ]] || continue
+        while IFS= read -r pinned; do
+            if [[ "$pinned" != "$declared" ]]; then
+                fail "${image#"$ROOT"/} builds FROM swift:$pinned, .swift-version says $declared"
+            fi
+        done < <(sed -n 's/^[[:space:]]*FROM[[:space:]]\{1,\}swift:\([0-9][0-9.]*\).*$/\1/p' "$image")
+    done
 }
 
 # SwiftPM pins the whole tree by commit revision, so an unpinned pin means a
@@ -382,6 +391,14 @@ check_workflow_swift_versions() {
 check_swiftpm_pins() {
     local resolved="$ROOT/Package.resolved"
     if [[ ! -f "$resolved" ]]; then
+        # Package.swift declares its dependencies per platform, and SwiftPM
+        # writes no lockfile for a manifest that declares none. The Linux arm
+        # declares no package, so an absent Package.resolved is the correct
+        # state there and failing on it turns the lint job permanently red. A
+        # platform whose arm does declare packages still has to carry one.
+        if [[ "$(manifest_declarations | wc -l)" -eq 0 ]]; then
+            return
+        fi
         fail "Package.resolved is missing; SwiftPM pins would not be reviewed"
         return
     fi
@@ -421,7 +438,7 @@ check_swiftpm_pins() {
 # declaration to report.
 check_swiftpm_pin_spelling() {
     local code declaration total parsed
-    code="$(grep -v '^[[:space:]]*//' "$ROOT/Package.swift" | tr '\n' ' ' || true)"
+    code="$(manifest_declarations_joined)"
     total="$(printf '%s' "$code" | grep -oE '\.package\([[:space:]]*url:' | wc -l || true)"
     parsed="$(swiftpm_declared | wc -l || true)"
     while IFS= read -r declaration; do
@@ -457,6 +474,45 @@ check_swiftpm_declarations() {
     done < <(swiftpm_declared)
 }
 
+# url|version for every .package(url:, .exact()) the platform compiles out of
+# Package.swift. The manifest gates its dependency list on the platform, so the
+# swift-cross-ui package sits in an arm a Linux build never compiles: reading the
+# file as plain text would report that dependency on Linux, where SwiftPM
+# resolves nothing and writes no lockfile. Dropping the #else arm of the one
+# `#if os(Linux)` block on Linux reads the manifest the way the platform does.
+manifest_declarations() {
+    if [[ "$(uname -s)" != Linux ]]; then
+        manifest_package_lines <"$ROOT/Package.swift"
+        return
+    fi
+    manifest_source | manifest_package_lines
+}
+
+# The same platform-filtered source as manifest_declarations, with the comment
+# lines dropped and the rest joined, so a declaration broken across lines is
+# still one declaration to count.
+manifest_source() {
+    if [[ "$(uname -s)" != Linux ]]; then
+        cat "$ROOT/Package.swift"
+        return
+    fi
+    awk '
+        /^#if /   { arm = "if"; next }
+        /^#else/  { arm = "else"; next }
+        /^#endif/ { arm = ""; next }
+        arm == "else" { next }
+        { print }
+    ' "$ROOT/Package.swift"
+}
+
+manifest_declarations_joined() {
+    manifest_source | grep -v '^[[:space:]]*//' | tr '\n' ' ' || true
+}
+
+manifest_package_lines() {
+    sed -n 's/.*\.package(url:[[:space:]]*"\([^"]*\)"[[:space:]]*,[[:space:]]*\.exact("\([^"]*\)").*/\1\t\2/p'
+}
+
 # identity|version|url for every .package(url:, .exact()) in Package.swift.
 # SwiftPM derives a package identity from the URL by dropping the scheme and
 # the .git suffix, and by lowercasing what is left, so this reads the same key
@@ -472,10 +528,7 @@ swiftpm_declared() {
         identity="${identity%.git}"
         identity="$(printf '%s' "$identity" | tr '[:upper:]' '[:lower:]')"
         printf '%s\t%s\t%s\n' "$identity" "$version" "$url"
-    done < <(
-        sed -n 's/.*\.package(url:[[:space:]]*"\([^"]*\)"[[:space:]]*,[[:space:]]*\.exact("\([^"]*\)").*/\1\t\2/p' \
-            "$ROOT/Package.swift"
-    )
+    done < <(manifest_declarations)
 }
 
 # identity|version|location|revision, one per pin, tab separated. SwiftPM
@@ -489,6 +542,10 @@ swiftpm_declared() {
 # and its state at eight, so a key rule has to match an indented line or that
 # number lands on the last pin as its version.
 swiftpm_pins() {
+    # A platform that resolves no packages has no lockfile, and the reader has
+    # to say so with no rows rather than an awk error on a missing path. The
+    # gate that needs a lockfile says so itself, in check_swiftpm_pins.
+    [[ -f "$ROOT/Package.resolved" ]] || return 0
     awk '
         function flush() {
             if (identity != "") {
@@ -519,7 +576,7 @@ run_check() {
     check_version_anchors
     check_artifact_versions_in_tree
     check_tool_pins
-    check_workflow_swift_versions
+    check_pinned_swift_versions
     check_swiftpm_pins
     if [[ "$FAILURES" -ne 0 ]]; then
         echo "deps: $FAILURES problem(s) with third-party pins" >&2

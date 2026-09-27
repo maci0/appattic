@@ -21,7 +21,11 @@ final class DependencyInventoryTests: XCTestCase {
     /// the name in the fourth `"`-separated field, and the same holds for
     /// "location" and "version".
     private func resolvedPins() throws -> [(identity: String, location: String, version: String)] {
-        let resolved = try String(contentsOf: root.appendingPathComponent("Package.resolved"), encoding: .utf8)
+        let url = root.appendingPathComponent("Package.resolved")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw XCTSkip("Package.swift declares no package on this platform, so SwiftPM resolved none and wrote no lockfile")
+        }
+        let resolved = try String(contentsOf: url, encoding: .utf8)
         var pins: [(identity: String, location: String, version: String)] = []
         for line in resolved.split(separator: "\n") {
             let parts = line.split(separator: "\"", omittingEmptySubsequences: false)
