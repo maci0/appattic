@@ -78,6 +78,38 @@ if ! cmp -s "$ROOT/core/src/linux-system-names.txt" \
 fi
 echo "system-name list mirror: ok"
 
+# One page vocabulary, two shells. StartPage.swift declares the sidebar page
+# names and both windows read APPATTIC_PAGE, but the names are spelled out a
+# second time in the Qt window's page table and in the warning it prints for an
+# unknown one. The two trees cannot share a constant across the language
+# boundary and nothing compared them, so a page added in Swift leaves the Qt
+# window opening the overview and quoting a value list that no longer matches.
+swift_pages="$(sed -n '/^public enum StartPage/,/^}/p' \
+    "$ROOT/Sources/AppAtticScan/StartPage.swift" \
+    | sed -n 's/^    case \([a-z]*\)$/\1/p')"
+qt_pages="$(sed -n '/initialPageFromName/,/^    }/p' "$ROOT/ui/linux-qt/main.cpp" \
+    | sed -n 's/^ *{QStringLiteral("\([a-z]*\)"), Page::.*/\1/p')"
+qt_valid_values="$(sed -n 's/.*Valid values: \([a-z, .]*\)\\n".*/\1/p' \
+    "$ROOT/ui/linux-qt/main.cpp" | tr -d ' .\n')"
+if [[ -z "$swift_pages" || -z "$qt_pages" ]]; then
+    echo "error: could not read the StartPage cases or the Qt page table" >&2
+    echo "       fix: keep 'case <page>' lines in the StartPage enum and the" >&2
+    echo "             {QStringLiteral(\"<page>\"), Page::...} table in main.cpp" >&2
+    exit 1
+fi
+if [[ "$(LC_ALL=C sort <<<"$swift_pages")" != "$(LC_ALL=C sort <<<"$qt_pages")" ]]; then
+    echo "error: the sidebar page names differ between StartPage.swift and the Qt page table" >&2
+    echo "       swift: $(LC_ALL=C sort <<<"$swift_pages" | tr '\n' ' ')" >&2
+    echo "       qt:    $(LC_ALL=C sort <<<"$qt_pages" | tr '\n' ' ')" >&2
+    exit 1
+fi
+if [[ "$qt_valid_values" != "$(tr '\n' ',' <<<"$swift_pages" | sed 's/,$//')" ]]; then
+    echo "error: the Qt 'Valid values' list does not match the StartPage cases" >&2
+    echo "       qt: $qt_valid_values" >&2
+    exit 1
+fi
+echo "page vocabulary: ok"
+
 # The desktop entry, the AppStream metainfo, the man page, and the Flatpak
 # manifest have to name the same app, the same binary, and the same icon, and
 # the install has to produce what they name. Nothing builds a Flatpak or an
