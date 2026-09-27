@@ -92,14 +92,17 @@ public func pathIdentityKey(_ path: String) -> String {
 /// `standardizingPath` (4 µs) dominated this function, not the scan itself.
 /// Bounded: `redactHomePaths` takes a caller-supplied home, so the key space is
 /// whatever a long-lived process passes in, and the map outlives every scan.
+/// Only caller-supplied homes live here; the process home has its own slot,
+/// because `""` is a real caller home and not a stand-in for "no home given".
 private let redactHomeLock = NSLock()
 private let redactHomeCacheLimit = 8
 nonisolated(unsafe) private var redactHomeCache: [String: String] = [:]
+nonisolated(unsafe) private var redactProcessHome: String? = nil
 
-/// Drop one entry once the map is over the limit. Not an age: the two real
-/// callers pass the process home, so the bound exists to cap a caller that
-/// feeds it unbounded keys, not to serve a working set. The victim is the
-/// greatest key, so the entries a run keeps do not depend on the hash seed.
+/// Drop one entry once the map is over the limit. Not an age: a caller that
+/// feeds it unbounded keys must not grow it, but the working set is whatever
+/// that caller reuses. The victim is the greatest key, so the entries a run
+/// keeps do not depend on the hash seed.
 private func trimRedactHomeCache() {
     guard redactHomeCache.count > redactHomeCacheLimit,
           let victim = redactHomeCache.keys.max()
@@ -118,14 +121,14 @@ private func standardizedHome(_ home: String) -> String {
 }
 
 /// Process home, resolved once: `homeDirectoryForCurrentUser` costs ~7 µs per
-/// call and the old default-arg form paid it on every log line.
+/// call and the old default-arg form paid it on every log line. Kept out of
+/// `redactHomeCache` so an explicit `home: ""` cannot read this slot back.
 private func processHome() -> String {
     redactHomeLock.lock()
     defer { redactHomeLock.unlock() }
-    if let cached = redactHomeCache[""] { return cached }
+    if let cached = redactProcessHome { return cached }
     let std = (FileManager.default.homeDirectoryForCurrentUser.path as NSString).standardizingPath
-    redactHomeCache[""] = std
-    trimRedactHomeCache()
+    redactProcessHome = std
     return std
 }
 

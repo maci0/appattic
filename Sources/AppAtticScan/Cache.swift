@@ -79,6 +79,19 @@ public func writeScanCache(_ cache: ScanCacheFile, to url: URL = defaultScanCach
     }
 }
 
+/// True when the snapshot carries no usable timestamp, a timestamp in the
+/// future, or one older than `maxAge`. Age alone, so a caller that cannot pay
+/// for an inventory stamp still enforces the same bound.
+public func isScanCacheExpired(
+    _ cache: ScanCacheFile,
+    now: Date = Date(),
+    maxAge: TimeInterval = scanCacheMaxAge
+) -> Bool {
+    guard let when = parseISODate(cache.data.scanned_at) else { return true }
+    let age = now.timeIntervalSince(when)
+    return age < 0 || age > maxAge
+}
+
 /// True when the cached scan is marked incomplete, or when includeSystem,
 /// fingerprint, or age (default 24h) no longer match.
 public func isScanCacheStale(
@@ -91,9 +104,7 @@ public func isScanCacheStale(
     if cache.data.incomplete == true { return true }
     if cache.includeSystem != includeSystem { return true }
     if cache.fingerprint != fingerprint { return true }
-    guard let when = parseISODate(cache.data.scanned_at) else { return true }
-    let age = now.timeIntervalSince(when)
-    return age < 0 || age > maxAge
+    return isScanCacheExpired(cache, now: now, maxAge: maxAge)
 }
 
 public func clearScanCache(at url: URL = defaultScanCacheURL()) {

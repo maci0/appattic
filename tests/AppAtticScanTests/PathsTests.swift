@@ -130,4 +130,19 @@ final class PathsTests: XCTestCase {
             )
         }
     }
+
+    func testRedactHomePathsWithEmptyHomeDoesNotBorrowTheProcessHome() throws {
+        // An empty home is a real argument, not "resolve the process home".
+        // The memo must not hand back the process-home slot for it.
+        let processHome = (FileManager.default.homeDirectoryForCurrentUser.path as NSString).standardizingPath
+        try XCTSkipIf(processHome.count <= 1, "no redaction is attempted for a root-only home")
+        let text = "rm: cannot remove '\(processHome)/Library/Caches/Foo': Permission denied"
+        XCTAssertEqual(redactHomePaths(text), "rm: cannot remove '~/Library/Caches/Foo': Permission denied")
+        XCTAssertEqual(redactHomePaths(text, home: ""), text)
+        // And it stays that way when other homes have passed through the memo.
+        for i in 0..<32 {
+            XCTAssertEqual(redactHomePaths("at /tmp/redact-empty-\(i)/x", home: "/tmp/redact-empty-\(i)"), "at ~/x")
+        }
+        XCTAssertEqual(redactHomePaths(text, home: ""), text)
+    }
 }

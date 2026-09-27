@@ -314,6 +314,53 @@ final class CacheTests: XCTestCase {
         XCTAssertFalse(isScanCacheStale(complete, includeSystem: false, fingerprint: "a", now: now, maxAge: 3600))
     }
 
+    func testIsScanCacheExpiredChecksAgeAlone() throws {
+        func snapshot(_ scannedAt: String) -> ScanData {
+            ScanData(
+                scanned_at: scannedAt,
+                duration_s: 1,
+                brew_available: false,
+                totals: ScanTotals(
+                    apps_installed: 0,
+                    orphaned_items: 0,
+                    orphaned_bytes: 0,
+                    system_leftover_bytes: 0,
+                    reclaimable_bytes: 0,
+                    stale_apps: 0,
+                    outdated_apps: 0
+                ),
+                leftovers: [],
+                software: []
+            )
+        }
+        let data = snapshot("2026-08-17T12:00:00Z")
+        let cache = ScanCacheFile(fingerprint: "a", includeSystem: false, data: data)
+        let now = parseISODate("2026-08-17T12:30:00Z")!
+        XCTAssertFalse(isScanCacheExpired(cache, now: now, maxAge: 3600))
+        XCTAssertTrue(
+            isScanCacheExpired(cache, now: parseISODate("2026-08-17T13:30:01Z")!, maxAge: 3600)
+        )
+        XCTAssertTrue(
+            isScanCacheExpired(cache, now: parseISODate("2026-08-17T11:30:00Z")!, maxAge: 3600)
+        )
+        XCTAssertTrue(
+            isScanCacheExpired(
+                ScanCacheFile(fingerprint: "a", includeSystem: false, data: snapshot("not a date")),
+                now: now,
+                maxAge: 3600
+            )
+        )
+        // Age alone ignores the fingerprint and the scan mode, so a caller
+        // that cannot stamp the inventory still gets the same bound.
+        XCTAssertFalse(
+            isScanCacheExpired(
+                ScanCacheFile(fingerprint: "other", includeSystem: true, data: data),
+                now: now,
+                maxAge: 3600
+            )
+        )
+    }
+
     func testCommitScanCacheSkipsWhenFingerprintMovesOrIncomplete() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-commit-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }

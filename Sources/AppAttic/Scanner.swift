@@ -157,7 +157,13 @@ final class ScannerViewModel {
         self.includeSystem = includeSystem
         invalidateRowCache()
         if let cache = loadScanCache() {
-            if cache.includeSystem != includeSystem || cache.data.incomplete == true {
+            // The instant view is only worth showing while the snapshot is
+            // inside the documented tolerance. Age is checked here because the
+            // inventory stamp that `refreshIfStale` computes is too slow to
+            // gate a launch on; the fingerprint check still runs behind it.
+            if cache.includeSystem != includeSystem
+                || cache.data.incomplete == true
+                || isScanCacheExpired(cache) {
                 scan(includeSystem: includeSystem)
                 return
             }
@@ -506,6 +512,13 @@ final class ScannerViewModel {
                     case .markManual:
                         vm.selectedMarkManual = []
                     }
+                    // The script just removed files, upgraded packages, or
+                    // changed install state: exactly what the snapshot
+                    // describes. Drop it, or the next launch opens on rows for
+                    // items that are already gone. Every caller rescans on
+                    // success anyway, which rewrites the file. The CLI's
+                    // update path clears the same file for the same reason.
+                    clearScanCache()
                     completion(true)
                 }
             } catch {
