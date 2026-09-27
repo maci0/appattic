@@ -340,3 +340,91 @@ final class FuzzSettingsAndDateTests: XCTestCase {
         }
     }
 }
+
+/// Fuzzes the `/etc/os-release` keyfile reader, a hand-rolled byte scan over
+/// a file the distribution package wrote. The invariants are the ones the
+/// scan promises: a field per line and never more, a key cut at the first `=`
+/// with no `=` of its own, and both halves of every field spelled out in the
+/// text the scan was handed.
+final class FuzzOsReleaseTests: XCTestCase {
+    private static let seeds = [
+        """
+        NAME="Ubuntu"
+        VERSION="22.04.3 LTS (Jammy Jellyfish)"
+        ID=ubuntu
+        ID_LIKE=debian
+        PRETTY_NAME="Ubuntu 22.04.3 LTS"
+        # a comment
+        BUILD_ID=1
+        """,
+        "ID=arch\nNAME='Arch Linux'\nPRETTY_NAME=Arch Linux\n",
+        "ID=fedora\r\nVERSION_ID=39\r\n",
+        "ID=slackware\nVERSION_ID=15.0\nID=slackware\nVERSION_ID=15.0\n",
+        "ID\n=novalue\n=  \n   =x\n#\n#ID=commented\n",
+        "  ID  =  spaced  \n",
+        "ID=\"unbalanced\nVERSION='mixed\"\n",
+        "ID=\nEMPTY=\n",
+        "",
+        "\n\n\n",
+        "   \n\t\n",
+        "\u{FEFF}ID=bom\n",
+    ]
+
+    /// The bytes the reader trims from both ends of a key or a value.
+    private static let edgeTrim = CharacterSet(charactersIn: " \t")
+
+    private func candidateLineCount(_ text: String) -> Int {
+        text.split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .filter { !$0.trimmingCharacters(in: FuzzOsReleaseTests.edgeTrim).isEmpty }
+            .count
+    }
+
+    func testMutatedOsReleaseYieldsFieldsCutFromTheText() {
+        var rng = FuzzRandom(seed: 0x5EED_0F5E)
+        for base in FuzzOsReleaseTests.seeds {
+            for seed in fuzzSeeds {
+                let text = FuzzMutator.text(from: base, using: &rng)
+                let fields = parseOsRelease(text)
+                let where_ = "seed \(seed): \(text.debugDescription)"
+
+                XCTAssertEqual(parseOsRelease(text), fields, "not deterministic: \(where_)")
+                XCTAssertLessThanOrEqual(fields.count, candidateLineCount(text), where_)
+                for (key, value) in fields {
+                    XCTAssertFalse(key.isEmpty, "empty key: \(where_)")
+                    XCTAssertFalse(key.contains("="), "key carries a delimiter: \(key.debugDescription) \(where_)")
+                    XCTAssertFalse(key.hasPrefix("#"), "comment read as a field: \(key.debugDescription) \(where_)")
+                    XCTAssertFalse(
+                        key.contains("\n") || key.contains("\r"),
+                        "key spans lines: \(key.debugDescription) \(where_)"
+                    )
+                    XCTAssertEqual(
+                        key.trimmingCharacters(in: FuzzOsReleaseTests.edgeTrim),
+                        key,
+                        "key padded: \(key.debugDescription) \(where_)"
+                    )
+                    // Quote stripping removes the outer pair, so what is left
+                    // is still spelled out in the text.
+                    XCTAssertTrue(text.contains(key), "key not in the text: \(key.debugDescription) \(where_)")
+                    XCTAssertTrue(text.contains(value), "value not in the text: \(value.debugDescription) \(where_)")
+                }
+            }
+        }
+    }
+
+    /// A key the reader saw twice keeps the last value, and a run of lines
+    /// with no `=` on it is not a field at all.
+    func testDuplicateKeysAndLinesWithoutASeparator() {
+        XCTAssertEqual(parseOsRelease("ID=first\nID=second\n"), ["ID": "second"])
+        XCTAssertEqual(parseOsRelease("ID\nNAME=x\n"), ["NAME": "x"])
+        XCTAssertTrue(parseOsRelease("#ID=x\n").isEmpty)
+        XCTAssertTrue(parseOsRelease("=x\n").isEmpty)
+        XCTAssertEqual(parseOsRelease("ID=x\r\nNAME=y\n"), ["ID": "x", "NAME": "y"])
+        XCTAssertEqual(parseOsRelease("ID = x "), ["ID": "x"])
+        XCTAssertEqual(parseOsRelease("ID=\"x y\""), ["ID": "x y"])
+        XCTAssertEqual(parseOsRelease("ID='x'"), ["ID": "x"])
+        XCTAssertEqual(parseOsRelease("ID="), ["ID": ""])
+        for blank in ["", " ", "\t", "\n", "\r\n", "   \t \n "] {
+            XCTAssertTrue(parseOsRelease(blank).isEmpty, blank.debugDescription)
+        }
+    }
+}
