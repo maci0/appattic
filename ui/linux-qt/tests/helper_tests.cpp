@@ -61,6 +61,26 @@ static int verifyHelpers() {
         std::fprintf(stderr, "humanSize(1023) lost the locale grouping\n");
         return 1;
     }
+    // A volume row's three columns have to add up. `bytesFree` counts the
+    // blocks ext4 reserves for root and `bytesAvailable` does not, so using
+    // the larger one for "used" makes a 100 GB volume with 5 GB reserved read
+    // 51 GB used beside 44 GB available.
+    if (volumeUsedBytes(Q_INT64_C(107374182400), Q_INT64_C(48234418176)) != Q_INT64_C(59139764224)) {
+        std::fprintf(stderr, "volumeUsedBytes should subtract available, not free\n");
+        return 1;
+    }
+    if (volumeUsedBytes(Q_INT64_C(107374182400), Q_INT64_C(107374182400)) != 0) {
+        std::fprintf(stderr, "an empty volume has nothing used\n");
+        return 1;
+    }
+    if (volumeUsedBytes(Q_INT64_C(107374182400), -1) != Q_INT64_C(107374182400)) {
+        std::fprintf(stderr, "a volume that reports no free space is all used\n");
+        return 1;
+    }
+    if (volumeUsedBytes(0, 0) != 0) {
+        std::fprintf(stderr, "a volume of unknown size has nothing used\n");
+        return 1;
+    }
     QVector<Finding> largeSize;
     appendFindingsFromBlob(largeSize, QByteArrayLiteral(
         "{\"findings\":[{\"name\":\"large\",\"size_bytes\":9007199254740993}]}"));

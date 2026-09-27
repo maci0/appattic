@@ -663,7 +663,6 @@ QVector<DiskVolume> listDiskVolumes() {
         v.device = QString::fromUtf8(s.device());
         v.fileSystem = fs;
         v.bytesTotal = s.bytesTotal();
-        v.bytesFree = s.bytesFree();
         v.bytesAvailable = s.bytesAvailable();
         v.readOnly = s.isReadOnly();
         v.isRoot = root == QLatin1String("/");
@@ -687,6 +686,12 @@ QVector<DiskVolume> listDiskVolumes() {
         return a.rootPath < b.rootPath;
     });
     return out;
+}
+
+qint64 volumeUsedBytes(qint64 total, qint64 available) {
+    if (total <= 0 || available >= total) return 0;
+    if (available < 0) return total;
+    return total - available;
 }
 
 QString diskContentsLabel(qint64 items, bool isDir) {

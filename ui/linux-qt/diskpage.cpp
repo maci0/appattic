@@ -614,7 +614,7 @@ void DiskPage::refreshVolumes() {
         it->setText(1, v.rootPath);
         it->setText(2, v.fileSystem);
         it->setText(3, humanSize(v.bytesTotal));
-        const qint64 used = v.bytesTotal > v.bytesFree ? v.bytesTotal - v.bytesFree : 0;
+        const qint64 used = volumeUsedBytes(v.bytesTotal, v.bytesAvailable);
         it->setText(4, humanSize(used));
         it->setText(5, humanSize(v.bytesAvailable));
         it->setData(1, Qt::UserRole, v.rootPath);
