@@ -184,7 +184,7 @@ bash scripts/test.sh                                           # AppAtticScanTes
 bash scripts/test.sh DiskSizeTests                             # one class
 bash scripts/test.sh DiskSizeTests/testParseDuKBRequiresLeadingInteger   # one test
 ./core/build.sh test brew.zig                                  # one Zig module
-./core/build.sh test brew.zig isSafeIdent                     # one Zig test
+./core/build.sh test jsonbuf.zig isSafeIdent               # one Zig test (from the module that declares it)
 ./core/build.sh test-core                                      # whole Zig core, no wasmtime/Qt
 bash scripts/lint.sh
 ```

@@ -10,7 +10,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     echo "Usage: $0 [test <name.zig> [testName] | test-core]"
     echo "  (no args)              WASM + all zig tests + host (needs wasmtime C API)"
     echo "  test brew.zig          one module (fast edit loop)"
-    echo "  test brew.zig isSafeIdent  one test in that module"
+    echo "  test jsonbuf.zig isSafeIdent  one test in that module"
     echo "  test-core              zig fmt --check + every zig test (no wasmtime, no Qt)"
     exit 0
 fi
@@ -85,18 +85,27 @@ if [ "${1:-}" = "test" ]; then
     zig fmt --check "$root/src/$name"
     filter="${3:-}"
     if [ -n "$filter" ]; then
-        # zig test exits 0 and prints "All 0 tests passed" when --test-filter
-        # matches nothing, so a typo in the name would read as a green run.
-        # The count is taken from the progress lines the runner prints.
-        log="$(zig test --test-filter "$filter" "$root/src/$name" 2>&1)" || {
+        # A module's tests are named <module>.test.<name>, and `zig test` on
+        # one file runs the tests of every file it imports. An unqualified
+        # filter therefore reaches the imported tree: `test brew.zig
+        # isSafeIdent` reported jsonbuf's tests green and never ran a brew
+        # test, which is the opposite of what the command promises. Scope the
+        # filter to the named module so a name that lives elsewhere reads as
+        # the typo it is.
+        mod="${name%.zig}"
+        log="$(zig test --test-filter "$mod.test.$filter" "$root/src/$name" 2>&1)" || {
             printf '%s\n' "$log" >&2
             exit 1
         }
+        # zig test exits 0 and prints "All 0 tests passed" when --test-filter
+        # matches nothing, so a typo in the name would read as a green run.
+        # The count is taken from the progress lines the runner prints.
         printf '%s\n' "$log"
         if ! printf '%s\n' "$log" | grep -qE '^[0-9]+/[0-9]+ '; then
-            echo "error: no test in $name matches '$filter'" >&2
-            printf 'list them: zig test %s 2>&1 | grep -oE %s\n' \
-                "$root/src/$name" "'\btest\.[A-Za-z0-9_.]+'" >&2
+            echo "error: no test named '$filter' in $name" >&2
+            echo "note: a test in an imported module is not in $name; run it from" >&2
+            echo "      that module instead: zig test core/src/<module>.zig 2>&1 |" >&2
+            printf "      grep -oE '\\b%s\\.test\\.[A-Za-z0-9_ ]+'\n" "$mod" >&2
             exit 1
         fi
         exit 0

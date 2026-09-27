@@ -288,6 +288,28 @@ else
     missing "cc (the C host gate needs it)" "install a C compiler: gcc or clang"
 fi
 
+# lint.sh compiles every C file under core/host with each compiler it finds,
+# and the two disagree on what they diagnose, so a machine with only one
+# compiler passes a defect the other would warn about. CI has both, so
+# without clang a local gate is weaker than the CI gate it stands in for.
+if command -v clang >/dev/null 2>&1; then
+    present "clang" "$(command -v clang)"
+else
+    missing "clang (scripts/lint.sh compiles with cc and clang; without it the local run is weaker than CI)" \
+        "bash $0 --install"
+fi
+
+# check-packaging.sh runs desktop-file-validate on the desktop entry when it
+# is on PATH and only notes the skip when it is not. CI installs it so the
+# check is blocking there; a preflight that stayed silent about it left the
+# desktop entry unvalidated locally with nothing naming the tool.
+if command -v desktop-file-validate >/dev/null 2>&1; then
+    present "desktop-file-validate" "$(command -v desktop-file-validate)"
+else
+    missing "desktop-file-validate (scripts/check-packaging.sh runs it on the desktop entry; without it the check only notes the skip)" \
+        "bash $0 --install-desktop-file-utils"
+fi
+
 # Swift is the one tool with no single install command: the distro packages
 # differ, and the tarball is built for another glibc. Report the version found
 # against the pin, because a swift of the wrong version fails the same way a

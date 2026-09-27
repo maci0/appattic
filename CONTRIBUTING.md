@@ -9,7 +9,7 @@ bash scripts/check.sh --qt     # full Linux CI parity, including Qt/WASM proof
 bash scripts/check.sh --core   # the same, minus every Swift step (see below)
 bash scripts/test.sh DiskSizeTests    # one class, or one test: Class/testName
 ./core/build.sh test brew.zig
-./core/build.sh test brew.zig isSafeIdent
+./core/build.sh test jsonbuf.zig isSafeIdent
 ./core/build.sh test-core
 ```
 
@@ -18,7 +18,11 @@ minus one (`APPATTIC_BUILD_JOBS` overrides). Output and failure reports stay in
 the module order the script declares, so a red line names the module that broke.
 The second argument to `test` filters to one test, the Zig counterpart of
 `scripts/test.sh Class/testName`; a name that matches nothing fails rather than
-reporting a green run over zero tests.
+reporting a green run over zero tests. The filter is scoped to the named
+module, because `zig test` on one file also runs the tests of every file it
+imports: an unqualified name would run the imported tree's tests and read green
+while the module you edited went untested. A test that lives in another module
+is run from that module.
 
 `scripts/check.sh --core` runs the lint gate, the Zig core suite and the
 reproducible-artifact check without a Swift toolchain, for work in `core/src/`,
