@@ -54,3 +54,23 @@ cc_strict_warnings=(-Werror -Wformat=2 -Wformat-security -Wshadow
 # shellcheck disable=SC2034  # read by the scripts that source this file
 zig_build_flags=(-target wasm32-freestanding -fno-entry -rdynamic
     -OReleaseSmall -fstrip)
+
+# Stamp the named files to SOURCE_DATE_EPOCH. The precompiled image beside a
+# WASM module is bound to it by a `.cwasm.stamp` holding that module's size and
+# mtime, and packaging ships the stamp as file content, so a module left at its
+# own build mtime gives two builds of one source two different artifacts.
+# BSD date has no -d and BSD touch has no -d @epoch, so the epoch is rendered to
+# the one `touch -t` spelling both accept; callers export TZ=UTC, so the
+# rendered stamp is the same on either host. With no epoch in the environment
+# the files are left alone rather than stamped with a time of the build's own.
+appattic_touch_epoch() {
+    if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+        return 0
+    fi
+    local stamp
+    case "$(uname -s)" in
+        Darwin) stamp="$(date -u -r "$SOURCE_DATE_EPOCH" +%Y%m%d%H%M.%S)" ;;
+        *) stamp="$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y%m%d%H%M.%S)" ;;
+    esac
+    touch -t "$stamp" -- "$@"
+}

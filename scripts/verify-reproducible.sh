@@ -22,7 +22,8 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     echo
     echo "  Builds one WASM module and the C host test twice, from two"
     echo "  differently named directories, under a different locale, timezone"
-    echo "  and SOURCE_DATE_EPOCH, and requires the artifacts to match."
+    echo "  and SOURCE_DATE_EPOCH, and requires the artifacts to match. Also"
+    echo "  requires the module mtime a .cwasm.stamp records to be the epoch."
     exit 0
 fi
 if [[ $# -ne 0 ]]; then
@@ -122,6 +123,35 @@ fail=0
 compare "C host test binary" "$tmp/host1" "$tmp/host2" || fail=1
 if [[ "$HAVE_ZIG" -eq 1 ]]; then
     compare "core.wasm" "$tmp/core1.wasm" "$tmp/core2.wasm" || fail=1
+fi
+
+# What a precompiled image's `.cwasm.stamp` records: the module's mtime beside
+# its bytes, and the stamp ships in the AppImage as file content. Writing the
+# images needs the Wasmtime C API, so the two values the stamp would hold are
+# checked on the module itself. core/build.sh stamps every module with the
+# epoch before it compiles the images, so a stamp names the epoch and never
+# the clock of the build that wrote it; a module left at its own mtime makes
+# two builds of one source differ, which no archive normalization reaches.
+if [[ "$HAVE_ZIG" -eq 1 ]]; then
+    for pass in 1 2; do
+        if [[ "$pass" -eq 1 ]]; then
+            wasm="$tmp/core1.wasm"
+            epoch=1000000000
+        else
+            wasm="$tmp/core2.wasm"
+            epoch=1800000000
+        fi
+        SOURCE_DATE_EPOCH="$epoch"
+        export SOURCE_DATE_EPOCH
+        appattic_touch_epoch "$wasm"
+        mtime="$(date -r "$wasm" +%s)"
+        echo "pass $pass stamp input: size $(wc -c <"$wasm" | tr -d ' ') mtime $mtime"
+        if [[ "$mtime" != "$epoch" ]]; then
+            echo "error: $wasm mtime is $mtime, not SOURCE_DATE_EPOCH $epoch" >&2
+            echo "       a .cwasm.stamp written from it would carry the build clock" >&2
+            fail=1
+        fi
+    done
 fi
 if [[ $fail -ne 0 ]]; then
     exit 1

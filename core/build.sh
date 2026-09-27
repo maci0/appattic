@@ -217,8 +217,12 @@ zig fmt --check "$root/src" "$root/bench"
 # core/out is kept between runs and the packaging scripts bundle it by glob
 # (AppImage) or by pattern (cmake install). Without this, the output of a
 # removed or renamed plugin survives in the tree and ships in the artifact.
-# Only the full build clears it; test and test-core leave the artifacts alone.
-rm -f "$out"/*.wasm "$out"/*.cwasm "$out"/*.cwasm.tmp "$out"/*.cwasm.stamp
+# The directory is generated (gitignored) and every full build re-emits
+# everything in it, so the whole of it is cleared: a list of extensions misses
+# an artifact kind added later, and it left the host binary behind when the
+# link step was skipped. Only the full build clears it; test and test-core
+# leave the artifacts alone.
+rm -rf "${out:?}"/* "${out:?}"/.[!.]* 2>/dev/null || true
 
 # One artifact name for every consumer of it: the emit below, the built list
 # and the host's try line. core.zig is the one source whose artifact is not
@@ -239,6 +243,17 @@ zig_wasm() {
 }
 
 run_modules zig_wasm "${wasm_sources[@]}"
+
+# The precompiled image written below is bound to its source by a sibling
+# `.cwasm.stamp` holding that module's size and mtime, and the AppImage ships
+# the stamp as file content: a stamp carrying the wall clock makes two builds
+# of the same source differ, and no amount of normalizing the archive metadata
+# reaches inside a file. Every module is therefore stamped with the epoch
+# before the image is compiled, so the stamp is a function of the source and
+# the epoch. The reader compares the stamp against the .wasm's own mtime, and
+# every consumer copies the pair with `cp -pf` and then stamps the whole
+# bundle with the same epoch, so the image still validates.
+appattic_touch_epoch "$out"/*.wasm
 
 run_modules zig_test "${test_modules[@]}"
 
