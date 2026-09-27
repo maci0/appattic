@@ -6,22 +6,14 @@
 
 #include <QApplication>
 #include <QByteArray>
-#include <QDate>
-#include <QDateTime>
 #include <QDir>
-#include <QFile>
-#include <QFileDevice>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
-#include <QSet>
 #include <QString>
 #include <QStringList>
-#include <QTemporaryDir>
-#include <QTime>
-#include <QTimeZone>
 #include <QVector>
 
 #include <cstddef>
@@ -36,7 +28,6 @@ struct SmokeState {
     bool path_xdg_config_plugin = false;
     int path_xdg_config_findings = 0;
     bool path_home_dot_active = false;
-    bool flatpak_plugin = false;
     int flatpak_unused_runtime = 0;
     int raw_outdated_kind = 0;
     int progressTicks = 0;
@@ -81,7 +72,6 @@ static void smokeCollectJson(const char *json, size_t len, void *user) {
         st->path_home_dot_active = true;
     }
     if (plugin == QLatin1String("flatpak")) {
-        st->flatpak_plugin = true;
         for (const QJsonValue &v : arr) {
             const QJsonObject f = v.toObject();
             if (jsonStr(f, "kind") == QLatin1String("unused-runtime")) {

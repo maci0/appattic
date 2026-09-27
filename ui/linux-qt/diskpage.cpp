@@ -143,7 +143,6 @@ private:
 
 class DiskPage::Impl {
 public:
-    DiskPage *q = nullptr;
     QStackedWidget *stack = nullptr;
     QWidget *locations = nullptr;
     QWidget *scanPage = nullptr;
@@ -197,7 +196,6 @@ public:
 };
 
 DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
-    d->q = this;
     auto *lay = new QVBoxLayout(this);
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);

@@ -38,8 +38,6 @@ pub const Action = enum {
     skip,
     /// Descend into the value.
     walk,
-    /// Stop walking.
-    stop,
 };
 
 pub const Cursor = struct {
@@ -172,7 +170,6 @@ pub fn walkObject(cur: *Cursor, comptime Ctx: type, ctx: *Ctx) void {
             .took => {},
             .skip => _ = cur.skipAfter(vt),
             .walk => walkValue(cur, Ctx, ctx, vt),
-            .stop => return,
         }
     }
 }

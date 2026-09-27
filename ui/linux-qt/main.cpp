@@ -782,11 +782,11 @@ public:
                 m_searchDebounce = new QTimer(this);
                 m_searchDebounce->setSingleShot(true);
                 m_searchDebounce->setInterval(120);
-                connect(m_searchDebounce, &QTimer::timeout, this, [this] { fillCurrent(true); });
+                connect(m_searchDebounce, &QTimer::timeout, this, [this] { fillCurrent(); });
             }
             m_searchDebounce->start();
         });
-        connect(m_filter, &QComboBox::currentIndexChanged, this, [this] { fillCurrent(true); });
+        connect(m_filter, &QComboBox::currentIndexChanged, this, [this] { fillCurrent(); });
         connect(m_clearSearch, &QPushButton::clicked, this, [this] { m_search->clear(); });
         connect(m_emptyRetry, &QPushButton::clicked, this, &MainWindow::rescan);
         connect(m_selectAll, &QPushButton::clicked, this, &MainWindow::toggleSelectAll);
@@ -1495,7 +1495,7 @@ private:
         return n;
     }
 
-    void fillCurrent(bool viewOnly = false) {
+    void fillCurrent() {
         const Page page = currentPage();
         if (m_pageTitle) m_pageTitle->setText(pageTitle(page));
         // The title bar and the task switcher entry name the page too, so the
@@ -1519,7 +1519,7 @@ private:
         vis(m_countAct, m_count, list || overview || scanLive);
         vis(m_scanBarAct, m_scanBar, scanLive);
         if (overview) fillOverview();
-        else if (list) fillTable(page, viewOnly);
+        else if (list) fillTable(page);
         else if (settings) refreshIgnoredList();
         refreshActionBar();
     }
@@ -1875,7 +1875,7 @@ private:
         if (uid == m_selectedUid) rebuildInspector();
     }
 
-    void fillTable(Page page, bool = false) {
+    void fillTable(Page page) {
         const Tone tone = toneFrom(palette());
         const QVector<Finding> rows = visibleRows(page);
         const QStringList headers = pageHeaders(page);
@@ -2043,10 +2043,6 @@ public:
         m_shotIndex = 0;
         shotNext();
     }
-
-    int shotExitCode() const { return m_shotExit; }
-
-    int shotPagesTaken() const { return m_shotPages; }
 
     void shotNext() {
         if (m_shotIndex >= m_shotQueue.size()) {
@@ -2253,7 +2249,7 @@ public:
         if (!m_marked.contains(biggest.uid())) return fail("busy mark dropped the selection");
         m_scanning = false;
         m_search->setText(QStringLiteral("table-app-1"));
-        fillCurrent(true);
+        fillCurrent();
         if (m_model->rowCount() != 111) return fail("search rows");
         m_search->clear();
         fillCurrent();

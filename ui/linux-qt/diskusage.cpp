@@ -238,7 +238,6 @@ void visitEntry(
     child->name = QString::fromUtf8(name);
     child->path = QString::fromUtf8(path, int(*pathLen));
     child->mtime = meta.mtime;
-    child->device = meta.dev;
     child->items = 1;
     child->isDir = meta.isDir;
     child->apparent = meta.apparent;
@@ -547,7 +546,6 @@ DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts) {
         return node;
     }
     node->mtime = meta.mtime;
-    node->device = meta.dev;
     node->apparent = meta.apparent;
     node->allocated = meta.allocated;
     char pathBuf[4096];
@@ -674,7 +672,6 @@ QVector<DiskVolume> listDiskVolumes() {
         v.fileSystem = fs;
         v.bytesTotal = s.bytesTotal();
         v.bytesAvailable = s.bytesAvailable();
-        v.readOnly = s.isReadOnly();
         v.isRoot = root == QLatin1String("/");
         // "/" + "/" is "//", which no path starts with, so the root volume
         // has to be compared on its own. Matches listDiskVolumes in

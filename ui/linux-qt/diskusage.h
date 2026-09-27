@@ -12,7 +12,6 @@ struct DiskNode {
     qint64 allocated = 0;
     qint64 items = 0;
     qint64 mtime = 0;
-    quint64 device = 0;
     bool isDir = false;
     bool unreadable = false;
     bool mountPoint = false;
@@ -37,7 +36,6 @@ struct DiskVolume {
     qint64 bytesAvailable = 0;
     bool isRoot = false;
     bool isHome = false;
-    bool readOnly = false;
 };
 
 struct DiskScanOptions {

@@ -4,6 +4,7 @@ const jsonbuf = @import("jsonbuf.zig");
 const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const path_store = @import("path_store.zig");
 
 const plugin_id = "deno";
 const query_cmd = "ls -1 /home/user/.deno/bin";
@@ -21,11 +22,6 @@ pub const DenoGlobal = struct {
     name: []const u8,
 };
 
-fn basenameOf(path: []const u8) []const u8 {
-    if (std.mem.lastIndexOfScalar(u8, path, '/')) |i| return path[i + 1 ..];
-    return path;
-}
-
 fn skipName(name: []const u8) bool {
     return name.len == 0 or name[0] == '.' or std.mem.eql(u8, name, "deno") or std.mem.eql(u8, name, "deno.exe");
 }
@@ -38,7 +34,7 @@ pub fn parseDenoGlobalList(text: []const u8, out: []DenoGlobal) usize {
         if (n == out.len) break;
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0) continue;
-        const name = basenameOf(line);
+        const name = path_store.basenameOf(line);
         if (skipName(name)) continue;
         if (!jsonbuf.isSafeCmdIdent(name)) continue;
         out[n] = .{ .name = name };
