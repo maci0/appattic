@@ -73,6 +73,35 @@ final class CacheTests: XCTestCase {
         }
     }
 
+    /// A file that cannot be decoded is read in full and rejected on every
+    /// launch, and a machine whose scans keep failing leaves it on disk holding
+    /// the account's own paths. It is dropped instead.
+    func testCorruptCacheFileIsDropped() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-corrupt-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("not a snapshot".utf8).write(to: url)
+        XCTAssertNil(loadScanCache(from: url))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    /// The snapshot is a whole-inventory JSON, so its size scales with the
+    /// number of rows. Past the ceiling it is not a snapshot, and reading it
+    /// would take the whole file into memory before the decoder could reject it.
+    func testSnapshotPastTheByteCeilingIsNotRead() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-oversized-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try writeScanCache(
+            ScanCacheFile(fingerprint: "fp", includeSystem: false, data: sampleScanData()),
+            to: url
+        )
+        XCTAssertEqual(try readScanCache(from: url).fingerprint, "fp")
+        XCTAssertThrowsError(try readScanCache(from: url, maxBytes: 1)) { error in
+            guard case AppAtticIOError.readFailed = error else {
+                return XCTFail("expected readFailed, got \(error)")
+            }
+        }
+    }
+
     func testWriteScanCacheRoundTrip() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-write-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }

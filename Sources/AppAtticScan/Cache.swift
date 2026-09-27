@@ -3,6 +3,15 @@ import Foundation
 /// Max age before a fingerprint-matching cache is treated as stale (24 hours).
 public let scanCacheMaxAge: TimeInterval = 24 * 3600
 
+/// Ceiling on the snapshot file, checked before it is read. The snapshot is a
+/// whole-inventory JSON, so its size scales with the number of leftovers and
+/// software rows: a home in the tens of thousands of rows is a few megabytes,
+/// and a few hundred thousand is still well inside this. Nothing a scan writes
+/// reaches it. A file past the ceiling is not a snapshot (a truncated write, a
+/// full disk, something else parked at that path), and reading it would pull
+/// the whole thing into memory before the decoder could reject it.
+public let scanCacheMaxBytes: Int = 256 * 1024 * 1024
+
 public struct ScanCacheFile: Codable, Sendable {
     public var fingerprint: String
     public var includeSystem: Bool
@@ -29,12 +38,33 @@ public func defaultScanCacheURL() -> URL {
     return base.appendingPathComponent("last-scan.json")
 }
 
-/// Swallow read/decode errors. Prefer `readScanCache` when the caller must distinguish missing vs corrupt.
+/// Swallow read/decode errors, and delete a file that decodes to nothing: it is
+/// read in full and rejected on every launch until a scan overwrites it, and a
+/// machine whose scans keep failing leaves it on disk holding the account's
+/// own paths. A missing or unreadable file is not corrupt, so it stays.
+/// Prefer `readScanCache` when the caller must report which it hit.
 public func loadScanCache(from url: URL = defaultScanCacheURL()) -> ScanCacheFile? {
-    try? readScanCache(from: url)
+    do {
+        return try readScanCache(from: url)
+    } catch AppAtticIOError.decodeFailed {
+        clearScanCache(at: url)
+        return nil
+    } catch {
+        return nil
+    }
 }
 
-public func readScanCache(from url: URL = defaultScanCacheURL()) throws -> ScanCacheFile {
+public func readScanCache(
+    from url: URL = defaultScanCacheURL(),
+    maxBytes: Int = scanCacheMaxBytes
+) throws -> ScanCacheFile {
+    let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+    if let size = (attrs?[.size] as? Int), size > maxBytes {
+        throw AppAtticIOError.readFailed(
+            path: url.path,
+            message: "cache file is \(size) bytes, past the \(maxBytes) byte bound"
+        )
+    }
     let raw: Data
     do {
         raw = try Data(contentsOf: url)

@@ -146,10 +146,15 @@ nonisolated(unsafe) private var redactProcessHome: String? = nil
 /// Drop one entry once the map is over the limit. Not an age: a caller that
 /// feeds it unbounded keys must not grow it, but the working set is whatever
 /// that caller reuses. The victim is the greatest key, so the entries a run
-/// keeps do not depend on the hash seed.
-private func trimRedactHomeCache() {
+/// keeps do not depend on the hash seed. `keeping` is never the victim: a home
+/// whose spelling sorts last would otherwise be dropped by the very call that
+/// stored it, and every later lookup of it would pay the `standardizingPath`
+/// again while the eight rarely passed homes sat in the map.
+private func trimRedactHomeCache(keeping keep: String) {
     guard redactHomeCache.count > redactHomeCacheLimit,
-          let victim = redactHomeCache.keys.max()
+          let victim = redactHomeCache.keys
+            .filter({ $0 != keep })
+            .max()
     else { return }
     redactHomeCache.removeValue(forKey: victim)
 }
@@ -160,7 +165,7 @@ private func standardizedHome(_ home: String) -> String {
     if let cached = redactHomeCache[home] { return cached }
     let std = (home as NSString).standardizingPath
     redactHomeCache[home] = std
-    trimRedactHomeCache()
+    trimRedactHomeCache(keeping: home)
     return std
 }
 
