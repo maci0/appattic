@@ -104,16 +104,6 @@ pub fn queryCommand(comptime spec: Spec) []const u8 {
     return spec.query_cmd ++ " " ++ spec.root;
 }
 
-fn nameInKeep(name: []const u8, keep: []const u8) bool {
-    var lines = std.mem.splitScalar(u8, keep, '\n');
-    while (lines.next()) |raw| {
-        const k = std.mem.trim(u8, raw, " \t\r");
-        if (k.len == 0) continue;
-        if (std.mem.eql(u8, k, name)) return true;
-    }
-    return false;
-}
-
 const linux_system_names = @embedFile("linux-system-names.txt");
 
 /// Sorted table of the embedded names, stored lowered. Parsed once on first
@@ -246,23 +236,14 @@ pub fn parseListing(
         if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
         if (!jsonbuf.isSafeIdent(name)) continue;
         if (isSystemLeftoverName(name)) continue;
-        if (nameInKeep(name, keep)) continue;
-        if (allow.len > 0 and !nameInKeep(name, allow)) continue;
+        if (pstore.nameInList(name, keep)) continue;
+        if (allow.len > 0 and !pstore.nameInList(name, allow)) continue;
         // The path is always `root` joined with the validated basename, never
         // the line as printed. `ls -1` prints a bare basename, so a line that
         // is already absolute is accepted only when it says exactly that; a
         // listing that spells out anything else (`/root/../../etc`) is dropped
         // rather than turned into an `rm -rf` target.
-        const need = root.len + 1 + name.len;
-        if (used + need > path_store.len) continue;
-        const start = used;
-        @memcpy(path_store[used..][0..root.len], root);
-        used += root.len;
-        path_store[used] = '/';
-        used += 1;
-        @memcpy(path_store[used..][0..name.len], name);
-        used += name.len;
-        const joined = path_store[start..used];
+        const joined = pstore.joinPath(root, name, path_store, &used) orelse continue;
         if (line[0] == '/' and !std.mem.eql(u8, line, joined)) continue;
         out[n] = .{ .name = name, .path = joined };
         n += 1;
@@ -647,8 +628,8 @@ fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
             // unchanged, so nothing the parser kept can carry a metacharacter.
             try std.testing.expect(jsonbuf.isSafeIdent(hit.name));
             try std.testing.expect(!isSystemLeftoverName(hit.name));
-            try std.testing.expect(!nameInKeep(hit.name, spec.keep));
-            if (spec.allow.len != 0) try std.testing.expect(nameInKeep(hit.name, spec.allow));
+            try std.testing.expect(!pstore.nameInList(hit.name, spec.keep));
+            if (spec.allow.len != 0) try std.testing.expect(pstore.nameInList(hit.name, spec.allow));
 
             // The path is either the absolute line `ls` printed, or a
             // root-joined copy inside the store. A path from anywhere else is a

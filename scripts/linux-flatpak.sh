@@ -49,18 +49,9 @@ fi
 APP_ID="org.appattic.AppAttic"
 KDE_RUNTIME="${KDE_RUNTIME:-6.10}"
 WASMTIME_VER="${WASMTIME_C_API_VERSION:-28.0.0}"
-if [[ -n "${ZIG_VERSION:-}" ]]; then
-    ZIG_VER="$ZIG_VERSION"
-elif [[ -f "$ROOT/.zig-version" ]]; then
-    ZIG_VER="$(tr -d '[:space:]' < "$ROOT/.zig-version")"
-else
-    echo "error: missing $ROOT/.zig-version; the required Zig version is declared there" >&2
-    exit 1
-fi
-if [[ -z "$ZIG_VER" ]]; then
-    echo "error: empty .zig-version" >&2
-    exit 1
-fi
+# shellcheck source=find-zig.sh
+. "$_script_dir/find-zig.sh"
+ZIG_VER="$(appattic_zig_version)" || exit 1
 MANIFEST="$ROOT/packaging/flatpak/${APP_ID}.yml"
 DIST="$ROOT/dist"
 WORK="$DIST/flatpak-work"

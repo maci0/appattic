@@ -25,41 +25,6 @@ pub const BrokenLink = struct {
     root_label: []const u8,
 };
 
-fn nameInKeep(name: []const u8) bool {
-    var lines = std.mem.splitScalar(u8, keep, '\n');
-    while (lines.next()) |raw| {
-        const k = std.mem.trim(u8, raw, " \t\r");
-        if (k.len == 0) continue;
-        if (std.mem.eql(u8, k, name)) return true;
-    }
-    return false;
-}
-
-fn copySlice(slice: []const u8, store: []u8, used: *usize) ?[]const u8 {
-    if (used.* + slice.len > store.len) return null;
-    const start = used.*;
-    @memcpy(store[used.*..][0..slice.len], slice);
-    used.* += slice.len;
-    return store[start..used.*];
-}
-
-fn listingNames(listing: []const u8, names: *[64][]const u8) usize {
-    var n: usize = 0;
-    var lines = std.mem.splitScalar(u8, listing, '\n');
-    while (lines.next()) |raw| {
-        if (n >= names.len) break;
-        const line = std.mem.trim(u8, raw, " \t\r");
-        if (line.len == 0) continue;
-        const name = pstore.basenameOf(line);
-        if (name.len == 0 or name[0] == '.') continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
-        if (nameInKeep(name)) continue;
-        names[n] = name;
-        n += 1;
-    }
-    return n;
-}
-
 fn testFlagOk(path: []const u8, flag: []const u8) bool {
     var cmd_buf: [512]u8 = undefined;
     var out: [8]u8 = undefined;
@@ -86,7 +51,7 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
         const ls_n = host_exec.run(ls_cmd, &ls_buf);
         note.add(ls_cmd, ls_n);
         if (ls_n < 0) continue;
-        const name_n = listingNames(ls_buf[0..@intCast(ls_n)], &names);
+        const name_n = pstore.listingNames(ls_buf[0..@intCast(ls_n)], &names, keep);
 
         for (names[0..name_n]) |name| {
             if (n >= out.len) return n;
@@ -94,7 +59,7 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
             // leaves no path behind, so a root with more files than the store
             // holds still reaches its last entry.
             var probe = used;
-            const stable_name = copySlice(name, paths, &probe) orelse continue;
+            const stable_name = pstore.copyInto(name, paths, &probe) orelse continue;
             const link_path = pstore.joinPath(root.path, stable_name, paths, &probe) orelse continue;
             if (!isDanglingSymlink(link_path)) continue;
             out[n] = .{ .name = stable_name, .path = link_path, .root_label = root.label };

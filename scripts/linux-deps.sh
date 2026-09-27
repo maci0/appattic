@@ -14,30 +14,15 @@ export DEBIAN_FRONTEND=noninteractive
 # shellcheck source=verify-sha256.sh
 . "$_script_dir/verify-sha256.sh"
 WASMTIME_VER="${WASMTIME_C_API_VERSION:-28.0.0}"
-if [[ -n "${ZIG_VERSION:-}" ]]; then
-    ZIG_VER="$ZIG_VERSION"
-elif [[ -f "$ROOT/.zig-version" ]]; then
-    ZIG_VER="$(tr -d '[:space:]' < "$ROOT/.zig-version")"
-else
-    echo "error: missing $ROOT/.zig-version; the required Zig version is declared there" >&2
-    exit 1
-fi
-if [[ -z "$ZIG_VER" ]]; then
-    echo "error: empty .zig-version" >&2
-    exit 1
-fi
+# shellcheck source=find-zig.sh
+. "$_script_dir/find-zig.sh"
+ZIG_VER="$(appattic_zig_version)" || exit 1
 # The Swift note has to name the exact version, not a series: find-swift.sh
 # rejects anything but the one in .swift-version, so a preflight that said
 # "5.10" would pass a machine that scripts/check.sh then refuses.
-if [[ ! -f "$ROOT/.swift-version" ]]; then
-    echo "error: missing $ROOT/.swift-version; the required Swift version is declared there" >&2
-    exit 1
-fi
-SWIFT_VER="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
-if [[ -z "$SWIFT_VER" ]]; then
-    echo "error: empty .swift-version" >&2
-    exit 1
-fi
+# shellcheck source=find-swift.sh
+. "$_script_dir/find-swift.sh"
+SWIFT_VER="$(appattic_swift_version)" || exit 1
 
 usage() {
     cat <<'EOF'

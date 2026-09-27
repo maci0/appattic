@@ -16,17 +16,26 @@ appattic_find_swift() {
     return 1
 }
 
-appattic_require_swift() {
-    local want
+# The version the tree is built against, whether or not swift is installed,
+# so a preflight can name the exact toolchain it needs. Same contract as
+# appattic_zig_version: loud on a missing or empty pin.
+appattic_swift_version() {
+    local ver
     if [[ ! -r "$ROOT/.swift-version" ]]; then
         echo "error: missing $ROOT/.swift-version; the required Swift version is declared there" >&2
-        exit 1
+        return 1
     fi
-    want="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
-    if [[ -z "$want" ]]; then
+    ver="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
+    if [[ -z "$ver" ]]; then
         echo "error: empty $ROOT/.swift-version" >&2
-        exit 1
+        return 1
     fi
+    printf '%s\n' "$ver"
+}
+
+appattic_require_swift() {
+    local want
+    want="$(appattic_swift_version)" || exit 1
     if ! appattic_find_swift; then
         echo "error: swift missing (need $want, see .swift-version)" >&2
         echo "Linux: ./scripts/linux-deps.sh --install-swift" >&2

@@ -17,6 +17,29 @@ appattic_find_zig() {
     return 1
 }
 
+# The version the tree is built against, whether or not zig is installed:
+# ZIG_VERSION overrides the pin the way the Docker builds use it, and the
+# installer scripts need the string for a download URL. Exits loud on a
+# missing or empty pin, so a caller that downloads a tarball never names
+# ziglang.org/download//.
+appattic_zig_version() {
+    local ver
+    if [[ -n "${ZIG_VERSION:-}" ]]; then
+        printf '%s\n' "$ZIG_VERSION"
+        return 0
+    fi
+    if [[ ! -r "$ROOT/.zig-version" ]]; then
+        echo "error: missing $ROOT/.zig-version; the required Zig version is declared there" >&2
+        return 1
+    fi
+    ver="$(tr -d '[:space:]' < "$ROOT/.zig-version")"
+    if [[ -z "$ver" ]]; then
+        echo "error: empty $ROOT/.zig-version" >&2
+        return 1
+    fi
+    printf '%s\n' "$ver"
+}
+
 # Same rule as scripts/lint.sh: a local checkout without zig gets a note and
 # keeps going, CI never passes on the skip.
 appattic_require_zig() {
@@ -28,6 +51,8 @@ appattic_require_zig() {
         echo "note: zig not on PATH, skip the Zig checks" >&2
         return 1
     fi
+    # The pin, not the override: this gate asks whether the installed toolchain
+    # is the one the tree declares, and ZIG_VERSION only names what to fetch.
     if [[ ! -r "$ROOT/.zig-version" ]]; then
         echo "error: missing $ROOT/.zig-version; the required Zig version is declared there" >&2
         exit 1

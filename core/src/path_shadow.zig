@@ -90,22 +90,6 @@ fn findShadowsNative(
     return n;
 }
 
-fn listingNames(listing: []const u8, names: *[64][]const u8) usize {
-    var n: usize = 0;
-    var lines = std.mem.splitScalar(u8, listing, '\n');
-    while (lines.next()) |raw| {
-        if (n >= names.len) break;
-        const line = std.mem.trim(u8, raw, " \t\r");
-        if (line.len == 0) continue;
-        const name = pstore.basenameOf(line);
-        if (name.len == 0 or name[0] == '.') continue;
-        if (!jsonbuf.isSafeIdent(name)) continue;
-        names[n] = name;
-        n += 1;
-    }
-    return n;
-}
-
 fn resolvePathExec(path: []const u8, buf: []u8) ?[]const u8 {
     var cmd_buf: [512]u8 = undefined;
     const cmd = std.fmt.bufPrint(&cmd_buf, "realpath {s}", .{path}) catch return null;
@@ -153,7 +137,6 @@ fn findShadowsExec(
     out: []ShadowFinding,
     path_store: []u8,
 ) usize {
-    note = .{};
     var n: usize = 0;
     var used: usize = 0;
     var ls_buf: [65536]u8 = undefined;
@@ -186,7 +169,7 @@ fn findShadowsExec(
         const ls_n = host_exec.run(ls_cmd, &ls_buf);
         note.add(ls_cmd, ls_n);
         if (ls_n < 0) continue;
-        const raw_n = listingNames(ls_buf[0..@intCast(ls_n)], &names);
+        const raw_n = pstore.listingNames(ls_buf[0..@intCast(ls_n)], &names, "");
         var copied: usize = 0;
         while (copied < raw_n) : (copied += 1) {
             const src = names[copied];
@@ -293,6 +276,9 @@ fn renderShadows(hits: []const ShadowFinding) bool {
 }
 
 fn query_impl(present: i32) i32 {
+    // Here, not in findShadowsExec: findShadows also has a native path, and
+    // a note left over from the previous run would name that run's failures.
+    note = .{};
     if (present == 0) {
         @memcpy(result_buf[0..none_json.len], none_json);
         result_nbytes = @intCast(none_json.len);
@@ -432,4 +418,11 @@ test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
+}
+
+test "a note from one run does not reach the next" {
+    note.add("ls -1 /home/user/.local/bin", host_exec.fail);
+    try std.testing.expectEqual(@as(i32, 0), query_impl(1));
+    const json = result_buf[0..result_nbytes];
+    try std.testing.expect(std.mem.indexOf(u8, json, "did not answer") == null);
 }
