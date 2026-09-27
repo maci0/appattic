@@ -330,13 +330,13 @@ private final class LocaleScopedTimestamps {
         // `RelativeDateTimeFormatter`, not `DateComponentsFormatter`: the
         // recipe for a named relative day — "yesterday", "in 3 days" — is
         // `dateTimeStyle = .named`, and `UnitsStyle` has no `named` member for
-        // the components formatter to take. corelibs-foundation leaves the
-        // relative formatter unimplemented, which is why this arm is Darwin's.
+        // the components formatter to take. The relative formatter has no
+        // `allowedUnits` or `maximumUnitCount` either; `.named` is the style
+        // that reads as the day label on its own. corelibs-foundation leaves
+        // this formatter unimplemented, which is why the arm is Darwin's.
         let r = RelativeDateTimeFormatter()
         r.dateTimeStyle = .named
         r.unitsStyle = .full
-        r.allowedUnits = .day
-        r.maximumUnitCount = 1
         let relative: ((Date, Date) -> String?)? = { r.localizedString(for: $0, relativeTo: $1) }
         #else
         let relative: ((Date, Date) -> String?)? = nil
