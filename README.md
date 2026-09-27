@@ -138,6 +138,7 @@ bash scripts/check.sh
 bash scripts/check.sh --qt
 # full Linux CI parity, including Qt/WASM proof
 
+bash scripts/verify-reproducible.sh                          # two builds, diffed
 swift build --target AppAtticScan -c debug --disable-automatic-resolution
 bash scripts/test.sh                                           # AppAtticScanTests
 bash scripts/test.sh DiskSizeTests                             # one class
@@ -151,7 +152,9 @@ bash scripts/lint.sh
 
 `swift test` and `swift build` need unrestricted permissions in sandboxed environments.
 
-`scripts/lint.sh` runs shellcheck on the build scripts, yamllint on the workflow and Flatpak YAML, checks that every version copy agrees, compiles every C file under `core/host` with warnings as errors (`embed.c` excepted: it needs the Wasmtime headers, so CMake compiles that one with `-Wall -Wextra`), runs `zig fmt --check` when `zig` is on PATH, and rejects any commit message that credits an AI tool (`Co-authored-by: Cursor` and friends): commit messages carry no tool attribution, and that check is what keeps it that way. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the fast lint + Zig core + test + CLI loop; `scripts/check.sh --qt` reproduces the full Linux CI verification. The Zig step needs only `zig` at `.zig-version`; without it `scripts/check.sh` says so and skips, and CI installs the toolchain first so the skip cannot pass there.
+`scripts/verify-reproducible.sh` builds the WASM core and the C host twice, from two differently named directories under a different timezone and `SOURCE_DATE_EPOCH`, and fails unless the artifacts are byte-identical. It is what keeps the build's reproducibility claims honest: a build path, host timestamp or locale that reaches an output shows up here as a diff, not as a surprise in a release. `scripts/check.sh` runs it on every pass.
+
+`scripts/lint.sh` runs shellcheck on the build scripts, yamllint on the workflow and Flatpak YAML, checks that every version copy agrees, compiles every C file under `core/host` with warnings as errors (`embed.c` excepted: it needs the Wasmtime headers, so CMake compiles that one with `-Wall -Wextra`), reruns the C host suite under AddressSanitizer and UndefinedBehaviorSanitizer with `-fno-sanitize-recover` so a finding fails the run, runs `zig fmt --check` when `zig` is on PATH, and rejects any commit message that credits an AI tool (`Co-authored-by: Cursor` and friends): commit messages carry no tool attribution, and that check is what keeps it that way. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the fast lint + Zig core + test + CLI loop; `scripts/check.sh --qt` reproduces the full Linux CI verification. The Zig step needs only `zig` at `.zig-version`; without it `scripts/check.sh` says so and skips, and CI installs the toolchain first so the skip cannot pass there.
 
 ## Native UI
 

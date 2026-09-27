@@ -16,9 +16,9 @@ case "${1:-}" in
 Usage: bash scripts/lint.sh
 
   shellcheck on the shell scripts, yamllint on the YAML,
-  host C warnings-as-errors, hostexec warnings-as-errors,
-  dependency pin consistency, zig fmt --check,
-  no AI tool credit in commit messages
+  host C warnings-as-errors, host C under ASan + UBSan,
+  hostexec warnings-as-errors, dependency pin consistency,
+  zig fmt --check, no AI tool credit in commit messages
 EOF
         exit 0
         ;;
@@ -89,6 +89,31 @@ case "$(uname -s)" in
     Linux) APPATTIC_HOST_EXEC_FIXTURE=1 "$tmp/hostexec_test" ;;
     *) "$tmp/hostexec_test" ;;
 esac
+
+# The same C sources again under ASan and UBSan. The suite above proves the
+# tests pass; this proves they pass without a heap overflow, a use-after-free
+# or undefined behaviour hiding behind a passing result. -fno-sanitize-recover
+# makes a UBSan finding fail the run instead of printing and continuing.
+echo "== C host under ASan + UBSan =="
+# shellcheck disable=SC2054  # the comma belongs to -fsanitize, not the array
+san_cflags=(-O1 -g -fno-omit-frame-pointer
+    -fsanitize=address,undefined -fno-sanitize-recover=undefined
+    -Wall -Wextra -Werror -Wformat=2 -Wformat-security
+    -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference)
+if ! cc "${san_cflags[@]}" \
+    -I "$ROOT/core/host" \
+    "$ROOT/core/host/hostexec.c" \
+    "$ROOT/core/host/tests/hostexec_test.c" \
+    -o "$tmp/hostexec_test_san" 2>"$tmp/san_build.log"; then
+    echo "error: the C host does not build with -fsanitize=address,undefined" >&2
+    cat "$tmp/san_build.log" >&2
+    exit 1
+fi
+case "$(uname -s)" in
+    Linux) APPATTIC_HOST_EXEC_FIXTURE=1 "$tmp/hostexec_test_san" ;;
+    *) "$tmp/hostexec_test_san" ;;
+esac
+echo "sanitizers: ok"
 
 check_commit_messages() {
     local pattern

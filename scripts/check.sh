@@ -65,6 +65,12 @@ bash "$ROOT/scripts/test.sh"
 echo "== CLI debug =="
 swift build -c debug --product appattic --disable-automatic-resolution
 
+# Two builds of the same source, diffed. Cheap next to the Zig suite and it
+# is the only check that would notice a build path or timestamp leaking into
+# an artifact.
+echo "== reproducible artifacts =="
+bash "$ROOT/scripts/verify-reproducible.sh"
+
 if [[ "$RUN_QT" -eq 1 ]]; then
     echo "== Qt UI link =="
     bash "$ROOT/scripts/linux-qt-link.sh"

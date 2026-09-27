@@ -216,9 +216,14 @@ if(UNIX AND NOT APPLE)
 endif()
 
 install(TARGETS appattic-qt RUNTIME DESTINATION bin)
+# The .cwasm images are what core/build.sh --precompile writes beside the
+# wasm: core/host/embed.c deserializes one instead of compiling, so an install
+# that ships only the wasm makes every first scan pay the compile.
 install(DIRECTORY "${APPATTIC_ROOT}/core/out/"
     DESTINATION share/appattic
-    FILES_MATCHING PATTERN "*.wasm"
+    FILES_MATCHING
+        PATTERN "*.wasm"
+        PATTERN "*.cwasm"
 )
 
 # The Michroma font is compiled into the binary, so its SIL OFL grant has to
