@@ -56,6 +56,107 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(checkVersion.contains("appattic-qt.1"), checkVersion)
     }
 
+    /// The AppStream `<description>` is the only release note the package
+    /// ships, so a `<release>` with a version and no note is a silent release.
+    /// The gate that stops it lives in check-version.sh; this pins both the
+    /// gate and the entry it reads, since either can drift alone.
+    func testNewestAppStreamReleaseCarriesANoteAndADate() throws {
+        let root = repoRoot()
+        let metainfo = try String(
+            contentsOf: root.appendingPathComponent("packaging/org.appattic.AppAttic.metainfo.xml"),
+            encoding: .utf8
+        )
+        let version = try String(
+            contentsOf: root.appendingPathComponent("Sources/AppAtticScan/Version.swift"),
+            encoding: .utf8
+        )
+        let declared = capture(#"appAtticVersion = "([^"]+)""#, in: version)
+
+        // Newest by version, not by position: an entry appended out of order
+        // must not leave an older one looking like the release of record.
+        let entries = metainfo.components(separatedBy: "<release ").dropFirst()
+        let newest = try XCTUnwrap(
+            entries
+                .compactMap { chunk -> (String, String)? in
+                    guard chunk.contains(#"version=""#) else { return nil }
+                    return (capture(#"version="([^"]+)""#, in: chunk), chunk)
+                }
+                .max { lhs, rhs in
+                    lhs.0.compare(rhs.0, options: .numeric) == .orderedAscending
+                }
+        )
+        XCTAssertEqual(newest.0, declared)
+
+        let head = newest.1.prefix { $0 != ">" }
+        XCTAssertTrue(head.contains("date=\""), "the \(declared) release has no date: \(head)")
+        XCTAssertTrue(
+            newest.1.contains("<description>"),
+            "the \(declared) release has no <description>: a release with no note is a silent release"
+        )
+        // Every tagged release has a note, not just the newest: the ones below
+        // are the notes a reader upgrading across majors reads.
+        for entry in entries {
+            XCTAssertTrue(
+                entry.contains(#"version=""#), "a <release> has no version: \(entry.prefix(60))"
+            )
+            XCTAssertTrue(
+                entry.contains("<description>"),
+                "the \(capture(#"version="([^"]+)""#, in: entry)) release has no <description>"
+            )
+        }
+
+        let checkVersion = try String(
+            contentsOf: root.appendingPathComponent("scripts/check-version.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(checkVersion.contains("<description>"), checkVersion)
+        XCTAssertTrue(checkVersion.contains("date="), checkVersion)
+    }
+
+    /// The Swift resource is a symlink to the one table the Zig core embeds,
+    /// so the two cannot drift. A copy here is a second file to forget, which
+    /// is how the table first got the same four names twice.
+    func testSystemNamesTableIsOneSymlinkedFile() throws {
+        let root = repoRoot()
+        let packaged = root.appendingPathComponent("Sources/AppAtticScan/linux-system-names.txt")
+        let values = try packaged.resourceValues(forKeys: [.isSymbolicLinkKey])
+        XCTAssertEqual(values.isSymbolicLink, true, packaged.path)
+        XCTAssertEqual(
+            try packaged.resolvingSymlinksInPath().path,
+            root.appendingPathComponent("core/src/linux-system-names.txt").path,
+            "the Swift resource must resolve to the table the Zig core embeds"
+        )
+
+        let core = try String(
+            contentsOf: repoRoot().appendingPathComponent("core/src/linux-system-names.txt"),
+            encoding: .utf8
+        )
+        let names = core.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let duplicates = Set(names.filter { name in
+            names.firstIndex(of: name) != names.lastIndex(of: name)
+        })
+        XCTAssertEqual(duplicates, [], "duplicate system names: \(duplicates.sorted())")
+        XCTAssertEqual(Set(names).count, names.count)
+    }
+
+    private func repoRoot() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    /// Group 1 of the first `pattern` match in `text`, or "" when there is none.
+    private func capture(_ pattern: String, in text: String) -> String {
+        guard let match = try? NSRegularExpression(pattern: pattern),
+              let hit = match.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let group = Range(match.range(at: 1), in: text)
+        else { return "" }
+        return String(text[group])
+    }
+
     func testMacBundleSourcesMatchPlatformFloor() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

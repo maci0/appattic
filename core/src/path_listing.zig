@@ -122,7 +122,7 @@ const linux_system_names = @embedFile("linux-system-names.txt");
 
 /// Sorted table of the embedded names, stored lowered. Parsed once on first
 /// use into static storage (WASM plugins are single-threaded; no atomics).
-/// The old code re-split and re-trimmed the 137-line text per candidate with
+/// The old code re-split and re-trimmed the whole text per candidate with
 /// `eqlIgnoreCase` per entry: ~1.5 µs per miss. Binary search: ~8 probes.
 var sys_name_table: [256][]const u8 = undefined;
 var sys_name_count: usize = 0;
@@ -145,7 +145,7 @@ fn ensureSysTable() void {
         sys_name_table[sys_name_count] = sys_table_low[used - k.len .. used];
         sys_name_count += 1;
     }
-    // Insertion sort: 137 entries, trivial.
+    // Insertion sort: one entry per line of the embedded table, trivial.
     var i: usize = 1;
     while (i < sys_name_count) : (i += 1) {
         const key = sys_name_table[i];

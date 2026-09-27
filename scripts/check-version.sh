@@ -3,7 +3,8 @@
 # the packaging copies that have to keep in step: the newest AppStream release,
 # the macOS bundle Info.plist, and the appattic-qt man page. CMakeLists.txt
 # reads the declaration, so this is the place that checks the copies, the
-# derivation, and that the version was not already released from another commit.
+# derivation, that the release has notes a user can read, and that the version
+# was not already released from another commit.
 # Usage: bash scripts/check-version.sh [--tag TAG]
 #   prints the declared version on stdout
 #   --tag  also requires TAG (a v* ref name or a bare version) to match it
@@ -34,9 +35,10 @@ while [[ $# -gt 0 ]]; do
 Usage: bash scripts/check-version.sh [--tag TAG]
 
   Checks that the AppStream release, the macOS Info.plist, and the
-  appattic-qt man page match appAtticVersion, that CMakeLists.txt still
-  derives its version from Version.swift, and that the declared version
-  is not a release already published from a different commit.
+  appattic-qt man page match appAtticVersion, that the AppStream release
+  carries a date and a <description>, that CMakeLists.txt still derives
+  its version from Version.swift, and that the declared version is not a
+  release already published from a different commit.
   Prints the declared version. With --tag, the tag must match it too.
 EOF
             exit 0
@@ -134,6 +136,34 @@ fi
 if [[ "$meta_version" != "$swift_version" ]]; then
     echo "error: version mismatch: AppStream release is $meta_version, appAtticVersion is $swift_version" >&2
     echo "error: bump both in the same commit: $VERSION_SRC, $METAINFO" >&2
+    exit 1
+fi
+# The AppStream <description> is the only release note a user gets, so a
+# release that carries a version and no note is a silent release: the tag
+# builds, the store lists a version, and nothing says what changed. The date is
+# in the same check because AppStream rejects a <release> without one, so a
+# missing date is a broken entry rather than a style choice.
+release_defects="$(awk -v want="$meta_version" '
+    function report() {
+        if (!dated) print "no date attribute"
+        if (!described) print "no <description>"
+    }
+    index($0, "<release ") {
+        inside = ($0 ~ ("version=\"" want "\""))
+        dated = 0
+        described = 0
+        closed = 0
+    }
+    inside && $0 ~ /date="/ { dated = 1 }
+    inside && /<description>/ { described = 1 }
+    inside && /<\/release>/ { closed = 1; report(); inside = 0 }
+    # A self-closing <release version="..."/> never reaches </release>.
+    END { if (inside && !closed) report() }
+' "$METAINFO" 2>/dev/null | sort -u | tr '\n' ' ')"
+if [[ -n "$release_defects" ]]; then
+    echo "error: the AppStream <release> for $meta_version in $METAINFO is $release_defects" >&2
+    echo "       every release needs a date and a consumer-facing <description>:" >&2
+    echo "       it is the only release note the package ships" >&2
     exit 1
 fi
 if [[ "$plist_version" != "$swift_version" ]]; then

@@ -139,7 +139,3 @@ java
 gradle
 m2
 maven
-java
-gradle
-m2
-maven

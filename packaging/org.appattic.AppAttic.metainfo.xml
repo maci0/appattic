@@ -42,6 +42,9 @@
         <p><code>appattic update</code> asks on a terminal and stops with exit 2 when there is none, unless the run passes <code>--yes</code>. A cancelled update exits 1, where it used to exit 0. A disk path that is not a readable directory is a usage error rather than an empty report.</p>
         <p><code>appattic config</code> is new. It scans nothing: it prints the settings file this machine resolved, whether it exists, every setting with the layer it came from, and the paths the XDG variables resolved to.</p>
         <p>Generated cleanup scripts quote plugin names and paths, and a name containing a newline can no longer inject shell. Your home path is redacted from error and status messages. Non-ASCII names, case folding, and date, size, and duration formatting follow the locale. The last-scan cache records the exact mtime of what it scanned, is dropped after a run that removes or updates something, and is dropped once it is over 24 hours old.</p>
+        <p>A folder size could read smaller than it is: <code>du</code> exits non-zero when a path it was asked about failed, and a batched run counted the partial total it still printed as a real measurement. A bind mount that loops back into its own tree also spun the walk out to its deadline instead of finishing. Both are fixed, and Java, Gradle, Maven, and <code>.m2</code> are recognized as system paths, so they are no longer offered as leftovers.</p>
+        <p>A PPA entry whose name was not a plain file name could put a path outside <code>/etc/apt/sources.list.d</code> into a generated cleanup script. Such a name is refused now, alongside the newline-injection fix above.</p>
+        <p>The Linux window no longer overwrites old settings that are neither true nor false with the defaults. It names the key and leaves the file alone, so a value you wrote is still yours to fix.</p>
         <p>The Linux window ships a man page: <code>man appattic-qt</code>.</p>
       </description>
     </release>
@@ -86,6 +89,11 @@
     <release version="1.1.3" date="2026-09-07">
       <description>
         <p>The offscreen Qt platform plugin is now shipped inside the AppImage, so every page renders without a display server.</p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-08-28">
+      <description>
+        <p>First release: the Linux Qt window packaged as an AppImage, and the <code>appattic</code> scan CLI behind it.</p>
       </description>
     </release>
   </releases>
