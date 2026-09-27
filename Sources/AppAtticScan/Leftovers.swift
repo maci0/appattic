@@ -442,18 +442,19 @@ public func probeActivityMtime(
     _ path: String,
     maxEntries: Int = 80,
     maxDepth: Int = 2,
-    timeout: TimeInterval = 0.2
+    timeout: TimeInterval = 0.2,
+    clock: MonotonicFn = monotonicSeconds
 ) -> Date? {
     // fd walk, not Foundation: `attributesOfItem` populates owner names per
     // entry (NSS lookup) and `contentsOfDirectory(...).sorted()` sorts every
     // directory for a max() that is order-independent. Same budget, timeout,
     // dotfile/skipDescend, and follow-symlink semantics as before.
-    let start = monotonicSeconds()
+    let start = clock()
     var best: Date?
     var seen = 0
     var stack: [(String, Int)] = [(path, 0)]
     while !stack.isEmpty {
-        if monotonicSeconds() - start > timeout || seen >= maxEntries { break }
+        if clock() - start > timeout || seen >= maxEntries { break }
         let (current, depth) = stack.removeLast()
         guard let (mtime, isDir) = statMtimeKind(current) else { continue }
         seen += 1
@@ -470,7 +471,7 @@ public func probeActivityMtime(
             names.append(name)
         }
         for name in names {
-            if monotonicSeconds() - start > timeout || seen >= maxEntries { break }
+            if clock() - start > timeout || seen >= maxEntries { break }
             let child = (current as NSString).appendingPathComponent(name)
             if skipDescend.contains(name) {
                 if let (mt, _) = statMtimeKind(child) {
@@ -1540,7 +1541,13 @@ public func listBrokenUserBinLinks(dirs: [String]? = nil) -> [DataItem] {
             extraPaths: extra
         ))
     }
-    return items.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    // `grouped` iterates in hash order, so the path breaks case-insensitive
+    // name ties: without it two links called `Foo` and `foo` swap places
+    // between processes.
+    return items.sorted {
+        let byName = $0.name.localizedCaseInsensitiveCompare($1.name)
+        return byName == .orderedSame ? $0.path < $1.path : byName == .orderedAscending
+    }
 }
 
 public func defaultOverlayShadowRoots(
@@ -1610,7 +1617,7 @@ public func listShadowingOverlays(
         let dirStd = URL(fileURLWithPath: dir).standardizedFileURL.path
         if pkgSet.contains(dirStd) { continue }
         guard let names = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-        for name in names where !name.hasPrefix(".") {
+        for name in names.sorted() where !name.hasPrefix(".") {
             let path = (dir as NSString).appendingPathComponent(name)
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: path, isDirectory: &isDir) else { continue }
@@ -1644,7 +1651,12 @@ public func listShadowingOverlays(
             ))
         }
     }
-    return items.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    // Path breaks the case-insensitive name tie, so two overlays called `Foo`
+    // and `foo` keep the same order between processes.
+    return items.sorted {
+        let byName = $0.name.localizedCaseInsensitiveCompare($1.name)
+        return byName == .orderedSame ? $0.path < $1.path : byName == .orderedAscending
+    }
 }
 
 func preferredBrokenLinkName(_ names: [String], toolFolder: String) -> String {
@@ -1697,7 +1709,11 @@ private func executableToolEntries(in dirs: [String]?) -> [(name: String, path: 
     var out: [(name: String, path: String)] = []
     for dir in dirs ?? defaultUserToolDirs() {
         guard let names = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-        for name in names where !name.hasPrefix(".") {
+        // `contentsOfDirectory` hands back readdir order, which the filesystem
+        // is free to vary between runs. Callers below keep the first entry per
+        // bundle or per name, so an unsorted read picks a different survivor
+        // on every process.
+        for name in names.sorted() where !name.hasPrefix(".") {
             let path = (dir as NSString).appendingPathComponent(name)
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { continue }
@@ -1774,7 +1790,9 @@ public func scanLeftovers(
     progress: (String) -> Void = { _ in },
     roots: [(String, String, String)]? = nil,
     measureSizes: Bool = true,
-    now: Date = Date()
+    now: Date = Date(),
+    clock: MonotonicFn = monotonicSeconds,
+    run: CommandRun = runCommand
 ) -> ([DataItem], [OrphanAgent]) {
     let ident = Identity(apps: apps + appsFromPathBinaries(), brew: brew, toolNames: listUserToolNames())
     var allRoots = roots ?? scanRootsForPlatform()
@@ -1821,7 +1839,7 @@ public func scanLeftovers(
         let toMeasure = items.filter { isListedLeftoverStatus($0.status) && !skipNestedProbe($0) }
         progress("  · measuring sizes for \(toMeasure.count) leftover folders…")
         // One `du -sk` per chunk, not one spawn per folder.
-        let sizes = duSizes(toMeasure.map(\.path), timeout: 6)
+        let sizes = duSizes(toMeasure.map(\.path), timeout: 6, run: run)
         let measuredIds = Set(toMeasure.map { ObjectIdentifier($0) })
         for item in items {
             if measuredIds.contains(ObjectIdentifier(item)) {
@@ -1845,7 +1863,7 @@ public func scanLeftovers(
             if skipNestedProbe(item) { return item.mtime }
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: item.path, isDirectory: &isDir), isDir.boolValue {
-                return probeActivityMtime(item.path) ?? item.mtime
+                return probeActivityMtime(item.path, clock: clock) ?? item.mtime
             }
             return item.mtime
         }

@@ -335,7 +335,9 @@ func jsonDependencyEntries(_ value: Any) -> [(String, String?)] {
     guard let obj = value as? [String: Any],
           let deps = obj["dependencies"] as? [String: Any]
     else { return out }
-    for (name, raw) in deps {
+    // JSON objects decode into a dictionary, whose iteration order Swift
+    // reseeds per process: unsorted, the package list reorders every run.
+    for (name, raw) in deps.sorted(by: { $0.key < $1.key }) {
         var version: String?
         if let child = raw as? [String: Any] {
             version = child["version"] as? String
@@ -427,7 +429,7 @@ public func parsePipxList(_ text: String) -> [PackageEntry] {
        let venvs = obj["venvs"] as? [String: Any]
     {
         var out: [PackageEntry] = []
-        for (fallback, raw) in venvs {
+        for (fallback, raw) in venvs.sorted(by: { $0.key < $1.key }) {
             var name = fallback
             var version: String?
             if let meta = raw as? [String: Any],

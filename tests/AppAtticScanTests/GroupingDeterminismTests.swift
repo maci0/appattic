@@ -74,4 +74,33 @@ final class GroupingDeterminismTests: XCTestCase {
             "node"
         )
     }
+
+    // Command output that arrives as a JSON object or a keyed table becomes a
+    // dictionary here, so these lists reorder between processes unless the
+    // parsers walk their keys sorted.
+    func testFlatpakUpdatesComeOutNameOrdered() {
+        let text = "zsh\t5.9\tZ shell\nbash\t5.2\tGNU bash\nalacritty\t0.13\tGPU terminal\n"
+        XCTAssertEqual(parseFlatpakUpdates(text).map(\.name), ["alacritty", "bash", "zsh"])
+    }
+
+    func testNpmGlobalListComesOutNameOrdered() {
+        let json = """
+        {"name":"root","dependencies":{
+          "typescript":{"version":"5.4.5"},
+          "eslint":{"version":"9.9.0"},
+          "prettier":{"version":"3.3.0"}
+        }}
+        """
+        XCTAssertEqual(parseNpmGlobalList(json).map(\.name), ["eslint", "prettier", "typescript"])
+    }
+
+    func testPipxListComesOutNameOrdered() {
+        let json = """
+        {"venvs":{
+          "ruff":{"metadata":{"main_package":{"package":"ruff","package_version":"0.6.8"}}},
+          "httpie":{"metadata":{"main_package":{"package":"httpie","package_version":"3.2.2"}}}
+        }}
+        """
+        XCTAssertEqual(parsePipxList(json).map(\.name), ["httpie", "ruff"])
+    }
 }

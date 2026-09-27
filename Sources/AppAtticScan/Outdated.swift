@@ -432,7 +432,9 @@ public func parseFlatpakUpdates(_ updatesText: String, installedText: String = "
     let latest = flatpakRows(updatesText)
     let current = flatpakRows(installedText)
     var out: [OutdatedPkg] = []
-    for (name, triple) in latest {
+    // `latest` is a dictionary, and Swift seeds hashing per process: walking it
+    // unsorted gives the outdated list a different order on every run.
+    for (name, triple) in latest.sorted(by: { $0.key < $1.key }) {
         var title = triple.1
         var summary = triple.2
         let cur = current[name]
@@ -904,7 +906,7 @@ public func pkgFromItunes(
 
 func itunesRequest(_ params: [String: String]) -> [String: [String: Any]] {
     var items: [URLQueryItem] = []
-    for (k, v) in params { items.append(URLQueryItem(name: k, value: v)) }
+    for (k, v) in params.sorted(by: { $0.key < $1.key }) { items.append(URLQueryItem(name: k, value: v)) }
     var comp = URLComponents(string: "https://itunes.apple.com/lookup")
     comp?.queryItems = items
     guard let url = comp?.url else { return [:] }

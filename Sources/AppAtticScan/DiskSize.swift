@@ -130,7 +130,11 @@ public func duSizes(
 /// `resourceValues`. On corelibs-foundation those populate owner names, which
 /// costs an NSS lookup per entry (~0.5 ms here: `libnss_systemd` D-Bus round
 /// trip), so a 2 300-file tree took 1.2 s instead of ~3 ms.
-public func directoryByteSize(_ path: String, timeout: TimeInterval = 8) -> (Int, Bool) {
+public func directoryByteSize(
+    _ path: String,
+    timeout: TimeInterval = 8,
+    clock: MonotonicFn = monotonicSeconds
+) -> (Int, Bool) {
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
         return (0, false)
@@ -149,7 +153,8 @@ public func directoryByteSize(_ path: String, timeout: TimeInterval = 8) -> (Int
         fd: fd,
         total: &total,
         sawError: &sawError,
-        deadline: monotonicSeconds() + timeout
+        deadline: clock() + timeout,
+        clock: clock
     )
     if !complete { return (total, false) }
     return (total, !sawError)
@@ -160,9 +165,10 @@ func walkLogicalBytes(
     fd: Int32,
     total: inout Int,
     sawError: inout Bool,
-    deadline: TimeInterval
+    deadline: TimeInterval,
+    clock: MonotonicFn = monotonicSeconds
 ) -> Bool {
-    if monotonicSeconds() > deadline { return false }
+    if clock() > deadline { return false }
     let dupfd = dup(fd)
     guard dupfd >= 0 else {
         sawError = true
@@ -201,7 +207,8 @@ func walkLogicalBytes(
                     fd: childFd,
                     total: &total,
                     sawError: &sawError,
-                    deadline: deadline
+                    deadline: deadline,
+                    clock: clock
                 )
                 close(childFd)
                 if !complete { return false }
@@ -209,7 +216,7 @@ func walkLogicalBytes(
         } else if kind == Int32(S_IFREG) {
             total = addBytes(total, Int(st.st_size))
         }
-        if monotonicSeconds() > deadline { return false }
+        if clock() > deadline { return false }
     }
     return true
 }

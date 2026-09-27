@@ -241,7 +241,13 @@ public func dateFromUnixEpoch(_ raw: TimeInterval) -> Date {
     return Date(timeIntervalSince1970: raw)
 }
 
-func monotonicSeconds() -> TimeInterval {
+/// Elapsed-time source for walk budgets and scan duration. Read through a
+/// parameter so a test or a replayed run can step it instead of racing the
+/// system uptime: a walk that finishes on a fast host but not on a loaded one
+/// reports a different size and a different leftover status.
+public typealias MonotonicFn = () -> TimeInterval
+
+public func monotonicSeconds() -> TimeInterval {
     ProcessInfo.processInfo.systemUptime
 }
 

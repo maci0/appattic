@@ -96,12 +96,14 @@ private let redactHomeLock = NSLock()
 private let redactHomeCacheLimit = 8
 nonisolated(unsafe) private var redactHomeCache: [String: String] = [:]
 
-/// Drop one entry once the map is over the limit. Which entry goes is the
-/// dictionary's hash order, not an age: the two real callers pass the process
-/// home, so the bound exists to cap a caller that feeds it unbounded keys, not
-/// to serve a working set.
+/// Drop one entry once the map is over the limit. Not an age: the two real
+/// callers pass the process home, so the bound exists to cap a caller that
+/// feeds it unbounded keys, not to serve a working set. The victim is the
+/// greatest key, so the entries a run keeps do not depend on the hash seed.
 private func trimRedactHomeCache() {
-    guard redactHomeCache.count > redactHomeCacheLimit, let victim = redactHomeCache.keys.first else { return }
+    guard redactHomeCache.count > redactHomeCacheLimit,
+          let victim = redactHomeCache.keys.max()
+    else { return }
     redactHomeCache.removeValue(forKey: victim)
 }
 

@@ -176,9 +176,10 @@ public func performScan(
     run: @escaping CommandRun = runCommand,
     skipLiveUsage: Bool = false,
     now: Date = Date(),
+    clock: MonotonicFn = monotonicSeconds,
     progress: @escaping (String) -> Void = { _ in }
 ) -> ScanResult {
-    let t0 = monotonicSeconds()
+    let t0 = clock()
     let result = ScanResult(scannedAt: now)
 
     progress("Scanning installed applications…")
@@ -213,7 +214,9 @@ public func performScan(
             brew: brewInfo,
             progress: progress,
             roots: leftoverRoots,
-            now: now
+            now: now,
+            clock: clock,
+            run: run
         )
         result.dataItems = items
         result.orphanAgents = agents
@@ -243,7 +246,7 @@ public func performScan(
     result.verdicts = evaluateAll(result.software, now: now)
     progress("Listing unused distro packages and language globals…")
     result.packages = packages ?? collectPackages(progress: progress, which: which, run: run)
-    result.durationS = max(0, monotonicSeconds() - t0)
+    result.durationS = max(0, clock() - t0)
     return result
 }
 
@@ -251,7 +254,8 @@ public func performScan(
 public func runFullScan(
     includeSystem: Bool = false,
     now: Date = Date(),
+    clock: MonotonicFn = monotonicSeconds,
     progress: @escaping (String) -> Void = { _ in }
 ) -> ScanData {
-    performScan(includeSystem: includeSystem, now: now, progress: progress).toScanData()
+    performScan(includeSystem: includeSystem, now: now, clock: clock, progress: progress).toScanData()
 }
