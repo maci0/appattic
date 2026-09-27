@@ -63,6 +63,8 @@ XDG_STATE_HOME: /home/u/.local/state
 XDG_DATA_DIRS: /usr/local/share:/usr/share
 ```
 
+Each ignored path is listed under its count, one per line, so a wrong entry is visible rather than a leftover that quietly never hides.
+
 `appattic update` asks for confirmation on a terminal. With stdin redirected (cron, CI, a pipeline) it stops with exit 2 unless you pass `--yes`, so an unattended upgrade is always something you asked for:
 
 ```bash
@@ -83,7 +85,7 @@ Settings live in `settings.json` next to the scan cache (same file for CLI, macO
 }
 ```
 
-`includeSystem` defaults to false (OS system apps stay out of the stale list). The CLI also reads it; `--include-system` turns it on for that run. There is no flag to turn it off when the file already has `true`. `confirmDelete` defaults to true and is UI-only. `ignoredLeftoverPaths` hides those leftovers in both the UI and CLI. A missing file uses those defaults. A malformed file is an error: the CLI exits 2, the UI shows the path and does not overwrite the file until you save settings. `appattic config` prints the file it resolved and the values in force, which is how you check a setting that looks ignored.
+`includeSystem` defaults to false (OS system apps stay out of the stale list). The CLI also reads it; `--include-system` turns it on for that run. There is no flag to turn it off when the file already has `true`. `confirmDelete` defaults to true and is UI-only. `ignoredLeftoverPaths` hides those leftovers in both the UI and CLI. Each entry is the full path a report prints: a relative one, a `~` one, or one with a trailing slash matches nothing, so the file is rejected with the offending entry named rather than storing a setting that does nothing. A missing file uses those defaults. A malformed file is an error: the CLI exits 2, the UI shows the path and does not overwrite the file until you save settings. `appattic config` prints the file it resolved and the values in force, which is how you check a setting that looks ignored.
 
 Environment:
 

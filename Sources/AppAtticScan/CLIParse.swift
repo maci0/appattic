@@ -262,7 +262,9 @@ settings.json (includeSystem, confirmDelete, ignored leftover paths):
   Linux: $XDG_DATA_HOME/appattic/settings.json
   macOS: ~/Library/Application Support/AppAttic/settings.json
   Missing file uses defaults (includeSystem false, confirmDelete true).
-  A malformed file is an error. --include-system turns includeSystem on for this run.
+  A malformed file is an error, as is an ignored path that is not absolute:
+  each one must be the full path a report prints.
+  --include-system turns includeSystem on for this run.
   It cannot turn includeSystem off when the file already has true.
   'appattic config' prints the values and paths this machine resolves.
 """

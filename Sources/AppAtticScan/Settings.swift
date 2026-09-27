@@ -157,7 +157,8 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         self.dataDirs = xdgSystemDirs(env: env)
     }
 
-    /// One `key: value` line per setting, in the order a reader meets them.
+    /// One `key: value` line per setting, in the order a reader meets them,
+    /// with the ignored paths on their own lines under their count.
     /// `includeSystem` shows where the value came from, since the file and the
     /// flag combine with OR and the flag is the only one that can turn it on.
     public var lines: [String] {
@@ -166,22 +167,30 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         // and naming the file for a value it did not supply sends the reader
         // looking for a `true` that is not there.
         let source = includeSystemFlag ? "on (--include-system)" : (includeSystemFile ? "file" : "default")
-        return [
+        var lines = [
             "settings file: \(settingsPath)\(settingsFileExists ? "" : " (missing, using defaults)")",
             "includeSystem: \(includeSystem) [\(source)]",
             "confirmDelete: \(confirmDelete)",
             "ignoredLeftoverPaths: \(ignoredLeftoverPaths.count)",
+        ]
+        // The count cannot be wrong in a way a reader can see. The entries are
+        // what a user compares against the paths a report prints, so they are
+        // printed in full, the way the paths on either side of them are.
+        lines.append(contentsOf: ignoredLeftoverPaths.map { "  \($0)" })
+        lines.append(contentsOf: [
             "scan cache: \(scanCachePath)",
             "XDG_DATA_HOME: \(dataHome)",
             "XDG_CONFIG_HOME: \(configHome)",
             "XDG_CACHE_HOME: \(cacheHome)",
             "XDG_STATE_HOME: \(stateHome)",
             "XDG_DATA_DIRS: \(dataDirs)",
-        ]
+        ])
+        return lines
     }
 }
 
-/// Load settings.json. A missing file is defaults. Empty JSON, unknown keys, or wrong types are errors.
+/// Load settings.json. A missing file is defaults. Empty JSON, unknown keys, wrong
+/// types, and an ignored path that is not absolute are errors.
 public func loadSettings(from url: URL = defaultSettingsURL()) throws -> AppAtticSettings {
     let path = url.path
     if !FileManager.default.fileExists(atPath: path) {
@@ -213,7 +222,22 @@ public func loadSettings(from url: URL = defaultSettingsURL()) throws -> AppAtti
         )
     }
     do {
-        return try JSONDecoder().decode(AppAtticSettings.self, from: raw).normalized()
+        let settings = try JSONDecoder().decode(AppAtticSettings.self, from: raw).normalized()
+        // An ignore entry is matched against the leftover path a scan reports,
+        // so a relative one, a `~` one, or one with a trailing slash never
+        // matches and the leftover the user hid stays in every report. Silent:
+        // nothing else in the file says the entry is wrong. Refuse it here,
+        // where the file is already strict about everything else.
+        if let bad = settings.ignoredLeftoverPaths.first(where: { !$0.hasPrefix("/") }) {
+            throw SettingsError.invalid(
+                path: path,
+                reason: "ignoredLeftoverPaths entry \"\(bad)\" is not an absolute path; "
+                    + "use the full path, the one the report prints"
+            )
+        }
+        return settings
+    } catch let error as SettingsError {
+        throw error
     } catch {
         throw SettingsError.invalid(
             path: path,

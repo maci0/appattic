@@ -73,6 +73,13 @@ AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable) {
     for (const QString &raw : ign) {
         const QString p = raw.normalized(QString::NormalizationForm_C);
         if (p.isEmpty() || seen.contains(p)) continue;
+        // Migrating writes this list into settings.json, which the JSON loader
+        // refuses to read back if an entry is not absolute. Report the key and
+        // let the caller stop, the same way an unreadable boolean stops it.
+        if (!p.startsWith(QLatin1Char('/'))) {
+            if (unreadable) unreadable->append(QStringLiteral("ignoredLeftovers"));
+            break;
+        }
         seen.insert(p);
         s.ignoredLeftoverPaths.append(p);
     }
@@ -135,6 +142,14 @@ bool parseSettingsJson(const QByteArray &raw, AppSettings *out, QString *err) {
             }
             const QString p = item.toString().normalized(QString::NormalizationForm_C);
             if (p.isEmpty() || seen.contains(p)) continue;
+            // Matched against the leftover path a scan reports, so a relative
+            // entry or a `~` one hides nothing and says so nowhere. The Swift
+            // loader refuses it too; a file one of the two accepts and the
+            // other rejects is a file the user cannot reason about.
+            if (!p.startsWith(QLatin1Char('/'))) {
+                if (err) *err = QStringLiteral("ignoredLeftoverPaths entry \"%1\" is not an absolute path; use the full path, the one the report prints").arg(p);
+                return false;
+            }
             seen.insert(p);
             s.ignoredLeftoverPaths.append(p);
         }

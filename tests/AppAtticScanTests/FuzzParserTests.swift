@@ -255,6 +255,12 @@ final class FuzzSettingsAndDateTests: XCTestCase {
                     )
                     for path in settings.ignoredLeftoverPaths {
                         XCTAssertFalse(path.isEmpty, "\(base.debugDescription) seed \(seed): \(raw.debugDescription)")
+                        // Everything that loads has to be usable: an ignore
+                        // entry that is not the reported path hides nothing.
+                        XCTAssertTrue(
+                            path.hasPrefix("/"),
+                            "\(base.debugDescription) seed \(seed): \(raw.debugDescription)"
+                        )
                     }
                 } catch let error as SettingsError {
                     XCTAssertFalse(error.description.isEmpty, "\(base.debugDescription) seed \(seed): \(raw.debugDescription)")

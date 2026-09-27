@@ -54,6 +54,27 @@ final class ConfigTests: XCTestCase {
         )
     }
 
+    /// A count cannot be wrong in a way a reader sees. The entries themselves
+    /// are what a user checks against the paths a report prints.
+    func testConfigLinesListEveryIgnoredPath() throws {
+        let settings = AppAtticSettings(ignoredLeftoverPaths: ["/tmp/Whisky", "/tmp/Caches/Steam"])
+        let config = EffectiveConfig(settings: settings, env: [:])
+        XCTAssertEqual(
+            config.lines.filter { $0.hasPrefix("  ") },
+            ["  /tmp/Whisky", "  /tmp/Caches/Steam"]
+        )
+        let count = try XCTUnwrap(config.lines.first { $0.hasPrefix("ignoredLeftoverPaths:") })
+        XCTAssertEqual(count, "ignoredLeftoverPaths: 2")
+        // Each entry follows the count it belongs to, so the list cannot be read
+        // as a continuation of the line above it.
+        let countIndex = try XCTUnwrap(config.lines.firstIndex(of: count))
+        XCTAssertEqual(Array(config.lines[(countIndex + 1)...].prefix(2)), [
+            "  /tmp/Whisky",
+            "  /tmp/Caches/Steam",
+        ])
+        XCTAssertTrue(EffectiveConfig(settings: .default, env: [:]).lines.allSatisfy { !$0.hasPrefix("  ") })
+    }
+
     func testEffectiveConfigResolvesEnvironmentRoots() {
         let env = [
             "XDG_DATA_HOME": "/xdg/data",

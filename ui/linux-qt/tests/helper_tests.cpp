@@ -1154,6 +1154,10 @@ static int checkSettings() {
              QByteArray(R"({"confirmDelete":"no"})"),
              QByteArray(R"({"unknownKey":true})"),
              QByteArray(R"({"ignoredLeftoverPaths":[1]})"),
+             // A relative or `~` entry matches no reported leftover path, so it
+             // hides nothing. The Swift loader refuses it; so does this one.
+             QByteArray(R"({"ignoredLeftoverPaths":["~/.cache/Whisky"]})"),
+             QByteArray(R"({"ignoredLeftoverPaths":["Whisky"]})"),
          }) {
         if (parseSettingsJson(bad, &s, &err)) {
             std::fprintf(stderr, "settings: bad settings.json accepted: %s\n", bad.constData());

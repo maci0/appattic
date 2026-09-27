@@ -54,7 +54,7 @@ No TCP/HTTP listener, webhook, or `serve` command. `parseCLIArguments(["serve"])
 
 | File | Where | Trust |
 |---|---|---|
-| `settings.json` | `Sources/AppAtticScan/Settings.swift`, `ui/linux-qt/settings.cpp` | Local. Unknown keys / bad types are errors. Missing file → defaults (`confirmDelete` true, `includeSystem` false). |
+| `settings.json` | `Sources/AppAtticScan/Settings.swift`, `ui/linux-qt/settings.cpp` | Local. Unknown keys / bad types / a non-absolute `ignoredLeftoverPaths` entry are errors, in both loaders. Missing file → defaults (`confirmDelete` true, `includeSystem` false). |
 | `last-scan.json` | `Sources/AppAtticScan/Cache.swift` | Trusted if fingerprint, `includeSystem`, and age match. No signature. Becomes leftover/stale/outdated rows. |
 | Homebrew / apt / pacman / paru / yay / dnf / yum / zypper / Flatpak / Snap / npm / pipx stdout | `Outdated.swift`, `Packages.swift`, `BrewInfo.swift`, WASM plugins | Treated as structured inventory. |
 | `docker images -f dangling=true`, `volume ls -f dangling=true`, `ps -a -f status=exited` (and the `podman` spellings) | `core/src/container_runtime.zig:16` `q_images` / `q_volumes` / `q_ps`, parsers at `:67`, `:87`, `:109` | Linux Qt build only; the Swift CLI has no container-runtime scan. The image and container identifiers are validated (`isSafeImageId`, `isSafeIdent`) before they become script arguments, so the text cannot inject a command. What the query means is the gap: "dangling" is "no container references it", not "empty". |

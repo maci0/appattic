@@ -158,6 +158,25 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(loaded.ignoredLeftoverPaths, ["/tmp/A", "/tmp/B"])
     }
 
+    func testRelativeIgnoredPathThrows() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-rel-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        // A relative or `~` entry matches no reported path, so the leftover it
+        // names stays in every report while the file reads as if it were hidden.
+        for entry in ["~/.cache/Whisky", "Whisky", "./Whisky", "../Whisky"] {
+            try Data("{\"ignoredLeftoverPaths\":\(String(reflecting: entry))]}".utf8).write(to: url)
+            XCTAssertThrowsError(try loadSettings(from: url)) { error in
+                guard case SettingsError.invalid(_, let reason) = error else {
+                    return XCTFail("expected invalid for \(entry), got \(error)")
+                }
+                XCTAssertTrue(reason.contains("not an absolute path"), reason)
+                XCTAssertTrue(reason.contains(entry), reason)
+            }
+        }
+        try Data(#"{"ignoredLeftoverPaths":["/tmp/A","/tmp/Whisky"]}"#.utf8).write(to: url)
+        XCTAssertEqual(try loadSettings(from: url).ignoredLeftoverPaths, ["/tmp/A", "/tmp/Whisky"])
+    }
+
     func testEffectiveIncludeSystemPrefersCLIFlag() {
         XCTAssertFalse(effectiveIncludeSystem(cliFlag: false, settings: .default))
         XCTAssertTrue(effectiveIncludeSystem(cliFlag: true, settings: .default))
