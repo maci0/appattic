@@ -1,8 +1,10 @@
 # AppAttic
 
-Local cleanup tool for leftover data from uninstalled apps, unused installed software, unused distro orphans and language globals, packages that have a newer version available, and a disk usage analyzer (folder sizes, devices, ring/treemap charts). Nothing is deleted until you review a script or confirm in the UI. Move to Trash from Disk Usage asks first.
+Local cleanup for the data an uninstalled app leaves behind, and a disk usage analyzer next to it. Native window on macOS and Linux, one CLI for both.
 
-macOS and Linux. Today: one Foundation scan library (`AppAtticScan`), a Gtk-free CLI (`appattic`), a SwiftCrossUI AppKit window on macOS (`AppAtticUI`), and a C++ Qt 6 window on Linux (`ui/linux-qt`) that scans through the Zig WASM core. Every package manager and every Linux leftover root is a WASM plugin; the Qt shell keeps widgets, alerts, and running the confirmed script. Architecture record: [`docs/specs/2026-08-26-zig-wasm-core-design.md`](docs/specs/2026-08-26-zig-wasm-core-design.md). Linux UI is Qt 6, same toolkit as TMOG Linux. Qt-on-Linux is not claimed linked until `scripts/linux-qt-link.sh` runs on a real Linux host.
+Nothing is deleted until you read the script it would run or confirm in the window. Move to Trash from Disk Usage asks first.
+
+Today: one Foundation scan library (`AppAtticScan`), a Gtk-free CLI (`appattic`), a SwiftCrossUI AppKit window on macOS (`AppAtticUI`), and a C++ Qt 6 window on Linux (`ui/linux-qt`) that scans through the Zig WASM core. Every package manager and every Linux leftover root is a WASM plugin; the Qt shell keeps widgets, alerts, and running the confirmed script. Architecture record: [`docs/specs/2026-08-26-zig-wasm-core-design.md`](docs/specs/2026-08-26-zig-wasm-core-design.md). Linux UI is Qt 6, same toolkit as TMOG Linux. Qt-on-Linux is not claimed linked until `scripts/linux-qt-link.sh` runs on a real Linux host.
 
 ## What it reports
 

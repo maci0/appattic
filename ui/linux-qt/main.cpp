@@ -436,7 +436,7 @@ public:
         auto *side = new QWidget;
         side->setFixedWidth(220);
         auto *sv = new QVBoxLayout(side);
-        sv->setContentsMargins(0, 8, 0, 8);
+        sv->setContentsMargins(0, kSpaceSm, 0, kSpaceSm);
         sv->setSpacing(0);
         m_sidebar = new QListWidget;
         m_sidebar->setItemDelegate(new SidebarDelegate(m_sidebar));
@@ -500,11 +500,11 @@ public:
         tools->setContextMenuPolicy(Qt::PreventContextMenu);
         m_pageTitle = new QLabel(QStringLiteral("Overview"));
         m_pageTitle->setFont(pageFont());
-        m_pageTitle->setContentsMargins(8, 4, 12, 4);
+        m_pageTitle->setContentsMargins(kSpaceSm, kSpaceXs, kSpaceMd, kSpaceXs);
         m_count = new QLabel;
         m_count->setFont(smallFont());
         m_count->setForegroundRole(QPalette::PlaceholderText);
-        m_count->setContentsMargins(8, 0, 8, 0);
+        m_count->setContentsMargins(kSpaceSm, 0, kSpaceSm, 0);
         m_scanBar = new QProgressBar;
         m_scanBar->setTextVisible(false);
         m_scanBar->setFixedWidth(120);
@@ -557,8 +557,8 @@ public:
 
         m_errorBar = new QWidget;
         auto *eh = new QHBoxLayout(m_errorBar);
-        eh->setContentsMargins(16, 8, 16, 8);
-        eh->setSpacing(8);
+        eh->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceSm);
+        eh->setSpacing(kSpaceSm);
         m_error = new QLabel;
         m_error->setWordWrap(true);
         auto *errDismiss = new QPushButton(QStringLiteral("Dismiss"));
@@ -606,13 +606,13 @@ public:
         m_table->setItemDelegate(new TableRowDelegate(m_table));
         m_emptyPane = new QWidget;
         auto *ev = new QVBoxLayout(m_emptyPane);
-        ev->setContentsMargins(16, 16, 16, 16);
-        ev->setSpacing(8);
+        ev->setContentsMargins(kSpaceLg, kSpaceLg, kSpaceLg, kSpaceLg);
+        ev->setSpacing(kSpaceSm);
         ev->addStretch();
         auto *emptyInner = new QWidget;
         auto *eiv = new QVBoxLayout(emptyInner);
         eiv->setContentsMargins(0, 0, 0, 0);
-        eiv->setSpacing(8);
+        eiv->setSpacing(kSpaceSm);
         eiv->setAlignment(Qt::AlignHCenter);
         m_emptyTitle = new QLabel;
         m_emptyTitle->setFont(titleFont());
@@ -647,8 +647,8 @@ public:
         m_inspectorScroll->setMinimumWidth(280);
         m_inspectorHost = new QWidget;
         m_inspectorLay = new QVBoxLayout(m_inspectorHost);
-        m_inspectorLay->setContentsMargins(16, 14, 16, 14);
-        m_inspectorLay->setSpacing(8);
+        m_inspectorLay->setContentsMargins(kSpaceLg, kSpaceLg, kSpaceLg, kSpaceLg);
+        m_inspectorLay->setSpacing(kSpaceSm);
         m_inspectorScroll->setWidget(m_inspectorHost);
 
         listSplit->addWidget(listPane);
@@ -675,7 +675,7 @@ public:
         m_actionBar = actionBar;
         m_actionCount = new QLabel;
         m_actionCount->setFont(smallFont());
-        m_actionCount->setContentsMargins(8, 0, 8, 0);
+        m_actionCount->setContentsMargins(kSpaceSm, 0, kSpaceSm, 0);
         m_actionBytes = new QLabel;
         m_actionBytes->setFont(smallFont());
         m_actionBytes->setForegroundRole(QPalette::PlaceholderText);
@@ -1212,7 +1212,7 @@ private:
         v->setSpacing(0);
         auto *stats = new QWidget;
         auto *sg = new QHBoxLayout(stats);
-        sg->setContentsMargins(8, 8, 8, 4);
+        sg->setContentsMargins(kSpaceSm, kSpaceSm, kSpaceSm, kSpaceXs);
         sg->setSpacing(0);
         m_statLeftovers = addInstrument(sg, QStringLiteral("Leftovers"));
         m_statLeftoverData = addInstrument(sg, QStringLiteral("Leftover data"));
@@ -1227,6 +1227,7 @@ private:
         auto *line = new QFrame;
         line->setFrameShape(QFrame::HLine);
         line->setFrameShadow(QFrame::Plain);
+        aaApplyHairline(line, palette());
         v->addWidget(line);
 
         auto *cols = new QSplitter(Qt::Horizontal);
@@ -1261,8 +1262,8 @@ private:
     QLabel *addInstrument(QHBoxLayout *row, const QString &label) {
         auto *w = new QWidget;
         auto *v = new QVBoxLayout(w);
-        v->setContentsMargins(16, 6, 20, 6);
-        v->setSpacing(2);
+        v->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceSm);
+        v->setSpacing(kSpaceTight);
         auto *l = new QLabel(label.toUpper());
         l->setFont(labelFont());
         l->setForegroundRole(QPalette::PlaceholderText);
@@ -1307,14 +1308,15 @@ private:
         v->setSpacing(0);
         auto *h = new QLabel(title);
         h->setFont(sectionFont());
-        h->setContentsMargins(16, 8, 16, 4);
+        h->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceXs);
         auto *rule = new QFrame;
         rule->setFrameShape(QFrame::HLine);
         rule->setFrameShadow(QFrame::Plain);
+        aaApplyHairline(rule, palette());
         auto *empty = new QLabel;
         empty->setAlignment(Qt::AlignCenter);
         empty->setWordWrap(true);
-        empty->setContentsMargins(16, 16, 16, 16);
+        empty->setContentsMargins(kSpaceLg, kSpaceLg, kSpaceLg, kSpaceLg);
         empty->setForegroundRole(QPalette::PlaceholderText);
         v->addWidget(h);
         v->addWidget(rule);
@@ -1327,10 +1329,10 @@ private:
     QWidget *buildSettings() {
         auto *w = new QWidget;
         auto *v = new QVBoxLayout(w);
-        v->setContentsMargins(16, 16, 16, 16);
-        v->setSpacing(20);
+        v->setContentsMargins(kSpaceLg, kSpaceLg, kSpaceLg, kSpaceLg);
+        v->setSpacing(kSpaceLg);
         auto *row = new QHBoxLayout;
-        row->setSpacing(32);
+        row->setSpacing(kSpaceLg * 2);
 
         auto scanCol = section(QStringLiteral("Scan"));
         auto *scanHint = hintLabel(
@@ -1354,7 +1356,7 @@ private:
         auto *ignListHost = new QWidget;
         auto *ilv = new QVBoxLayout(ignListHost);
         ilv->setContentsMargins(0, 0, 0, 0);
-        ilv->setSpacing(4);
+        ilv->setSpacing(kSpaceXs);
         m_ignoredEmpty = hintLabel(
             QStringLiteral("None. Ignore a leftover from its inspector to hide it on later scans.")
         );
@@ -1383,7 +1385,7 @@ private:
         ilv->addWidget(ignHint);
         auto *ignButtons = new QHBoxLayout;
         ignButtons->setContentsMargins(0, 0, 0, 0);
-        ignButtons->setSpacing(8);
+        ignButtons->setSpacing(kSpaceSm);
         m_showIgnored = new QPushButton(QStringLiteral("Show Again"));
         m_showIgnored->setToolTip(
             QStringLiteral("Show the selected ignored leftover in the list again")
@@ -1440,7 +1442,7 @@ private:
         auto *w = new QWidget;
         auto *v = new QVBoxLayout(w);
         v->setContentsMargins(0, 0, 0, 0);
-        v->setSpacing(8);
+        v->setSpacing(kSpaceSm);
         auto *t = new QLabel(title);
         t->setFont(sectionFont());
         v->addWidget(t);
@@ -2486,13 +2488,12 @@ private:
         for (QLabel *k : m_factKeys) k->setFixedWidth(px + 12);
     }
 
-    QLabel *inspectorLabel(const QString &text, int pt, bool bold, const QColor &color, bool mono = false) {
+    /// A named type role, never a point size: the inspector is built from the
+    /// same scale as every other pane, so a size typed here would be the one
+    /// level on this page that can drift from it.
+    QLabel *inspectorLabel(const QString &text, const QFont &font, const QColor &color) {
         auto *l = new QLabel(text);
-        QFont f = bodyFont();
-        if (bold) f = titleFont();
-        else if (mono) f = monoFont();
-        else if (pt <= 11) f = smallFont();
-        l->setFont(f);
+        l->setFont(font);
         l->setWordWrap(true);
         l->setTextInteractionFlags(Qt::TextSelectableByMouse);
         QPalette p = l->palette();
@@ -2505,13 +2506,12 @@ private:
         auto *row = new QWidget;
         auto *h = new QHBoxLayout(row);
         h->setContentsMargins(0, 0, 0, 0);
-        h->setSpacing(10);
+        h->setSpacing(kSpaceMd);
         const Tone t = toneFrom(palette());
-        auto *k = inspectorLabel(label.toUpper(), 11, false, t.dim);
-        k->setFont(labelFont());
+        auto *k = inspectorLabel(label.toUpper(), labelFont(), t.dim);
         k->setAlignment(Qt::AlignTrailing | Qt::AlignTop);
         m_factKeys.append(k);
-        auto *v = inspectorLabel(value, 13, false, color, mono);
+        auto *v = inspectorLabel(value, mono ? monoFont() : bodyFont(), color);
         h->addWidget(k);
         h->addWidget(v, 1);
         m_inspectorLay->addWidget(row);
@@ -2524,13 +2524,12 @@ private:
         const Finding *f = findingByUid(m_selectedUid);
         if (page == Page::Overview || page == Page::Settings || page == Page::DiskUsage) return;
         if (isScanPending() && m_findings.isEmpty()) {
-            m_inspectorLay->addWidget(inspectorLabel(QStringLiteral("Scanning"), 13, true, t.text));
+            m_inspectorLay->addWidget(inspectorLabel(QStringLiteral("Scanning"), titleFont(), t.text));
             m_inspectorLay->addWidget(inspectorLabel(
                 !m_scanPhase.isEmpty()
                     ? scanStatusText()
                     : QStringLiteral("Results appear here when the scan finishes."),
-                13,
-                false,
+                bodyFont(),
                 t.dim
             ));
             m_inspectorLay->addStretch();
@@ -2553,17 +2552,17 @@ private:
                 title = QStringLiteral("Select a package");
                 body = QStringLiteral("Orphan distro packages and user-global language tools. Remove or mark-manual after confirm.");
             }
-            m_inspectorLay->addWidget(inspectorLabel(title, 13, true, t.text));
-            m_inspectorLay->addWidget(inspectorLabel(body, 13, false, t.dim));
+            m_inspectorLay->addWidget(inspectorLabel(title, titleFont(), t.text));
+            m_inspectorLay->addWidget(inspectorLabel(body, bodyFont(), t.dim));
             m_inspectorLay->addStretch();
             return;
         }
         if (!m_selectedChild.isEmpty() && page == Page::Packages) {
-            m_inspectorLay->addWidget(inspectorLabel(m_selectedChild, 13, true, t.text));
+            m_inspectorLay->addWidget(inspectorLabel(m_selectedChild, titleFont(), t.text));
             addFact(QStringLiteral("What"), QStringLiteral("Dependency of %1").arg(displayName(*f)), t.text);
             addFact(QStringLiteral("Why"), QStringLiteral("Selected alone. Remove this package, not the parent tree."), t.text);
         } else {
-            m_inspectorLay->addWidget(inspectorLabel(displayName(*f), 13, true, t.text));
+            m_inspectorLay->addWidget(inspectorLabel(displayName(*f), titleFont(), t.text));
             addFact(QStringLiteral("What"), whatText(*f, page), t.text);
             addFact(QStringLiteral("Why"), whyText(*f), t.text);
         }

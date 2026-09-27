@@ -151,6 +151,33 @@ inline QFont aaMonoFont() {
     return aaWithScriptFallback(f);
 }
 
+// Spacing scale, the one `Metrics` gives the AppKit window and the one
+// DESIGN.md declares. A layout gap, margin, or padding is a step on it, not
+// a number picked at the call site, so a page reads at the same density
+// whichever shell draws it. `kSpaceTight` is the one step below the scale,
+// for a label sitting on the value it labels.
+constexpr int kSpaceTight = 2;
+constexpr int kSpaceXs = 4;
+constexpr int kSpaceSm = 8;
+constexpr int kSpaceMd = 12;
+constexpr int kSpaceLg = 16;
+
+// Row and pane separators. The AppKit window spells this value out
+// (`appHairline` in Sources/AppAttic/Theme.swift), so both shells draw the
+// same line. The default Qt frame color is a different strength under every
+// platform theme, which is why the rules are painted from here.
+inline QColor aaHairlineColor(const QPalette &p) {
+    return p.color(QPalette::Window).lightness() < 128 ? QColor(76, 76, 76) : QColor(194, 194, 194);
+}
+
+inline void aaApplyHairline(QFrame *line, const QPalette &p) {
+    if (!line) return;
+    QPalette lp = line->palette();
+    lp.setColor(QPalette::WindowText, aaHairlineColor(p));
+    lp.setColor(QPalette::Text, aaHairlineColor(p));
+    line->setPalette(lp);
+}
+
 inline int aaRowPx(const QWidget *w = nullptr) {
     const QFontMetrics fm(aaBodyFont());
     const int floor = fm.height() + 8;

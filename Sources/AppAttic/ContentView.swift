@@ -106,13 +106,13 @@ struct ContentView: View {
         } detail: {
             VStack(alignment: .leading, spacing: 0) {
                 toolbar
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(Metrics.lg)
+                    .padding(Metrics.sm)
                     .fixedSize(horizontal: false, vertical: true)
                     .background(Color.appChrome)
                 HRule()
                 if let error = vm.errorMessage, vm.scanData != nil || vm.isScanning {
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: Metrics.sm) {
                         Text(error)
                             .font(.system(size: TypeScale.body))
                             .foregroundColor(Color.appRed)
@@ -122,8 +122,8 @@ struct ContentView: View {
                             vm.holdsSettingsError = false
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(Metrics.lg)
+                    .padding(Metrics.sm)
                     HRule()
                 }
                 if vm.isScanning && vm.scanData == nil {
@@ -195,7 +195,7 @@ struct ContentView: View {
     }
 
     var sidebar: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Metrics.tight) {
             ForEach(SidebarItem.allCases, id: \.id) { item in
                 let on = selected == item
                 HStack {
@@ -209,11 +209,11 @@ struct ContentView: View {
                             .foregroundColor(on ? Color.appOnAccent.opacity(0.9) : Color.appDim)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(Metrics.md)
+                .padding(Metrics.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(on ? Color.appBlue : Color.clear)
-                .cornerRadius(6)
+                .cornerRadius(Metrics.radiusMd)
                 .onTapGesture {
                     guard item != selected else { return }
                     selected = item
@@ -221,8 +221,8 @@ struct ContentView: View {
             }
             Spacer()
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 8)
+        .padding(Metrics.sm)
+        .padding(Metrics.sm)
         .frame(minWidth: 200, maxWidth: 220, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -245,7 +245,7 @@ struct ContentView: View {
     }
 
     var toolbar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.sm) {
             if let count = toolbarCount {
                 Text(count)
                     .font(.system(size: TypeScale.small))
@@ -301,7 +301,7 @@ struct ContentView: View {
     }
 
     var scanningState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Metrics.sm) {
             Spacer()
             Text("Scanning")
                 .font(.system(size: TypeScale.title, weight: .semibold))
@@ -312,11 +312,11 @@ struct ContentView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(16)
+        .padding(Metrics.lg)
     }
 
     func errorState(_ error: String) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Metrics.sm) {
             Spacer()
             Text(vm.holdsSettingsError ? "Settings could not be loaded" : "Scan failed")
                 .font(.system(size: TypeScale.title, weight: .semibold))
@@ -334,12 +334,12 @@ struct ContentView: View {
                     .frame(maxWidth: 360)
             } else {
                 Button("Rescan") { vm.scan(includeSystem: includeSystem) }
-                    .padding(.top, 4)
+                    .padding(Metrics.xs)
             }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(16)
+        .padding(Metrics.lg)
     }
 
     @ViewBuilder
@@ -368,7 +368,7 @@ struct ContentView: View {
         let outdatedRows = vm.overviewOutdated
         return VStack(alignment: .leading, spacing: 0) {
             if let totals = vm.scanData?.totals {
-                HStack(alignment: .top, spacing: 28) {
+                HStack(alignment: .top, spacing: Metrics.lg * 2) {
                     overviewStat("Installed", "\(totals.apps_installed)")
                     overviewStat("Leftovers", "\(visibleOrphanCount)", Color.appRed)
                     overviewStat("Leftover data", humanSize(visibleOrphanedBytes), Color.appGreen)
@@ -382,8 +382,8 @@ struct ContentView: View {
                     overviewStat("Last scan", lastScanLabel, Color.appDim)
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(Metrics.lg)
+                .padding(Metrics.md)
             }
             if leftoverRows.isEmpty && staleRows.isEmpty && outdatedRows.isEmpty {
                 if vm.scanData != nil {
@@ -471,8 +471,8 @@ struct ContentView: View {
             Text(title)
                 .font(.system(size: TypeScale.title, weight: .semibold))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(Metrics.lg)
+                .padding(Metrics.sm)
                 .background(Color.appChrome)
             HRule()
             rows()
@@ -490,7 +490,7 @@ struct ContentView: View {
     }
 
     func overviewStat(_ label: String, _ value: String, _ color: Color = Color.appText) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Metrics.tight) {
             Text(label.uppercased())
                 .font(.system(size: TypeScale.label))
                 .foregroundColor(Color.appDim)
@@ -503,8 +503,8 @@ struct ContentView: View {
     func overviewTappableRow(_ name: String, _ detail: String, _ trailing: String, action: @escaping () -> Void) -> some View {
         VStack(spacing: 0) {
             overviewDetailRow(name, detail, trailing)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
+                .padding(Metrics.lg)
+                .padding(Metrics.sm)
             HRule()
         }
         .onTapGesture(perform: action)
@@ -613,7 +613,7 @@ struct ContentView: View {
     }
 
     var packageFilterChips: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Metrics.xs) {
             packageFilterChip("All", .all)
             packageFilterChip("Leaves", .leaves)
             packageFilterChip("Globals", .globals)
@@ -625,10 +625,10 @@ struct ContentView: View {
         return Text(title)
             .font(.system(size: TypeScale.small))
             .foregroundColor(on ? Color.appOnAccent : Color.appText)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(Metrics.sm)
+            .padding(Metrics.xs)
             .background(on ? Color.appBlue : Color.appChrome)
-            .cornerRadius(4)
+            .cornerRadius(Metrics.radiusSm)
             .onTapGesture {
                 guard filter != packageFilter else { return }
                 packageFilter = filter
@@ -688,7 +688,7 @@ struct ContentView: View {
     ) -> some View {
         VStack(spacing: 0) {
             row()
-                .padding(.horizontal, 12)
+                .padding(Metrics.md)
                 .frame(height: 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(selected ? Color.appBlue : Color.clear)
@@ -785,20 +785,20 @@ struct ContentView: View {
     }
 
     func headerRow<Content: View>(@ViewBuilder columns: () -> Content) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.sm) {
             columns()
         }
         .font(.system(size: TypeScale.label, weight: .semibold))
         .foregroundColor(Color.appDim)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
+        .padding(Metrics.md)
+        .padding(Metrics.xs)
         .background(Color.appChrome)
     }
 
     func overviewDetailRow(_ name: String, _ detail: String, _ trailing: String) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: Metrics.sm) {
+            VStack(alignment: .leading, spacing: Metrics.tight) {
                 Text(name)
                     .font(.system(size: TypeScale.body))
                     .foregroundColor(Color.appText)
@@ -825,7 +825,7 @@ struct ContentView: View {
 
     func compactLeftoverRow(_ item: LeftoverItem, selected: Bool) -> some View {
         let marked = vm.selectedLeftovers.contains(item.path)
-        return HStack(spacing: 8) {
+        return HStack(spacing: Metrics.sm) {
             rowMarkCell(marked, selected: selected)
             Text(leftoverName(item))
                 .font(.system(size: TypeScale.body))
@@ -851,7 +851,7 @@ struct ContentView: View {
         let selectable = StaleTier.isSelectable(item.tierKind)
         let marked = selectable && vm.selectedApps.contains(item.path)
         let status = item.outdated == true ? "\(displayTier(item.tier)) · out" : displayTier(item.tier)
-        return HStack(spacing: 8) {
+        return HStack(spacing: Metrics.sm) {
             rowMarkCell(marked, selected: selected)
             Text(item.name)
                 .font(.system(size: TypeScale.body))
@@ -881,7 +881,7 @@ struct ContentView: View {
         } else {
             ver = "\(item.current_version ?? "-") → \(item.latest_version ?? "?")"
         }
-        return HStack(spacing: 8) {
+        return HStack(spacing: Metrics.sm) {
             rowMarkCell(marked, selected: selected)
             Text(item.displayName)
                 .font(.system(size: TypeScale.body))
@@ -903,7 +903,7 @@ struct ContentView: View {
         let marked = vm.selectedPackages.contains(item.id) || vm.selectedMarkManual.contains(item.id)
         let kind = item.kind == "global" ? "Global" : "Orphan"
         let kindColor = item.kind == "global" ? Color.appYellow : Color.appRed
-        return HStack(spacing: 8) {
+        return HStack(spacing: Metrics.sm) {
             rowMarkCell(marked, selected: selected)
             Text(item.name)
                 .font(.system(size: TypeScale.body))
@@ -1158,10 +1158,10 @@ struct ContentView: View {
     }
 
     func inspectorPane<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Metrics.md) {
             content()
         }
-        .padding(16)
+        .padding(Metrics.lg)
         .frame(minWidth: 280, maxWidth: 360, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.appBg)
     }
@@ -1170,7 +1170,7 @@ struct ContentView: View {
         topPad: CGFloat = 0,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Metrics.sm) {
             HRule()
             content()
         }
@@ -1178,7 +1178,7 @@ struct ContentView: View {
     }
 
     func infoRow(_ label: String, _ value: String, color: Color = Color.appText, mono: Bool = false) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: Metrics.sm) {
             Text(label.uppercased())
                 .font(.system(size: TypeScale.label, weight: .semibold))
                 .foregroundColor(Color.appDim)
@@ -1192,7 +1192,7 @@ struct ContentView: View {
     }
 
     func infoBlock(_ label: String, _ value: String, mono: Bool = false) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: Metrics.sm) {
             Text(label.uppercased())
                 .font(.system(size: TypeScale.label, weight: .semibold))
                 .foregroundColor(Color.appDim)
@@ -1212,7 +1212,7 @@ struct ContentView: View {
         actionTitle: String? = nil,
         action: (() -> Void)? = nil
     ) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Metrics.sm) {
             Spacer()
             Text(title)
                 .font(.system(size: TypeScale.title, weight: .semibold))
@@ -1223,17 +1223,17 @@ struct ContentView: View {
                 .frame(maxWidth: 360)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
-                    .padding(.top, 4)
+                    .padding(Metrics.xs)
             }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(16)
+        .padding(Metrics.lg)
     }
 
     var settings: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 32) {
+            HStack(alignment: .top, spacing: Metrics.lg * 2) {
                 settingsSection("Scan") {
                     HStack {
                         Text("Include system apps in scan")
@@ -1277,7 +1277,7 @@ struct ContentView: View {
                         // ASCII one in byte order, which reads as unordered to
                         // a German or Japanese user.
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: Metrics.xs) {
                                 ForEach(vm.ignoredLeftovers
                                     .sorted {
                                         collatedBefore(ignoredPathLabel($0), ignoredPathLabel($1),
@@ -1295,7 +1295,7 @@ struct ContentView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
-                            .padding(4)
+                            .padding(Metrics.xs)
                         }
                         .frame(maxHeight: 140)
                         Button("Clear ignored leftovers") {
@@ -1305,19 +1305,19 @@ struct ContentView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(Metrics.lg)
             Spacer()
             Text("AppAttic \(appAtticVersion)")
                 .font(.system(size: TypeScale.small))
                 .foregroundColor(Color.appDim)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+                .padding(Metrics.lg)
+                .padding(Metrics.md)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Metrics.sm) {
             Text(title)
                 .font(.system(size: TypeScale.title, weight: .semibold))
             content()
@@ -1326,7 +1326,7 @@ struct ContentView: View {
     }
 
     var actionBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Metrics.sm) {
             Text("\(vm.selectionCount) selected")
                 .font(.system(size: TypeScale.small))
                 .foregroundColor(Color.appDim)
@@ -1388,13 +1388,13 @@ struct ContentView: View {
                 .disabled(vm.isScanning)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(Metrics.md)
+        .padding(Metrics.sm)
         .background(Color.appChrome)
     }
 
     var scriptSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Metrics.lg) {
             Text("Review Script")
                 .font(.system(size: TypeScale.title, weight: .semibold))
             Text("Review every line before running.")
@@ -1415,7 +1415,7 @@ struct ContentView: View {
                 Button("Close") { showScript = false }
             }
         }
-        .padding(16)
+        .padding(Metrics.lg)
         .frame(minWidth: 520, minHeight: 360)
     }
 

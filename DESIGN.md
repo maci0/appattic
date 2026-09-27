@@ -7,7 +7,11 @@ colors:
   darkBg: "#1e1e1e"
   darkChrome: "#2e2e2e"
   text: "#1f1f1f"
+  darkText: "#f5f5f5"
   dim: "#525252"
+  darkDim: "#adadad"
+  hairline: "#c2c2c2"
+  darkHairline: "#4c4c4c"
   blue: "#0a84ff"
   red: "#ff453a"
   yellow: "#ffd60a"
@@ -46,13 +50,25 @@ typography:
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.35
-rounded:
-  sm: "4px"
-  md: "6px"
+  display:
+    fontFamily: "Michroma"
+    fontSize: "body + 4pt"
+    fontWeight: 400
+    letterSpacing: "1.02% (Qt page title; Linux shell only)"
+  displaySection:
+    fontFamily: "Michroma"
+    fontSize: "body + 2pt"
+    fontWeight: 400
+    letterSpacing: "1.02% (Qt section title; Linux shell only)"
 spacing:
+  tight: "2px"
+  xs: "4px"
   sm: "8px"
   md: "12px"
   lg: "16px"
+rounded:
+  sm: "4px"
+  md: "6px"
 components:
   sidebar:
     textColor: "{colors.text}"
@@ -79,6 +95,8 @@ List and inspector fill is white in light mode, `#1e1e1e` in dark mode. Sidebar 
 
 Interactive accent is system blue. Status: system red (orphaned / REMOVE), amber (REVIEW / outdated version; darker than system yellow in light mode), green (KEEP). Never use color alone. Rows keep a text status.
 
+Row and pane separators are the hairline pair (`#c2c2c2`, `#4c4c4c`), not the platform's default frame color, which is a different strength under every theme. `appHairline` in `Theme.swift` and `aaHairlineColor` in `uistyle.h` are the same two values.
+
 The product mark (`packaging/appattic.svg`) uses that same dark fill `#1e1e1e`, dark chrome `#2e2e2e`, accent `#0a84ff`, KEEP `#30d158`, and REMOVE `#ff453a`. GitHub canvas (`#0d1117`, `#58a6ff`, `#21262d`) is not the mark.
 
 ## Typography
@@ -86,6 +104,8 @@ The product mark (`packaging/appattic.svg`) uses that same dark fill `#1e1e1e`, 
 macOS uses 13pt body and 11pt secondary columns on the system UI face. Linux Qt uses Selawik when it is installed (TMOG's application font), otherwise the desktop UI font. Page and section titles use bundled Michroma (OFL), the TMOG display face. Instrument and inspector labels are small, uppercase, and tracked. Values sit under those labels at body size plus two points, DemiBold, with tabular figures on sizes. Paths and scripts use the desktop fixed-width font. No VFD digit grid. No oversized marketing numerals.
 
 The roles are named, not retyped at each call site. `TypeScale` in `Sources/AppAttic/Theme.swift` and the `aa*Font` functions in `ui/linux-qt/uistyle.h` are the same scale on both platforms: body, small, title, label, value, mono. A level means the same thing on macOS and Linux, so neither shell grows a private size literal. The two display steps (`aaPageFont`, `aaSectionFont`) exist only on Qt, because the Michroma page and section titles are a Linux-shell affordance with no macOS counterpart. They are steps above the application font (four points and two), not point sizes of their own, so a desktop set to a large text size keeps the titles above the body text they label.
+
+Spacing is the same story: `Metrics` in `Theme.swift` and `kSpaceTight` / `kSpaceXs` / `kSpaceSm` / `kSpaceMd` / `kSpaceLg` in `uistyle.h` are one scale, and a gap, margin, or padding is a step on it. The steps are 2 for a label on its own value, then 4, 8, 12, 16, so a page has one rhythm instead of a number picked per call site. A second multiple of a step (32 between the settings columns) is written as the step times two, not as a new number.
 
 The Linux sidebar is a source list (window fill, theme icons, style-drawn rows) with Settings pinned at the bottom, like TMOG. The detail pane carries a Michroma page title. Toolbars are QToolBar.
 

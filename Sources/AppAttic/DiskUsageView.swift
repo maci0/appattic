@@ -40,7 +40,7 @@ struct DiskUsageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: Metrics.sm) {
                 Button("Scan Home") { scan(FileManager.default.homeDirectoryForCurrentUser.path) }
                     .disabled(scanning)
                 Button("Scan File System") { scan("/") }
@@ -50,14 +50,14 @@ struct DiskUsageView: View {
                 TextField("Folder path", text: $path)
                 Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(Metrics.lg)
+            .padding(Metrics.sm)
             HRule()
             if scanning {
                 Text(status.isEmpty ? "Scanning" : status)
                     .font(.system(size: TypeScale.body))
                     .foregroundColor(Color.appDim)
-                    .padding(16)
+                    .padding(Metrics.lg)
                 Spacer()
             } else if let root {
                 HStack {
@@ -72,15 +72,15 @@ struct DiskUsageView: View {
                         .font(.system(size: TypeScale.body))
                         .foregroundColor(Color.appDim)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(Metrics.lg)
+                .padding(Metrics.sm)
                 HRule()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         diskRows(root, depth: 0)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(Metrics.lg)
+                    .padding(Metrics.sm)
                 }
                 HRule()
                 HStack {
@@ -100,13 +100,13 @@ struct DiskUsageView: View {
                         .font(.system(size: TypeScale.small))
                         .foregroundColor(Color.appDim)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(Metrics.lg)
+                .padding(Metrics.sm)
             } else {
                 Text("Devices")
                     .font(.system(size: TypeScale.title, weight: .semibold))
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
+                    .padding(Metrics.lg)
+                    .padding(Metrics.md)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(volumes.enumerated()), id: \.offset) { _, vol in
@@ -124,12 +124,12 @@ struct DiskUsageView: View {
                                         .foregroundColor(Color.appDim)
                                         .frame(width: 72, alignment: .trailing)
                                 }
-                                .padding(.vertical, 6)
+                                .padding(Metrics.sm)
                             }
                             HRule()
                         }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(Metrics.lg)
                 }
             }
         }
@@ -170,7 +170,7 @@ struct DiskUsageView: View {
                     .foregroundColor(selected?.path == node.path ? Color.appOnAccent : Color.appDim)
                     .frame(width: 72, alignment: .trailing)
             }
-            .padding(.vertical, 3)
+            .padding(Metrics.xs)
             .background(selected?.path == node.path ? Color.appBlue : Color.clear)
         }
     }

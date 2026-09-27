@@ -50,6 +50,21 @@ extension Color {
     )
 }
 
+/// Spacing and shape scale, the same steps `kSpace*` give the Qt shell
+/// (`ui/linux-qt/uistyle.h`). A gap, margin, or padding is one of these, so a
+/// page reads at the same density whichever shell draws it. `tight` is the one
+/// step below the scale, for a label sitting on the value it labels.
+enum Metrics {
+    static let tight: Double = 2
+    static let xs: Double = 4
+    static let sm: Double = 8
+    static let md: Double = 12
+    static let lg: Double = 16
+    /// Corner radius of a selected sidebar row and of the small chrome blocks.
+    static let radiusSm: Double = 4
+    static let radiusMd: Double = 6
+}
+
 /// Type roles, the same ones the `aa*Font` functions in `uistyle.h` give the
 /// Qt shell. One scale, so a level means the same thing on both platforms.
 /// These are the macOS point sizes. The Qt shell derives each role from the

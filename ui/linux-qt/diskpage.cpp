@@ -212,7 +212,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     intro->setWordWrap(true);
     intro->setFont(aaSmallFont());
     intro->setForegroundRole(QPalette::PlaceholderText);
-    intro->setContentsMargins(16, 12, 16, 8);
+    intro->setContentsMargins(kSpaceLg, kSpaceMd, kSpaceLg, kSpaceSm);
     lv->addWidget(intro);
     auto *scanBar = new QToolBar;
     scanBar->setMovable(false);
@@ -280,7 +280,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     tools->setContextMenuPolicy(Qt::PreventContextMenu);
     d->crumb = new QLabel;
     d->crumb->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    d->crumb->setContentsMargins(8, 0, 8, 0);
+    d->crumb->setContentsMargins(kSpaceSm, 0, kSpaceSm, 0);
     d->devicesBtn = new QPushButton(QStringLiteral("Devices"));
     d->devicesBtn->setToolTip(QStringLiteral("Back to the device and folder list"));
     d->stopBtn = new QPushButton(QStringLiteral("Stop"));
@@ -328,7 +328,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     sv->addWidget(tools);
     auto *prog = new QWidget;
     auto *ph = new QHBoxLayout(prog);
-    ph->setContentsMargins(16, 0, 16, 8);
+    ph->setContentsMargins(kSpaceLg, 0, kSpaceLg, kSpaceSm);
     d->progress = new QProgressBar;
     d->progress->setRange(0, 0);
     d->progress->setTextVisible(false);
@@ -373,7 +373,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     sv->addWidget(split, 1);
     d->status = new QLabel;
     d->status->setFont(aaSmallFont());
-    d->status->setContentsMargins(16, 6, 16, 6);
+    d->status->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceSm);
     d->status->setForegroundRole(QPalette::PlaceholderText);
     sv->addWidget(d->status);
     d->stack->addWidget(d->scanPage);
