@@ -82,9 +82,11 @@ modules:
           - .build
           - .deps
           - .gauntlet
+          - .tmp-shots
           - .zig-cache
           - .zig-cache-local
           - .github
+          - AppAttic.app
           - benchmarks
           - dist
           - docs

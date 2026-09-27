@@ -270,6 +270,22 @@ check_tool_pins() {
     done
 }
 
+# The Swift toolchain is declared twice: in .swift-version, and in every
+# setup-swift step. CI must build with the declared version, so a bump that
+# misses a workflow has to fail here rather than on the runner.
+check_workflow_swift_versions() {
+    local declared workflow step
+    declared="$(tr -d '[:space:]' < "$ROOT/.swift-version")"
+    for workflow in "$ROOT"/.github/workflows/*.yml; do
+        [[ -f "$workflow" ]] || continue
+        while IFS= read -r step; do
+            if [[ "$step" != "$declared" ]]; then
+                fail "${workflow#"$ROOT"/} pins setup-swift to $step, .swift-version says $declared"
+            fi
+        done < <(sed -n 's/^[[:space:]]*swift-version:[[:space:]]*"\([^"]*\)".*/\1/p' "$workflow")
+    done
+}
+
 # SwiftPM pins the whole tree by commit revision, so an unpinned pin means a
 # build that resolves a different source than the one reviewed.
 check_swiftpm_pins() {
@@ -321,6 +337,7 @@ run_check() {
     check_version_anchors
     check_artifact_versions_in_tree
     check_tool_pins
+    check_workflow_swift_versions
     check_swiftpm_pins
     if [[ "$FAILURES" -ne 0 ]]; then
         echo "deps: $FAILURES problem(s) with third-party pins" >&2

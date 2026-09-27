@@ -30,7 +30,10 @@ jobs:
             .zig-cache
             .zig-cache-local
             dist/.appimage-tools
-          key: ${{ runner.os }}-appimage-${{ hashFiles('scripts/dep-checksums.sha256', 'scripts/deps.sh', 'core/src/**/*.zig') }}
+          key: >-
+            ${{ runner.os }}-appimage-${{
+            hashFiles('scripts/dep-checksums.sha256', 'scripts/deps.sh',
+            '.zig-version', 'core/src/**/*.zig') }}
           restore-keys: |
             ${{ runner.os }}-appimage-
       - name: Install Qt 6 and build tools

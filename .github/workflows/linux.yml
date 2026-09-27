@@ -50,7 +50,9 @@ jobs:
       - name: Install shellcheck
         run: sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends shellcheck
       - name: Install yamllint
-        # Pinned here and in scripts/deps.sh, which fails if the two disagree.
+        # Pinned: an unpinned linter makes a green run mean "whatever
+        # yamllint shipped that morning", not "this tree passes". The pin is
+        # repeated in scripts/deps.sh, which fails if the two disagree.
         run: uv tool install "yamllint==1.38.0"
       - name: Install zig
         run: sudo bash scripts/linux-deps.sh --install-zig
@@ -80,7 +82,14 @@ jobs:
             .swiftpm
             .zig-cache
             .zig-cache-local
-          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('Package.resolved', 'Package.swift', 'Sources/**/*.swift', 'tests/**/*.swift', 'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
+          # The toolchain version files belong in the key: a restore of a
+          # .build or .zig-cache written by another Swift or Zig is a build
+          # against a compiler this tree does not pin.
+          key: >-
+            ${{ runner.os }}-${{ github.job }}-${{
+            hashFiles('Package.resolved', 'Package.swift', '.swift-version',
+            '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
+            'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
           restore-keys: |
             ${{ runner.os }}-${{ github.job }}-
       - name: Install Qt 6
@@ -143,7 +152,14 @@ jobs:
             .swiftpm
             .zig-cache
             .zig-cache-local
-          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('Package.resolved', 'Package.swift', 'Sources/**/*.swift', 'tests/**/*.swift', 'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
+          # The toolchain version files belong in the key: a restore of a
+          # .build or .zig-cache written by another Swift or Zig is a build
+          # against a compiler this tree does not pin.
+          key: >-
+            ${{ runner.os }}-${{ github.job }}-${{
+            hashFiles('Package.resolved', 'Package.swift', '.swift-version',
+            '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
+            'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
           restore-keys: |
             ${{ runner.os }}-${{ github.job }}-
       - name: Install Qt 6
@@ -195,7 +211,7 @@ jobs:
           path: |
             .zig-cache
             .zig-cache-local
-          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('core/src/**/*.zig') }}
+          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('.zig-version', 'core/src/**/*.zig') }}
           restore-keys: |
             ${{ runner.os }}-${{ github.job }}-
       - name: Distro deps

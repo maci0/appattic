@@ -195,7 +195,7 @@ podman build -t appattic-arch -f Dockerfile.arch .
 # or: docker build -t appattic .
 ```
 
-Ubuntu image installs Qt 6, runs `AppAtticScanTests`, and links the CLI plus the Qt window. `Dockerfile.arch` does the same on Arch. GitHub Actions `.github/workflows/linux.yml` runs both Ubuntu and archlinux jobs.
+Ubuntu image installs Qt 6, runs `AppAtticScanTests`, and links the CLI plus the Qt window. `Dockerfile.arch` does the same on Arch. GitHub Actions `.github/workflows/linux.yml` runs the same matrix as the images: Ubuntu 24.04, a `swift:5.10.1-jammy` container, and archlinux, plus lint and a macOS scan-library job.
 
 Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settings. The last scan is shown immediately if one was saved. AppAttic then checks its inventory fingerprint in the background and rescans if app, package-manager, tool, Steam/CrossOver, or leftover state changed, or if the scan is over 24 hours old. Checkmarks on leftovers, stale apps, outdated rows, and Packages rows survive a background refresh if those items are still present. Settings (confirm before running; on macOS, include system apps) and ignored leftover paths persist in `settings.json` (see above). The Linux window does not scan installed system apps. Ignore a leftover from its inspector to hide it on later scans. Include-in-cleanup uses the leftover list tickbox on Linux, the inspector toggle, and toolbar Select All.
 

@@ -47,6 +47,19 @@ fi
 
 APP_ID="org.appattic.AppAttic"
 KDE_RUNTIME="${KDE_RUNTIME:-6.10}"
+WASMTIME_VER="${WASMTIME_C_API_VERSION:-28.0.0}"
+if [[ -n "${ZIG_VERSION:-}" ]]; then
+    ZIG_VER="$ZIG_VERSION"
+elif [[ -f "$ROOT/.zig-version" ]]; then
+    ZIG_VER="$(tr -d '[:space:]' < "$ROOT/.zig-version")"
+else
+    echo "error: missing $ROOT/.zig-version; the required Zig version is declared there" >&2
+    exit 1
+fi
+if [[ -z "$ZIG_VER" ]]; then
+    echo "error: empty .zig-version" >&2
+    exit 1
+fi
 MANIFEST="$ROOT/packaging/flatpak/${APP_ID}.yml"
 DIST="$ROOT/dist"
 WORK="$DIST/flatpak-work"
@@ -128,17 +141,13 @@ case "$ARCH" in
         ;;
 esac
 mkdir -p "$EXTRA"
-if [[ "$FP_ARCH" == x86_64 ]]; then
-    prefetch_archive "wasmtime-v28.0.0-x86_64-linux-c-api.tar.xz" \
-        "https://github.com/bytecodealliance/wasmtime/releases/download/v28.0.0/wasmtime-v28.0.0-x86_64-linux-c-api.tar.xz"
-    prefetch_archive "zig-x86_64-linux-0.16.0.tar.xz" \
-        "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz"
-else
-    prefetch_archive "wasmtime-v28.0.0-aarch64-linux-c-api.tar.xz" \
-        "https://github.com/bytecodealliance/wasmtime/releases/download/v28.0.0/wasmtime-v28.0.0-aarch64-linux-c-api.tar.xz"
-    prefetch_archive "zig-aarch64-linux-0.16.0.tar.xz" \
-        "https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz"
-fi
+# The names come from the same declarations the other fetchers read, so a pin
+# bump in .zig-version or WASMTIME_C_API_VERSION cannot leave this script
+# prefetching a tarball the manifest no longer asks for.
+prefetch_archive "wasmtime-v${WASMTIME_VER}-${FP_ARCH}-linux-c-api.tar.xz" \
+    "https://github.com/bytecodealliance/wasmtime/releases/download/v${WASMTIME_VER}/wasmtime-v${WASMTIME_VER}-${FP_ARCH}-linux-c-api.tar.xz"
+prefetch_archive "zig-${FP_ARCH}-linux-${ZIG_VER}.tar.xz" \
+    "https://ziglang.org/download/${ZIG_VER}/zig-${FP_ARCH}-linux-${ZIG_VER}.tar.xz"
 
 echo "staging sources in $WORK"
 rm -rf "$WORK"
@@ -147,6 +156,8 @@ rsync -a \
     --exclude '.git/' \
     --exclude '.build/' \
     --exclude '.deps/' \
+    --exclude '.tmp-shots/' \
+    --exclude 'AppAttic.app/' \
     --exclude 'dist/' \
     --exclude '.zig-cache/' \
     --exclude '.zig-cache-local/' \
@@ -162,13 +173,17 @@ fi
 mkdir -p "$DIST"
 rm -rf "$BUILD"
 echo "flatpak-builder: ${APP_ID}"
-# rofiles-fuse leftover mounts from a killed build fail the next run.
-if mountpoint -q "$STATE/rofiles" 2>/dev/null; then
-    fusermount3 -u "$STATE/rofiles" 2>/dev/null || fusermount -u "$STATE/rofiles" 2>/dev/null || true
+# rofiles-fuse leftover mounts from a killed build fail the next run. A first
+# build has no state dir, and `find` on a missing path exits 1, which
+# pipefail would turn into a failed run before flatpak-builder ever starts.
+if [[ -d "$STATE" ]]; then
+    if mountpoint -q "$STATE/rofiles" 2>/dev/null; then
+        fusermount3 -u "$STATE/rofiles" 2>/dev/null || fusermount -u "$STATE/rofiles" 2>/dev/null || true
+    fi
+    find "$STATE" -maxdepth 2 -type d -name 'rofiles-*' 2>/dev/null | while read -r mp; do
+        fusermount3 -u "$mp" 2>/dev/null || fusermount -u "$mp" 2>/dev/null || true
+    done
 fi
-find "$STATE" -maxdepth 2 -type d -name 'rofiles-*' 2>/dev/null | while read -r mp; do
-    fusermount3 -u "$mp" 2>/dev/null || fusermount -u "$mp" 2>/dev/null || true
-done
 
 flatpak-builder \
     --user \
