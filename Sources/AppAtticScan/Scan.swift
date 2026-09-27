@@ -49,22 +49,6 @@ public final class ScanResult {
         dataItems.filter { $0.isListedLeftover }
     }
 
-    public var orphanedBytes: Int {
-        orphanedItems.reduce(0) { addBytes($0, $1.sizeBytes) }
-    }
-
-    public var systemLeftoverBytes: Int {
-        dataItems.filter { $0.leftoverStatus == .system }.reduce(0) { addBytes($0, $1.sizeBytes) }
-    }
-
-    public var reclaimableBytes: Int {
-        var total = orphanedBytes
-        for v in verdicts where v.tierKind == .remove {
-            total = addBytes(total, addBytes(v.software.sizeBytes, v.software.dataBytes))
-        }
-        return total
-    }
-
     public func toScanData() -> ScanData {
         var orphanedCount = 0
         var orphanedBytes = 0

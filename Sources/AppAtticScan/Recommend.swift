@@ -93,14 +93,12 @@ public struct Verdict {
     public var software: Software
     public var tier: String
     public var reason: String
-    public var reclaimableBytes: Int
     /// `tier` as a typed value, or nil when it is not a known tier.
     public var tierKind: StaleTier? { StaleTier(rawValue: tier) }
-    public init(software: Software, tier: String, reason: String = "", reclaimableBytes: Int = 0) {
+    public init(software: Software, tier: String, reason: String = "") {
         self.software = software
         self.tier = tier
         self.reason = reason
-        self.reclaimableBytes = reclaimableBytes
     }
 }
 
@@ -448,8 +446,7 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
             return Verdict(
                 software: sw,
                 tier: StaleTier.remove.rawValue,
-                reason: "\(spanNote(sw)); easy to reinstall via brew",
-                reclaimableBytes: addBytes(sw.sizeBytes, sw.dataBytes)
+                reason: "\(spanNote(sw)); easy to reinstall via brew"
             )
         }
         if sw.source == "brew-cask", sw.kind == "other" {
@@ -497,8 +494,7 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
         return Verdict(
             software: sw,
             tier: StaleTier.remove.rawValue,
-            reason: "Not used for \(humanDays(d)). \(reinstallHint(sw.source) ?? "Easy to reinstall.")",
-            reclaimableBytes: addBytes(sw.sizeBytes, sw.dataBytes)
+            reason: "Not used for \(humanDays(d)). \(reinstallHint(sw.source) ?? "Easy to reinstall.")"
         )
     }
     return Verdict(
