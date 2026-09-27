@@ -16,7 +16,7 @@ Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability
 
 ## Rule
 
-The core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. As built those parts sit around the Zig module rather than inside it: `core/src/core.zig` exports only `core_abi_version` (`core/src/abi.zig`), `core/host/embed.c` owns load/unload, coeffect tags and capability intercept, and the native shell owns grouping (`groupLinuxLeftovers`, `ui/linux-qt/finding.cpp:658`) and script concatenation (`cleanupScript`, `ui/linux-qt/main.cpp:2717`) behind the confirm boundary. Nothing on the load path switches on `apt` vs `pacman` vs `npm`; per-manager knowledge is one plugin per manager plus the `host.exec` allowlist (`core/host/hostexec.h:35`). No layer owns filesystem roots: a path plugin declares its own root and tags 0 when the root is absent. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; Darwin and CI may inject fixtures via `APPATTIC_HOST_EXEC_FIXTURE`). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
+The core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. As built those parts sit around the Zig module rather than inside it: `core/src/core.zig` exports only `core_abi_version` (`core/src/abi.zig`), `core/host/embed.c` owns load/unload, passes each plugin's argv tag to `plugin_query`, and capability intercept, and the native shell owns grouping (`groupLinuxLeftovers`, `ui/linux-qt/finding.cpp:661`) and script concatenation (`cleanupScript`, `ui/linux-qt/main.cpp:2763`) behind the confirm boundary. Which plugins exist lives in one place (`wasm_sources`, `core/build.sh`), so no part of the load path switches on `apt` vs `pacman` vs `npm`. Per-manager knowledge is one plugin per manager, the `host.exec` allowlist (`core/host/hostexec.h:35`), and the native shell's presence table (`kExecRules`, `ui/linux-qt/corehost.cpp:84`), which decides only the presence tag, never what gets loaded. A path plugin declares the root it queries and tags 0 when the root is absent (`spec_table`, `core/src/path_listing.zig:29`); the shell repeats those presence roots in `kXdgRules` (`corehost.cpp:109`) and `kHomeRules` (`corehost.cpp:120`) to compute that tag, so a new path root is a second entry as well. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; Darwin and CI may inject fixtures via `APPATTIC_HOST_EXEC_FIXTURE`). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
 
 `AppAtticScan` keeps building until a later port copies its tests into Zig. The core does not delete it. The Swift CLI (`appattic`) parses in `AppAtticScan` (`CLIParse.swift`); it is not a WASM guest. Linux Qt loads `appattic_core.wasm` through `core/host/embed.c`, and refuses to scan without it.
 
@@ -38,8 +38,8 @@ The paper does not treat dialogs as plugins. Adaptation: plugin supplies confirm
 
 | Layer | Owns | Does not own |
 |---|---|---|
-| Native shell | Windows, lists, inspector, buttons, alerts, sheet, grouping findings, joining the confirmed `sh`, running it | CLI parsing, classify, root lists |
-| C host (`core/host/embed.c`) | ABI gate, load/unload, coeffect tags, capability intercept | Manager names, scan roots, brew/apt/snap parsers |
+| Native shell | Windows, lists, inspector, buttons, alerts, sheet, grouping findings, presence tag per plugin, joining the confirmed `sh`, running it | CLI parsing, classify, the plugin inventory |
+| C host (`core/host/embed.c`) | ABI gate, load/unload, passing the argv tag to `plugin_query`, capability intercept | Deciding the tag, manager parsers, scan roots, brew/apt/snap parsers |
 | Zig core WASM (`core/src/core.zig`) | `core_abi_version` only | Everything else; the loading parts live in the C host and the native shell |
 | WASM plugins | Each manager, each leftover root, overlay/shadow, user-bin | Widgets |
 
@@ -131,7 +131,7 @@ Not built. No `core/src/<id>.zig`, so no `.wasm` is built and the host load list
 
 ## Host load list
 
-`core/build.sh` emits `appattic_core.wasm` plus one `.wasm` per in-scope plugin, and prints the argv below. Linux Qt (`ui/linux-qt/corehost.cpp` `pluginWasmFiles`) keeps no second registry: it loads every `.wasm` in `core/out` except the core. So a new plugin lands on both sides by being added to `wasm_sources` in `core/build.sh`, never by being listed in a second place. Tag `0` on any of them: coeffect missing, empty findings, plugin still loads. Missing file: host skips that argv (INACTIVE). `chocolatey`, `nuget`, `appstore`, `steam` are backlog: no `.wasm` is built for them, so they are never arguments. `core/build.sh` also precompiles each module to a `<id>.wasm.cwasm` sidecar; the host deserializes it when it is at least as new as the `.wasm` and compiles the source otherwise, so a stale sidecar costs speed, never correctness.
+`core/build.sh` emits `appattic_core.wasm` plus one `.wasm` per in-scope plugin, and prints the argv below. Linux Qt (`pluginWasmFiles`, `ui/linux-qt/corehost.cpp:170`) keeps no second load registry: it loads every `.wasm` in `core/out` except the core. So a new plugin reaches both sides by being added to `wasm_sources` in `core/build.sh`, never by being listed in a second place; the shell then tags it from the presence table, and a plugin with no rule there gets tag `1`. Tag `0` on any of them: coeffect missing, empty findings, plugin still loads. Missing file: host skips that argv (INACTIVE). `chocolatey`, `nuget`, `appstore`, `steam` are backlog: no `.wasm` is built for them, so they are never arguments. `core/build.sh` also precompiles each module to a `<id>.wasm.cwasm` sidecar; the host deserializes it when it is at least as new as the `.wasm` and compiles the source otherwise, so a stale sidecar costs speed, never correctness.
 
 ```bash
 ./core/build.sh
@@ -202,7 +202,7 @@ Linux Qt already loads the WASM plugins. These remain in Swift for the macOS UI 
 
 ## Tests
 
-Host exit 0 loading the built plugin set (`core/build.sh` builds it; `scripts/linux-qt-link.sh --smoke` is the gate that loads it in CI). JSON plugin ids match. No `system prune`, no `snap remove --purge '*'`, no `rm -rf /usr/bin/snap`, no `apt-get purge -y` / `dpkg --purge` (`core/host/tests/hostexec_test.c` asserts those). Tag 0 yields empty findings.
+Host exit 0 loading the built plugin set (`core/build.sh` builds it; CI runs `bash scripts/linux-qt-link.sh` and then `scripts/verify-qt-link.sh`, which asserts the `ui/linux-qt/build/LINUX_QT_LINK.txt` proof). JSON plugin ids match. No `system prune`, no `snap remove --purge '*'`, no `rm -rf /usr/bin/snap`, no `apt-get purge -y` / `dpkg --purge` (`core/host/tests/hostexec_test.c` asserts those). Tag 0 yields empty findings.
 
 ## Settled and open questions
 
@@ -210,5 +210,5 @@ Settled by this record, kept here only so a later change knows what was decided:
 
 Still open, and deliberately undecided by this record:
 
-- `idleDays` default 30? No `idleDays` field exists yet, so nothing is filtered by age today.
+- `idleDays` default 30? No plugin emits `idleDays` (`core/src/container_runtime.zig:355` pins its absence) and nothing is filtered by age today. The native `Finding.idleDays` (`ui/linux-qt/finding.h:47`) is filled from `mtime` for the row label only, so a default is still undecided.
 - podman-docker shim vs Docker Desktop?

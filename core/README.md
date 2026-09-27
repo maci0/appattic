@@ -68,6 +68,6 @@ Not built. Not on the host load list. See spec heading **Backlog**.
 | `chocolatey` | Windows Chocolatey outdated/orphan packages |
 | `nuget` | User-global NuGet leftovers (not every project `packages.config`) |
 | `appstore` | Microsoft Store leftovers and outdated on Windows. macOS App Store / `mas` stays in Swift until a later `mas` plugin; that is a different id |
-| `steam` | Steam games/leftovers on Windows. Linux/macOS Steam stays in Swift for now |
+| `steam` | Steam games/leftovers on Windows. Linux/macOS Steam stays in Swift for now. Remaining Steam leftover work as this plugin later |
 
 The Swift scan library (`AppAtticScan`) and macOS UI are not linked to this directory. Linux Qt 6 loads `appattic_core.wasm` through `embed.c`.
