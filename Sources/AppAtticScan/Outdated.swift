@@ -884,25 +884,73 @@ public func pkgFromItunes(
     )
 }
 
-func itunesRequest(_ params: [String: String]) -> [String: [String: Any]] {
+/// What one lookup returned: the rows it indexed, and why it returned none when
+/// the request itself failed. An empty answer and a failed request are the same
+/// list of rows, and only the second one is worth telling the operator about: a
+/// failed lookup leaves every App Store app looking up to date.
+struct ItunesLookup {
+    var rows: [String: [String: Any]]
+    var failure: String?
+    /// Set once the task's completion handler has run, so a wait that times out
+    /// can tell "still in flight" from "answered with nothing".
+    var answered = false
+}
+
+/// The lookup endpoint, the per-request timeout, and the longer wait around
+/// the task: the request timeout bounds the transfer, the outer wait bounds a
+/// task that never calls back.
+let itunesLookupURL = "https://itunes.apple.com/lookup"
+let itunesRequestTimeout: TimeInterval = 12
+let itunesLookupTimeout: TimeInterval = 15
+
+func itunesRequest(
+    _ params: [String: String],
+    session: URLSession = .shared,
+    onFailure: ((String) -> Void)? = nil
+) -> [String: [String: Any]] {
     var items: [URLQueryItem] = []
     for (k, v) in params.sorted(by: { $0.key < $1.key }) { items.append(URLQueryItem(name: k, value: v)) }
-    var comp = URLComponents(string: "https://itunes.apple.com/lookup")
+    var comp = URLComponents(string: itunesLookupURL)
     comp?.queryItems = items
-    guard let url = comp?.url else { return [:] }
-    var req = URLRequest(url: url, timeoutInterval: 12)
+    guard let url = comp?.url else {
+        onFailure?("the lookup URL could not be built")
+        return [:]
+    }
+    var req = URLRequest(url: url, timeoutInterval: itunesRequestTimeout)
     req.setValue("AppAttic/1.0", forHTTPHeaderField: "User-Agent")
-    let box = LockBox<[String: [String: Any]]>([:])
+    let box = LockBox<ItunesLookup>(ItunesLookup(rows: [:], failure: nil))
     let sem = DispatchSemaphore(value: 0)
-    URLSession.shared.dataTask(with: req) { data, _, _ in
-        defer { sem.signal() }
-        guard let data,
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return }
-        box.value = indexItunesResults(obj)
+    session.dataTask(with: req) { data, response, error in
+        defer {
+            box.mutate { $0.answered = true }
+            sem.signal()
+        }
+        if let error {
+            box.mutate { $0.failure = "no response (\(error.localizedDescription))" }
+            return
+        }
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            box.mutate { $0.failure = "HTTP \(http.statusCode)" }
+            return
+        }
+        guard let data else {
+            box.mutate { $0.failure = "the response carried no body" }
+            return
+        }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            box.mutate { $0.failure = "the response was not JSON" }
+            return
+        }
+        box.mutate { $0.rows = indexItunesResults(obj) }
     }.resume()
-    _ = sem.wait(timeout: .now() + 15)
-    return box.value
+    var result = box.value
+    if !result.answered, sem.wait(timeout: .now() + itunesLookupTimeout) == .timedOut {
+        result.failure = "no answer within \(Int(itunesLookupTimeout))s"
+    }
+    if let failure = result.failure {
+        onFailure?(failure)
+    }
+    return result.rows
 }
 
 private final class LockBox<T>: @unchecked Sendable {
@@ -913,18 +961,34 @@ private final class LockBox<T>: @unchecked Sendable {
         set { lock.lock(); defer { lock.unlock() }; _value = newValue }
     }
     init(_ value: T) { _value = value }
+    func mutate(_ body: (inout T) -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        body(&_value)
+    }
 }
 
-public func itunesLookup(_ bundleId: String) -> [String: Any]? {
+public func itunesLookup(
+    _ bundleId: String,
+    session: URLSession = .shared,
+    onFailure: ((String) -> Void)? = nil
+) -> [String: Any]? {
     if bundleId.isEmpty { return nil }
     for country in storeCountries() {
-        let idx = itunesRequest(["bundleId": bundleId, "country": country])
+        let idx = itunesRequest(
+            ["bundleId": bundleId, "country": country],
+            session: session,
+            onFailure: onFailure
+        )
         if let row = idx[bundleId] { return row }
     }
     return nil
 }
 
-public func itunesLookupBatch(_ adamIds: [String]) -> [String: [String: Any]] {
+public func itunesLookupBatch(
+    _ adamIds: [String],
+    session: URLSession = .shared,
+    onFailure: ((String) -> Void)? = nil
+) -> [String: [String: Any]] {
     let ids = adamIds.filter { !$0.isEmpty }
     if ids.isEmpty { return [:] }
     var out: [String: [String: Any]] = [:]
@@ -934,7 +998,11 @@ public func itunesLookupBatch(_ adamIds: [String]) -> [String: [String: Any]] {
         var i = 0
         while i < missing.count {
             let chunk = Array(missing[i..<min(i + 20, missing.count)])
-            let idx = itunesRequest(["id": chunk.joined(separator: ","), "country": country])
+            let idx = itunesRequest(
+                ["id": chunk.joined(separator: ","), "country": country],
+                session: session,
+                onFailure: onFailure
+            )
             for (k, v) in idx { out[k] = v }
             i += 20
         }
@@ -967,7 +1035,7 @@ public func collectAppstore(
     }
     var cat = catalog
     if cat == nil {
-        cat = masCatalog(masApps)
+        cat = masCatalog(masApps, onFailure: { progress?("  · App Store lookup failed (\($0)): updates may be missing") })
     }
     let resolved = cat ?? [:]
     var out: [OutdatedPkg] = []
@@ -982,7 +1050,11 @@ public func collectAppstore(
     return out
 }
 
-func masCatalog(_ apps: [AppRecord]) -> [String: [String: Any]] {
+func masCatalog(
+    _ apps: [AppRecord],
+    session: URLSession = .shared,
+    onFailure: ((String) -> Void)? = nil
+) -> [String: [String: Any]] {
     var ids: [String] = []
     var mutated = apps
     for i in mutated.indices {
@@ -996,7 +1068,7 @@ func masCatalog(_ apps: [AppRecord]) -> [String: [String: Any]] {
         }
         if let adam { ids.append(adam) }
     }
-    var catalog = itunesLookupBatch(ids)
+    var catalog = itunesLookupBatch(ids, session: session, onFailure: onFailure)
     for app in mutated {
         let extra = app.extra
         let adam = extra["mas_adam_id"] ?? ""
@@ -1005,7 +1077,7 @@ func masCatalog(_ apps: [AppRecord]) -> [String: [String: Any]] {
             continue
         }
         guard let bid else { continue }
-        guard let row = itunesLookup(bid) else { continue }
+        guard let row = itunesLookup(bid, session: session, onFailure: onFailure) else { continue }
         catalog[bid] = row
         if let tid = row["trackId"] {
             catalog["\(tid)"] = row
@@ -1014,9 +1086,13 @@ func masCatalog(_ apps: [AppRecord]) -> [String: [String: Any]] {
     return catalog
 }
 
-public func attachItunesMeta(_ pkgs: [OutdatedPkg], catalog: [String: [String: Any]]? = nil) {
+public func attachItunesMeta(
+    _ pkgs: [OutdatedPkg],
+    catalog: [String: [String: Any]]? = nil,
+    onFailure: ((String) -> Void)? = nil
+) {
     let ids = pkgs.filter { $0.manager == "app-store" && $0.name.allSatisfy(\.isNumber) }.map(\.name)
-    let cat = catalog ?? itunesLookupBatch(ids)
+    let cat = catalog ?? itunesLookupBatch(ids, onFailure: onFailure)
     for p in pkgs where p.manager == "app-store" {
         guard let row = cat[p.name] else { continue }
         if let bid = row["bundleId"] as? String, p.name.allSatisfy(\.isNumber) {
@@ -1054,7 +1130,7 @@ public func queryAppstore(
 ) -> [OutdatedPkg] {
     if PlatformOverride.isLinux { return [] }
     if let pkgs = queryMas(progress: progress, which: which, run: run) {
-        attachItunesMeta(pkgs)
+        attachItunesMeta(pkgs) { progress?("  · App Store lookup failed (\($0)): details may be missing") }
         return pkgs
     }
     return collectAppstore(apps, progress: progress)

@@ -1,3 +1,7 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import XCTest
 @testable import AppAtticScan
 
@@ -814,4 +818,71 @@ final class OutdatedTests: XCTestCase {
         let entry = OutdatedEntry(name: "wget", manager: "brew-formula", reason: "already explained")
         XCTAssertEqual(outdatedReason(entry, page: "this page"), "already explained")
     }
+
+    func testItunesRequestReportsFailedLookup() {
+        var failures: [String] = []
+        let rows = itunesRequest(["bundleId": "com.example.app", "country": "us"], session: stubURLSession(status: 403)) { failures.append($0) }
+        XCTAssertTrue(rows.isEmpty)
+        XCTAssertEqual(failures, ["HTTP 403"])
+    }
+
+    func testItunesRequestReportsTransportFailure() {
+        var failures: [String] = []
+        let rows = itunesRequest(["bundleId": "com.example.app", "country": "us"], session: stubURLSession(error: URLError(.notConnectedToInternet))) { failures.append($0) }
+        XCTAssertTrue(rows.isEmpty)
+        XCTAssertEqual(failures.count, 1)
+        XCTAssertTrue(failures[0].hasPrefix("no response"), failures[0])
+    }
+
+    func testItunesRequestKeepsQuietOnSuccess() {
+        var failures: [String] = []
+        let body = Data(#"{"results":[{"bundleId":"com.example.app","trackName":"Example","version":"2.0"}]}"#.utf8)
+        let rows = itunesRequest(["bundleId": "com.example.app", "country": "us"], session: stubURLSession(status: 200, body: body)) { failures.append($0) }
+        XCTAssertTrue(failures.isEmpty)
+        XCTAssertEqual(rows["com.example.app"]?["trackName"] as? String, "Example")
+    }
+
+    func testItunesRequestReportsBodyThatIsNotJSON() {
+        var failures: [String] = []
+        let rows = itunesRequest(["bundleId": "com.example.app", "country": "us"], session: stubURLSession(status: 200, body: Data("<html>rate limited</html>".utf8))) { failures.append($0) }
+        XCTAssertTrue(rows.isEmpty)
+        XCTAssertEqual(failures, ["the response was not JSON"])
+    }
+}
+
+/// Answers every request with one canned status, body, or error.
+private final class StubURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var status = 200
+    nonisolated(unsafe) static var body = Data()
+    nonisolated(unsafe) static var error: Error?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        if let error = Self.error {
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: Self.status,
+            httpVersion: "HTTP/1.1",
+            headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private func stubURLSession(status: Int, body: Data = Data(), error: Error? = nil) -> URLSession {
+    StubURLProtocol.status = status
+    StubURLProtocol.body = body
+    StubURLProtocol.error = error
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [StubURLProtocol.self]
+    return URLSession(configuration: config)
 }
