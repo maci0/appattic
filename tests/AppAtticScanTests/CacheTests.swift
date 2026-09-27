@@ -238,15 +238,41 @@ final class CacheTests: XCTestCase {
         XCTAssertEqual(xdg["pacman"], "/var/lib/pacman/local")
     }
 
-    func testPathMtimeStampSkipsMissingAndRecordsEpoch() throws {
+    func testPathMtimeStampSkipsMissingAndRecordsMtime() throws {
         XCTAssertEqual(pathMtimeStamp("flatpak-user", "/nope/appattic-missing-flatpak"), "")
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mtime-stamp-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let line = pathMtimeStamp("flatpak-user", dir.path)
+        let entry = dir.appendingPathComponent("stampme")
+        try Data("x".utf8).write(to: entry)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 100)],
+            ofItemAtPath: entry.path
+        )
+        let line = pathMtimeStamp("flatpak-user", entry.path)
         XCTAssertTrue(line.hasPrefix("flatpak-user:"), line)
         XCTAssertFalse(line.contains("missing"), line)
-        XCTAssertNotNil(Int(line.split(separator: ":").last ?? ""), line)
+        XCTAssertEqual(
+            line,
+            "flatpak-user:\(Date(timeIntervalSince1970: 100).timeIntervalSince1970.bitPattern)",
+            line
+        )
+        // Sub-second and pre-1970 mtimes must not collapse: a whole-second
+        // stamp lets a package tree edited twice inside one second keep the
+        // fingerprint it had before the edit, and the next run reuses a stale
+        // cached scan.
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 100.25)],
+            ofItemAtPath: entry.path
+        )
+        let subSecond = pathMtimeStamp("flatpak-user", entry.path)
+        XCTAssertNotEqual(line, subSecond)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: -1.5)],
+            ofItemAtPath: entry.path
+        )
+        let beforeEpoch = pathMtimeStamp("flatpak-user", entry.path)
+        XCTAssertNotEqual(subSecond, beforeEpoch)
     }
 
     func testAndroidSdkStampWhenPresent() throws {
