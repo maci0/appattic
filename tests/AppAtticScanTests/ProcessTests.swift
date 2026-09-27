@@ -300,7 +300,11 @@ final class ProcessTests: XCTestCase {
     /// resolves, but it makes the script's own comment about the first match
     /// wrong.
     func testAugmentedProcessEnvironmentPutsCleanupDirsFirstWithoutDuplicates() throws {
-        let home = "/home/tester"
+        // `augmentedProcessEnvironment` reads the account home itself, so the
+        // expected list has to be built from the same source. A hardcoded home
+        // here made the test assert the runner's account name: it passed only
+        // where the home happened to be the literal one.
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
         let cleanup = cleanupPathDirectories(home: home)
         let out = augmentedProcessEnvironment(env: [
             "PATH": "/opt/tools:\(cleanup[0]):/opt/tools",

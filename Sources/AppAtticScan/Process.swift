@@ -146,6 +146,12 @@ public let commandPipeDrainGrace: TimeInterval = 2
 /// opens once the process has exited.
 private let commandPipePollSliceMs: Int = 100
 
+/// How often the wait for a spawned command re-checks the direct child with a
+/// zero-timeout `waitpid`. The `terminationHandler` is the fast path and is
+/// signalled without waiting for this to elapse; the interval only bounds how
+/// late the fallback below can be noticed.
+private let childExitPollInterval: TimeInterval = 0.1
+
 /// How much of a redirected command's output a report keeps. A package
 /// transaction writes a line per file it touches and can run for minutes, and
 /// the report shows a few hundred characters of the end, so the rest is read
@@ -278,15 +284,119 @@ private func stopProcess(_ process: Process, exited: DispatchSemaphore) {
 /// forwards SIGTERM to the command below it, or a package manager that exits
 /// on it, used to answer the wait inside the grace period and read as a script
 /// that finished; it was stopped, and the lines before the stop ran.
+///
+/// `runAndWaitForExit` is the same wait with the exit status it reaps handed
+/// back: a caller that reads `terminationStatus` has to use that one, because
+/// the wait can be the one that reaps the child itself.
 @discardableResult
 public func runAndWait(_ process: Process, timeout: TimeInterval) throws -> Bool {
+    try runAndWaitForExit(process, timeout: timeout).timedOut == false
+}
+
+/// `runAndWait` with the exit status the wait reaped.
+func runAndWaitForExit(_ process: Process, timeout: TimeInterval) throws -> ChildExit {
     let exited = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in exited.signal() }
     try process.run()
     isolateProcessGroup(process)
-    if exited.wait(timeout: .now() + timeout) == .success { return true }
-    stopProcess(process, exited: exited)
-    return false
+    return waitForDirectChild(process, exited: exited, timeout: timeout)
+}
+
+/// How a spawned command ended.
+struct ChildExit {
+    /// True when the deadline passed and the process was stopped.
+    var timedOut: Bool
+    /// The exit status this wait reaped itself, or nil when Foundation reaped
+    /// the child and `Process.terminationStatus` is the one to read.
+    var reapedStatus: Int32?
+
+    /// The status to report, from whichever of the two has it.
+    func status(from process: Process) -> Int32 {
+        reapedStatus ?? process.terminationStatus
+    }
+}
+
+/// What a zero-timeout `waitpid` on a spawned command's direct child found.
+private enum DirectChildState {
+    /// Still running.
+    case running
+    /// Gone, and this call is the one that reaped it: the raw `wait` status
+    /// comes back with it.
+    case reaped(Int32)
+    /// Gone, and Foundation reaped it: `Process.terminationStatus` is the
+    /// status to read, and `waitUntilExit` returns without waiting for the
+    /// child's own descendants.
+    case reapedElsewhere
+}
+
+/// `waitpid(pid, WNOHANG)`, the one signal for "the direct child exited" that
+/// does not wait out the child's own descendants.
+///
+/// `Process.terminationHandler` is not that signal on Linux: libdispatch
+/// reports the child as exited only once everything it spawned is gone too, so
+/// `sh -c "helper &"` signals the handler when `helper` exits — seconds later,
+/// or never. A command that has already exited is then cut off at its own
+/// timeout and reported as a timeout it never had, with its real status
+/// thrown away. The direct child is reapable the moment it exits, so the wait
+/// below asks `waitpid` as well.
+private func directChildState(_ pid: pid_t) -> DirectChildState {
+    guard pid > 0 else { return .running }
+    var status: Int32 = 0
+    let reaped = waitpid(pid, &status, WNOHANG)
+    if reaped == pid { return .reaped(status) }
+    if reaped == 0 { return .running }
+    // ECHILD: there is no such child left to wait for, so something else has it.
+    return errno == ECHILD ? .reapedElsewhere : .running
+}
+
+/// The exit status a reaped child reports, decoded the way
+/// `Process.terminationStatus` spells it. The `WIFEXITED` family is not
+/// importable into Swift, so the raw `wait` status is read by hand: the low
+/// seven bits are the signal that ended the child (0 for a normal exit, 0x7f
+/// for a stop), and the byte above them is its exit code. A child killed by a
+/// signal therefore reports the signal number, which is what Foundation
+/// reports for one too.
+private func exitStatus(fromWaitStatus status: Int32) -> Int32 {
+    let signal = status & 0x7f
+    if signal == 0 { return (status >> 8) & 0xff }
+    if signal == 0x7f { return status }
+    return signal
+}
+
+/// Wait for `process` to exit, for `exited` to be signalled, or for `timeout`
+/// to pass.
+private func waitForDirectChild(
+    _ process: Process,
+    exited: DispatchSemaphore,
+    timeout: TimeInterval
+) -> ChildExit {
+    let pid = process.processIdentifier
+    let deadline = monotonicSeconds() + timeout
+    // The injected clock is the pipe drain window's, and a stepped one must not
+    // decide how long a command may run: the deadline is the host's own clock.
+    while true {
+        if exited.wait(timeout: .now() + childExitPollInterval) == .success {
+            process.waitUntilExit()
+            return ChildExit(timedOut: false, reapedStatus: nil)
+        }
+        switch directChildState(pid) {
+        case .reaped(let status):
+            // Foundation's handler is still pending and never will report this
+            // child, so `waitUntilExit` would block here until the descendants
+            // it left behind are gone. The status came with the reap.
+            return ChildExit(timedOut: false, reapedStatus: exitStatus(fromWaitStatus: status))
+        case .reapedElsewhere:
+            process.waitUntilExit()
+            return ChildExit(timedOut: false, reapedStatus: nil)
+        case .running:
+            break
+        }
+        if monotonicSeconds() >= deadline {
+            stopProcess(process, exited: exited)
+            process.waitUntilExit()
+            return ChildExit(timedOut: true, reapedStatus: nil)
+        }
+    }
 }
 
 /// Runs `cmd` without a shell and returns (status, stdout, stderr). Status 127
@@ -370,13 +480,11 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: @escaping Monoton
     // Block on the exit notification instead of polling `isRunning`: the old
     // 50 ms sleep charged a full tick to every subprocess, so a scan that runs
     // dozens of `which`/`du`/package queries paid that dead time per call
-    // whether the command took 1 ms or the full timeout.
-    var timedOut = false
-    if exited.wait(timeout: .now() + timeout) == .timedOut {
-        timedOut = true
-        stopProcess(process, exited: exited)
-    }
-    process.waitUntilExit()
+    // whether the command took 1 ms or the full timeout. The handler is not
+    // enough on its own: see `waitForDirectChild` for the command that exits
+    // and leaves a descendant holding the pipe.
+    let exit = waitForDirectChild(process, exited: exited, timeout: timeout)
+    let timedOut = exit.timedOut
     // The exit above ends the direct child, but a descendant holding the write
     // end leaves the readers with no EOF. Handing them a deadline is what makes
     // them finish: a detached reader blocked on `read` outlives the call, and a
@@ -393,7 +501,7 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: @escaping Monoton
     }
     let out = decodeUTF8(collected.out)
     let err = decodeUTF8(collected.err)
-    return (process.terminationStatus, out, err)
+    return (exit.status(from: process), out, err)
 }
 
 /// The status a stopped script reports, 124 being the shell's own "timed out".
@@ -467,11 +575,15 @@ public func runGeneratedScript(
     }
     process.standardError = errHandle
     process.standardInput = FileHandle.nullDevice
-    let finished = try runAndWait(process, timeout: timeout)
+    let exit = try runAndWaitForExit(process, timeout: timeout)
+    let finished = exit.timedOut == false
     try? errHandle.synchronize()
     try? errHandle.close()
     openErrHandle = nil
-    var status = process.terminationStatus
+    // From the wait, not from the process: the wait is what reaps the child
+    // when Foundation's handler is late, and Foundation then has no status to
+    // report at all.
+    var status = exit.status(from: process)
     // The stderr tail is the only thing that says which line of `set -e`
     // stopped the script, so a read that failed is not an empty stderr: it is
     // a run whose reason is unknown, and the report says so rather than
