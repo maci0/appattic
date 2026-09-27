@@ -172,7 +172,7 @@ final class SettingsTests: XCTestCase {
         // A relative or `~` entry matches no reported path, so the leftover it
         // names stays in every report while the file reads as if it were hidden.
         for entry in ["~/.cache/Whisky", "Whisky", "./Whisky", "../Whisky"] {
-            try Data("{\"ignoredLeftoverPaths\":\(String(reflecting: entry))]}".utf8).write(to: url)
+            try Data("{\"ignoredLeftoverPaths\":[\(String(reflecting: entry))]}".utf8).write(to: url)
             XCTAssertThrowsError(try loadSettings(from: url)) { error in
                 guard case SettingsError.invalid(_, let reason) = error else {
                     return XCTFail("expected invalid for \(entry), got \(error)")
