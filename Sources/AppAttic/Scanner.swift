@@ -246,7 +246,7 @@ final class ScannerViewModel {
         ]
         let leftItems = visibleOrphanedLeftovers(data.leftovers, ignoring: ignoredLeftovers)
             .filter { selectedLeftovers.contains($0.path) }
-        let appItems = data.software.filter { selectedApps.contains($0.path) && selectableCleanupTiers.contains($0.tier ?? "") }
+        let appItems = data.software.filter { selectedApps.contains($0.path) && StaleTier.isSelectable($0.tierKind) }
         if !leftItems.isEmpty {
             lines.append("# Leftover data and PATH overlays")
             for item in leftItems {
@@ -353,7 +353,7 @@ final class ScannerViewModel {
         var next = selectedApps
         if on {
             guard let item = scanData?.software.first(where: { $0.path == path }),
-                  selectableCleanupTiers.contains(item.tier ?? "") else { return }
+                  StaleTier.isSelectable(item.tierKind) else { return }
             next.insert(path)
         } else {
             next.remove(path)

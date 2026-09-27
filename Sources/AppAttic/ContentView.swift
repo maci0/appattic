@@ -856,7 +856,7 @@ struct ContentView: View {
     }
 
     func compactStaleRow(_ item: SoftwareItem, selected: Bool) -> some View {
-        let selectable = selectableCleanupTiers.contains(item.tier ?? "")
+        let selectable = StaleTier.isSelectable(item.tierKind)
         let marked = selectable && vm.selectedApps.contains(item.path)
         let status = item.outdated == true ? "\(displayTier(item.tier)) · out" : displayTier(item.tier)
         return HStack(spacing: 8) {
@@ -968,16 +968,16 @@ struct ContentView: View {
     }
 
     func leftoverNameColor(_ item: LeftoverItem) -> Color {
-        item.status == "shadow" ? Color.appYellow : Color.appText
+        item.leftoverStatus == .shadow ? Color.appYellow : Color.appText
     }
 
     func leftoverSecondaryColor(_ item: LeftoverItem) -> Color {
-        item.status == "shadow" ? Color.appYellow.opacity(0.85) : Color.appDim
+        item.leftoverStatus == .shadow ? Color.appYellow.opacity(0.85) : Color.appDim
     }
 
     func leftoverStatusColor(_ item: LeftoverItem) -> Color {
-        if item.status == "orphaned" { return Color.appRed }
-        if item.status == "shadow" { return Color.appYellow }
+        if item.leftoverStatus == .orphaned { return Color.appRed }
+        if item.leftoverStatus == .shadow { return Color.appYellow }
         return Color.appText
     }
 
@@ -1109,7 +1109,7 @@ struct ContentView: View {
             }
             Spacer()
             inspectorSection {
-                if selectableCleanupTiers.contains(item.tier ?? "") {
+                if StaleTier.isSelectable(item.tierKind) {
                     HStack {
                         Text("Include in cleanup")
                             .font(.system(size: 13))
@@ -1601,7 +1601,7 @@ struct ContentView: View {
     func selectAllStale() {
         vm.selectedApps = toggleListedSelection(
             selected: vm.selectedApps,
-            visible: staleRows.filter { selectableCleanupTiers.contains($0.tier ?? "") }.map(\.path)
+            visible: staleRows.filter { StaleTier.isSelectable($0.tierKind) }.map(\.path)
         )
     }
 
@@ -1631,7 +1631,7 @@ struct ContentView: View {
         case .leftovers:
             return !leftoverRows.isEmpty
         case .stale:
-            return staleRows.contains { selectableCleanupTiers.contains($0.tier ?? "") }
+            return staleRows.contains { StaleTier.isSelectable($0.tierKind) }
         case .outdated:
             return outdatedRows.contains(where: \.updatable)
         case .packages:
@@ -1646,7 +1646,7 @@ struct ContentView: View {
         case .leftovers:
             return leftoverRows.allSatisfy { vm.selectedLeftovers.contains($0.path) }
         case .stale:
-            let paths = staleRows.filter { selectableCleanupTiers.contains($0.tier ?? "") }.map(\.path)
+            let paths = staleRows.filter { StaleTier.isSelectable($0.tierKind) }.map(\.path)
             return !paths.isEmpty && paths.allSatisfy { vm.selectedApps.contains($0) }
         case .outdated:
             let ids = outdatedRows.filter(\.updatable).map(\.id)
@@ -1679,12 +1679,12 @@ struct ContentView: View {
     }
 
     func tierColor(_ tier: String?) -> Color {
-        switch tier {
-        case "remove":
+        switch tier.flatMap(StaleTier.init(rawValue:)) {
+        case .remove:
             return Color.appRed
-        case "review":
+        case .review:
             return Color.appYellow
-        case "keep":
+        case .keep:
             return Color.appGreen
         default:
             return Color.appDim

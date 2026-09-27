@@ -84,6 +84,50 @@ public struct LeftoverItem: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+extension LeftoverItem {
+    /// `status` as a typed value, or nil when it is not a known status (a cache written by a newer AppAttic).
+    public var leftoverStatus: LeftoverStatus? { LeftoverStatus(rawValue: status) }
+
+    /// True for the rows `visibleOrphanedLeftovers` keeps: orphaned and shadow.
+    public var isListedLeftover: Bool { isListedLeftoverStatus(status) }
+
+    public var totalBytes: Int { size_bytes ?? 0 }
+}
+
+/// Stale tiers, as they appear on JSON `tier` fields and `Verdict.tier`.
+public enum StaleTier: String, Codable, Sendable, Hashable, CaseIterable {
+    case keep
+    case review
+    case remove
+    case system
+
+    /// Tiers a user can opt into cleanup.
+    public static let selectable: Set<StaleTier> = [.review, .remove]
+
+    /// True for a tier that can be opted into cleanup, false for an unset or unknown tier.
+    public static func isSelectable(_ tier: StaleTier?) -> Bool {
+        tier.map { selectable.contains($0) } ?? false
+    }
+
+    /// Tiers the stale list shows. KEEP is never listed, `system` only with `includeSystem`.
+    public func isVisibleStale(includeSystem: Bool) -> Bool {
+        self == .review || self == .remove || (includeSystem && self == .system)
+    }
+}
+
+/// Package managers AppAttic can upgrade in place. Other managers stay report-only.
+public enum UpgradableManager: String, Codable, Sendable, Hashable, CaseIterable {
+    case brewFormula = "brew-formula"
+    case brewCask = "brew-cask"
+    case flatpak
+    case apt
+    case pacman
+    case aur
+    case dnf
+    case yum
+    case zypper
+}
+
 /// Paths that hide this leftover when present in the ignore list: the item path plus extra_paths.
 public func leftoverIgnorePaths(_ item: LeftoverItem) -> [String] {
     [item.path] + (item.extra_paths ?? [])
@@ -135,6 +179,8 @@ public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
     public let bundle_id: String?
     public var id: String { path }
     public var totalBytes: Int { addBytes(size_bytes ?? 0, data_bytes ?? 0) }
+    /// `tier` as a typed value, or nil when it is unset or not a known tier.
+    public var tierKind: StaleTier? { tier.flatMap(StaleTier.init(rawValue:)) }
 
     public init(
         name: String,
@@ -206,6 +252,11 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
     }
     public var updatable: Bool { outdatedIsUpdatable(manager: manager, kind: kind) }
 
+    /// The manager behind `updatable`, or nil for report-only managers and untrusted casks.
+    public var upgradableManager: UpgradableManager? {
+        kind == "untrusted" ? nil : UpgradableManager(rawValue: manager)
+    }
+
     public init(
         name: String,
         manager: String,
@@ -231,13 +282,7 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
 
 public func outdatedIsUpdatable(manager: String, kind: String?) -> Bool {
     if kind == "untrusted" { return false }
-    switch manager {
-    case "brew-formula", "brew-cask", "flatpak",
-         "apt", "pacman", "aur", "dnf", "yum", "zypper":
-        return true
-    default:
-        return false
-    }
+    return UpgradableManager(rawValue: manager) != nil
 }
 
 public struct PackageEntry: Codable, Identifiable, Hashable, Sendable {
@@ -252,7 +297,7 @@ public struct PackageEntry: Codable, Identifiable, Hashable, Sendable {
     public let children: [String]?
     public var id: String { manager + ":" + name }
     public var canMarkManual: Bool {
-        kind == "orphan" && ["apt", "pacman", "dnf", "zypper"].contains(manager)
+        kind == "orphan" && DistroPackageManager(rawValue: manager) != nil
     }
 
     public init(

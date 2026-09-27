@@ -358,6 +358,12 @@ public final class DataItem {
         self.extraPaths = extraPaths
     }
 
+    /// `status` as a typed value, or nil when it is not a known status.
+    public var leftoverStatus: LeftoverStatus? { LeftoverStatus(rawValue: status) }
+
+    /// True for the rows the leftover lists keep: orphaned and shadow.
+    public var isListedLeftover: Bool { isListedLeftoverStatus(status) }
+
     public func toLeftoverItem() -> LeftoverItem {
         LeftoverItem(
             name: name,
@@ -389,14 +395,14 @@ public struct OrphanAgent {
 }
 
 func dataItem(from agent: OrphanAgent, ident: Identity? = nil) -> DataItem {
-    var status = "orphaned"
+    var status = LeftoverStatus.orphaned.rawValue
     var owner: String?
     if let ident {
         let base = URL(fileURLWithPath: agent.program).lastPathComponent
         if !isGenericOwnerToken(base) {
             let (st, own) = ident.classify(base, kind: "dir")
             if st == "owned" || st == "system" {
-                status = "owned"
+                status = LeftoverStatus.owned.rawValue
                 owner = own
             }
         }
@@ -412,7 +418,7 @@ func dataItem(from agent: OrphanAgent, ident: Identity? = nil) -> DataItem {
 }
 
 public func skipNestedProbe(_ item: DataItem) -> Bool {
-    if item.status == "system" { return true }
+    if item.leftoverStatus == .system { return true }
     if item.kind == "bundleid" || item.kind == "group" { return true }
     if skipNestedRoots.contains(item.rootLabel) { return true }
     return false
@@ -479,12 +485,12 @@ public func probeActivityMtime(
 
 public func applyRecentActivity(_ items: [DataItem], now: Date = Date()) {
     for item in items {
-        if item.status != "orphaned" { continue }
+        if item.leftoverStatus != .orphaned { continue }
         if item.rootLabel == "LaunchAgents" { continue }
         if item.kind == "symlink" { continue }
         guard let dt = item.activityMtime ?? item.mtime else { continue }
         if let age = daysSince(dt, now: now), age <= Double(activeDays) {
-            item.status = "active"
+            item.status = LeftoverStatus.active.rawValue
         }
     }
 }
@@ -820,7 +826,7 @@ public func leftoverWhyText(
 
 public func applyOrphanReasons(_ items: [DataItem], catalog: [String: String] = [:]) {
     for item in items {
-        if item.status == "orphaned" {
+        if item.leftoverStatus == .orphaned {
             item.reason = leftoverWhyText(rootLabel: item.rootLabel, kind: item.kind, extraPaths: item.extraPaths)
             item.summary = leftoverSummary(
                 rootLabel: item.rootLabel,
@@ -829,7 +835,7 @@ public func applyOrphanReasons(_ items: [DataItem], catalog: [String: String] = 
                 extraPaths: item.extraPaths,
                 appBlurb: leftoverAppBlurb(name: item.name, extraPaths: item.extraPaths, catalog: catalog)
             )
-        } else if item.status == "shadow" {
+        } else if item.leftoverStatus == .shadow {
             item.reason = leftoverWhyText(
                 rootLabel: item.rootLabel,
                 kind: item.kind,
@@ -853,7 +859,7 @@ public func applyOrphanReasons(_ items: [DataItem], catalog: [String: String] = 
 public func groupOrphanedLeftovers(_ items: [DataItem]) -> [DataItem] {
     var buckets: [String: [DataItem]] = [:]
     for item in items {
-        guard item.status == "orphaned", item.rootLabel != "LaunchAgents" else { continue }
+        guard item.leftoverStatus == .orphaned, item.rootLabel != "LaunchAgents" else { continue }
         let key = leftoverGroupKey(item.name)
         guard !key.isEmpty else { continue }
         buckets[key, default: []].append(item)
@@ -876,7 +882,7 @@ public func groupOrphanedLeftovers(_ items: [DataItem]) -> [DataItem] {
         let id = ObjectIdentifier(item)
         if consumed.contains(id) { continue }
         let key = ownerOf[id] ?? leftoverBucketKey(item, buckets: buckets)
-        if item.status == "orphaned", item.rootLabel != "LaunchAgents", mergeKeys.contains(key),
+        if item.leftoverStatus == .orphaned, item.rootLabel != "LaunchAgents", mergeKeys.contains(key),
            let group = buckets[key]
         {
             out.append(mergeOrphanGroup(group))
@@ -1004,7 +1010,7 @@ public func applyLeftoverAppBlurbs(
     progress: (String) -> Void = { _ in }
 ) {
     var catalog = leftoverBlurbsFromSnapshot(brew)
-    let needed = items.filter { $0.status == "orphaned" }.compactMap { item -> String? in
+    let needed = items.filter { $0.leftoverStatus == .orphaned }.compactMap { item -> String? in
         leftoverLookupTokens(name: item.name, extraPaths: item.extraPaths).first { token in
             leftoverProductBlurbs[norm(token)] == nil && catalog[token] == nil && catalog[norm(token)] == nil
         }
@@ -1509,7 +1515,7 @@ public func listBrokenUserBinLinks(dirs: [String]? = nil) -> [DataItem] {
             name: primary.name,
             rootLabel: userBinRootLabel(URL(fileURLWithPath: primary.path).deletingLastPathComponent().path),
             kind: "symlink",
-            status: "orphaned",
+            status: LeftoverStatus.orphaned.rawValue,
             extraPaths: extra
         ))
     }
@@ -1612,7 +1618,7 @@ public func listShadowingOverlays(
                 name: name,
                 rootLabel: label,
                 kind: kind,
-                status: "shadow",
+                status: LeftoverStatus.shadow.rawValue,
                 shadows: packaged
             ))
         }
@@ -1810,7 +1816,7 @@ public func scanLeftovers(
                 item.mtime = mt
             }
         }
-        progress("  · checking nested mtimes for \(items.filter { $0.status != "system" }.count) entries…")
+        progress("  · checking nested mtimes for \(items.filter { $0.leftoverStatus != .system }.count) entries…")
         let acts = pmap(items, workers: 8) { item -> Date? in
             if skipNestedProbe(item) { return item.mtime }
             var isDir: ObjCBool = false

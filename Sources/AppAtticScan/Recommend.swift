@@ -94,6 +94,8 @@ public struct Verdict {
     public var tier: String
     public var reason: String
     public var reclaimableBytes: Int
+    /// `tier` as a typed value, or nil when it is not a known tier.
+    public var tierKind: StaleTier? { StaleTier(rawValue: tier) }
     public init(software: Software, tier: String, reason: String = "", reclaimableBytes: Int = 0) {
         self.software = software
         self.tier = tier
@@ -104,16 +106,12 @@ public struct Verdict {
 
 /// REVIEW and REMOVE rows, plus SYSTEM when `includeSystem` is on. KEEP is omitted.
 public func staleVerdicts(_ verdicts: [Verdict], includeSystem: Bool = false) -> [Verdict] {
-    verdicts.filter {
-        $0.tier == "remove" || $0.tier == "review" || (includeSystem && $0.tier == "system")
-    }
+    verdicts.filter { $0.tierKind?.isVisibleStale(includeSystem: includeSystem) == true }
 }
 
 /// Same filter as `staleVerdicts` for JSON `SoftwareItem` rows.
 public func visibleStaleSoftware(_ items: [SoftwareItem], includeSystem: Bool) -> [SoftwareItem] {
-    items.filter {
-        $0.tier == "remove" || $0.tier == "review" || (includeSystem && $0.tier == "system")
-    }
+    items.filter { $0.tierKind?.isVisibleStale(includeSystem: includeSystem) == true }
 }
 
 func matchDataItems(softwareName: String, bundleId: String?, items: [DataItem]) -> [DataItem] {
@@ -122,7 +120,7 @@ func matchDataItems(softwareName: String, bundleId: String?, items: [DataItem]) 
     let swNorm = norm(softwareName)
     let b = (bundleId ?? "").lowercased()
     for it in items {
-        if it.status != "owned" { continue }
+        if it.leftoverStatus != .owned { continue }
         let n = stripLeftoverNameSuffix(it.name).lowercased()
         if let owner = it.owner, owner.lowercased() == swLow {
             out.append(it)
@@ -162,7 +160,7 @@ public func staleSizeText(sizeBytes: Int, sizeMeasured: Bool, dataBytes: Int) ->
 
 /// Byte total for listed stale rows (REVIEW + REMOVE). Overview uses this as a size hint, not a promise that cleanup will delete them.
 public func staleReclaimableBytes(_ items: [SoftwareItem]) -> Int {
-    items.filter { $0.tier == "remove" || $0.tier == "review" }
+    items.filter { StaleTier.isSelectable($0.tierKind) }
         .reduce(0) { addBytes($0, $1.totalBytes) }
 }
 
@@ -402,13 +400,13 @@ func isSteamClientSoftware(_ sw: Software) -> Bool {
 /// a brew formula has a long enough shell-history span.
 public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
     if sw.source == "system" {
-        return Verdict(software: sw, tier: "system", reason: "System app: leave alone")
+        return Verdict(software: sw, tier: StaleTier.system.rawValue, reason: "System app: leave alone")
     }
     if isSteamClientSoftware(sw) {
-        return Verdict(software: sw, tier: "keep", reason: "Steam client: uninstall games from Steam, not by deleting this folder")
+        return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Steam client: uninstall games from Steam, not by deleting this folder")
     }
     if sw.runningService {
-        return Verdict(software: sw, tier: "keep", reason: "Running as a brew service (daemon)")
+        return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Running as a brew service (daemon)")
     }
     var used = sw.lastUsed
     var fromData = false
@@ -420,81 +418,81 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
     let reinstallEasy = reinstallHint(sw.source) != nil
 
     if sw.kind == "formula", !sw.isLeaf {
-        return Verdict(software: sw, tier: "keep", reason: "Dependency of other brew packages: remove the parent instead")
+        return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Dependency of other brew packages: remove the parent instead")
     }
     if sw.kind == "formula", sw.bins.isEmpty, days == nil {
-        return Verdict(software: sw, tier: "keep", reason: "Library formula: no command to measure usage")
+        return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Library formula: no command to measure usage")
     }
 
     if days == nil {
         let ageDays = sw.installedAt != nil ? daysSince(sw.installedAt, now: now) : nil
         if let ageDays, ageDays < Double(activeDays) {
-            return Verdict(software: sw, tier: "keep", reason: "Installed \(humanDays(ageDays)) ago: too new to judge")
+            return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Installed \(humanDays(ageDays)) ago: too new to judge")
         }
         if sw.kind == "formula" {
             let span = sw.historySpanDays
             if span == nil || span! < Double(staleDays) {
-                return Verdict(software: sw, tier: "keep", reason: "\(spanNote(sw)): not enough history to judge usage")
+                return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "\(spanNote(sw)): not enough history to judge usage")
             }
             return Verdict(
                 software: sw,
-                tier: "remove",
+                tier: StaleTier.remove.rawValue,
                 reason: "\(spanNote(sw)); easy to reinstall via brew",
                 reclaimableBytes: addBytes(sw.sizeBytes, sw.dataBytes)
             )
         }
         if sw.source == "brew-cask", sw.kind == "other" {
-            return Verdict(software: sw, tier: "keep", reason: "Homebrew cask with no app bundle: no unused-app signal")
+            return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Homebrew cask with no app bundle: no unused-app signal")
         }
         if reinstallEasy {
             let when = ageDays != nil ? humanDays(ageDays!) : "a while"
             return Verdict(
                 software: sw,
-                tier: "review",
+                tier: StaleTier.review.rawValue,
                 reason: "No usage detected (installed \(when) ago). Review before uninstalling."
             )
         }
-        return Verdict(software: sw, tier: "review", reason: "No usage detected: check if you still need it")
+        return Verdict(software: sw, tier: StaleTier.review.rawValue, reason: "No usage detected: check if you still need it")
     }
 
     let d = days!
     if d <= Double(activeDays) {
         if fromData {
-            return Verdict(software: sw, tier: "keep", reason: "Data directory written \(humanDays(d)) ago")
+            return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Data directory written \(humanDays(d)) ago")
         }
-        return Verdict(software: sw, tier: "keep", reason: "Used \(humanDays(d)) ago: actively in use")
+        return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Used \(humanDays(d)) ago: actively in use")
     }
     if fromData {
-        return Verdict(software: sw, tier: "review", reason: "Data directory written \(humanDays(d)) ago")
+        return Verdict(software: sw, tier: StaleTier.review.rawValue, reason: "Data directory written \(humanDays(d)) ago")
     }
     if d <= Double(staleDays) {
-        return Verdict(software: sw, tier: "review", reason: "Not used for \(humanDays(d))")
+        return Verdict(software: sw, tier: StaleTier.review.rawValue, reason: "Not used for \(humanDays(d))")
     }
     if !sw.dataMeasured {
         return Verdict(
             software: sw,
-            tier: "review",
+            tier: StaleTier.review.rawValue,
             reason: "Not used for \(humanDays(d)) but holds data that could not be measured: review before removing"
         )
     }
     if sw.dataBytes >= dataKeepThreshold {
         return Verdict(
             software: sw,
-            tier: "review",
+            tier: StaleTier.review.rawValue,
             reason: "Not used for \(humanDays(d)) but holds significant data: review before removing"
         )
     }
     if reinstallEasy {
         return Verdict(
             software: sw,
-            tier: "remove",
+            tier: StaleTier.remove.rawValue,
             reason: "Not used for \(humanDays(d)). \(reinstallHint(sw.source) ?? "Easy to reinstall.")",
             reclaimableBytes: addBytes(sw.sizeBytes, sw.dataBytes)
         )
     }
     return Verdict(
         software: sw,
-        tier: "review",
+        tier: StaleTier.review.rawValue,
         reason: "Not used for \(humanDays(d)). Manual reinstall if you still want it."
     )
 }

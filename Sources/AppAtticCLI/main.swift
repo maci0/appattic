@@ -214,7 +214,7 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
     if !category.isEmpty {
         orphans = orphans.filter { leftoverMatchesCategory($0, categories: category) }
     }
-    let system = result.dataItems.filter { $0.status == "system" }
+    let system = result.dataItems.filter { $0.leftoverStatus == .system }
     let bytes = orphans.reduce(0) { addBytes($0, $1.sizeBytes) }
     print()
     print(C.bold("LEFTOVERS: leftover data and PATH overlays (\(orphans.count) items, \(humanSize(bytes)))"))
@@ -225,7 +225,7 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
     var rows: [[String]] = []
     for i in shown {
         let size = i.sizeMeasured ? humanSize(i.sizeBytes) : C.dim("n/a (protected)")
-        let nameColor: (String) -> String = i.status == "shadow" ? C.yellow : C.red
+        let nameColor: (String) -> String = i.leftoverStatus == .shadow ? C.yellow : C.red
         rows.append([
             nameColor(leftoverDisplayName(name: i.name, extraPaths: i.extraPaths)),
             C.dim(leftoverWhatText(
@@ -266,16 +266,16 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
 
 func printStale(_ result: ScanResult, includeSystem: Bool) {
     var verdicts = staleVerdicts(result.verdicts, includeSystem: includeSystem)
-    let order = ["remove": 0, "review": 1, "keep": 2]
-    verdicts.sort {
-        let a = order[$0.tier] ?? 3
-        let b = order[$1.tier] ?? 3
+    let order: [StaleTier: Int] = [.remove: 0, .review: 1, .keep: 2]
+    verdicts.sort { lhs, rhs in
+        let a = lhs.tierKind.flatMap { tier in order[tier] } ?? 3
+        let b = rhs.tierKind.flatMap { tier in order[tier] } ?? 3
         if a != b { return a < b }
-        return addBytes($0.software.sizeBytes, $0.software.dataBytes)
-            > addBytes($1.software.sizeBytes, $1.software.dataBytes)
+        return addBytes(lhs.software.sizeBytes, lhs.software.dataBytes)
+            > addBytes(rhs.software.sizeBytes, rhs.software.dataBytes)
     }
-    let nRemove = verdicts.filter { $0.tier == "remove" }.count
-    let nReview = verdicts.filter { $0.tier == "review" }.count
+    let nRemove = verdicts.filter { $0.tierKind == .remove }.count
+    let nReview = verdicts.filter { $0.tierKind == .review }.count
     print()
     print(C.bold("STALE: unused installed software (\(verdicts.count) items)"))
     print(C.dim("  \(C.yellow("\(nReview)")) review · \(C.red("\(nRemove)")) remove candidates"))
@@ -283,11 +283,11 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
     for v in verdicts {
         let s = v.software
         let (label, style): (String, (String) -> String) = {
-            switch v.tier {
-            case "keep": return ("KEEP", C.green)
-            case "review": return ("REVIEW", C.yellow)
-            case "remove": return ("REMOVE", C.red)
-            case "system": return ("SYSTEM", C.dim)
+            switch v.tierKind {
+            case .keep?: return ("KEEP", C.green)
+            case .review?: return ("REVIEW", C.yellow)
+            case .remove?: return ("REMOVE", C.red)
+            case .system?: return ("SYSTEM", C.dim)
             default: return (v.tier.uppercased(), C.dim)
             }
         }()
@@ -304,7 +304,7 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
         ])
     }
     print(renderTable(headers: ["Verdict", "Name", "What", "Source", "Last used", "Size", "Why"], rows: rows))
-    let reclaim = verdicts.filter { $0.tier == "remove" }.reduce(0) {
+    let reclaim = verdicts.filter { $0.tierKind == .remove }.reduce(0) {
         addBytes($0, addBytes($1.software.sizeBytes, $1.software.dataBytes))
     }
     if reclaim > 0 {

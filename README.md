@@ -94,6 +94,8 @@ if let err = parseCLIArguments(["--top", "-1"]).parseError {
 }
 ```
 
+Wire strings stay on the JSON models (`status`, `tier`, `manager`) so a cache from a newer AppAttic still decodes. Read them through the typed accessors instead of comparing raw strings: `LeftoverItem.leftoverStatus` and `DataItem.leftoverStatus` (`LeftoverStatus`), `SoftwareItem.tierKind` and `Verdict.tierKind` (`StaleTier`), `OutdatedEntry.upgradableManager` (`UpgradableManager`). `StaleTier.selectable` is the REVIEW + REMOVE set behind `selectableCleanupTiers`; `outdatedIsUpdatable` and `PackageEntry.canMarkManual` are the same answers in function form. Each accessor returns an optional when the stored value is not one this build knows, so an unknown tier is not mistaken for `keep`.
+
 Tests (same flags as `.github/workflows/linux.yml`):
 
 ```bash

@@ -43,7 +43,7 @@ public final class ScanResult {
     }
 
     public var orphanedItems: [DataItem] {
-        dataItems.filter { isListedLeftoverStatus($0.status) }
+        dataItems.filter { $0.isListedLeftover }
     }
 
     public var orphanedBytes: Int {
@@ -51,12 +51,12 @@ public final class ScanResult {
     }
 
     public var systemLeftoverBytes: Int {
-        dataItems.filter { $0.status == "system" }.reduce(0) { addBytes($0, $1.sizeBytes) }
+        dataItems.filter { $0.leftoverStatus == .system }.reduce(0) { addBytes($0, $1.sizeBytes) }
     }
 
     public var reclaimableBytes: Int {
         var total = orphanedBytes
-        for v in verdicts where v.tier == "remove" {
+        for v in verdicts where v.tierKind == .remove {
             total = addBytes(total, addBytes(v.software.sizeBytes, v.software.dataBytes))
         }
         return total
@@ -67,10 +67,10 @@ public final class ScanResult {
         var orphanedBytes = 0
         var systemLeftoverBytes = 0
         for item in dataItems {
-            if isListedLeftoverStatus(item.status) {
+            if item.isListedLeftover {
                 orphanedCount += 1
                 orphanedBytes = addBytes(orphanedBytes, item.sizeBytes)
-            } else if item.status == "system" {
+            } else if item.leftoverStatus == .system {
                 systemLeftoverBytes = addBytes(systemLeftoverBytes, item.sizeBytes)
             }
         }
@@ -81,8 +81,8 @@ public final class ScanResult {
         for verdict in verdicts {
             let id = ObjectIdentifier(verdict.software)
             if verdictBySoftware[id] == nil { verdictBySoftware[id] = verdict }
-            if verdict.tier == "review" || verdict.tier == "remove" { stale += 1 }
-            if verdict.tier == "remove" {
+            if StaleTier.isSelectable(verdict.tierKind) { stale += 1 }
+            if verdict.tierKind == .remove {
                 reclaimableBytes = addBytes(
                     reclaimableBytes,
                     addBytes(verdict.software.sizeBytes, verdict.software.dataBytes)

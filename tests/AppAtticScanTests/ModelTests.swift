@@ -173,4 +173,88 @@ final class ModelTests: XCTestCase {
         )
         XCTAssertEqual(uninstallCommand(for: item), "snap remove code")
     }
+
+    func testLeftoverStatusAccessor() {
+        let item = LeftoverItem(
+            name: "python3",
+            path: "/home/u/.local/bin/python3",
+            root: ".local/bin",
+            kind: "file",
+            status: "shadow",
+            size_bytes: 7
+        )
+        XCTAssertEqual(item.leftoverStatus, .shadow)
+        XCTAssertTrue(item.isListedLeftover)
+        XCTAssertEqual(item.totalBytes, 7)
+
+        let unknown = LeftoverItem(
+            name: "x",
+            path: "/tmp/x",
+            root: "Caches",
+            kind: "dir",
+            status: "future-status"
+        )
+        XCTAssertNil(unknown.leftoverStatus)
+        XCTAssertFalse(unknown.isListedLeftover)
+        XCTAssertEqual(unknown.totalBytes, 0)
+
+        let live = DataItem(path: "/tmp/x", name: "x", rootLabel: "Caches", kind: "dir", status: "shadow")
+        XCTAssertEqual(live.leftoverStatus, .shadow)
+        XCTAssertTrue(live.isListedLeftover)
+        XCTAssertEqual(live.toLeftoverItem().leftoverStatus, .shadow)
+    }
+
+    func testStaleTierAccessors() {
+        let sw = Software(name: "Foo", kind: "app", path: "/tmp/Foo.app", source: "mac")
+        let keep = Verdict(software: sw, tier: "keep")
+        let review = Verdict(software: sw, tier: "review")
+        let remove = Verdict(software: sw, tier: "remove")
+        let system = Verdict(software: sw, tier: "system")
+        XCTAssertEqual(review.tierKind, .review)
+        XCTAssertNil(Verdict(software: sw, tier: "").tierKind)
+
+        XCTAssertEqual(staleVerdicts([keep, review, remove]).count, 2)
+        XCTAssertEqual(staleVerdicts([keep, review, remove, system]).count, 2)
+        XCTAssertEqual(staleVerdicts([keep, review, remove, system], includeSystem: true).count, 3)
+
+        XCTAssertTrue(StaleTier.isSelectable(review.tierKind))
+        XCTAssertTrue(StaleTier.isSelectable(remove.tierKind))
+        XCTAssertFalse(StaleTier.isSelectable(keep.tierKind))
+        XCTAssertFalse(StaleTier.isSelectable(nil))
+        XCTAssertEqual(selectableCleanupTiers, ["remove", "review"])
+
+        let item = SoftwareItem(name: "Foo", kind: "app", path: "/tmp/Foo.app", source: "mac", tier: "remove")
+        XCTAssertEqual(item.tierKind, .remove)
+        XCTAssertNil(SoftwareItem(name: "Bar", kind: "app", path: "/tmp/Bar.app", source: "mac").tierKind)
+        XCTAssertEqual(visibleStaleSoftware([item], includeSystem: false).count, 1)
+    }
+
+    func testUpgradableManagerMatchesOutdatableManagers() {
+        for raw in ["brew-formula", "brew-cask", "flatpak", "apt", "pacman", "aur", "dnf", "yum", "zypper"] {
+            let entry = OutdatedEntry(name: "foo", manager: raw)
+            XCTAssertTrue(entry.updatable, "\(raw) should be updatable")
+            XCTAssertNotNil(entry.upgradableManager, "\(raw) should map to a manager")
+        }
+        for raw in ["snap", "pip", "app-store", "npm", "future-manager"] {
+            let entry = OutdatedEntry(name: "foo", manager: raw)
+            XCTAssertFalse(entry.updatable, "\(raw) is report-only")
+            XCTAssertNil(entry.upgradableManager)
+        }
+        let untrusted = OutdatedEntry(name: "foo", manager: "brew-cask", kind: "untrusted")
+        XCTAssertFalse(untrusted.updatable)
+        XCTAssertNil(untrusted.upgradableManager)
+
+        for manager in ["apt", "pacman", "dnf", "zypper"] {
+            XCTAssertTrue(
+                PackageEntry(name: "libfoo", manager: manager, kind: "orphan").canMarkManual,
+                "\(manager) orphans can be marked manual"
+            )
+        }
+        for manager in ["npm", "pipx", "uv", "future"] {
+            XCTAssertFalse(
+                PackageEntry(name: "libfoo", manager: manager, kind: "orphan").canMarkManual,
+                "\(manager) has no manual marker"
+            )
+        }
+    }
 }

@@ -23,7 +23,7 @@ public struct CleanupSelection: Equatable, Sendable {
 }
 
 /// UI can opt REVIEW and REMOVE into cleanup. CLI `--dry-run` for report/stale only emits REMOVE.
-public let selectableCleanupTiers: Set<String> = ["remove", "review"]
+public let selectableCleanupTiers: Set<String> = Set(StaleTier.selectable.map(\.rawValue))
 
 public func pruneCleanupSelection(
     leftovers: Set<String>,
@@ -36,7 +36,7 @@ public func pruneCleanupSelection(
 ) -> CleanupSelection {
     let leftoverPaths = Set(visibleOrphanedLeftovers(data.leftovers, ignoring: ignoring).map(\.path))
     let appPaths = Set(
-        data.software.filter { selectableCleanupTiers.contains($0.tier ?? "") }.map(\.path)
+        data.software.filter { StaleTier.isSelectable($0.tierKind) }.map(\.path)
     )
     let outdatedIds = Set((data.outdated ?? []).filter(\.updatable).map(\.id))
     let listed = data.packages ?? []
@@ -363,7 +363,7 @@ func appendLeftoverCommands(_ lines: inout [String], items: [DataItem]) {
 }
 
 func appendRemoveVerdicts(_ lines: inout [String], result: ScanResult) {
-    for v in result.verdicts where v.tier == "remove" {
+    for v in result.verdicts where v.tierKind == .remove {
         let s = v.software
         lines.append("")
         lines.append("# \(s.name) (\(s.source)) not used for a long time")
