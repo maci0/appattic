@@ -53,7 +53,10 @@ if [[ "${#shell_files[@]}" -eq 0 ]]; then
     echo "error: no shell script found to check" >&2
     exit 1
 fi
-shellcheck -x -P SCRIPTDIR "${shell_files[@]}"
+# --enable=optional: the optional checks (quoting of expansions inside strings,
+# ${var} braces, extra masked returns, nullary conditions) run only when named,
+# so the default run is silent about them. Every script in the tree passes them.
+shellcheck -x -P SCRIPTDIR --enable=optional "${shell_files[@]}"
 
 # One declared version, three copies to keep in step (AppStream release,
 # Info.plist, the qt man page), plus a CFBundleVersion that is a rising build
@@ -140,8 +143,8 @@ strict_cflags=(-Wall -Wextra -Werror
     -Wformat=2 -Wformat-security -Wshadow -Wstrict-prototypes -Wconversion
     -Wpedantic -Wnull-dereference
     -Wcast-qual -Wundef -Wmissing-prototypes -Wold-style-definition
-    -Wredundant-decls -Wswitch-enum -Wdouble-promotion -Wfloat-equal
-    -Wjump-misses-init -Wtautological-compare)
+    -Wredundant-decls -Wswitch-enum -Wswitch-default -Wdouble-promotion
+    -Wfloat-equal -Wjump-misses-init -Wtautological-compare)
 cflags=(-O2 "${strict_cflags[@]}")
 # Every C file under core/host is compiled here, so a new one cannot join the
 # tree without also joining the gate. Discovered, not listed: a new
