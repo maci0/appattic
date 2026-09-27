@@ -95,8 +95,23 @@ newest_version() {
 plist_string() {
     # $1: label, $2: key, $3: file. The value is the <string> on the line after
     # the <key>, which is how a plist written one key per line spells a string.
+    #
+    # `awk` and not the `sed -n "/<key>$2<\/key>/{n;s/.../p}"` this used to be.
+    # That form reads here and prints nothing under the sed macOS ships — the
+    # two do not agree on it — so check-version.sh found no version in the plist
+    # at all, and every release-notes call there failed with "no
+    # CFBundleShortVersionString string in Info.plist". `match` takes its
+    # pattern as a string, so the `/` in `</string>` needs no escape, and the
+    # key goes to `index` rather than to a regular expression.
     local out
-    out="$(sed -n "/<key>$2<\\/key>/{n;s/.*<string>\\([^<]*\\)<\\/string>.*/\\1/p}" "$3" 2>/dev/null | head -n 1)"
+    out="$(awk -v key="$2" '
+        seen {
+            if (match($0, "<string>[^<]*</string>"))
+                print substr($0, RSTART + 8, RLENGTH - 17)
+            exit
+        }
+        index($0, "<key>" key "</key>") { seen = 1 }
+    ' "$3" 2>/dev/null)"
     if [[ -z "$out" ]]; then
         echo "error: no $2 string in $1 ($3)" >&2
         exit 1
