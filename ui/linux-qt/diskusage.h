@@ -54,7 +54,9 @@ struct DiskScanOptions {
 };
 
 DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts);
-/// Allocated bytes for a file or directory tree. -1 if the path cannot be read.
+/// Allocated bytes for a file or directory tree. -1 when the path cannot be
+/// stat'ed; a tree whose entries cannot be opened still reports the totals the
+/// stat calls gave.
 qint64 measurePathBytes(const QString &path, const DiskScanOptions &opts = DiskScanOptions());
 QVector<DiskVolume> listDiskVolumes();
 /// Bytes a volume row reports as used, so the row reconciles:

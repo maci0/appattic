@@ -156,8 +156,8 @@ fn ensureSysTable() void {
 }
 
 /// Case-insensitive membership in the system-names table. The candidate is
-/// lowered once into a stack buffer; over-long names cannot match (longest
-/// entry is 23 bytes) and skip the search.
+/// lowered once into a stack buffer; a name longer than that buffer cannot
+/// match (the longest table entry is 23 bytes) and skips the search.
 fn nameInSysTable(name: []const u8) bool {
     if (name.len == 0 or name.len > 64) return false;
     ensureSysTable();

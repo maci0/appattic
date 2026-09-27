@@ -4,21 +4,26 @@ Design: [`docs/specs/2026-08-26-zig-wasm-core-design.md`](../docs/specs/2026-08-
 
 Needs `zig` 0.16 (`.zig-version`) and, to run the host, the Wasmtime C API (`brew install zig wasmtime`, or `scripts/linux-deps.sh --install-wasmtime` on Linux). Test one plugin with `./core/build.sh test brew.zig`.
 
-Every manager and leftover path is a plugin: one `<id>.zig` compiled to `<id>.wasm`. Built WASM matches the spec **Host load list**.
+Every manager and leftover path is a plugin: one `<id>.zig` compiled to `<id>.wasm`, except `core.zig`, which is the loader and lands as `appattic_core.wasm`. Built WASM matches the spec **Host load list**.
 
 > **Mirror rule — read before changing a parser.** The same tool-output
 > grammars are implemented twice: here (`core/src/<id>.zig`, loaded by the
-> Linux Qt UI) and in Swift (`Sources/AppAtticScan/{Outdated,Packages,Usage}.swift`,
+> Linux Qt UI) and in Swift (`Sources/AppAtticScan/{Outdated,Packages,BrewInfo}.swift`,
 > used by the CLI and macOS UI), which never loads this core. A grammar fix on
 > one side must land on the other: `core/src/apt.zig` ↔ `parseAptUpgradable` /
 > `parseAptAutoremove` / `parseDpkgRc`, `pacman.zig` ↔ `parsePacmanQu` /
 > `parsePacmanOrphans`, `dnf.zig` ↔ `parseDnfUpgrades` / `parseDnfUnneeded`,
 > `zypper.zig` ↔ `parseZypperListUpdates` / `parseZypperUnneeded`,
-> `flatpak.zig` ↔ `parseFlatpakUpdates`, `npm/pnpm.zig` ↔ `parseNpmGlobalList` /
-> `parsePnpmGlobalList` (both over `jsonscan.zig` ↔ `jsonDependencyEntries`),
-> `pip.zig` ↔ `parsePipUserList` (the `--outdated` rows it also reports are Zig-only so far), `deno.zig` ↔
-> `listDenoGlobals`. The Swift `ParserParityTests` pin edge behavior; mirror new
-> edges there too. Overlay findings are `path-shadow`. Darwin leftover roots stay in Swift `AppAtticScan`. Query plugins call `host.exec`. The embedder allowlists `snap`, `pacman` (`-Qdt` / `-Qu`), `paru`/`yay`/`pikaur` (`-Qua`), `apt-get -s autoremove` / `apt list --upgradable`, `dpkg -l`, `dnf`/`dnf5`/`yum` (`repoquery --unneeded`, `list --upgrades`, `check-update`), `zypper` (`packages --unneeded`, `list-updates`), `flatpak` (`uninstall --unused` / `remove --unused`, `remote-ls --updates --app`, `list --app`), `npm`, `pnpm`, `bun`, `pipx`, `uv`, `brew` (`outdated` with json flags), `gem outdated`, `composer global outdated`, `pip`/`pip3` (`list --user --outdated --format=json`), `docker`/`podman` (dangling images, dangling volumes, exited containers), `ls`, `readlink` (`-f` / `-n`), `realpath` (one path, no flags), and `test` (`-e` / `-f` / `-h` / `-L`), and denies destructive argv (`rm`, `rmi`, `snap remove`, `system prune`, `volume prune`, `purge`, `upgrade`, `install`, `-y`, `pacman -Syu`/`-R*`, `paru`/`yay` `-S`/`-R*`, `dnf leaves`/`remove`/`upgrade`, `zypper rm`/`dup`/`update`, `apt-get upgrade`, `dpkg --purge`, `flatpak uninstall -y`, `npm uninstall`, `pnpm remove`, `bun remove`, `pipx uninstall`, `uv tool uninstall`, `pip install`/`pip uninstall`, `pip list` without `--user`, `brew uninstall`/`brew upgrade`, `gem uninstall`/`gem update`, `composer global update`/`composer global remove`). Distro and AUR outdated findings are named upgrades after confirm (`updatable` true, command in JSON). `host.exec` never runs those commands. Language queries are user-global only (`npm ls -g` / `npm outdated -g`, `pnpm ls -g` / `pnpm outdated -g`, `bun pm ls -g`, `pipx list`, `uv tool list`, `gem outdated`, `composer global outdated`, `pip list --user --outdated`). Homebrew reports user-global outdated formulae/casks. Gem, Composer globals, and pip user-site are report-only (`updatable` false). Darwin injects fixtures so tests do not need those daemons. Tag `0` means the coeffect is missing (plugin inactive).
+> `flatpak.zig` ↔ `parseFlatpakUpdates`, `npm/pnpm/bun.zig` ↔ `parseNpmGlobalList` /
+> `parsePnpmGlobalList` / `parseBunGlobalList` (npm and pnpm over `jsonscan.zig` ↔
+> `jsonDependencyEntries`), `pipx.zig` ↔ `parsePipxList`, `uv.zig` ↔ `parseUvToolList`,
+> `brew.zig` ↔ `parseBrewOutdatedJSON`, `pip.zig` ↔ `parsePipUserList` (Zig reads the
+> user-global list out of `pip list --user --outdated --format=json`, where Swift starts from
+> `pip list --user --not-required --format=json`, and the `--outdated` rows it also reports
+> are Zig-only so far), `deno.zig` ↔
+> `listDenoGlobals`. `gem.zig` and `composer.zig` have no Swift counterpart yet. The Swift
+> `ParserParityTests` pin edge behavior; mirror new
+> edges there too. Overlay findings are `path-shadow`. Darwin leftover roots stay in Swift `AppAtticScan`. Query plugins call `host.exec`. The embedder allowlists `snap`, `pacman` (any `-Q` query, including `-Qdt` and `-Qu`), `paru`/`yay`/`pikaur` (same `-Q` rule, so `-Qua`), `apt`/`apt-get` (`-s autoremove` / `list --upgradable`), `dpkg -l`, `dnf`/`dnf5`/`yum` (`repoquery --unneeded`, `list --upgrades`, `check-update`), `zypper` (`packages --unneeded`, `list-updates`), `flatpak` (`uninstall --unused` / `remove --unused`, `remote-ls --updates --app`, `list --app`), `npm`, `pnpm`, `bun`, `pipx`, `uv`, `brew` (`outdated` with json flags), `gem outdated`, `composer global outdated`, `pip`/`pip3` (`list` with `--user` and a json format, which is what the plugin asks for), `docker`/`podman` (dangling images, dangling volumes, exited containers), `ls`, `readlink` (`-f` / `-n`), `realpath` (one path, no flags), and `test` (`-e` / `-f` / `-h` / `-L`), and denies destructive argv (`rm`, `rmi`, `snap remove`, `system prune`, `volume prune`, `purge`, `upgrade`, `install`, `-y`, `pacman -Syu`/`-R*`, `paru`/`yay` `-S`/`-R*`, `dnf leaves`/`remove`/`upgrade`, `zypper rm`/`dup`/`update`, `apt-get upgrade`, `dpkg --purge`, `flatpak uninstall -y`, `npm uninstall`, `pnpm remove`, `bun remove`, `pipx uninstall`, `uv tool uninstall`, `pip install`/`pip uninstall`, `pip list` without `--user`, `brew uninstall`/`brew upgrade`, `gem uninstall`/`gem update`, `composer global update`/`composer global remove`). A `paru`/`yay`/`pikaur` command is admitted by its `-Q` token alone, so a denied token only catches it when no `-Q` is present. Distro and AUR outdated findings are named upgrades after confirm (`updatable` true, command in JSON). `host.exec` never runs those commands. Language queries are user-global only (`npm ls -g` / `npm outdated -g`, `pnpm ls -g`, `bun pm ls -g`, `pipx list`, `uv tool list`, `gem outdated`, `composer global outdated`, `pip list --user --outdated`). Homebrew reports user-global outdated formulae/casks. npm globals, Gem, Composer globals, and pip user-site are report-only (`updatable` false). Darwin injects fixtures so tests do not need those daemons. Tag `0` means the coeffect is missing (plugin inactive).
 
 ```bash
 ./core/build.sh test brew.zig
@@ -55,7 +60,7 @@ Every manager and leftover path is a plugin: one `<id>.zig` compiled to `<id>.wa
 
 Tag `0` = missing coeffect (empty findings). Missing `.wasm` file: host skips that plugin.
 
-Host intercept rejects `system prune`, `rmi -f`, `volume prune`, `snap remove --purge`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`, `rm /usr/bin/flatpak`. `host.exec` also denies those as argv. Named `rmi <id>` / `volume rm <name>` / `rm <id>` appear only in confirm-script JSON.
+Host intercept rejects `system prune`, `rmi -f`, `volume prune`, `snap remove --purge`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`, `rm /usr/bin/flatpak`. `host.exec` also denies those as argv. The named forms `rmi <id>`, `volume rm <id>` and `rm <id>` (containers and volumes are removed by id, the finding also carries the name) are never executable through the host: they appear in the confirm-script JSON and in each finding's `command` field.
 
 The Linux Qt 6 window (`ui/linux-qt`) links `core/host/embed.c` and the same Wasmtime C API. It is not Gtk.
 

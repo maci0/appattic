@@ -22,7 +22,6 @@ const commands = [_][3][]const u8{
     .{ "docker " ++ q_images, "docker " ++ q_volumes, "docker " ++ q_ps },
     .{ "podman " ++ q_images, "podman " ++ q_volumes, "podman " ++ q_ps },
 };
-const tails = [3][]const u8{ q_images, q_volumes, q_ps };
 
 var result_buf: [16384]u8 = undefined;
 var note: querynote.Log = .{};
@@ -126,17 +125,11 @@ pub fn parseExitedContainers(text: []const u8, out: []Hit) usize {
     return n;
 }
 
-/// `cmd` is a full static command, `tail` the query it is built from. A
-/// command that did not answer goes to the note, so a run where all three
-/// failed does not read as a clean scan.
-fn execQuery(cmd: []const u8, tail: []const u8, buf: []u8) i32 {
-    var built: [128]u8 = undefined;
-    if (cmd.len + tail.len > built.len) {
-        note.add(cmd, host_exec.bad);
-        return host_exec.bad;
-    }
-    @memcpy(built[0..tail.len], tail);
-    const rc = host_exec.run(cmd[0..tail.len], buf);
+/// `cmd` is the full static command, engine and query. A command that did not
+/// answer goes to the note, so a run where all three failed does not read as a
+/// clean scan.
+fn execQuery(cmd: []const u8, buf: []u8) i32 {
+    const rc = host_exec.run(cmd, buf);
     note.add(cmd, rc);
     return rc;
 }
@@ -236,9 +229,9 @@ fn query_impl(present: i32) i32 {
     }
     const engine: []const u8 = if (present == EnginePodman) "podman" else "docker";
     const row = commands[if (present == EnginePodman) 1 else 0];
-    const ni = execQuery(row[0], tails[0], &images_buf);
-    const nv = execQuery(row[1], tails[1], &volumes_buf);
-    const np = execQuery(row[2], tails[2], &ps_buf);
+    const ni = execQuery(row[0], &images_buf);
+    const nv = execQuery(row[1], &volumes_buf);
+    const np = execQuery(row[2], &ps_buf);
     var images: [16]Hit = undefined;
     var volumes: [16]Hit = undefined;
     var containers: [16]Hit = undefined;

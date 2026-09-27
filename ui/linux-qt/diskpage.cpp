@@ -491,7 +491,9 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 item->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
                 item->setData(1, Qt::UserRole, apparent);
                 item->setData(2, Qt::UserRole, allocated);
-                // Inserted where the finished tree will put it: by size.
+                // Inserted by apparent size, the column the tree sorts on by
+                // default. The ring chart below sorts on the selected metric,
+                // so its order can differ from the streaming rows.
                 int at = top->childCount();
                 for (int i = 0; i < top->childCount(); ++i) {
                     if (apparent > top->child(i)->data(1, Qt::UserRole).toLongLong()) {
@@ -731,8 +733,11 @@ void DiskPage::showScan() {
     d->backBtn->setVisible(true);
 }
 
-/// The same row the finished tree draws, from values alone: the streaming path
-/// cannot touch the DiskNode, which the scanning thread owns.
+/// A row built from values alone: the streaming path cannot touch the
+/// DiskNode, which the scanning thread owns. The `unreadable` and
+/// `mountPoint` flags are false while a scan streams, so a folder that is a
+/// mount point or came back unreadable loses that suffix until the finished
+/// tree redraws it.
 static QTreeWidgetItem *makeValueItem(
     const QString &name,
     const QString &path,

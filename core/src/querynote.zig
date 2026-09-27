@@ -2,15 +2,17 @@ const std = @import("std");
 const jsonbuf = @import("jsonbuf.zig");
 const host_exec = @import("host_exec.zig");
 
+/// Failures kept per plugin run. Past this the rest are counted, not listed.
+pub const max_logged = 8;
+
 /// Query commands that did not answer during one plugin run.
 ///
 /// `host_exec.run` returns a negative code for a refused command, a failed or
 /// timed-out child, and a too-small output buffer. A plugin that treats that
 /// as "no rows" reports an empty finding list, which reads as a clean scan:
 /// no orphans, nothing outdated, nothing left over. The Log keeps the command
-/// and the reason so `render` can name them in the result `note`.
-pub const max_logged = 8;
-
+/// and the reason so the plugin's render step can name them in the result
+/// `note`.
 pub const Log = struct {
     items: [max_logged][2][]const u8 = undefined,
     n: usize = 0,

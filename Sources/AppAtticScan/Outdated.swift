@@ -805,11 +805,10 @@ public func storeCountries(_ localeText: String? = nil) -> [String] {
 /// `cur * 10 + digit` that saturates instead of trapping.
 ///
 /// A version comes from a package index or the App Store, so a digit run is
-/// only as long as whoever published it made it. The same bound `hxDigitsValue`
-/// needs for shell history applies here: past 18 digits `cur * 10` overflows
-/// and the trap takes the whole scan down with it. Saturating keeps the
-/// comparison ordered, and two components too wide to tell apart compare by
-/// the components after them.
+/// only as long as whoever published it made it. A 19-digit run overflows `Int`
+/// in `cur * 10`, and a trap there would take the whole scan down with it.
+/// Saturating keeps the comparison ordered, and two components too wide to tell
+/// apart compare by the components after them.
 @inline(__always)
 private func appendVersionDigit(_ cur: Int, _ digit: Int) -> Int {
     let (scaled, scaleOverflow) = cur.multipliedReportingOverflow(by: 10)

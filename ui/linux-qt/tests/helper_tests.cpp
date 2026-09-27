@@ -219,6 +219,24 @@ static int verifyHelpers() {
         std::fprintf(stderr, "commandIsShellSafe accepted an injected query in a guard\n");
         return 1;
     }
+    // The row guard filters a listing inside the guard, so npm, pnpm, bun,
+    // pipx and uv removals reach the script in this shape.
+    if (!commandIsShellSafe(QStringLiteral(
+            "if npm ls -g --depth=0 | grep -qF -- 'left-pad@1.3.0'; then "
+            "npm uninstall -g left-pad; fi"))) {
+        std::fprintf(stderr, "commandIsShellSafe rejected a row guard\n");
+        return 1;
+    }
+    if (commandIsShellSafe(QStringLiteral(
+            "if npm ls -g | grep -qF -- 'x'; then npm uninstall -g x; reboot; fi"))) {
+        std::fprintf(stderr, "commandIsShellSafe accepted an injected action in a row guard\n");
+        return 1;
+    }
+    if (commandIsShellSafe(QStringLiteral(
+            "if npm ls -g | grep -qF -- 'x' ; reboot; then npm uninstall -g x; fi"))) {
+        std::fprintf(stderr, "commandIsShellSafe accepted an injected query in a row guard\n");
+        return 1;
+    }
     if (!QFile::exists(QStringLiteral(":/icons/appattic.png"))) {
         std::fprintf(stderr, "icon: embedded :/icons/appattic.png missing\n");
         return 1;

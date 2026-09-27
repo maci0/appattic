@@ -482,17 +482,52 @@ static bool commandRemovesProtectedPath(const QString &cmd) {
 /// lines go through `rootcmd`, so the payload would run as root. Refuse the
 /// command instead. Same character set as Zig `jsonbuf.shQuote` and Swift
 /// `isSafeShellByte`, plus the space and the single quote a quoted value needs.
+/// One single-quoted value, as `shellQuote` writes it, with nothing after the
+/// closing quote.
+bool isQuotedValue(const QString &s) {
+    if (s.size() < 2 || !s.startsWith(QLatin1Char('\'')) || !s.endsWith(QLatin1Char('\'')))
+        return false;
+    const int last = s.size() - 1;
+    int i = 1;
+    while (i < last) {
+        if (s.at(i) != QLatin1Char('\'')) {
+            ++i;
+            continue;
+        }
+        // A `'\''` run is the only way a quote appears inside the value. Any
+        // other quote before the last character is not the closing one, so the
+        // rest of the guard would be payload, not data.
+        if (i + 3 <= last && s.mid(i, 4) == QLatin1String("'\\''")) {
+            i += 4;
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
 bool commandIsShellSafe(const QString &cmd) {
     if (cmd.isEmpty()) return false;
-    // A guarded removal is app-written structure around a plugin command:
-    // `if <query> >/dev/null 2>&1; then <action>; fi`. The redirect is the only
-    // shell syntax here that the app itself adds, and it is what makes a second
-    // run a no-op instead of a `set -e` abort. Judge the query and the action
-    // by the same byte rule, or the guard would refuse every removal.
+    // A guarded removal is app-written structure around a plugin command. Two
+    // shapes reach here: `if <query> >/dev/null 2>&1; then <action>; fi` and
+    // `if <list> | grep -qF -- '<row>'; then <action>; fi`. Both wrappers are
+    // what make a second run a no-op instead of a `set -e` abort. The query and
+    // the action are judged by the same byte rule as any other command, or the
+    // guard would refuse every removal.
     if (const std::optional<GuardedRemove> guarded = parseGuardedRemove(cmd)) {
         static const QString kRedirect = QStringLiteral(" >/dev/null 2>&1");
+        static const QString kRowFilter = QStringLiteral(" | grep -qF -- ");
         QString query = guarded->present;
         if (query.endsWith(kRedirect)) query.chop(kRedirect.size());
+        // A row guard filters a listing in the guard, so the row is literal
+        // data the app quoted: everything after `| grep -qF --` is one quoted
+        // value, and the command being checked is what precedes it.
+        const int filter = query.indexOf(kRowFilter);
+        if (filter >= 0) {
+            const QString row = query.mid(filter + kRowFilter.size());
+            query.chop(query.size() - filter);
+            if (!isQuotedValue(row)) return false;
+        }
         return !query.isEmpty() && commandIsShellSafe(query) && commandIsShellSafe(guarded->action);
     }
     bool in_quote = false;

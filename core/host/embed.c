@@ -129,10 +129,10 @@ static void cache_clear_locked(void) {
 static void run_enter(void) {
     pthread_mutex_lock(&g_life_lock);
     /* An entry is keyed by (path, size, mtime), so rebuilding a plugin leaves
-       the old one behind forever and the cache only ever filled. It is emptied
-       here instead, between runs, where nothing can still be executing: a
-       full cache otherwise turns every later compile into a module nobody
-       owns. */
+       the old one behind forever and the cache only ever filled. A cache that
+       reached MOD_CACHE_MAX is emptied here instead, at a point where no run
+       is executing, because a full cache otherwise turns every later compile
+       into a module nobody owns. */
     if (g_runs_active == 0) {
         pthread_mutex_lock(&g_mod_lock);
         if (g_mod_count >= MOD_CACHE_MAX) cache_clear_locked();

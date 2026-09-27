@@ -17,8 +17,8 @@ import Glibc
 /// overlay root that a package dir also ships (e.g. `~/.local/bin/foo` against
 /// `/usr/bin/foo`) is reported on Leftovers with a `shadow` status linking the
 /// packaged path, and the cleanup script removes the overlay path only, leaving
-/// the packaged file alone. See `Overlays.swift` `isUserBinLeftoverPath` /
-/// `listShadowingOverlays`.
+/// the packaged file alone. See `Overlays.swift` `listShadowingOverlays` and
+/// `LeftoverText.swift` `isUserBinLeftoverPath`.
 let homeDotData = [
     ".mozilla", ".thunderbird", ".steam", ".wine", ".java",
     ".gradle", ".docker", ".kube", ".aws", ".gnupg", ".ssh",

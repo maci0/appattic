@@ -158,17 +158,18 @@ public func applyPrefsFallback(_ apps: inout [AppRecord], items: [DataItem]) {
     }
 }
 
-/// A scan resets and reads the process-global `failedChecks` set and stamps the
-/// single scan cache file. Two scans in one process interleave both, so one
+/// A scan resets and reads the process-global `failedCheckSources` set and
+/// stamps the single scan cache file. Two scans in one process interleave both, so one
 /// scan's failures are attributed to the other and a cache commit can mix
 /// them. One scan at a time, enforced here rather than left to each caller. The
 /// lock is not recursive, so a `progress` callback must not start a scan: it
 /// would block forever on the scan already in flight.
 private let scanLock = NSLock()
 
-/// Serialises `progress`. Collectors emit from `pmap` worker threads, so
-/// without this the callback runs on up to four threads at once and any state
-/// behind it (a progress label, a counter) is read and written unsynchronised.
+/// Serialises `progress`. Collectors emit from `pmap` worker threads (up to 16
+/// in a full scan), so without this the callback runs on many threads at once
+/// and any state behind it (a progress label, a counter) is read and written
+/// unsynchronised.
 /// The lock is held across the emit: a callback that called back into a
 /// collector would deadlock on it, which is why `emit` must not be reentrant.
 private final class SerialProgress: @unchecked Sendable {
