@@ -20,6 +20,7 @@ static void print_usage(FILE *fp, const char *argv0) {
     fprintf(fp, "  docker/podman images -f dangling=true, volume ls -f dangling=true, ps -a -f status=exited\n");
     fprintf(fp, "  ls readlink realpath test. Per-binary argv rules: core/host/hostexec.h.\n");
     fprintf(fp, "fixtures: always on Darwin, elsewhere under APPATTIC_HOST_EXEC_FIXTURE=1.\n");
+    fprintf(fp, "  both host-exec switches take 1/true/yes/on or 0/false/no/off.\n");
 }
 
 int main(int argc, char **argv) {

@@ -90,6 +90,8 @@ Environment:
 | Variable | Used by | Role |
 |---|---|---|
 | `APPATTIC_CORE_OUT` | Linux Qt | Directory of `appattic_core.wasm` and plugins. AppImage sets this. |
+| `APPATTIC_HOST_EXEC_LIVE` | Linux Qt | `1` runs the core's allowlisted package queries against the real binaries instead of the built-in fixtures. Off by default, and read as off for any value other than `1`, `true`, `yes`, or `on`. |
+| `APPATTIC_HOST_EXEC_FIXTURE` | Linux Qt | `1` serves the built-in fixtures on non-macOS hosts. Same accepted values as above. macOS uses fixtures either way. |
 | `APPATTIC_PAGE` | UI | Initial sidebar: `overview` (default), `leftovers`, `stale`, `outdated`, `packages`, `disk`, `settings`. An unset or empty value opens the overview; an unknown name is reported on stderr and also opens the overview. |
 | `NO_COLOR` | CLI | Disable ANSI color when set to a non-empty value. Also `--no-color` or `TERM=dumb`. |
 | `COLORFGBG` | CLI | Terminal background as `fg;bg`. Picks the light or dark status colors; unset uses the light set, which is the readable one on a white background. |

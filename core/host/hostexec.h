@@ -56,6 +56,8 @@ void appattic_host_restore_user_path(void);
    and write nothing. Darwin (and APPATTIC_HOST_EXEC_FIXTURE=1) injects
    canned stdout so tests do not need snap/pacman/apt daemons.
    APPATTIC_HOST_EXEC_LIVE=1 forks execvp when the binary is on PATH.
+   Both variables take 1/true/yes/on as on and 0/false/no/off, empty, or unset
+   as off; any other value is reported on stderr and read as off.
    Live exec is capped at 60s; a hang returns FAIL and the child is killed.
    Returns nbytes written, or a negative APPATTIC_HOST_EXEC_* code. */
 int appattic_host_exec(const char *cmdline, char *out, size_t cap);

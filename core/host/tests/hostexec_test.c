@@ -154,6 +154,51 @@ static int expect_deny(const char *cmd) {
     return 0;
 }
 
+static int exec_answered(const char *cmd, char *out, size_t cap) {
+    int n = appattic_host_exec(cmd, out, cap);
+    if (n <= 0) return 0;
+    out[n < (int)cap ? n : (int)cap - 1] = '\0';
+    return 1;
+}
+
+/* APPATTIC_HOST_EXEC_LIVE picks between canned fixtures and a live execvp, so
+   a value that reads as false has to leave it off. Reading it as "non-empty
+   and not 0" made LIVE=false the sandbox downgrade it exists to avoid, and
+   put real apt output in front of a caller expecting the fixture. */
+static int check_host_exec_live_flag(void) {
+    static const char *const kOff[] = {"false", "FALSE", "no", "off", "0", "", " 1x "};
+    static const char *const kOn[] = {"1", "true", "yes", "on", " ON "};
+    const char *cmd = "apt-get -s autoremove";
+    const char *fixture = "Remv libfoo0";
+    char out[4096];
+
+    /* The fixture switch is on for this check, so every assertion below is
+       about the LIVE value alone, whatever the host defaults to. */
+    if (setenv("APPATTIC_HOST_EXEC_FIXTURE", "1", 1) != 0) return fail("setenv FIXTURE");
+
+    for (size_t i = 0; i < sizeof kOff / sizeof kOff[0]; i++) {
+        if (setenv("APPATTIC_HOST_EXEC_LIVE", kOff[i], 1) != 0) return fail("setenv LIVE");
+        if (!exec_answered(cmd, out, sizeof out) || !strstr(out, fixture)) {
+            fprintf(stderr, "hostexec_test: LIVE=\"%s\" did not stay on fixtures\n", kOff[i]);
+            return 1;
+        }
+    }
+
+    for (size_t i = 0; i < sizeof kOn / sizeof kOn[0]; i++) {
+        if (setenv("APPATTIC_HOST_EXEC_LIVE", kOn[i], 1) != 0) return fail("setenv LIVE");
+        /* Live exec answers with whatever apt-get prints, or fails when it is
+           not installed. Either way the canned fixture must be gone. */
+        if (exec_answered(cmd, out, sizeof out) && strstr(out, fixture)) {
+            fprintf(stderr, "hostexec_test: LIVE=\"%s\" still served the fixture\n", kOn[i]);
+            return 1;
+        }
+    }
+
+    unsetenv("APPATTIC_HOST_EXEC_LIVE");
+    unsetenv("APPATTIC_HOST_EXEC_FIXTURE");
+    return 0;
+}
+
 int main(void) {
     int rc = 0;
     rc |= expect_allow("apt-get -s autoremove");
@@ -720,6 +765,8 @@ int main(void) {
         return fail("docker ps fixture text");
     }
 
+    if (rc != 0) return 1;
+    rc |= check_host_exec_live_flag();
     if (rc != 0) return 1;
 #if !defined(_WIN32)
     rc |= check_user_path_restores();

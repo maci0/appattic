@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -313,13 +314,64 @@ int appattic_host_exec_cancelled(void) {
     return atomic_load(&g_host_exec_cancel) != 0;
 }
 
-static int env_truthy(const char *name) {
+/* Presence, not a boolean: FLATPAK_ID is an application ID, so any non-empty
+   value means flatpak. The switches below get env_flag instead. */
+static int env_set(const char *name) {
     const char *e = getenv(name);
     return e && e[0] && strcmp(e, "0") != 0;
 }
 
+static int eq_ignore_case(const char *a, const char *b) {
+    return a && b && strcasecmp(a, b) == 0;
+}
+
+/* A named on/off switch, read strictly. Only the spellings below are on, so
+   APPATTIC_HOST_EXEC_LIVE=false and APPATTIC_HOST_EXEC_FIXTURE=0 leave the
+   switch off, which is the only safe direction for the variable that chooses
+   between canned fixtures and a live execvp. Any other value is reported and
+   read as off rather than guessed at. */
+static int env_flag(const char *name) {
+    static const char *const kFlags[] = {
+        "APPATTIC_HOST_EXEC_LIVE", "APPATTIC_HOST_EXEC_FIXTURE"};
+    static int warned[sizeof kFlags / sizeof kFlags[0]];
+    static pthread_mutex_t warned_lock = PTHREAD_MUTEX_INITIALIZER;
+    const char *raw = getenv(name);
+    if (!raw) return 0;
+    while (*raw == ' ' || *raw == '\t') raw++;
+    size_t len = strlen(raw);
+    while (len > 0 && (raw[len - 1] == ' ' || raw[len - 1] == '\t')) len--;
+    if (len == 0) return 0;
+    char buf[16];
+    if (len < sizeof buf) {
+        memcpy(buf, raw, len);
+        buf[len] = '\0';
+        if (eq_ignore_case(buf, "0") || eq_ignore_case(buf, "false") ||
+            eq_ignore_case(buf, "no") || eq_ignore_case(buf, "off"))
+            return 0;
+        if (eq_ignore_case(buf, "1") || eq_ignore_case(buf, "true") ||
+            eq_ignore_case(buf, "yes") || eq_ignore_case(buf, "on"))
+            return 1;
+    }
+    int report = 0;
+    pthread_mutex_lock(&warned_lock);
+    for (size_t i = 0; i < sizeof kFlags / sizeof kFlags[0]; i++) {
+        if (eq(kFlags[i], name) && !warned[i]) {
+            warned[i] = 1;
+            report = 1;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&warned_lock);
+    if (report)
+        fprintf(stderr,
+                "appattic: %s=\"%s\" is not a boolean; use 1 or 0. Reading it "
+                "as 0.\n",
+                name, raw);
+    return 0;
+}
+
 int appattic_host_in_flatpak(void) {
-    return env_truthy("FLATPAK_ID");
+    return env_set("FLATPAK_ID");
 }
 
 #ifndef _WIN32
@@ -419,7 +471,7 @@ static void apply_user_path_locked(void) {
             path_prepend_dir(g_user_path, sizeof g_user_path, dir);
         }
     }
-    if (env_truthy("FLATPAK_ID")) {
+    if (env_set("FLATPAK_ID")) {
         static const char *const host_dirs[] = {
             "/run/host/usr/bin",
             "/run/host/usr/local/bin",
@@ -477,11 +529,11 @@ void appattic_host_restore_user_path(void) {}
 #endif
 
 static int use_fixture(void) {
-    if (env_truthy("APPATTIC_HOST_EXEC_LIVE")) return 0;
+    if (env_flag("APPATTIC_HOST_EXEC_LIVE")) return 0;
 #ifdef __APPLE__
     return 1;
 #else
-    return env_truthy("APPATTIC_HOST_EXEC_FIXTURE");
+    return env_flag("APPATTIC_HOST_EXEC_FIXTURE");
 #endif
 }
 

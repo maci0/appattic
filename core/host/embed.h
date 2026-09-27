@@ -27,6 +27,8 @@ typedef void (*appattic_progress_fn)(
    dnf/dnf5/yum, zypper, flatpak, npm, pnpm, bun, pipx, pip/pip3, uv, brew, gem,
    composer, docker/podman. Query argv only (see hostexec.h). Destructive argv is denied.
    Darwin injects fixtures (no daemons). APPATTIC_HOST_EXEC_LIVE=1 runs execvp.
+   Both host-exec variables are strict booleans (1/true/yes/on, 0/false/no/off);
+   see hostexec.h.
    on_progress may be NULL. It runs before plugin_query so the UI can show
    the current plugin, not only the last finished one. */
 int appattic_wasm_run(
