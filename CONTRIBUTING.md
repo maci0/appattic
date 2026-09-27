@@ -6,12 +6,12 @@ Setup, tests, and layout: [README.md](README.md).
 ./build.sh --help
 bash scripts/check.sh          # fast: lint + Zig core + AppAtticScanTests + CLI
 bash scripts/check.sh --qt     # full Linux CI parity, including Qt/WASM proof
-swift test --filter DiskSizeTests --disable-automatic-resolution
+bash scripts/test.sh DiskSizeTests    # one class, or one test: Class/testName
 ./core/build.sh test brew.zig
 ./core/build.sh test-core
 ```
 
-PRs run `.github/workflows/linux.yml` (lint, Ubuntu tests, jammy, archlinux Qt link). Match those flags locally: `--disable-automatic-resolution` on `swift test` / `swift build`, and `APPATTIC_NO_MAC_UI=1` on macOS (`scripts/check.sh` sets it for you). The lint job checks out full history so `scripts/lint.sh` can reject AI tool credits in commit messages; a shallow clone sees fewer commits and says how many.
+PRs run `.github/workflows/linux.yml` (lint, Ubuntu tests, jammy, archlinux Qt link). Use `bash scripts/test.sh` rather than `swift test`: it passes `--disable-automatic-resolution` and sets `APPATTIC_NO_MAC_UI=1` on macOS, matching the workflow. `swift test` builds every target in the package and `AppAtticUI` needs a Swift 6 compiler, which `.swift-version` (5.10.1) does not provide, so a bare `swift test` does not build on the pinned toolchain. `scripts/check.sh` runs the same script. The lint job checks out full history so `scripts/lint.sh` can reject AI tool credits in commit messages; a shallow clone sees fewer commits and says how many.
 
 Missing tools: `bash scripts/linux-deps.sh` prints what the distro needs, `--install-shellcheck` installs the one `scripts/lint.sh` cannot do without.
 

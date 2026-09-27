@@ -21,6 +21,8 @@ Usage: bash scripts/check.sh [--qt]
   (default)  lint + Zig core tests + AppAtticScanTests + CLI debug build
   --qt       full Linux CI parity, including bash scripts/linux-qt-link.sh
              and the scripts/verify-qt-link.sh proof checks
+
+  One test class instead of the suite: bash scripts/test.sh DiskSizeTests
 EOF
             exit 0
             ;;
@@ -58,7 +60,7 @@ if appattic_require_zig; then
 fi
 
 echo "== AppAtticScanTests =="
-swift test --filter AppAtticScanTests --disable-automatic-resolution
+bash "$ROOT/scripts/test.sh"
 
 echo "== CLI debug =="
 swift build -c debug --product appattic --disable-automatic-resolution
