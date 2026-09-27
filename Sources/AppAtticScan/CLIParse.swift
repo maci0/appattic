@@ -65,6 +65,12 @@ public struct CLIOptions {
     public var allFileSystems: Bool
     public var allocated: Bool
     public var yes: Bool
+    /// Whether `--top`/`--category` was given at all. The value alone cannot
+    /// answer it: a value-taking flag that was handed nothing sets neither
+    /// `top` nor `category`, and the command-scoped check below would then
+    /// pass a flag the chosen command never accepts.
+    var sawTop: Bool
+    var sawCategory: Bool
     public var parseError: CLIParseError?
     public var error: String? { parseError?.description }
 
@@ -103,6 +109,8 @@ public struct CLIOptions {
         self.allFileSystems = allFileSystems
         self.allocated = allocated
         self.yes = yes
+        self.sawTop = false
+        self.sawCategory = false
         self.parseError = parseError
     }
 }
@@ -148,8 +156,8 @@ let cliCommandScopedOptions: [CLICommandScopedOption] = [
     CLICommandScopedOption(name: "--all-file-systems", commands: ["disk"]) { $0.allFileSystems },
     CLICommandScopedOption(name: "--leftovers-only", commands: ["report"]) { $0.leftoversOnly },
     CLICommandScopedOption(name: "--stale-only", commands: ["report"]) { $0.staleOnly },
-    CLICommandScopedOption(name: "--top", commands: ["report", "leftovers", "disk"]) { $0.top != nil },
-    CLICommandScopedOption(name: "--category", commands: ["report", "leftovers"]) { !$0.category.isEmpty },
+    CLICommandScopedOption(name: "--top", commands: ["report", "leftovers", "disk"]) { $0.sawTop },
+    CLICommandScopedOption(name: "--category", commands: ["report", "leftovers"]) { $0.sawCategory },
     CLICommandScopedOption(
         name: "--dry-run",
         commands: ["report", "leftovers", "stale", "outdated", "packages", "update"]
@@ -158,6 +166,29 @@ let cliCommandScopedOptions: [CLICommandScopedOption] = [
 
 func cliCommandList() -> String {
     cliCommands.sorted().joined(separator: ", ")
+}
+
+/// Whether `value` names the JSON file `--json` is documented to write. A value
+/// that does not is a directory (`--json /var`) or the command the flag would
+/// otherwise swallow: `appattic --json erase` would write a file named `erase`
+/// and never erase, so the flag reports a usage error instead.
+func cliJSONPath(_ value: String) -> Bool {
+    !value.isEmpty && !value.hasPrefix("-") && posixLowercased(value).hasSuffix(".json")
+}
+
+/// Whether `value` is the command it would be read as if it stood on its own.
+/// `--category erase` is that shape: the token behind the flag is a command,
+/// so the flag was handed no value and the token stays a command.
+func cliValueNamesCommand(_ value: String) -> Bool {
+    value == "help" || cliCommands.contains(value)
+}
+
+/// Whether `value` can be the root `disk` walks. A path carries a separator,
+/// absolute or relative; the one name with no separator that is still a path is
+/// the dash-leading one `--` exists to pass through, since it can reach the
+/// positional list no other way.
+func cliDiskRoot(_ value: String) -> Bool {
+    value.contains("/") || value.hasPrefix("-")
 }
 
 /// "disk", "report and disk", "report, leftovers, and disk".
@@ -215,16 +246,21 @@ commands:
   stale         unused installed software (review and remove)
   outdated      installed packages with a newer version available
   packages      distro orphans and language globals
-  disk [PATH]   folder sizes (like Disk Usage Analyzer). Optional PATH, default home
+  disk [PATH]   folder sizes (like Disk Usage Analyzer). Optional PATH, default
+                home. PATH is a path: it carries a separator, or it is a name
+                that starts with a dash and came behind `--`
   erase         delete the stored scan snapshot (the paths the last scan recorded)
   update        named package upgrades (prompts on a TTY; --dry-run prints the script). Not a full distro upgrade
 
   `--` ends the options: `appattic disk -- -backup` reads `-backup` as the PATH.
 
 options:
-  --json FILE         also write the scan as JSON to FILE. The file is the whole
-                      scan: --top, --category, --leftovers-only, and --stale-only
-                      shape what is printed, not what is written
+  --json FILE         also write the scan as JSON to FILE, which has to end in
+                      .json. The file is the whole scan: --top, --category,
+                      --leftovers-only, and --stale-only shape what is printed,
+                      not what is written. A value that names no JSON file is a
+                      usage error, so `appattic --json erase` cannot write a
+                      file named erase instead of running the erase command
   --include-system    on report, leftovers, stale, outdated, packages, update, config:
                       include OS system apps in the stale list
   --fresh             on report, leftovers, stale, outdated, packages, update: ignore
@@ -234,7 +270,10 @@ options:
   --top N             on report and leftovers: only the N largest. on disk: N
                       largest entries per folder
   --category CAT      on report and leftovers: filter by category (substring
-                      match, repeatable)
+                      match, repeatable). A value that names a command is
+                      refused rather than taken: `appattic --category erase`
+                      tells the user the filter needs a value, and the erase
+                      command is still the command
   --leftovers-only    on report, skip stale, outdated, and packages
   --stale-only        on report, skip leftovers, outdated, and packages
   --no-color          disable ANSI color (also NO_COLOR or TERM=dumb)
@@ -343,6 +382,11 @@ public func cliColorEnabled(
 /// `parseError`, so `--help` still prints on a line that also has a bad token.
 public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     var opts = CLIOptions()
+    // No command typed is the `report` command. It is settled before the walk
+    // so the default is in place for the command-scoped check below: left
+    // implicit, `appattic --top 5` would carry no command for a flag that
+    // needs one, and `appattic report --top 5` would not.
+    opts.command = "report"
     var i = 0
     var positional: [String] = []
     // A bad flag does not stop the scan: later tokens still count, so
@@ -364,7 +408,7 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         }
         if a == "--json" {
             i += 1
-            guard i < args.count, !args[i].hasPrefix("-") else {
+            guard i < args.count, cliJSONPath(args[i]) else {
                 if opts.parseError == nil { opts.parseError = .jsonRequiresPath }
                 continue
             }
@@ -374,7 +418,7 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         }
         if a.hasPrefix("--json=") {
             let value = String(a.dropFirst("--json=".count))
-            if value.isEmpty || value.hasPrefix("-") {
+            if !cliJSONPath(value) {
                 if opts.parseError == nil { opts.parseError = .jsonRequiresPath }
                 i += 1
                 continue
@@ -384,6 +428,7 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
             continue
         }
         if a == "--top" {
+            opts.sawTop = true
             i += 1
             guard i < args.count, let n = Int(args[i]), n >= 0 else {
                 if opts.parseError == nil { opts.parseError = .topRequiresNonNegativeInteger }
@@ -394,6 +439,7 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
             continue
         }
         if a.hasPrefix("--top=") {
+            opts.sawTop = true
             guard let n = Int(a.dropFirst("--top=".count)), n >= 0 else {
                 if opts.parseError == nil { opts.parseError = .topRequiresNonNegativeInteger }
                 i += 1
@@ -404,8 +450,9 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
             continue
         }
         if a == "--category" {
+            opts.sawCategory = true
             i += 1
-            guard i < args.count, !args[i].hasPrefix("-") else {
+            guard i < args.count, !args[i].isEmpty, !args[i].hasPrefix("-"), !cliValueNamesCommand(args[i]) else {
                 if opts.parseError == nil { opts.parseError = .categoryRequiresValue }
                 continue
             }
@@ -414,8 +461,9 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
             continue
         }
         if a.hasPrefix("--category=") {
+            opts.sawCategory = true
             let value = String(a.dropFirst("--category=".count))
-            if value.isEmpty || value.hasPrefix("-") {
+            if value.isEmpty || value.hasPrefix("-") || cliValueNamesCommand(value) {
                 if opts.parseError == nil { opts.parseError = .categoryRequiresValue }
                 i += 1
                 continue
@@ -432,6 +480,13 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         positional.append(a)
         i += 1
     }
+    // An empty argv token is never a command, a path, or a value: a shell
+    // expands an unset variable to one, and `appattic disk ""` would otherwise
+    // walk an empty root instead of failing as a usage error. Checked here, not
+    // where the token was read, so it covers the ones behind `--` too.
+    if opts.parseError == nil, let empty = positional.first(where: { $0.isEmpty }) {
+        opts.parseError = .unknownCommand(empty)
+    }
     if let first = positional.first {
         if first == "help" {
             // The word form of `--help`, the way git, docker, and kubectl
@@ -447,7 +502,18 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         } else if cliCommands.contains(first) {
             opts.command = first
             if first == "disk" {
-                if positional.count >= 2 { opts.diskPath = positional[1] }
+                if positional.count >= 2 {
+                    // A root is a path, and a path carries a separator or is the
+                    // dash-leading name `--` exists to pass through. A bare word
+                    // where a root belongs is a typo or a flag that lost its own
+                    // argument (`appattic disk REPORT`), and walking it would
+                    // report a missing root instead of naming the token.
+                    if cliDiskRoot(positional[1]) {
+                        opts.diskPath = positional[1]
+                    } else if opts.parseError == nil {
+                        opts.parseError = .unexpectedArgument(positional[1])
+                    }
+                }
                 if positional.count > 2, opts.parseError == nil {
                     opts.parseError = .unexpectedArgument(positional[2])
                 }
