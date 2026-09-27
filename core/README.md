@@ -30,7 +30,8 @@ Every manager and leftover path is a plugin: one `<id>.zig` compiled to `<id>.wa
 > cask ... from untrusted tap" error and marks those rows report-only;
 > `brew.zig` does not, so every outdated cask it finds is updatable.
 >
-> Overlay findings are `path-shadow`. Darwin leftover roots stay in Swift
+> Overlay findings are `path-shadow`, which reads its one path with `realpath`
+> and no flags, then `test -f`. Darwin leftover roots stay in Swift
 > `AppAtticScan`. Query plugins call `host.exec`. Tag `0` means the coeffect is
 > missing (plugin inactive). Darwin injects fixtures so tests do not need those
 > daemons.
