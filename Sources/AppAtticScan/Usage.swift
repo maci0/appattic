@@ -15,8 +15,22 @@ let launchTimestampFutureTolerance: TimeInterval = 24 * 3600
 
 let envAssignRE = try! NSRegularExpression(pattern: #"^[A-Za-z_]\w*="#)
 let cmdTokenRE = try! NSRegularExpression(pattern: #"^[A-Za-z0-9_][\w.+-]*$"#)
-let tsRE = try! NSRegularExpression(pattern: #"^:\s+(\d{9,11}):\d+;(.*)$"#)
-let fishCmdRE = try! NSRegularExpression(pattern: #"^- cmd:\s+(.*)$"#)
+// The two history patterns that end in `(.*)$` carry `.dotMatchesLineSeparators`
+// so a `.` crosses a carriage return. ICU treats CR as a line terminator, so
+// without it `.*` stops there and the pattern cannot reach the end of the line:
+// a lone CR inside a command made the regex path index nothing where the byte
+// path indexes the same token, and which scanner reads a file is decided by
+// whether some unrelated byte in it is non-ASCII. The byte scanner drops
+// trailing CRs and keeps any other CR in the command, which is what a `.` that
+// matches CR produces here.
+let tsRE = try! NSRegularExpression(
+    pattern: #"^:\s+(\d{9,11}):\d+;(.*)$"#,
+    options: [.dotMatchesLineSeparators]
+)
+let fishCmdRE = try! NSRegularExpression(
+    pattern: #"^- cmd:\s+(.*)$"#,
+    options: [.dotMatchesLineSeparators]
+)
 // Bounded to the same epoch width tsRE and hxDigitsValue use: an unbounded
 // run makes TimeInterval(line[r]) +infinity for a corrupt history file.
 let fishWhenRE = try! NSRegularExpression(pattern: #"^\s*when:\s+(\d{9,11})$"#)
