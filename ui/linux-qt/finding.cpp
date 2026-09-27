@@ -681,7 +681,10 @@ bool commandNeedsRoot(const QString &cmd) {
     // A guarded removal is `if <query>; then <action>; fi`. Judge the action,
     // or the leading `if` hides an action that needs root.
     if (const std::optional<GuardedRemove> guarded = parseGuardedRemove(t)) t = guarded->action;
-    QString first = t.section(QLatin1Char(' '), 0, 0);
+    // Split on any whitespace run, as the Swift twin `commandNeedsRoot` does:
+    // a tab-separated `apt\tinstall` is one argument, not two, and would
+    // otherwise read as the base name `apt\tinstall` and match no manager.
+    QString first = t.simplified().section(QLatin1Char(' '), 0, 0);
     if (first.contains(QLatin1Char('/'))) first = first.section(QLatin1Char('/'), -1);
     return first == QLatin1String("apt-get")
         || first == QLatin1String("apt-mark")
@@ -761,6 +764,13 @@ void groupLinuxLeftovers(QVector<Finding> &findings) {
         for (int i : idx) {
             if (findings[i].bytes > findings[primary].bytes) primary = i;
         }
+        // A member with no measurement (`bytes < 0`) leaves the merged total
+        // unknown. Summing the rest anyway prints a partial sum as if it were
+        // the whole group, which is what the CLI's `sizeMeasured` flag avoids.
+        bool allSized = true;
+        for (int i : idx) {
+            if (findings[i].bytes < 0) allSized = false;
+        }
         for (int i : idx) {
             if (i == primary) continue;
             if (!findings[i].path.isEmpty()) findings[primary].extraPaths << findings[i].path;
@@ -771,6 +781,7 @@ void groupLinuxLeftovers(QVector<Finding> &findings) {
             }
             drop.insert(i);
         }
+        if (!allSized) findings[primary].bytes = -1;
         findings[primary].extraPaths.removeDuplicates();
         findings[primary].extraPaths.removeAll(findings[primary].path);
     }
@@ -1135,11 +1146,12 @@ bool canMarkManual(const Finding &f) {
     if (isGlobalKind(f)) return false;
     if (f.kind != QLatin1String("orphan") && !f.kind.contains(QLatin1String("orphan"))) return false;
     const QString m = distroManager(f);
-    if (m == QLatin1String("dpkg") || m == QLatin1String("yum") || m == QLatin1String("aur")) {
-        return false;
-    }
-    return m == QLatin1String("apt") || m == QLatin1String("pacman")
-        || m == QLatin1String("dnf") || m == QLatin1String("zypper");
+    // `dpkg` rc rows are marked with `apt-mark manual` on both platforms, the
+    // same as `apt` orphans. The manager that emitted them is not the one that
+    // owns the mark.
+    return m == QLatin1String("apt") || m == QLatin1String("dpkg")
+        || m == QLatin1String("pacman") || m == QLatin1String("dnf")
+        || m == QLatin1String("zypper");
 }
 
 QString markManualCommand(const Finding &f) {
@@ -1152,7 +1164,9 @@ QString markManualCommand(const Finding &f) {
     if (name.isEmpty() || name.startsWith(QLatin1Char('-'))) return {};
     const QString q = shellQuote(name);
     const QString m = distroManager(f);
-    if (m == QLatin1String("apt")) return QStringLiteral("apt-mark manual ") + q;
+    if (m == QLatin1String("apt") || m == QLatin1String("dpkg")) {
+        return QStringLiteral("apt-mark manual ") + q;
+    }
     if (m == QLatin1String("pacman")) return QStringLiteral("pacman -D --asexplicit ") + q;
     if (m == QLatin1String("dnf")) return QStringLiteral("dnf mark install ") + q;
     if (m == QLatin1String("zypper")) return QStringLiteral("zypper --non-interactive install ") + q;

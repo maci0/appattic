@@ -1479,8 +1479,13 @@ private:
             if (needQ && !searchHaystack(f).contains(q)) continue;
             rows.push_back(f);
         }
+        // `std::sort` is not stable, so rows of equal size would keep the order
+        // the scan happened to emit, and many rows are the same size (every
+        // 4 KB directory, every unmeasured `-1`). Break the tie on the row
+        // identity, as `sortChildrenWith` in diskusage.cpp does on path.
         std::sort(rows.begin(), rows.end(), [](const Finding &a, const Finding &b) {
-            return a.bytes > b.bytes;
+            if (a.bytes != b.bytes) return a.bytes > b.bytes;
+            return a.uid() < b.uid();
         });
         return rows;
     }
@@ -1600,7 +1605,8 @@ private:
                 rows.push_back(f);
             }
             std::sort(rows.begin(), rows.end(), [](const Finding &a, const Finding &b) {
-                return a.bytes > b.bytes;
+                if (a.bytes != b.bytes) return a.bytes > b.bytes;
+                return a.uid() < b.uid();
             });
             const int n = qMin(12, rows.size());
             for (int i = 0; i < n; ++i) {
@@ -2684,17 +2690,29 @@ private:
     void refreshActionBar() {
         qint64 bytes = 0;
         int n = 0;
+        int unsized = 0;
         for (const Finding &f : m_findings) {
             if (!m_marked.contains(f.uid()) && !m_markedManual.contains(f.uid())) continue;
             ++n;
-            if (f.bytes > 0) bytes = addBytes(bytes, f.bytes);
+            if (f.bytes < 0) ++unsized;
+            else bytes = addBytes(bytes, f.bytes);
         }
         const Page page = currentPage();
         m_actionBar->setVisible(
             n > 0 && page != Page::Overview && page != Page::Settings && page != Page::DiskUsage
         );
         m_actionCount->setText(QStringLiteral("%1 selected").arg(n));
-        m_actionBytes->setText(bytes > 0 ? humanSize(bytes) : QString());
+        // A marked row with no measurement (`bytes < 0`) makes the total a
+        // partial sum. Say so instead of printing the part that did measure as
+        // the whole selection.
+        QString bytesText;
+        if (bytes > 0) {
+            bytesText = humanSize(bytes);
+            if (unsized > 0) bytesText += QStringLiteral(" (partial)");
+        } else if (unsized > 0) {
+            bytesText = QStringLiteral("unknown");
+        }
+        m_actionBytes->setText(bytesText);
         const bool busy = m_scanning;
         const bool canDelete = scriptHasCommands(cleanupScript());
         const bool canUpdate = scriptHasCommands(updateScript());

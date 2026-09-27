@@ -397,6 +397,14 @@ public func commandNeedsRoot(_ cmd: String) -> Bool {
 /// reviews a script that cannot do anything. The presence check is a read and
 /// stays unprivileged; only the action escalates.
 public func withRootCmd(_ cmd: String) -> String {
+    // A multi-line command is a list, not one line: `rootcmd` would take the
+    // first line's words and leave the rest of them as bare commands, which
+    // run unprivileged or fail to parse. Escalate each line on its own.
+    if cmd.contains("\n") {
+        return cmd.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { withRootCmd(String($0)) }
+            .joined(separator: "\n")
+    }
     guard commandNeedsRoot(cmd) else { return cmd }
     // Escalating the whole line hands `rootcmd` the words `if` and `<query>` as
     // arguments and leaves a bare `then` behind, so the line stops parsing and
