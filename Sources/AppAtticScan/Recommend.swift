@@ -241,7 +241,7 @@ public func buildSoftware(
     now: Date = Date()
 ) -> [Software] {
     let history = history ?? (brew.available && !brew.formulas.isEmpty
-        ? loadHistory(keep: brewHistoryKeep(brew))
+        ? loadHistory(keep: brewHistoryKeep(brew), now: now)
         : HistoryIndex())
     var software: [Software] = []
     let caskDesc = Dictionary(brew.casks.compactMap { c in

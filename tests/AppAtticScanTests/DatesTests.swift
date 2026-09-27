@@ -16,6 +16,38 @@ final class DatesTests: XCTestCase {
         XCTAssertEqual(cal.component(.second, from: parsed), 17)
     }
 
+    /// The process-wide date formatters are shared objects, and Foundation's
+    /// `date(from:)` / `string(from:)` mutate internal parse state, so the
+    /// parallel mdls and ISO paths that `pmap` drives have to be safe. This
+    /// hammers both formatters plus the ISO fallback list from 16 workers: an
+    /// unsynchronized shared formatter drops or mangles parses under that load.
+    func testDateParsingAndFormattingSurviveParallelPmapWorkers() {
+        let n = 96
+        let results = pmap(Array(0..<n), workers: 16) { i -> (Date?, Date?, String?) in
+            let seconds = i * 7
+            let mdls = parseMdlsDate(
+                String(format: "2026-08-15 00:00:%02d +0000", seconds % 60)
+            )
+            // Space instead of "T": the integer fast path rejects it, so this
+            // lands on the shared DateFormatter fallback list.
+            let iso = parseISODate(
+                String(format: "2026-08-15 00:00:%02d +0000", seconds % 60)
+            )
+            return (mdls, iso, isoString(mdls))
+        }
+        XCTAssertEqual(results.count, n)
+        for i in 0..<n {
+            let seconds = i * 7 % 60
+            let mdls = try? XCTUnwrap(results[i].0, "mdls parse dropped at \(i)")
+            let iso = try? XCTUnwrap(results[i].1, "ISO fallback parse dropped at \(i)")
+            XCTAssertEqual(
+                mdls.map { $0.timeIntervalSince1970.rounded() },
+                iso.map { $0.timeIntervalSince1970.rounded() },
+                "mdls and ISO disagree at \(i)"
+            )
+            XCTAssertNotNil(results[i].2, "isoString returned nil at \(i)")
+        }
+    }
 
     func testParseISODateAcceptsZAndOffset() throws {
         let z = try XCTUnwrap(parseISODate("2026-08-17T12:30:00Z"))
@@ -25,7 +57,6 @@ final class DatesTests: XCTestCase {
         XCTAssertEqual(round.timeIntervalSince1970, z.timeIntervalSince1970, accuracy: 0.5)
     }
 
-
     func testParseISODateFractionalMicrosecondsFromXBEL() throws {
         let micro = try XCTUnwrap(parseISODate("2026-04-01T15:00:00.123456Z"))
         let whole = try XCTUnwrap(parseISODate("2026-04-01T15:00:00Z"))
@@ -34,13 +65,11 @@ final class DatesTests: XCTestCase {
         XCTAssertNotNil(parseISODate("2026-04-01T15:00:00.123456+00:00"))
     }
 
-
     func testParseISODateTimezoneLessIsUTC() throws {
         let naive = try XCTUnwrap(parseISODate("2026-04-01T15:00:00"))
         let z = try XCTUnwrap(parseISODate("2026-04-01T15:00:00Z"))
         XCTAssertEqual(naive.timeIntervalSince1970, z.timeIntervalSince1970, accuracy: 0.5)
     }
-
 
     func testParseISODateOffsetIsInstantNotWallClock() throws {
         let paris = try XCTUnwrap(parseISODate("2026-08-17T14:30:00+02:00"))
@@ -48,12 +77,10 @@ final class DatesTests: XCTestCase {
         XCTAssertEqual(paris.timeIntervalSince1970, z.timeIntervalSince1970, accuracy: 0.5)
     }
 
-
     func testParseISODateRejectsImpossibleCivilDate() {
         XCTAssertNil(parseISODate("2026-02-31T15:00:00"))
         XCTAssertNil(parseMdlsDate("2026-02-31 15:00:00 +0000"))
     }
-
 
     func testParseISODateUtcInstantIsPreviousLocalDayInNewYork() throws {
         let tz = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
@@ -66,7 +93,6 @@ final class DatesTests: XCTestCase {
         XCTAssertEqual(cal.component(.hour, from: dt), 23)
     }
 
-
     func testDateFromUnixEpochScalesMillisAndMicros() {
         let seconds: TimeInterval = 1_717_200_000
         XCTAssertEqual(dateFromUnixEpoch(seconds).timeIntervalSince1970, seconds, accuracy: 0.5)
@@ -74,13 +100,11 @@ final class DatesTests: XCTestCase {
         XCTAssertEqual(dateFromUnixEpoch(seconds * 1_000_000).timeIntervalSince1970, seconds, accuracy: 0.5)
     }
 
-
     func testDaysSinceNil() {
         XCTAssertNil(daysSince(nil))
         let now = Date(timeIntervalSince1970: 1_787_011_200)
         XCTAssertEqual(daysSince(now.addingTimeInterval(-3 * 86400), now: now), 3.0)
     }
-
 
     func testDaysSinceIsElapsedHoursNotCalendarDays() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -88,7 +112,6 @@ final class DatesTests: XCTestCase {
         XCTAssertEqual(daysSince(twelveHours, now: now)!, 0.5, accuracy: 0.0001)
         XCTAssertNil(calendarDaysSince(nil))
     }
-
 
     func testCalendarDaysSinceSpringForwardIsYesterdayNotToday() throws {
         let tz = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
@@ -103,7 +126,6 @@ final class DatesTests: XCTestCase {
         XCTAssertLessThan(sunday.timeIntervalSince(saturday) / 86400, 1)
         XCTAssertEqual(calendarDaysSince(saturday, now: sunday, calendar: cal), 1)
     }
-
 
     func testCalendarDaysSinceFallBackSameDayStaysToday() throws {
         let tz = try XCTUnwrap(TimeZone(identifier: "America/New_York"))

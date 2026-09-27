@@ -6,6 +6,13 @@ import FoundationXML
 let indexWindowS: TimeInterval = 120
 let maxHistoryLines = 500_000
 
+/// How far past the scan time a recorded launch may sit and still be treated
+/// as real. Desktop clocks run a little ahead of ours, and a backwards NTP
+/// step leaves these files with timestamps in the future. `daysSince` clamps a
+/// future date to 0, so without this bound such a file marks a never-launched
+/// app as used this second and it is never proposed for cleanup.
+let launchTimestampFutureTolerance: TimeInterval = 24 * 3600
+
 let envAssignRE = try! NSRegularExpression(pattern: #"^[A-Za-z_]\w*="#)
 let cmdTokenRE = try! NSRegularExpression(pattern: #"^[A-Za-z0-9_][\w.+-]*$"#)
 let tsRE = try! NSRegularExpression(pattern: #"^:\s+(\d{9,11}):\d+;(.*)$"#)
@@ -32,6 +39,18 @@ public struct HistoryIndex {
         self.lastSeen = lastSeen
         self.everUsed = everUsed
         self.oldestSeen = oldestSeen
+    }
+
+    /// Drops entries whose command timestamp sits after `now`. A shell that
+    /// wrote its history with a clock ahead of ours, or a corrupt epoch field,
+    /// otherwise reads as "run this second": `daysSince` clamps the negative
+    /// age to 0 and the formula is pinned to KEEP with no way to prove it idle.
+    func droppingTimestampsAfter(_ now: Date) -> HistoryIndex {
+        HistoryIndex(
+            lastSeen: lastSeen.filter { isPlausibleLaunchDate($0.value, now: now) },
+            everUsed: everUsed,
+            oldestSeen: oldestSeen.flatMap { isPlausibleLaunchDate($0, now: now) ? $0 : nil }
+        )
     }
 }
 
@@ -67,6 +86,12 @@ public func flatpakVarAppPath() -> String {
     (FileManager.default.homeDirectoryForCurrentUser.path as NSString).appendingPathComponent(".var/app")
 }
 
+/// A launch timestamp at or before the scan, allowing for the small forward
+/// skew a desktop clock can have against ours.
+func isPlausibleLaunchDate(_ dt: Date, now: Date) -> Bool {
+    dt <= now.addingTimeInterval(launchTimestampFutureTolerance)
+}
+
 /// Keeps the newest timestamp seen for a lowercased, trimmed key.
 func recordNewest(_ key: String, _ dt: Date, into hits: inout [String: Date]) {
     let k = posixLowercased(key.trimmingCharacters(in: .whitespaces))
@@ -78,9 +103,15 @@ func recordNewest(_ key: String, _ dt: Date, into hits: inout [String: Date]) {
 final class XbelSink: NSObject, XMLParserDelegate {
     var hits: [String: Date] = [:]
     var bookmarkDate: Date?
+    let now: Date
+
+    init(now: Date) {
+        self.now = now
+        super.init()
+    }
 
     func record(_ key: String?, _ dt: Date?) {
-        guard let key, let dt else { return }
+        guard let key, let dt, isPlausibleLaunchDate(dt, now: now) else { return }
         recordNewest(key, dt, into: &hits)
     }
 
@@ -101,9 +132,9 @@ final class XbelSink: NSObject, XMLParserDelegate {
     }
 }
 
-public func parseRecentlyUsedXbel(_ path: String) -> [String: Date] {
+public func parseRecentlyUsedXbel(_ path: String, now: Date = Date()) -> [String: Date] {
     guard let parser = XMLParser(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
-    let sink = XbelSink()
+    let sink = XbelSink(now: now)
     parser.delegate = sink
     parser.shouldProcessNamespaces = true
     parser.shouldResolveExternalEntities = false
@@ -113,8 +144,15 @@ public func parseRecentlyUsedXbel(_ path: String) -> [String: Date] {
 
 final class GnomeStateSink: NSObject, XMLParserDelegate {
     var hits: [String: Date] = [:]
+    let now: Date
+
+    init(now: Date) {
+        self.now = now
+        super.init()
+    }
 
     func record(_ key: String, _ dt: Date) {
+        guard isPlausibleLaunchDate(dt, now: now) else { return }
         recordNewest(key, dt, into: &hits)
     }
 
@@ -124,7 +162,7 @@ final class GnomeStateSink: NSObject, XMLParserDelegate {
         let appId = attributes["id"] ?? ""
         let raw = attributes["last-seen"] ?? ""
         if appId.isEmpty || raw.isEmpty { return }
-        guard let epoch = Double(raw), epoch.isFinite else { return }
+        guard let epoch = Double(raw), epoch.isFinite, epoch >= 0 else { return }
         let dt = dateFromUnixEpoch(epoch)
         record(appId, dt)
         let stem = posixLowercased(appId).hasSuffix(".desktop") ? String(appId.dropLast(8)) : appId
@@ -139,16 +177,16 @@ final class GnomeStateSink: NSObject, XMLParserDelegate {
     }
 }
 
-public func parseGnomeApplicationState(_ path: String) -> [String: Date] {
+public func parseGnomeApplicationState(_ path: String, now: Date = Date()) -> [String: Date] {
     guard let parser = XMLParser(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
-    let sink = GnomeStateSink()
+    let sink = GnomeStateSink(now: now)
     parser.delegate = sink
     parser.shouldResolveExternalEntities = false
     _ = parser.parse()
     return sink.hits
 }
 
-public func parseFlatpakVarAppMtimes(_ root: String) -> [String: Date] {
+public func parseFlatpakVarAppMtimes(_ root: String, now: Date = Date()) -> [String: Date] {
     var hits: [String: Date] = [:]
     guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return hits }
     for name in names {
@@ -156,7 +194,8 @@ public func parseFlatpakVarAppMtimes(_ root: String) -> [String: Date] {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { continue }
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let dt = attrs[.modificationDate] as? Date
+              let dt = attrs[.modificationDate] as? Date,
+              isPlausibleLaunchDate(dt, now: now)
         else { continue }
         let key = posixLowercased(name)
         if hits[key] == nil || dt > hits[key]! { hits[key] = dt }
@@ -545,7 +584,8 @@ func parseFishHistoryRegex(_ text: String, index: inout HistoryIndex, keep: Set<
 public func loadHistory(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     env: [String: String] = ProcessInfo.processInfo.environment,
-    keep: Set<String>? = nil
+    keep: Set<String>? = nil,
+    now: Date = Date()
 ) -> HistoryIndex {
     var idx = HistoryIndex()
     let ns = home as NSString
@@ -566,7 +606,7 @@ public func loadHistory(
             parseFishHistory(path, index: &idx, keep: keep)
         }
     }
-    return idx
+    return idx.droppingTimestampsAfter(now)
 }
 
 public func innerExecutablePath(_ appPath: String, executable: String?) -> String? {
@@ -743,20 +783,25 @@ func mergeHits(_ hits: inout [String: Date], _ extra: [String: Date]) {
     }
 }
 
-func linuxLaunchHits(xbelPath: String?, gnomePath: String?, varApp: String?) -> [String: Date] {
+func linuxLaunchHits(
+    xbelPath: String?,
+    gnomePath: String?,
+    varApp: String?,
+    now: Date
+) -> [String: Date] {
     var hits: [String: Date] = [:]
     let xbel = xbelPath ?? recentlyUsedXbelPath()
     if FileManager.default.fileExists(atPath: xbel) {
-        hits.merge(parseRecentlyUsedXbel(xbel)) { a, b in a > b ? a : b }
+        hits.merge(parseRecentlyUsedXbel(xbel, now: now)) { a, b in a > b ? a : b }
     }
     let gnome = gnomePath ?? gnomeApplicationStatePath()
     if FileManager.default.fileExists(atPath: gnome) {
-        mergeHits(&hits, parseGnomeApplicationState(gnome))
+        mergeHits(&hits, parseGnomeApplicationState(gnome, now: now))
     }
     let varAppPath = varApp ?? flatpakVarAppPath()
     var isDir: ObjCBool = false
     if FileManager.default.fileExists(atPath: varAppPath, isDirectory: &isDir), isDir.boolValue {
-        mergeHits(&hits, parseFlatpakVarAppMtimes(varAppPath))
+        mergeHits(&hits, parseFlatpakVarAppMtimes(varAppPath, now: now))
     }
     return hits
 }
@@ -772,7 +817,7 @@ public func fillAppUsage(
     now: Date = Date()
 ) {
     if PlatformOverride.isLinux {
-        let hits = linuxLaunchHits(xbelPath: xbelPath, gnomePath: gnomeStatePath, varApp: flatpakVarApp)
+        let hits = linuxLaunchHits(xbelPath: xbelPath, gnomePath: gnomeStatePath, varApp: flatpakVarApp, now: now)
         progress("  · checking recently-used.xbel (\(hits.count) apps)…")
         for i in apps.indices {
             if FileManager.default.fileExists(atPath: apps[i].path),

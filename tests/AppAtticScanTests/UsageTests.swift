@@ -355,6 +355,24 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(idx.lastSeen["mycli"], Date(timeIntervalSince1970: 1_717_200_000))
     }
 
+    func testLoadHistoryDropsTimestampsAfterTheScan() throws {
+        let td = FileManager.default.temporaryDirectory.appendingPathComponent("hist-future-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: td, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: td) }
+        try """
+        : 1717200000:0;pasttool --ok
+        : 9999999999:0;futuretool --ok
+        """.write(to: td.appendingPathComponent(".zsh_history"), atomically: true, encoding: .utf8)
+        let idx = loadHistory(
+            home: td.path,
+            env: ["XDG_DATA_HOME": td.path],
+            now: Date(timeIntervalSince1970: 1_787_011_200)
+        )
+        XCTAssertEqual(idx.lastSeen["pasttool"], Date(timeIntervalSince1970: 1_717_200_000))
+        XCTAssertNil(idx.lastSeen["futuretool"], "a command stamped after the scan must not read as run this second")
+        XCTAssertEqual(idx.oldestSeen, Date(timeIntervalSince1970: 1_717_200_000))
+    }
+
     func testParseHistoryFileStripsCRLF() throws {
         let path = try writeTemp(": 1717200000:0;crlftool --ok\r\n", suffix: ".hist")
         defer { try? FileManager.default.removeItem(atPath: path) }
@@ -492,6 +510,59 @@ final class UsageTests: XCTestCase {
         let path = try writeTemp(xml, suffix: ".xml")
         defer { try? FileManager.default.removeItem(atPath: path) }
         XCTAssertTrue(parseGnomeApplicationState(path).isEmpty)
+    }
+
+    /// A desktop clock ahead of ours (or a corrupt value) used to land as a
+    /// future date, which `daysSince` clamps to 0: the app read as launched
+    /// this second and never reached a removal tier.
+    func testGnomeApplicationStateRejectsFutureLastSeen() throws {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let xml = """
+        <?xml version="1.0"?>
+        <application-state>
+          <application id="org.example.future.desktop" last-seen="9999999999"/>
+          <application id="org.example.huge.desktop" last-seen="1e300"/>
+          <application id="org.example.now.desktop" last-seen="1787011200"/>
+        </application-state>
+        """
+        let path = try writeTemp(xml, suffix: ".xml")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let hits = parseGnomeApplicationState(path, now: now)
+        XCTAssertNil(hits["org.example.future"])
+        XCTAssertNil(hits["org.example.huge"])
+        XCTAssertEqual(hits["org.example.now"], now)
+    }
+
+    func testXbelRejectsVisitedInTheFuture() throws {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let xml = """
+        <?xml version="1.0"?>
+        <xbel version="1.0" xmlns:bookmark="http://www.freedesktop.org/standards/desktop/bookmark">
+          <bookmark href="file:///tmp/future.doc" visited="2027-01-01T00:00:00Z">
+            <info>
+              <metadata>
+                <bookmark:applications>
+                  <bookmark:application name="Futura" exec="futura %u" count="1"/>
+                </bookmark:applications>
+              </metadata>
+            </info>
+          </bookmark>
+          <bookmark href="file:///tmp/past.doc" visited="2024-06-01T00:00:00Z">
+            <info>
+              <metadata>
+                <bookmark:applications>
+                  <bookmark:application name="Pastora" exec="pastora %u" count="1"/>
+                </bookmark:applications>
+              </metadata>
+            </info>
+          </bookmark>
+        </xbel>
+        """
+        let path = try writeTemp(xml, suffix: ".xbel")
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let hits = parseRecentlyUsedXbel(path, now: now)
+        XCTAssertNil(hits["futura"], "a visit dated after the scan must not read as launched now")
+        XCTAssertNotNil(hits["pastora"])
     }
 
     func testParsesXbelVisitedWithMicroseconds() throws {
