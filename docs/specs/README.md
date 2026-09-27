@@ -9,4 +9,4 @@ Requirement and architecture records. Visual rules live in [`DESIGN.md`](../../D
 
 Superseded records live in [`archive/`](archive/) and are kept for history.
 
-These records are canonical. [`core/README.md`](../../core/README.md) repeats the host load list and the backlog table for contributor convenience; when the two disagree, the record here wins and the copy is brought back into line.
+These records are canonical. [`core/README.md`](../../core/README.md) links here for the host load list and the backlog rather than restating them; it still shows the host argv block as a copy, so when that block and the record's **Host load list** disagree, the record here wins and the copy is brought back into line.
