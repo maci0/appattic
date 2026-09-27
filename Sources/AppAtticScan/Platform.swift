@@ -48,7 +48,8 @@ public func parseOsRelease(_ text: String) -> [String: String] {
         guard a < b, bytes[a] != 0x23 /* # */ else { return }
         var eq = a
         while eq < b, bytes[eq] != 0x3D /* = */ { eq += 1 }
-        guard eq < b else { return }
+        // `eq == a` is a line whose key is empty, which is not a field either.
+        guard eq < b, a < eq else { return }
         var (vs, ve) = (eq + 1, b)
         while vs < ve, bytes[vs] == 0x20 || bytes[vs] == 0x09 { vs += 1 }
         while ve > vs, bytes[ve - 1] == 0x20 || bytes[ve - 1] == 0x09 { ve -= 1 }

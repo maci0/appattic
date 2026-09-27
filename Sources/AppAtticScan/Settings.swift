@@ -253,8 +253,8 @@ public func configEnvEntries(
             let page = resolveStartPage(env: ["APPATTIC_PAGE": raw])
             return page.unknownValue == nil ? page.page.rawValue : "unknown, opening overview"
         },
-        entry("FLATPAK_ID", unsetEffect: "host run") { _ in
-            "sandboxed: package queries go through /run/host"
+        entry("FLATPAK_ID", unsetEffect: "host run") { raw in
+            raw.isEmpty ? "set but empty, so a host run" : "sandboxed: package queries go through /run/host"
         },
         entry("APPATTIC_HOST_EXEC_LIVE", unsetEffect: "off: fixtures unless the platform forces them") { raw in
             configBoolSwitch(raw) ? "on: package queries run the real binaries" : "off: read as off"

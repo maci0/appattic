@@ -448,8 +448,8 @@ func parseHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Set<St
             while cs < cmdEnd, hxTrimEdge(bytes[cs]) { cs += 1 }
             var ce = cmdEnd
             while ce > cs, hxTrimEdge(bytes[ce - 1]) { ce -= 1 }
-            noteHistoryTime(ts, index: &index)
             if cs < ce {
+                noteHistoryTime(ts, index: &index)
                 hxRecordCommand(bytes, cs, ce, ts: ts, index: &index, keep: keep)
             }
         }
@@ -553,8 +553,10 @@ func parseHistoryFileRegex(_ text: String, index: inout HistoryIndex, keep: Set<
         } else {
             cmd = line.trimmingCharacters(in: .whitespaces)
         }
-        noteHistoryTime(ts, index: &index)
+        // A line with an epoch and no command behind it indexes nothing: the
+        // timestamp belongs to a command, so a truncated line is not evidence.
         if cmd.isEmpty { continue }
+        noteHistoryTime(ts, index: &index)
         guard let first = firstCommandToken(cmd), fullMatch(cmdTokenRE, first) else { continue }
         guard retainHistoryToken(first, keep: keep) else { continue }
         let token = posixLowercased(first)

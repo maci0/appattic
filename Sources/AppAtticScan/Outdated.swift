@@ -523,11 +523,9 @@ func parseAptUpgradableLine(_ s: Substring) -> (name: String, current: String, l
         guard i < le, u[i] == 0x2F else { return nil }
         let nameB = (ls, i)
         i += 1
-        guard let distB = tokBounds(u, le, &i), distB.0 < distB.1,
-              let latestB = tokBounds(u, le, &i), latestB.0 < latestB.1,
+        guard let latestB = tokBounds(u, le, &i), latestB.0 < latestB.1,
               let archB = tokBounds(u, le, &i), archB.0 < archB.1
         else { return nil }
-        _ = distB
         _ = archB
         while i < le, bWS(u[i]) { i += 1 }
         guard i < le, u[i] == 0x5B /* [ */ else { return nil }
