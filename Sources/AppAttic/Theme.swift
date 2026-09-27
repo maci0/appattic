@@ -41,9 +41,11 @@ extension Color {
 
 /// Type roles, the same ones the `aa*Font` functions in `uistyle.h` give the
 /// Qt shell. One scale, so a level means the same thing on both platforms.
-/// Body is 13; the only steps around it are small (one down) and instrument
-/// value (two up). Nothing sits in between, and nothing goes to display size:
-/// this is a utility.
+/// These are the macOS point sizes. The Qt shell derives each role from the
+/// desktop application font instead, so the same role can be a different step
+/// there: `aaSmallFont` steps one down, not two. Body is 13; the only steps
+/// around it are small and instrument value. Nothing sits in between, and
+/// nothing goes to display size: this is a utility.
 ///
 /// `Double`, because `Font.system(size:weight:design:)` takes a `Double`.
 enum TypeScale {

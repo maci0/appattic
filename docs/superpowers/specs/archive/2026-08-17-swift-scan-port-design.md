@@ -10,7 +10,7 @@ Status: Implemented, superseded by [`2026-08-26-zig-wasm-core-design.md`](../202
 
 Port the Python scanner into Swift so the Mac UI and Linux CLI/UI run with no Python. Product behavior stays the same: leftovers, stale software, outdated version signal. Nothing auto-deletes. Outdated is report-only except Homebrew formulas/casks and Flatpak, which apply only through the explicit `update` command or UI confirm. Distro managers, Snap, and the App Store stay report-only.
 
-Follow-on architecture (Zig WASM core + plugins; Linux Qt already loads it): [`2026-08-26-zig-wasm-core-design.md`](2026-08-26-zig-wasm-core-design.md).
+Follow-on architecture (Zig WASM core + plugins; Linux Qt already loads it): [`2026-08-26-zig-wasm-core-design.md`](../2026-08-26-zig-wasm-core-design.md).
 
 ## Goal
 

@@ -6,7 +6,7 @@ Status: Accepted
 
 ## Context
 
-Follow-on to [`2026-08-17-swift-scan-port-design.md`](2026-08-17-swift-scan-port-design.md) (that port is implemented; `AppAtticScan` remains until a later Zig copy of its tests). This record is the decision that has been made, not a proposal.
+Follow-on to [`2026-08-17-swift-scan-port-design.md`](archive/2026-08-17-swift-scan-port-design.md) (that port is implemented; `AppAtticScan` remains until a later Zig copy of its tests). This record is the decision that has been made, not a proposal.
 
 ## Decision
 
@@ -18,7 +18,7 @@ Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability
 
 The Zig WASM core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. Core has no switch on `apt` vs `pacman` vs `npm`. Core does not own filesystem roots. A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; Darwin and CI may inject fixtures via `APPATTIC_HOST_EXEC_FIXTURE`). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
 
-`AppAtticScan` keeps building until a later port copies its tests into Zig. This spike does not delete it. The Swift CLI (`appattic`) parses in `AppAtticScan` (`CLIParse.swift`); it is not a WASM guest. Linux Qt loads `appattic_core.wasm` through `core/host/embed.c`.
+`AppAtticScan` keeps building until a later port copies its tests into Zig. The core does not delete it. The Swift CLI (`appattic`) parses in `AppAtticScan` (`CLIParse.swift`); it is not a WASM guest. Linux Qt loads `appattic_core.wasm` through `core/host/embed.c`, and refuses to scan without it.
 
 ## Paper principles that bind AppAttic
 
@@ -30,7 +30,7 @@ The Zig WASM core is a loader: ABI, inject/coeffects, capability intercept, left
 6. **WASM sandbox** (ch. 6.3, 6.7). Untrusted code sees only embedder imports.
 7. **System boundary** (ch. 6.1). Disk, images, distro packages sit outside Γ. Withhold emission until confirm. Script is compensation, not a tracked inverse of `rm`.
 8. **Key identity** (ch. 6.6). Namespace `appattic.findings.<id>`. ABI integer 1.
-9. **Zig comptime** (ch. 6.4). Later, for typed inject accessors. Not the spike.
+9. **Zig comptime** (ch. 6.4). Later, for typed inject accessors. Not in this record.
 
 The paper does not treat dialogs as plugins. Adaptation: plugin supplies confirm copy and script text. Native toolkit draws the alert and the sheet.
 
@@ -116,7 +116,7 @@ Linux leftover roots plus `path-user-bin`, `path-home-dot`, and `path-shadow`. D
 
 ## Backlog
 
-Not in this spike. No `core/src/<id>.zig`, so no `.wasm` is built and the host load list never contains one.
+Not built. No `core/src/<id>.zig`, so no `.wasm` is built and the host load list never contains one.
 
 | id | Scope |
 |---|---|

@@ -40,8 +40,10 @@ fi
 shellcheck -x -P SCRIPTDIR "$ROOT/build.sh" "$ROOT/run.sh" "$ROOT/core/build.sh" \
     "$ROOT/core/bench.sh" "$ROOT/scripts"/*.sh
 
-# The three version declarations must agree, or an artifact reports one number
-# while the packaging record says another.
+# One declared version, three copies to keep in step (AppStream release,
+# Info.plist, the qt man page), plus a CFBundleVersion that is a rising build
+# number. Mismatch means an artifact reports one number while the packaging
+# record says another.
 bash "$ROOT/scripts/check-version.sh" >/dev/null
 
 if ! command -v yamllint >/dev/null 2>&1; then

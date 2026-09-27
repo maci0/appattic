@@ -14,7 +14,12 @@ static void print_usage(FILE *fp, const char *argv0) {
     fprintf(fp, "       %s --precompile <module.wasm>...   (writes <module>.wasm.cwasm)\n", argv0);
     fprintf(fp, "tag 0 = missing coeffect; default 1. container-runtime: 1 docker, 2 podman.\n");
     fprintf(fp, "not loaded: chocolatey nuget appstore steam (backlog)\n");
-    fprintf(fp, "host.exec allow: snap pacman -Q* apt-get -s autoremove apt list --upgradable dnf repoquery/--upgrades/check-update zypper packages --unneeded/list-updates flatpak npm pnpm bun pipx pip/pip3 --user outdated uv brew gem composer docker ls. Darwin fixtures.\n");
+    fprintf(fp, "host.exec allow: snap pacman/paru/yay/pikaur -Q* apt -s autoremove apt list --upgradable dpkg -l\n");
+    fprintf(fp, "  dnf repoquery --unneeded/list --upgrades/check-update zypper packages --unneeded/list-updates\n");
+    fprintf(fp, "  flatpak npm pnpm bun pipx pip/pip3 --user --format=json uv brew gem composer\n");
+    fprintf(fp, "  docker/podman images -f dangling=true, volume ls -f dangling=true, ps -a -f status=exited\n");
+    fprintf(fp, "  ls readlink realpath test. Per-binary argv rules: core/host/hostexec.h.\n");
+    fprintf(fp, "fixtures: always on Darwin, elsewhere under APPATTIC_HOST_EXEC_FIXTURE=1.\n");
 }
 
 int main(int argc, char **argv) {

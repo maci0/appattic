@@ -2,14 +2,14 @@
 
 Local cleanup tool for leftover data from uninstalled apps, unused installed software, unused distro orphans and language globals, packages that have a newer version available, and a disk usage analyzer (folder sizes, devices, ring/treemap charts). Nothing is deleted until you review a script or confirm in the UI. Move to Trash from Disk Usage asks first.
 
-macOS and Linux. Today: one Foundation scan library (`AppAtticScan`), a Gtk-free CLI (`appattic`), a SwiftCrossUI AppKit window on macOS (`AppAtticUI`), and a C++ Qt 6 window on Linux (`ui/linux-qt`). Direction: Zig core compiled to WASM, extra package managers and dialog copy as WASM plugins, native widgets only in the shell. Spec: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Linux UI is Qt 6, same toolkit as TMOG Linux. Qt-on-Linux is not claimed linked until `scripts/linux-qt-link.sh` runs on a real Linux host.
+macOS and Linux. Today: one Foundation scan library (`AppAtticScan`), a Gtk-free CLI (`appattic`), a SwiftCrossUI AppKit window on macOS (`AppAtticUI`), and a C++ Qt 6 window on Linux (`ui/linux-qt`) that scans through the Zig WASM core. Every package manager and every Linux leftover root is a WASM plugin; the Qt shell keeps widgets, alerts, and running the confirmed script. Architecture record: [`docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md`](docs/superpowers/specs/2026-08-26-zig-wasm-core-design.md). Linux UI is Qt 6, same toolkit as TMOG Linux. Qt-on-Linux is not claimed linked until `scripts/linux-qt-link.sh` runs on a real Linux host.
 
 ## What it reports
 
 - **Leftovers.** User data whose owner app is gone (Application Support, caches, XDG dirs, and similar), plus user overlays (`~/.local/bin`, `~/bin`, `~/.cargo/bin`, `~/.local/share/applications`) that hide a same-named packaged file. Overlay rows use status `shadow`; cleanup removes the overlay only. Apple/system/toolchain dirs are not counted as reclaimable.
 - **Stale.** Installed apps and brew formulas with weak or old usage. Last-used comes from Spotlight (macOS, including the inner executable), running processes, prefs mtime, data-dir mtime, Linux `recently-used.xbel`, and shell history for CLI tools. Unused is not the same as outdated.
-- **Outdated.** Newer version available from Homebrew, Flatpak, Snap, apt, pacman, AUR (paru/yay/pikaur), dnf/yum, zypper, or the App Store. Named upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf/yum, zypper) run from the Outdated page after you confirm, or with `appattic update` (`--dry-run` prints the script first, `--yes` skips the prompt when there is no terminal). Not a full distro upgrade (`apt upgrade`, `pacman -Syu`). App Store and Snap stay report-only. Untrusted Homebrew casks are listed and are not updated. Debian/Ubuntu also lists `dpkg` config remnants (`rc`) and PPA source files.
-- **Packages.** Distro orphans (nothing still needs them) and user-global language tools (`npm`/`pnpm`/`bun -g`, pipx, `uv tool`). Remove and mark-as-manual are confirm + script only. Distro upgrades are never included.
+- **Outdated.** Newer version available from Homebrew, Flatpak, Snap, apt, pacman, AUR (paru/yay/pikaur), dnf/yum, zypper, or the App Store. Named upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf/yum, zypper) run from the Outdated page after you confirm, or with `appattic update` (`--dry-run` prints the script first, `--yes` skips the prompt when there is no terminal). Not a full distro upgrade (`apt upgrade`, `pacman -Syu`). App Store, Snap, and the language globals (npm, pip, RubyGems, Composer) stay report-only. Untrusted Homebrew casks are listed and are not updated. Debian/Ubuntu also lists `dpkg` config remnants (`rc`) and PPA source files.
+- **Packages.** Distro orphans (nothing still needs them) and user-global language tools (`npm`/`pnpm`/`bun -g`, pipx, `uv tool`, top-level pip user-site, `~/.deno/bin`; the Zig core adds RubyGems and Composer globals, and container leftovers: dangling images, dangling volumes, exited containers). Remove and mark-as-manual are confirm + script only. Distro upgrades are never included.
 - **Disk usage.** Folder and device sizes with a tree, allocated vs apparent size, ring and treemap charts (Linux Qt), scan home / folder / file system, open in the file manager, and move to Trash after confirm. Other file systems are not descended into unless you ask. Directory symlinks are not followed. `appattic disk [PATH]` prints the tree.
 
 Tiers for installed software: KEEP (in use), REVIEW (idle, check first), REMOVE (stale and easy to reinstall). Default CLI cleanup scripts (`report --dry-run`, `leftovers --dry-run`, `stale --dry-run`) only include orphaned leftovers, PATH overlays, and REMOVE-tier items. `packages --dry-run` is a separate package script. The UI can also uninstall REVIEW-tier apps you opt into.
@@ -210,8 +210,8 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 | `tests/AppAtticScanTests/` | XCTest port of the old scanner cases |
 
 | `DESIGN.md` | Native UI visual rules |
-| `docs/superpowers/specs/` | Requirement and architecture records (Swift port implemented; Zig WASM core accepted) |
-| `core/` | Zig `wasm32` spike (core + plugins + C Wasmtime embedder) |
+| `docs/superpowers/specs/` | Requirement and architecture records (both accepted, both implemented) |
+| `core/` | Zig `wasm32` scan core (loader + plugins + C Wasmtime embedder). The Linux window runs on it |
 
 ## Notes
 
