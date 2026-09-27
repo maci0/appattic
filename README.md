@@ -229,7 +229,7 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 | `Sources/AppAtticCLI/` | `appattic` command line |
 | `Sources/AppAttic/` | SwiftCrossUI app (AppKit on macOS) |
 | `ui/linux-qt/` | C++ Qt 6 Widgets shell (Linux). Window, findings, settings, WASM host paths, and smoke are separate files |
-| `tests/AppAtticScanTests/` | XCTest port of the old scanner cases |
+| `tests/AppAtticScanTests/` | XCTest port of the old scanner cases, plus seeded mutation harnesses for the parsers that read foreign text: the CLI argv and `COLORFGBG`, package manager listings, `settings.json`, and ISO timestamps |
 
 | `DESIGN.md` | Native UI visual rules |
 | `docs/superpowers/specs/` | Requirement and architecture records (both accepted, both implemented) |
