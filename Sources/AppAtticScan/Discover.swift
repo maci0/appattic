@@ -181,8 +181,7 @@ public func plistDescription(_ info: [String: Any], appName: String) -> String? 
     }
     if text.isEmpty || isJunkAppBlurb(text) { return nil }
     func fullMatch(_ s: String) -> Bool {
-        // Was `versionRE` (`^[\d.]+$`) evaluated twice per call (firstMatch +
-        // rangeOfFirstMatch). Byte check: non-empty, digits and dots only.
+        // `^[\d.]+$` as a byte check: non-empty, digits and dots only.
         s.utf8.withContiguousStorageIfAvailable { u -> Bool in
             guard !u.isEmpty else { return false }
             for k in 0..<u.count {
@@ -325,7 +324,8 @@ public func makeApp(from appPath: String) -> AppRecord? {
     return AppRecord(path: real, displayName: name, bundleId: bid, sourceDir: sourceDir, isSystem: isSystem, extra: extra)
 }
 
-/// Desktop Entry string escapes (`\s` `\n` `\t` `\r` `\\`). Not used on Exec.
+/// Desktop Entry string escapes (`\s` `\n` `\t` `\r` `\\`). `readDesktop`
+/// skips them for the Exec, TryExec, and URL keys.
 /// Byte walk: escapes are ASCII, and UTF-8 trail bytes never contain 0x5C,
 // so non-ASCII passes through untouched.
 func unescapeDesktopValue(_ raw: String) -> String {

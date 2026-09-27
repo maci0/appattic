@@ -33,6 +33,8 @@ public struct HistoryIndex {
     }
 }
 
+/// Last-used as usage, or nil when it sits within `windowSeconds` of the
+/// install date: a first run right after installing is not usage.
 public func effectiveLastUsed(
     _ lastUsed: Date?,
     _ dateAdded: Date?,

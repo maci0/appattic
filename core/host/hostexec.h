@@ -11,7 +11,7 @@ extern "C" {
 #define APPATTIC_HOST_EXEC_FAIL (-2)
 #define APPATTIC_HOST_EXEC_BAD (-3)
 
-/* 1 if argv0 is snap/pacman/apt-get/apt/ls/readlink/realpath/test/dnf/dnf5/yum/zypper/flatpak
+/* 1 if argv0 is snap/pacman/paru/yay/pikaur/apt-get/apt/dpkg/ls/readlink/realpath/test/dnf/dnf5/yum/zypper/flatpak
    /npm/pnpm/bun/pipx/pip/pip3/uv/brew/gem/composer/docker/podman and argv is a read-only query.
    docker/podman: images -f dangling=true, volume ls -f dangling=true,
    ps -a -f status=exited only.
@@ -19,10 +19,12 @@ extern "C" {
    brew: outdated with --json / --json=v2 only.
    gem: outdated only. composer: global outdated only.
    pip/pip3: list --user --format=json (optional --outdated).
-   pacman: -Q* queries including -Qu. apt: -s autoremove, list --upgradable.
+   pacman (and paru/yay/pikaur): -Q* queries including -Qu / -Qua.
+   apt: -s autoremove, list --upgradable. dpkg: -l only.
    dnf: repoquery --unneeded, list --upgrades, check-update.
    zypper: packages --unneeded, list-updates.
-   flatpak: uninstall/remove --unused with --dry-run/--simulate/-s only.
+   flatpak: uninstall/remove --unused with --dry-run/--simulate/-s;
+   remote-ls --updates --app; list --app.
    0 if missing, unknown binary, metacharacters, or destructive argv
    (rm, rmi, snap remove, system prune, volume prune, purge, upgrade, install, -y,
     pacman -Syu/-R*, dnf leaves/remove/upgrade, zypper rm/dup/update, flatpak uninstall -y,

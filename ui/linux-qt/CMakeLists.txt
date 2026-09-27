@@ -178,7 +178,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_property(SOURCE main.cpp finding.cpp settings.cpp smoke.cpp
         diskusage.cpp diskchart.cpp diskpage.cpp
         APPEND PROPERTY COMPILE_OPTIONS -Werror)
-    # -Werror lives on the source, so the object library gets it too.
 endif()
 if(UNIX AND NOT APPLE)
     get_filename_component(_wasmtime_libdir "${WASMTIME_LIBRARY}" DIRECTORY)

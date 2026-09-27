@@ -86,8 +86,10 @@ QString scriptRootHelper();
 void groupLinuxLeftovers(QVector<Finding> &findings);
 bool isLeftover(const Finding &f);
 bool isOutdated(const Finding &f);
-/// Same rule as Swift `outdatedIsUpdatable`: Homebrew, Flatpak, and named distro
-/// upgrades after confirm. App Store, Snap, language globals, and untrusted casks stay report-only.
+/// Same manager list as Swift `outdatedIsUpdatable`, plus a kind gate: only a
+/// kind naming an outdated or upgrade row (or no kind at all) can be upgraded.
+/// Homebrew, Flatpak, and named distro upgrades stay updatable after confirm.
+/// App Store, Snap, language globals, and untrusted casks stay report-only.
 bool outdatedIsUpdatable(const QString &manager, const QString &kind);
 bool hasUsageTiming(const Finding &f);
 bool isStaleTierStatus(const QString &status);

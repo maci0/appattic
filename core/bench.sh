@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Native micro-benchmarks for the Zig core (Linux only: uses clock_gettime).
 # Not part of ./core/build.sh; run on demand: ./core/bench.sh [filter-substr]
-# One line per benchmark: "<name> <iters> <ns/op> <checksum>".
+# One line per benchmark: "<name> <iters> <ns/op> <checksum>", then a final
+# "sink=<n>" line so the optimizer cannot drop a benchmarked loop.
 set -euo pipefail
 export LC_ALL=C
 export LANG=C

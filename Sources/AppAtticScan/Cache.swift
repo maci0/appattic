@@ -79,7 +79,8 @@ public func writeScanCache(_ cache: ScanCacheFile, to url: URL = defaultScanCach
     }
 }
 
-/// True when includeSystem, fingerprint, or age (default 24h) no longer match.
+/// True when the cached scan is marked incomplete, or when includeSystem,
+/// fingerprint, or age (default 24h) no longer match.
 public func isScanCacheStale(
     _ cache: ScanCacheFile,
     includeSystem: Bool,

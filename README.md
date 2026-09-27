@@ -38,7 +38,7 @@ Equivalent without `run.sh` after a build:
 .build/release/appattic --version
 ```
 
-Useful flags: `--json FILE`, `--include-system`, `--fresh` (ignore the last-scan cache), `--dry-run` (print the script for this command), `--top N` (largest leftovers), `--category CAT`, `--leftovers-only`, `--stale-only`, `--no-color`, `--version` (`-v`), `--help` (`-h`). Progress and status (including JSON written to FILE) go to stderr so reports and `--dry-run` scripts stay pipeable.
+Useful flags: `--json FILE`, `--include-system`, `--fresh` (ignore the last-scan cache), `--dry-run` (print the script for this command), `--top N` (largest leftovers), `--category CAT`, `--leftovers-only`, `--stale-only`, `--all-file-systems` and `--allocated` (on `disk`), `--no-color`, `--version` (`-v`), `--help` (`-h`). Progress and status (including JSON written to FILE) go to stderr so reports and `--dry-run` scripts stay pipeable.
 
 Settings live in `settings.json` next to the scan cache (same file for CLI, macOS UI, and Linux Qt):
 
@@ -113,7 +113,7 @@ bash scripts/lint.sh
 
 `swift test` and `swift build` need unrestricted permissions in sandboxed environments.
 
-`scripts/lint.sh` runs shellcheck on the build scripts, compiles `hostexec` with warnings as errors, runs `zig fmt --check` when `zig` is on PATH, and rejects any commit message that credits an AI tool (`Co-authored-by: Cursor` and friends): commit messages carry no tool attribution, and that check is what keeps it that way. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the fast lint + test + CLI loop; `scripts/check.sh --qt` reproduces the full Linux CI verification.
+`scripts/lint.sh` runs shellcheck on the build scripts, yamllint on the workflow and Flatpak YAML, checks that the three version declarations agree, compiles `hostexec` with warnings as errors, runs `zig fmt --check` when `zig` is on PATH, and rejects any commit message that credits an AI tool (`Co-authored-by: Cursor` and friends): commit messages carry no tool attribution, and that check is what keeps it that way. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the fast lint + test + CLI loop; `scripts/check.sh --qt` reproduces the full Linux CI verification.
 
 ## Native UI
 
@@ -134,6 +134,7 @@ You cannot cross-compile the Qt UI from macOS and call that a Linux link. Build 
 ./scripts/linux-deps.sh              # print Qt 6 + Wasmtime + Swift + shellcheck notes
 ./scripts/linux-deps.sh --install    # Qt 6 headers, cmake, ninja, clang (root)
 ./scripts/linux-deps.sh --install-wasmtime
+./scripts/linux-deps.sh --install-zig
 ./scripts/linux-deps.sh --install-shellcheck   # needed by scripts/lint.sh
 # Arch has no Swift in extra. AUR: swift-bin. Or:
 ./scripts/linux-deps.sh --install-swift   # Swift 5.10.1 into /opt/swift (or .deps/swift without root)
@@ -153,7 +154,7 @@ bash scripts/linux-appimage.sh
 # dist/AppAttic-x86_64.AppImage  (or aarch64 on arm64 hosts)
 ```
 
-`VERSION` is the current git tag without a leading `v`, or the version declared in `Sources/AppAtticScan/Util.swift` if untagged (`bash scripts/check-version.sh` prints it). The release workflow sets it from the `v*` tag and fails the build when the tag disagrees with that declaration. The script then runs `--smoke` on the AppImage and fails if that does not print `SMOKE=ok`. Debug builds additionally take `--dev-check <table|stream|disk|shot>`: the CI gates and the offscreen page renders (`shot <dir>`), all compiled out with `NDEBUG`.
+`VERSION` is the current git tag without a leading `v`, or, on an untagged checkout, the version declared in `Sources/AppAtticScan/Util.swift`. The version is declared in three files that nothing keeps in sync (that file, `ui/linux-qt/CMakeLists.txt`, and the newest `<release>` in `packaging/org.appattic.AppAttic.metainfo.xml`), so `bash scripts/check-version.sh` is the one reader: it prints the declared version and fails when the three disagree. `bash scripts/check-version.sh --tag v1.2.3` also requires the tag to match. The release workflow runs the `--tag` form against the `v*` ref. The AppImage script then runs `--smoke` and fails if that does not print `SMOKE=ok`. Debug builds additionally take `--dev-check <table|stream|disk|shot>`: the CI gates and the offscreen page renders (`shot <dir>`), all compiled out with `NDEBUG`.
 
 Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downloads pinned linuxdeploy, linuxdeploy-plugin-qt, and appimagetool into `dist/.appimage-tools/` and checks SHA-256. WASM modules ship under `usr/share/appattic/`; `libwasmtime.so` sits next to the binary. It also writes `dist/AppAttic-<arch>.AppImage.sbom.json`, a CycloneDX 1.5 inventory of every pinned third-party artifact that went into the image. Regenerate it or check the pins yourself:
 

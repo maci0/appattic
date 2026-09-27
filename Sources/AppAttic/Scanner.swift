@@ -199,6 +199,9 @@ final class ScannerViewModel {
         }
     }
 
+    /// Stamp the inventory before and after the scan. `commitScanCache` drops
+    /// the result when the two differ, so a scan that raced an install is not
+    /// served to the next launch.
     private func runScan(includeSystem: Bool) {
         isScanning = true
         if !holdsSettingsError {

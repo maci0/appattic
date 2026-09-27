@@ -20,11 +20,12 @@ typedef void (*appattic_progress_fn)(
    tag 0 = missing coeffect; default 1. container-runtime: 1 docker, 2 podman.
    Missing plugin files are skipped. Returns 0 on success, 1 on plugin/abi error, 2 on usage.
    Host intercept rejects `system prune`, `rmi -f`, `volume prune`,
-   `snap remove --purge`, `rm /usr/bin/snap`.
+   `snap remove --purge`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`,
+   `rm /usr/bin/flatpak`.
    `host.exec` allowlist is `appattic_host_exec_allowed` in hostexec.h:
-   snap, pacman, apt-get/apt, ls, readlink, realpath, test, dnf/dnf5/yum, zypper,
-   flatpak, npm, pnpm, bun, pipx, pip/pip3, uv, brew, gem, composer,
-   docker/podman. Query argv only (see hostexec.h). Destructive argv is denied.
+   snap, pacman, paru/yay/pikaur, apt-get/apt, dpkg, ls, readlink, realpath, test,
+   dnf/dnf5/yum, zypper, flatpak, npm, pnpm, bun, pipx, pip/pip3, uv, brew, gem,
+   composer, docker/podman. Query argv only (see hostexec.h). Destructive argv is denied.
    Darwin injects fixtures (no daemons). APPATTIC_HOST_EXEC_LIVE=1 runs execvp.
    on_progress may be NULL. It runs before plugin_query so the UI can show
    the current plugin, not only the last finished one. */

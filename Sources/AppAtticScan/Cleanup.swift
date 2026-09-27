@@ -264,7 +264,7 @@ func linuxUninstallId(source: String, path: String, pkgId: String?) -> String {
 }
 
 /// Packaged OS prefixes that leftover/uninstall scripts must not `rm`.
-/// Matches Qt `isProtectedPackagedPath`, plus `/etc` `/System` `/Library` and kernel roots.
+/// The root list is identical to Qt `isProtectedPackagedPath` in `ui/linux-qt/finding.cpp`.
 public func isProtectedPackagedPath(_ path: String) -> Bool {
     if path.isEmpty { return false }
     let roots = [
@@ -421,7 +421,7 @@ func staleCleanupScript(_ result: ScanResult) -> String {
 }
 
 /// Printable `/bin/sh` for this CLI command. `outdated` comments every upgrade; `update` is named live upgrades after confirm.
-/// `report` / `leftovers` / `stale` emit leftovers and REMOVE-tier uninstalls, not packages.
+/// `packages` emits removals (the mark-manual set is always empty here; the UI builds that half). `report` / `leftovers` / `stale` emit leftovers and REMOVE-tier uninstalls, not packages.
 public func dryRunScript(
     command: String,
     result: ScanResult,

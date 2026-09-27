@@ -1,9 +1,9 @@
 import XCTest
 @testable import AppAtticScan
 
-// Fixed differential corpus: old split/trim implementations vs the byte scans.
-// Guards the tricky edges (whitespace-only tab fields, single-token leaders,
-///mid-list "name" rows, 5+ column tails).
+// Fixed corpus pinning the byte scanners where a split/trim rewrite drifts:
+// whitespace-only tab fields, single-token leaders, mid-list "name" rows,
+// 5+ column tails.
 final class ParserParityTests: XCTestCase {
     func testFlatpakWhitespaceOnlyTabFields() {
         // Old `filter { !$0.isEmpty }` kept `" "` as a positional placeholder.

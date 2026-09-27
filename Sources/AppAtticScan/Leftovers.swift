@@ -25,12 +25,13 @@ public let appAliases: [String: [String]] = [
 ]
 
 /// Ownership rule for the two taxonomies that walk the same directories:
-/// Leftovers owns *data* (`~/.steam`, `~/.wine`, … listed here and in the
-/// `path-home-dot` plugin allowlist — keep both lists in sync); Packages owns
-/// *tools* (PATH overlays, globals). A path that is both data and an install
-/// root (e.g. `~/.steam/steamapps` vs the `steam` tool) is reported on
-/// Leftovers with a `shadow` status linking the packaged path, never deleted
-/// outright. See `isUserBinLeftoverPath` / `listShadowingOverlays`.
+/// Leftovers owns *data* (`~/.steam`, `~/.wine`, …; the `path-home-dot`
+/// allowlist in `core/src/path_listing.zig` covers a subset of these, keep the
+/// two in sync); Packages owns *tools* (PATH overlays, globals). A file in an
+/// overlay root that a package dir also ships (e.g. `~/.local/bin/foo` against
+/// `/usr/bin/foo`) is reported on Leftovers with a `shadow` status linking the
+/// packaged path, never deleted outright. See `isUserBinLeftoverPath` /
+/// `listShadowingOverlays`.
 let homeDotData = [
     ".mozilla", ".thunderbird", ".steam", ".wine", ".java",
     ".gradle", ".docker", ".kube", ".aws", ".gnupg", ".ssh",

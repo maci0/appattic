@@ -531,7 +531,7 @@ public func parseISODate(_ value: String?) -> Date? {
     }
 }
 
-/// Direct parse of the ISO-8601 shapes the formatters below accept, by integer
+/// Direct parse of the ISO-8601 shapes the formatters above accept, by integer
 /// arithmetic. `parseISODate` spent 23 µs per call building variant strings and
 /// trying up to nine formatters.
 ///

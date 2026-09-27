@@ -1986,9 +1986,6 @@ private:
     }
 
 public:
-    /// Render every page offscreen and save it next to the link proof. The
-    /// smoke checks fill widgets; only this paints them, and the PNGs are what
-    /// layout review looks at.
     /// One scan against the host.exec fixtures, pumped to completion. The
     /// gates below all need exactly this.
     bool runFixtureScan() {
@@ -2004,6 +2001,9 @@ public:
     }
 
 #ifndef NDEBUG
+    /// Render every page offscreen and save it next to the link proof. The
+    /// smoke checks fill widgets; only this paints them, and the PNGs are what
+    /// layout review looks at.
     void startShots(const QString &dir) {
         QDir().mkpath(dir);
         m_shotDir = dir;
