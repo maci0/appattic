@@ -51,12 +51,18 @@ static QTreeWidgetItem *makeValueItem(
 );
 static void appendChildren(QTreeWidgetItem *parent, DiskNode *node, int depth);
 
+/// How long the destructor waits for the scan thread before detaching it. The
+/// walk tests the cancel flag between directories, so a normal stop returns at
+/// once; a getdents64 on a hung network mount does not come back at all, and an
+/// unbounded wait would freeze the GUI at quit.
+static constexpr int kScanThreadDrainMs = 8000;
+
 class DiskScanWorker : public QObject {
     Q_OBJECT
 public:
     void setWanted(int token) { m_wanted.storeRelease(token); }
     void requestCancel() { m_wanted.storeRelease(0); }
-    bool isCancelled() const { return m_wanted.loadAcquire() != m_token; }
+    bool isCancelled() const { return m_wanted.loadAcquire() != m_token.loadAcquire(); }
     DiskNode *takeRoot() {
         DiskNode *r = m_root;
         m_root = nullptr;
@@ -65,7 +71,7 @@ public:
 
 public slots:
     void run(const QString &path, bool oneFs, int token) {
-        m_token = token;
+        m_token.storeRelease(token);
         delete m_root;
         m_root = nullptr;
         DiskScanOptions opts;
@@ -75,10 +81,13 @@ public slots:
             return static_cast<DiskScanWorker *>(user)->isCancelled();
         };
         opts.progress = [](qint64 dirs, const QString &p, void *user) {
-            emit static_cast<DiskScanWorker *>(user)->progress(dirs, p);
+            auto *w = static_cast<DiskScanWorker *>(user);
+            emit w->progress(w->m_token.loadAcquire(), dirs, p);
         };
         opts.dirDone = [](const DiskNode &n, void *user) {
-            emit static_cast<DiskScanWorker *>(user)->dirDone(
+            auto *w = static_cast<DiskScanWorker *>(user);
+            emit w->dirDone(
+                w->m_token.loadAcquire(),
                 n.path,
                 n.name,
                 n.apparent,
@@ -102,10 +111,14 @@ public slots:
     }
 
 signals:
-    void progress(qint64 dirs, const QString &path);
+    /// `token` is the run that produced the event, not the one the page is
+    /// showing. A rescan can start before a cancelled walk has drained, and the
+    /// events of the old run are already sitting in the queue behind it.
+    void progress(int token, qint64 dirs, const QString &path);
     /// One finished directory, as values: the tree it came from is owned by the
     /// scanning thread. Built-in types only, so the signal needs no metatype.
     void dirDone(
+        int token,
         const QString &path,
         const QString &name,
         qint64 apparent,
@@ -119,7 +132,9 @@ signals:
 private:
     DiskNode *m_root = nullptr;
     QAtomicInteger<int> m_wanted{0};
-    int m_token = 0;
+    /// Read from the walk's worker threads on every cancellation check and on
+    /// every streamed event, so it is atomic like the token it is compared to.
+    QAtomicInteger<int> m_token{0};
 };
 
 class DiskPage::Impl {
@@ -426,7 +441,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         selectNode(n);
         updateChrome();
     });
-    connect(d->worker, &DiskScanWorker::progress, this, [this](qint64 dirs, const QString &path) {
+    connect(d->worker, &DiskScanWorker::progress, this, [this](int token, qint64 dirs, const QString &path) {
+        if (token != d->scanToken) return;
         // The scanned path is under the account home, so it carries the
         // account name. The status text is what leaves the window (status bar,
         // screenshot), so it names the folder as `~/...`; the tree keeps the
@@ -439,8 +455,9 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         emit statusMessage(QStringLiteral("Scanning disk usage · ") + label);
     });
     connect(d->worker, &DiskScanWorker::dirDone, this,
-            [this](const QString &path, const QString &name, qint64 apparent, qint64 allocated,
-                   qint64 items, qint64 mtime) {
+            [this](int token, const QString &path, const QString &name, qint64 apparent,
+                   qint64 allocated, qint64 items, qint64 mtime) {
+                if (token != d->scanToken) return;
                 if (!m_scanning || d->root) return;
                 // Only the rows the finished tree shows directly under the root.
                 const int slash = path.lastIndexOf(QLatin1Char('/'));
@@ -560,9 +577,19 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
 
 DiskPage::~DiskPage() {
     if (d->worker) d->worker->requestCancel();
+    bool stopped = true;
     if (d->thread) {
         d->thread->quit();
-        d->thread->wait();
+        stopped = d->thread->wait(kScanThreadDrainMs);
+    }
+    if (!stopped) {
+        /* The scan thread still owns its tree and the worker it is running on.
+           Deleting either from here would free a tree under the walk, and
+           ~QObject would delete a running QThread, so both are detached and
+           left to the process exit. */
+        d->thread->setParent(nullptr);
+        delete d;
+        return;
     }
     d->chart->setRoot(nullptr);
     d->tree->clear();

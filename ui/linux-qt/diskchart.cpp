@@ -42,6 +42,10 @@ void DiskChart::setRoot(DiskNode *node) {
     m_root = node;
     m_view = node;
     m_hover = nullptr;
+    // The hits hold raw node pointers into the tree the caller is replacing,
+    // and the repaint that would clear them has not run yet, so a mouse move
+    // in between would hand a freed node to a tooltip or to the page.
+    m_hits.clear();
     update();
 }
 

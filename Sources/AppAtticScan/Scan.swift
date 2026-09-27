@@ -150,13 +150,12 @@ public func applyPrefsFallback(_ apps: inout [AppRecord], items: [DataItem]) {
     }
 }
 
-/// A scan resets and reads the process-global `failedChecks` set, rewrites the
-/// host's process-global `PATH` override around every command, and stamps the
-/// single scan cache file. Two scans in one process interleave all three, so one
-/// scan's failures are attributed to the other and a cache commit can mix them.
-/// One scan at a time, enforced here rather than left to each caller. The lock
-/// is not recursive, so a `progress` callback must not start a scan: it would
-/// block forever on the scan already in flight.
+/// A scan resets and reads the process-global `failedChecks` set and stamps the
+/// single scan cache file. Two scans in one process interleave both, so one
+/// scan's failures are attributed to the other and a cache commit can mix
+/// them. One scan at a time, enforced here rather than left to each caller. The
+/// lock is not recursive, so a `progress` callback must not start a scan: it
+/// would block forever on the scan already in flight.
 private let scanLock = NSLock()
 
 /// Serialises `progress`. Collectors emit from `pmap` worker threads, so

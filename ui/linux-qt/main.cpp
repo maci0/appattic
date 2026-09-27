@@ -107,6 +107,11 @@ static qint64 addBytes(qint64 a, qint64 b) {
 /// the last 400, so this only has to cover them with room for a whole line.
 static const int kScriptOutputCap = 64 * 1024;
 
+/// How long the destructor waits for the scan thread. A run notices the cancel
+/// flag between plugins, so a normal quit returns at once; a subprocess wedged
+/// past its own timeout does not, and the wait has to end for the app to.
+static const int kScanThreadDrainMs = 8000;
+
 static bool isDarkPalette(const QPalette &p) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     const Qt::ColorScheme scheme = QGuiApplication::styleHints()->colorScheme();
@@ -949,19 +954,22 @@ public:
             m_worker->requestCancel();
         }
         m_scanThread->quit();
-        bool stopped = m_scanThread->wait(8000);
-        if (!stopped) {
-            m_scanThread->terminate();
-            stopped = m_scanThread->wait(2000);
-        }
+        const bool stopped = m_scanThread->wait(kScanThreadDrainMs);
         clearCoreWasmCancel();
         /* The PATH rewrite and the engine registry are process-global, and a
            run that never stopped is still reading and writing them. Tearing
            them down beside a live run is the race the host's own drain guard
-           cannot see, so they wait until the thread is gone. A run that
-           outlives the wait keeps the engine until exit. */
+           cannot see, so they wait until the thread is gone.
+
+           The thread is never killed: a run spends its time inside the host
+           under g_life_lock or g_mod_lock, and terminate() would strand that
+           mutex for the next thread that takes it, wedging
+           appattic_wasm_shutdown forever. It is detached instead, so ~QObject
+           cannot delete a running QThread either (Qt aborts on that), and the
+           process exit reclaims it together with the engine. */
         if (!stopped) {
             std::fprintf(stderr, "scan thread still running at dispose, keeping the engine\n");
+            m_scanThread->setParent(nullptr);
             return;
         }
         /* Inverse of requestCancel above: leave the process-global cancel in
