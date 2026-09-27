@@ -252,6 +252,13 @@ static QString settingsInvalidMessage(const QString &path, const QString &err) {
     ).arg(path, err));
 }
 
+static QString settingsLegacyMessage(const QStringList &keys) {
+    return redactHomePaths(QStringLiteral(
+        "Old settings for %1 are neither true nor false, so they were not carried over. "
+        "Set them to true or false, then save settings."
+    ).arg(keys.join(QStringLiteral(", "))));
+}
+
 static QString settingsUnwritableMessage(const QString &path) {
     return redactHomePaths(QStringLiteral("Could not save settings to %1.").arg(path));
 }
@@ -3005,7 +3012,15 @@ private:
         QFile f(path);
         if (!f.exists()) {
             bool hadLegacy = false;
-            const AppSettings s = migrateLegacyQSettings(&hadLegacy);
+            QStringList unreadable;
+            const AppSettings s = migrateLegacyQSettings(&hadLegacy, &unreadable);
+            if (!unreadable.isEmpty()) {
+                // Migrating would write the defaults over a value the user
+                // wrote, so stop here and name the key instead.
+                m_settingsError = true;
+                showError(settingsLegacyMessage(unreadable));
+                return;
+            }
             applyLoadedSettings(s);
             if (hadLegacy) persistSettings();
             return;
@@ -3239,6 +3254,12 @@ static int smokeUiCopy() {
     if (badMsg.contains(QLatin1String("invalid settings /tmp"))
         || !badMsg.contains(QLatin1String("not valid JSON"))) {
         std::fprintf(stderr, "ui-copy: settings invalid still uses developer phrasing\n");
+        return 1;
+    }
+    const QString legacyMsg = settingsLegacyMessage({QStringLiteral("includeSystem")});
+    if (!legacyMsg.contains(QLatin1String("includeSystem"))
+        || !legacyMsg.contains(QLatin1String("true nor false"))) {
+        std::fprintf(stderr, "ui-copy: settings legacy message does not name the key\n");
         return 1;
     }
     if (ignoredPathLabel(QStringLiteral("/tmp/Caches/Foo")) != QLatin1String("Caches/Foo")) {

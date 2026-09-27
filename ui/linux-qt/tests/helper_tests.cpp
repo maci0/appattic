@@ -3,6 +3,7 @@
 // shipped Qt app (scripts/linux-qt-link.sh runs both).
 #include "diskusage.h"
 #include "finding.h"
+#include "settings.h"
 
 #include <QAtomicInt>
 #include <QDate>
@@ -999,10 +1000,62 @@ static int checkDiskUsage() {
     return 0;
 }
 
+static int checkSettings() {
+    // A legacy value that is not a boolean must not become the default: the
+    // migration would write that default back as the user's setting.
+    bool readable = false;
+    if (!legacyBoolValue(QVariant(true), false, &readable) || !readable) {
+        std::fprintf(stderr, "settings: legacy bool QVariant(true)\n");
+        return 1;
+    }
+    for (const char *on : {"true", "1", "yes", "YES", " true "}) {
+        if (!legacyBoolValue(QVariant(QString::fromLatin1(on)), false, &readable) || !readable) {
+            std::fprintf(stderr, "settings: legacy bool on spelling %s\n", on);
+            return 1;
+        }
+    }
+    for (const char *off : {"false", "0", "no", "No"}) {
+        if (legacyBoolValue(QVariant(QString::fromLatin1(off)), true, &readable) || !readable) {
+            std::fprintf(stderr, "settings: legacy bool off spelling %s\n", off);
+            return 1;
+        }
+    }
+    if (legacyBoolValue(QVariant(QStringLiteral("maybe")), true, &readable) != true
+        || !legacyBoolValue(QVariant(QStringLiteral("maybe")), false, &readable) != false
+        || readable) {
+        std::fprintf(stderr, "settings: unreadable legacy value was not reported\n");
+        return 1;
+    }
+
+    AppSettings s;
+    QString err;
+    const QByteArray raw = R"({"confirmDelete":false,"ignoredLeftoverPaths":["/a","/a"],"includeSystem":true})";
+    if (!parseSettingsJson(raw, &s, &err) || s.confirmDelete || !s.includeSystem
+        || s.ignoredLeftoverPaths != QStringList{QStringLiteral("/a")}) {
+        std::fprintf(stderr, "settings: valid settings.json not parsed (%s)\n", qPrintable(err));
+        return 1;
+    }
+    for (const QByteArray &bad : {
+             QByteArray(""),
+             QByteArray("not json"),
+             QByteArray("[]"),
+             QByteArray(R"({"confirmDelete":"no"})"),
+             QByteArray(R"({"unknownKey":true})"),
+             QByteArray(R"({"ignoredLeftoverPaths":[1]})"),
+         }) {
+        if (parseSettingsJson(bad, &s, &err)) {
+            std::fprintf(stderr, "settings: bad settings.json accepted: %s\n", bad.constData());
+            return 1;
+        }
+    }
+    std::fprintf(stdout, "settings: ok\n");
+    return 0;
+}
+
 int main() {
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
-        checkDiskUsage(),
+        checkDiskUsage(), checkSettings(),
     };
     for (const int rc : checks) {
         if (rc != 0) return rc;

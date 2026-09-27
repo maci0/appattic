@@ -100,6 +100,7 @@ Environment:
 | `XDG_CACHE_HOME` | Linux | Absolute cache root scanned for leftovers. |
 | `XDG_STATE_HOME` | Linux | Absolute state root scanned for leftovers. |
 | `XDG_DATA_DIRS` | Linux | Colon-separated absolute data roots searched for desktop entries. Unset or empty uses `/usr/local/share:/usr/share`; relative entries are skipped. |
+| `FLATPAK_ID` | Linux Qt and the core host | Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags and package-manager queries go through `/run/host` and `flatpak-spawn --host`. Unset or empty is a normal host run. |
 
 Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used.
 

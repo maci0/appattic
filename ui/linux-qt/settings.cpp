@@ -17,30 +17,39 @@ QString settingsFilePath() {
         .filePath(QStringLiteral("appattic/settings.json"));
 }
 
-static bool legacyBool(const QSettings &qs, const QString &key, bool fallback) {
-    if (!qs.contains(key)) return fallback;
-    const QVariant v = qs.value(key);
-    if (v.userType() == QMetaType::Bool) return v.toBool();
-    const QString t = v.toString().trimmed().toLower();
+bool legacyBoolValue(const QVariant &value, bool fallback, bool *readable) {
+    if (readable) *readable = true;
+    if (value.userType() == QMetaType::Bool) return value.toBool();
+    const QString t = value.toString().trimmed().toLower();
     if (t == QLatin1String("true") || t == QLatin1String("1") || t == QLatin1String("yes")) {
         return true;
     }
     if (t == QLatin1String("false") || t == QLatin1String("0") || t == QLatin1String("no")) {
         return false;
     }
+    if (readable) *readable = false;
     return fallback;
 }
 
-AppSettings migrateLegacyQSettings(bool *hadValues) {
+static bool legacyBool(const QSettings &qs, const QString &key, bool fallback, QStringList *unreadable) {
+    if (!qs.contains(key)) return fallback;
+    bool readable = true;
+    const bool v = legacyBoolValue(qs.value(key), fallback, &readable);
+    if (!readable && unreadable) unreadable->append(key);
+    return v;
+}
+
+AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable) {
     QSettings qs(QStringLiteral("AppAttic"), QStringLiteral("AppAttic"));
     const bool present = qs.contains(QStringLiteral("confirmDelete"))
         || qs.contains(QStringLiteral("includeSystem"))
         || qs.contains(QStringLiteral("ignoredLeftovers"));
     if (hadValues) *hadValues = present;
+    if (unreadable) unreadable->clear();
     AppSettings s;
     if (!present) return s;
-    s.confirmDelete = legacyBool(qs, QStringLiteral("confirmDelete"), true);
-    s.includeSystem = legacyBool(qs, QStringLiteral("includeSystem"), false);
+    s.confirmDelete = legacyBool(qs, QStringLiteral("confirmDelete"), true, unreadable);
+    s.includeSystem = legacyBool(qs, QStringLiteral("includeSystem"), false, unreadable);
     const QStringList ign = qs.value(QStringLiteral("ignoredLeftovers")).toStringList();
     QSet<QString> seen;
     for (const QString &raw : ign) {

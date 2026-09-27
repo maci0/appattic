@@ -315,10 +315,11 @@ int appattic_host_exec_cancelled(void) {
 }
 
 /* Presence, not a boolean: FLATPAK_ID is an application ID, so any non-empty
-   value means flatpak. The switches below get env_flag instead. */
+   value means flatpak, which is also what the Qt shell reads. The switches
+   below get env_flag instead. */
 static int env_set(const char *name) {
     const char *e = getenv(name);
-    return e && e[0] && strcmp(e, "0") != 0;
+    return e && e[0];
 }
 
 static int eq_ignore_case(const char *a, const char *b) {

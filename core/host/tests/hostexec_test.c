@@ -475,6 +475,11 @@ int main(void) {
     if (appattic_host_in_flatpak()) return fail("FLATPAK_ID unset must not report sandbox");
     if (setenv("FLATPAK_ID", "org.appattic.AppAttic", 1) != 0) return fail("setenv FLATPAK_ID");
     if (!appattic_host_in_flatpak()) return fail("FLATPAK_ID set must report sandbox");
+    /* Presence, not a boolean, and the same rule the Qt shell reads. */
+    if (setenv("FLATPAK_ID", "", 1) != 0) return fail("setenv FLATPAK_ID empty");
+    if (appattic_host_in_flatpak()) return fail("empty FLATPAK_ID must not report sandbox");
+    if (setenv("FLATPAK_ID", "0", 1) != 0) return fail("setenv FLATPAK_ID 0");
+    if (!appattic_host_in_flatpak()) return fail("non-empty FLATPAK_ID must report sandbox");
     rc |= expect_allow("pacman -Qdt");
     rc |= expect_deny("pacman -Rns libfoo");
     unsetenv("FLATPAK_ID");
