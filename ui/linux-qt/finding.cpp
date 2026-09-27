@@ -109,8 +109,16 @@ QString expandHomeUserPlaceholder(const QString &text, const QString &home) {
         {"/.cache", "XDG_CACHE_HOME"},
     };
     for (const auto &root : kXdgRoots) {
-        const QString value = QString::fromUtf8(qgetenv(root.env)).trimmed();
+        QString value = QString::fromUtf8(qgetenv(root.env)).trimmed();
         if (value.isEmpty() || !value.startsWith(QLatin1Char('/'))) continue;
+        // The placeholder is replaced by the root on its own, and the separator
+        // that followed it in the text is still after the match, so a root that
+        // ends in one would double it: with `XDG_DATA_HOME=/`,
+        // `/home/user/.local/share/applications/foo.desktop` has to name
+        // `/applications/foo.desktop` rather than `//applications/foo.desktop`.
+        while (value.endsWith(QLatin1Char('/'))) {
+            value.chop(1);
+        }
         out.replace(QStringLiteral("/home/user") + QLatin1String(root.rel), value);
     }
     if (homePath.size() <= 1 || homePath == QLatin1String("/home/user")) return out;
