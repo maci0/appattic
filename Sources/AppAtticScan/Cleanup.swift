@@ -298,7 +298,7 @@ public func commandNeedsRoot(_ cmd: String) -> Bool {
     case "apt-get", "apt-mark", "apt", "pacman", "dnf", "dnf5", "yum", "zypper":
         return true
     default:
-        return t.contains(" '/etc/apt/sources.list.d/") || t.contains(" /etc/apt/sources.list.d/")
+        return t.contains(" /etc/apt/sources.list.d/")
     }
 }
 

@@ -328,9 +328,7 @@ fn fixtureFor(cmd: []const u8) ?[]const u8 {
         if (std.mem.indexOf(u8, cmd, "remote-ls") != null or std.mem.indexOf(u8, cmd, "--updates") != null) {
             return flatpak_updates_fixture;
         }
-        if (std.mem.indexOf(u8, cmd, " list") != null or std.mem.endsWith(u8, cmd, " list") or
-            std.mem.indexOf(u8, cmd, " ls") != null)
-        {
+        if (std.mem.indexOf(u8, cmd, " list") != null or std.mem.indexOf(u8, cmd, " ls") != null) {
             return flatpak_list_fixture;
         }
         return flatpak_fixture;

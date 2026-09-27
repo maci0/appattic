@@ -554,8 +554,7 @@ public func collectPackages(
                 }
                 if let text = runPackageQuery(
                     which: which, run: run, names: ["dpkg"],
-                    args: ["-l"],
-                    ok: { $0 == 0 }
+                    args: ["-l"]
                 ) {
                     result.append(contentsOf: parseDpkgRc(text))
                 }
@@ -578,7 +577,7 @@ public func collectPackages(
                 return parseZypperUnneeded(text)
             }
         case nil:
-            queries.append { [] }
+            break
     }
     queries.append {
         guard let text = runPackageQuery(

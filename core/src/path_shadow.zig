@@ -88,7 +88,14 @@ fn findShadowsNative(
                 if (packaged == null) packaged = pkg_path;
             }
             if (same or packaged == null) continue;
-            out[n] = .{ .name = name, .path = overlay_path, .shadows = packaged.? };
+            // entry.name points into the dir reader buffer, which the next
+            // it.next call invalidates. joinPath already copied the name into
+            // path_store, so take it from the stored path instead.
+            out[n] = .{
+                .name = overlay_path[odir.len + 1 ..],
+                .path = overlay_path,
+                .shadows = packaged.?,
+            };
             n += 1;
         }
     }

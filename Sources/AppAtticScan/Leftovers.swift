@@ -245,7 +245,7 @@ public func classifyLinuxSystemName(_ name: String) -> (String, String?) {
     if snapSystemNames.contains(n) {
         return ("system", nil)
     }
-    if n.hasPrefix("core") && (n == "core" || n.dropFirst(4).allSatisfy(\.isNumber)) {
+    if n.hasPrefix("core") && n.dropFirst(4).allSatisfy(\.isNumber) {
         return ("system", nil)
     }
     let parts = n.split(separator: "-")
@@ -311,9 +311,6 @@ public func includeScanEntry(_ path: String, kind: String) -> Bool {
     }
     if kind == "plist" {
         return exists && !isDir.boolValue && path.hasSuffix(".plist")
-    }
-    if kind == "mixed" || kind == "leaf" {
-        return exists
     }
     return exists
 }

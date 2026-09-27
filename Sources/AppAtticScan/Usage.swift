@@ -40,7 +40,7 @@ public struct HistoryIndex {
 public func effectiveLastUsed(
     _ lastUsed: Date?,
     _ dateAdded: Date?,
-    windowSeconds: TimeInterval = 120
+    windowSeconds: TimeInterval = indexWindowS
 ) -> Date? {
     guard let lastUsed else { return nil }
     guard let dateAdded else { return lastUsed }
@@ -634,12 +634,10 @@ public func processBasenames(_ psOutput: String) -> Set<String> {
         }
         let token = line.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
         let baseName = URL(fileURLWithPath: token).lastPathComponent
-        if !baseName.contains(" ") {
-            let base = posixLowercased(baseName)
-            if !base.isEmpty {
-                names.insert(base)
-                names.insert(URL(fileURLWithPath: base).deletingPathExtension().lastPathComponent)
-            }
+        let base = posixLowercased(baseName)
+        if !base.isEmpty {
+            names.insert(base)
+            names.insert(URL(fileURLWithPath: base).deletingPathExtension().lastPathComponent)
         }
     }
     return names
@@ -702,7 +700,6 @@ func mdlsMeta(
         let s = String(line)
         guard s.contains(" = ") else { continue }
         let parts = s.components(separatedBy: " = ")
-        guard parts.count >= 2 else { continue }
         let k = parts[0].trimmingCharacters(in: .whitespaces)
         var value = parts.dropFirst().joined(separator: " = ").trimmingCharacters(in: .whitespaces)
         if k == "kMDItemDescription" {
@@ -827,11 +824,7 @@ public func fillAppUsage(
         let innerDates = pmap(needInner.map(\.1), workers: 16) { mdlsDates($0, run: run) }
         for (pair, dates) in zip(needInner, innerDates) {
             let i = pair.0
-            var used = dates.0
-            if let usedDt = used, let installed = apps[i].installedAt,
-               abs(usedDt.timeIntervalSince(installed)) <= indexWindowS {
-                used = nil
-            }
+            let used = effectiveLastUsed(dates.0, apps[i].installedAt)
             if let used, !hasAuthoritativeUsage(apps[i]), apps[i].lastUsed == nil || used > apps[i].lastUsed! {
                 apps[i].lastUsed = used
                 apps[i].lastUsedSource = "spotlight"

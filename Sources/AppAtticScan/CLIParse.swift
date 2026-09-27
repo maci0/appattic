@@ -353,7 +353,7 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         }
         if a.hasPrefix("--category=") {
             let value = String(a.dropFirst("--category=".count))
-            if value.isEmpty {
+            if value.isEmpty || value.hasPrefix("-") {
                 opts.parseError = .categoryRequiresValue
                 return opts
             }

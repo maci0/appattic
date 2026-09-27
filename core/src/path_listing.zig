@@ -251,7 +251,7 @@ pub fn parseListing(
         if (isSystemLeftoverName(name)) continue;
         if (nameInKeep(name, keep)) continue;
         if (allow.len > 0 and !nameInKeep(name, allow)) continue;
-        const path = if (line.len > 0 and line[0] == '/') line else blk: {
+        const path = if (line[0] == '/') line else blk: {
             const need = root.len + 1 + name.len;
             if (used + need > path_store.len) continue;
             const start = used;
@@ -313,7 +313,10 @@ fn render(comptime spec: Spec, hits: []const Orphan) bool {
     w.str(spec.dialog_title);
     w.raw(",\"body\":\"Named dirs only. Nothing runs until you confirm.\"}}");
     note.write(&w);
-    const s = w.slice() orelse return false;
+    const s = w.slice() orelse {
+        result_nbytes = 0;
+        return false;
+    };
     result_nbytes = @intCast(s.len);
     return true;
 }

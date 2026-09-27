@@ -10,7 +10,6 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
 #include <poll.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -24,6 +23,8 @@
 #define MAX_TOK 16
 #define HOST_EXEC_TIMEOUT_MS 60000
 #define HOST_EXEC_KILL_GRACE_MS 1000
+#define HOST_EXEC_POLL_MS 50
+#define HOST_EXEC_POLL_SLICE_MS 100
 
 static int eq(const char *a, const char *b) {
     return a && b && strcmp(a, b) == 0;
@@ -266,7 +267,6 @@ int appattic_host_exec_allowed(const char *cmdline) {
         if (eq(t, "remote-ls")) has_remote_ls = 1;
         if (eq(t, "--app")) has_app = 1;
         if (eq(t, "--updates")) has_updates_flag = 1;
-        if (strncmp(t, "--columns=", 10) == 0) continue;
     }
 
     if (is_snap) return has_list;
@@ -721,15 +721,6 @@ static const char *fixture_for(const char *cmdline) {
         return FIXTURE_PACMAN;
     }
     if (eq(base, "test")) return test_fixture_ok(cmdline) ? "" : NULL;
-    if (eq(base, "readlink")) {
-        for (int i = 1; i < n; i++) {
-            const char *t = tok[i];
-            if (t[0] == '-') continue;
-            if (strstr(t, "/.local/bin/python3") != NULL) return "/home/user/.local/bin/python3";
-            if (strstr(t, "/usr/bin/python3") != NULL) return "/usr/bin/python3";
-        }
-        return NULL;
-    }
     if (eq(base, "ls")) {
         for (int i = 1; i < n; i++) {
             const char *t = tok[i];
@@ -823,9 +814,9 @@ static void reap_child(pid_t pid) {
         if (waitpid(pid, &st, WNOHANG) == pid) return;
         struct timespec sl;
         sl.tv_sec = 0;
-        sl.tv_nsec = 50L * 1000L * 1000L;
+        sl.tv_nsec = (long)HOST_EXEC_POLL_MS * 1000L * 1000L;
         (void)nanosleep(&sl, NULL);
-        waited += 50;
+        waited += HOST_EXEC_POLL_MS;
     }
     if (kill(-pid, SIGKILL) != 0) {
         (void)kill(pid, SIGKILL);
@@ -907,7 +898,7 @@ static int run_live(char **argv, char *out, size_t cap) {
             if (left > (long)HOST_EXEC_TIMEOUT_MS) left = (long)HOST_EXEC_TIMEOUT_MS;
             wait_ms = (int)left;
         }
-        if (wait_ms > 100) wait_ms = 100;
+        if (wait_ms > HOST_EXEC_POLL_SLICE_MS) wait_ms = HOST_EXEC_POLL_SLICE_MS;
         struct pollfd pfd;
         pfd.fd = fds[0];
         pfd.events = POLLIN;
@@ -966,9 +957,9 @@ static int run_live(char **argv, char *out, size_t cap) {
         }
         struct timespec sl;
         sl.tv_sec = 0;
-        sl.tv_nsec = 50L * 1000L * 1000L;
+        sl.tv_nsec = (long)HOST_EXEC_POLL_MS * 1000L * 1000L;
         (void)nanosleep(&sl, NULL);
-        waited += 50;
+        waited += HOST_EXEC_POLL_MS;
     }
     if (WIFEXITED(st) && WEXITSTATUS(st) == 127) return APPATTIC_HOST_EXEC_FAIL;
     if (eq(base_of(argv[0]), "test") && WIFEXITED(st) && WEXITSTATUS(st) != 0) {

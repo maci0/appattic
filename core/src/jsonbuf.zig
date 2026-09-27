@@ -202,7 +202,7 @@ pub fn writeOutdated(
 /// Unscoped ident, or one npm-style `@scope/name`. No `..`, no extra `/`.
 pub fn isSafePkgName(s: []const u8) bool {
     if (s.len == 0 or s.len > 214) return false;
-    if (s[0] != '@') return isSafeIdent(s);
+    if (s[0] != '@') return s[0] != '.' and isSafeIdent(s);
     var slash: ?usize = null;
     for (s, 0..) |c, i| {
         if (c == '/') {
@@ -212,6 +212,7 @@ pub fn isSafePkgName(s: []const u8) bool {
     }
     const sp = slash orelse return false;
     if (sp <= 1 or sp + 1 >= s.len) return false;
+    if (s[1] == '.' or s[sp + 1] == '.') return false;
     return isSafeIdent(s[1..sp]) and isSafeIdent(s[sp + 1 ..]);
 }
 
