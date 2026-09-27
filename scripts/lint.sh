@@ -37,8 +37,20 @@ if ! command -v shellcheck >/dev/null 2>&1; then
     echo "macOS: xcode-select --install, then bash scripts/lint.sh again" >&2
     exit 1
 fi
-shellcheck -x -P SCRIPTDIR "$ROOT/build.sh" "$ROOT/run.sh" "$ROOT/core/build.sh" \
-    "$ROOT/core/bench.sh" "$ROOT/scripts"/*.sh
+# Discovered, not listed: a script added anywhere in the tree joins the gate
+# without someone having to remember to name it here. The prunes are build
+# output and vendored trees, which hold no first-party shell.
+mapfile -t shell_files < <(
+    find "$ROOT" \
+        \( -name .git -o -name .zig-cache -o -name .zig-cache-local \
+           -o -name .build -o -name .deps -o -name build \) -prune \
+        -o -type f -name '*.sh' -print | LC_ALL=C sort
+)
+if [[ "${#shell_files[@]}" -eq 0 ]]; then
+    echo "error: no shell script found to check" >&2
+    exit 1
+fi
+shellcheck -x -P SCRIPTDIR "${shell_files[@]}"
 
 # One declared version, three copies to keep in step (AppStream release,
 # Info.plist, the qt man page), plus a CFBundleVersion that is a rising build
@@ -54,8 +66,10 @@ if ! command -v yamllint >/dev/null 2>&1; then
     echo "install: uv tool install \"yamllint==$yl\"" >&2
     exit 1
 fi
-yamllint -c "$ROOT/.yamllint" "$ROOT"/.github/*.yml "$ROOT"/.github/workflows/*.yml \
-    "$ROOT"/packaging/flatpak/*.yml
+# --strict: without it yamllint exits 0 on warnings, so a rule downgraded to a
+# warning is a rule nothing fails on.
+yamllint --strict -c "$ROOT/.yamllint" "$ROOT"/.github/*.yml \
+    "$ROOT"/.github/workflows/*.yml "$ROOT"/packaging/flatpak/*.yml
 
 echo "== dependency pins =="
 bash "$ROOT/scripts/deps.sh" check
@@ -66,8 +80,18 @@ if ! command -v cc >/dev/null 2>&1; then
 fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-cflags=(-O2 -Wall -Wextra -Werror -Wformat=2 -Wformat-security
-    -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference)
+# One warning set for both builds below, so the sanitizer build cannot drift
+# into compiling sources the plain build would have rejected. Every flag is
+# GCC 10+ and clang 10+, checked against both. core/build.sh and the Qt
+# CMakeLists carry a smaller set for the shipped binary; this gate is the
+# strictest of the three, so a warning here is a warning there too.
+strict_cflags=(-Wall -Wextra -Werror
+    -Wformat=2 -Wformat-security -Wshadow -Wstrict-prototypes -Wconversion
+    -Wpedantic -Wnull-dereference
+    -Wcast-qual -Wundef -Wmissing-prototypes -Wold-style-definition
+    -Wredundant-decls -Wswitch-enum -Wdouble-promotion -Wfloat-equal
+    -Wjump-misses-init -Wtautological-compare)
+cflags=(-O2 "${strict_cflags[@]}")
 # Every C file under core/host is compiled here, so a new one cannot join the
 # tree without also joining the gate. embed.c is the exception: it needs the
 # Wasmtime C API headers, which the lint job does not install. CMake compiles it
@@ -98,8 +122,7 @@ echo "== C host under ASan + UBSan =="
 # shellcheck disable=SC2054  # the comma belongs to -fsanitize, not the array
 san_cflags=(-O1 -g -fno-omit-frame-pointer
     -fsanitize=address,undefined -fno-sanitize-recover=undefined
-    -Wall -Wextra -Werror -Wformat=2 -Wformat-security
-    -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference)
+    "${strict_cflags[@]}")
 if ! cc "${san_cflags[@]}" \
     -I "$ROOT/core/host" \
     "$ROOT/core/host/hostexec.c" \
