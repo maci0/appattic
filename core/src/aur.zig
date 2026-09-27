@@ -76,8 +76,9 @@ fn renderAur(outdated: []const AurOutdated, helper: []const u8) bool {
         if (i != 0) w.raw(",");
         // Guarded: `paru -S` on a package already at the scanned version
         // reinstalls it, so a script that runs twice would do the work twice.
-        // The row is read from the helper's own `paru -Q`, the database an AUR
-        // package is installed into.
+        // The row is read from the helper's own `paru -Qu` (or `yay` / `pikaur`),
+        // the same update check the scan asked, so the guard closes only while
+        // the package is still behind.
         var cmd_buf: [1024]u8 = undefined;
         var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
         var query_buf: [32]u8 = undefined;

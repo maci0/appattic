@@ -320,7 +320,9 @@ public func updateCommand(_ pkg: OutdatedPkg) -> String? {
     }
 }
 
-/// Named upgrade script. CLI `update` with no `--dry-run` runs this; the UI confirms first.
+/// Named upgrade script. `appattic update` with no `--dry-run` runs this, after
+/// a `[y/N]` confirmation (`--yes` skips it); the UI confirms before it offers
+/// the script.
 public func updateScript(_ pkgs: [OutdatedPkg]) -> String {
     let cmds = pkgs.compactMap(updateCommand)
     var lines = [

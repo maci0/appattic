@@ -22,7 +22,10 @@ public struct CleanupSelection: Equatable, Sendable {
     }
 }
 
-/// UI can opt REVIEW and REMOVE into cleanup. CLI `--dry-run` for report/stale only emits REMOVE.
+/// The REVIEW + REMOVE tiers a UI can opt into cleanup, in string form. The
+/// live check is `StaleTier.isSelectable(_:)`; this is the same set for a
+/// caller that holds raw `tier` strings. CLI `--dry-run` for report/stale
+/// emits only REMOVE.
 let selectableCleanupTiers: Set<String> = Set(StaleTier.selectable.map(\.rawValue))
 
 public func pruneCleanupSelection(
@@ -536,11 +539,13 @@ func appendRemoveVerdicts(_ lines: inout [String], result: ScanResult) {
     }
 }
 
-/// Preamble every generated script opens with: the same shell, the same safety
-/// line, and a title naming what the script does. `scriptHasActionableCommands`
-/// reads a generated script back and skips comments and `set -` lines, so the
-/// first two lines are the shell and `set -e` and everything after them is
-/// comments.
+/// Preamble the leftover, stale, and combined cleanup scripts open with: the
+/// same shell, the same safety line, and a stamped title naming what the
+/// script does. The update, packages, and outdated-report scripts carry their
+/// own headers.
+/// `scriptHasActionableCommands` reads a generated script back and skips
+/// comments and `set -` lines, so the first two lines are the shell and
+/// `set -e` and everything after them is comments.
 func scriptHeader(_ kind: String, scannedAt: Date) -> [String] {
     [
         "#!/bin/sh",

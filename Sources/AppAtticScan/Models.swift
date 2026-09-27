@@ -96,7 +96,7 @@ extension LeftoverItem {
     /// `status` as a typed value, or nil when it is not a known status (a cache written by a newer AppAttic).
     public var leftoverStatus: LeftoverStatus? { LeftoverStatus(rawValue: status) }
 
-    /// True for the rows `visibleOrphanedLeftovers` keeps: orphaned and shadow.
+    /// True for the rows the leftover lists keep: orphaned and shadow.
     public var isListedLeftover: Bool { isListedLeftoverStatus(status) }
 
     public var totalBytes: Int { size_bytes ?? 0 }
@@ -317,9 +317,10 @@ public func outdatedUpgradableManager(manager: String, kind: String?) -> Upgrada
     kind == "untrusted" ? nil : UpgradableManager(rawValue: manager)
 }
 
-/// One row from the Packages page: a distro orphan, a language global, or a
-/// container leftover. `kind` distinguishes them, and `canMarkManual` is the
-/// typed answer for whether a row can be marked manual at all.
+/// One row from the Packages page: a distro orphan (`kind == "orphan"`) or a
+/// language global (`kind == "global"`). Those two are the only kinds a
+/// collector emits, and `canMarkManual` is the typed answer for whether a row
+/// can be marked manual at all.
 public struct PackageEntry: Codable, Identifiable, Hashable, Sendable {
     public let name: String
     public let manager: String

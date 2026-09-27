@@ -280,7 +280,8 @@ pub fn isSystemLeftoverName(name: []const u8) bool {
 /// `dropped` counts the rows the path store could not hold. A name that is a
 /// leftover but has nowhere to put its joined path is still a leftover, so it
 /// belongs in the note: `addTruncatedRows` covers the `out` array running
-/// full, and a full store shortened the list in exactly the same silent way.
+/// full, and a full store used to shorten the list in the same silent way until
+/// `addDroppedRows` gave it the same `note` field.
 pub fn parseListing(
     listing: []const u8,
     keep: []const u8,

@@ -71,8 +71,11 @@ fn splitRef(tok: []const u8, name: *[]const u8, branch: *[]const u8) bool {
     return true;
 }
 
-/// Parse `flatpak uninstall --unused --dry-run`. Numbered leftover runtimes only.
-/// `flatpak list` / `remote-ls` dumps are not unused.
+/// Parse `flatpak uninstall --unused --dry-run`. A row counts when its first
+/// token is a `N.` number prefix or an `app/arch/branch` ref; noise lines and
+/// the `ID` / `Name` / `Application` header are dropped. A `flatpak list` /
+/// `remote-ls` dump prints `app version`, which has neither, so it is not
+/// reported.
 pub fn parseFlatpakUnused(text: []const u8, out: []FlatpakUnused) usize {
     var n: usize = 0;
     var lines = std.mem.splitScalar(u8, text, '\n');

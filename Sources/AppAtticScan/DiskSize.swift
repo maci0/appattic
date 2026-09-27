@@ -28,11 +28,12 @@ public func fileSize(_ path: String) -> Int {
     intFromSizeAttribute(try? FileManager.default.attributesOfItem(atPath: path)[.size])
 }
 
-/// `du` size of `path` and whether the measurement stands. The two results are
-/// `(bytes, measured)`: a path `du` could not read, or one it reported as
-/// missing, comes back as `(0, false)`, which is not the same as an empty
-/// directory. Rows carry that flag, so an unmeasured size is never shown as a
-/// size of zero.
+/// Size of `path` and whether the measurement stands, as `(bytes, measured)`.
+/// A plain file comes from its stat size, a `.app` from Spotlight, anything
+/// else from `du -sk`, and a directory `du` cannot read from the in-process
+/// walk. Only a path all of those fail on comes back as `(0, false)`, which is
+/// not the same as an empty directory. Rows carry that flag, so an unmeasured
+/// size is never shown as a size of zero.
 public func duSize(_ path: String, timeout: TimeInterval = 8, run: CommandRun = runCommand) -> (Int, Bool) {
     // One `attributesOfItem` answers both "does it exist" and "is it a
     // directory"; the previous `fileExists` + `fileSize` pair stat'ed twice.
@@ -76,7 +77,9 @@ func parseDuKB(_ out: String) -> (Int, Bool) {
 /// Batch `du -sk` for many directories: one spawn per chunk instead of one
 /// per path. A full leftover scan spawns `du` hundreds of times (~50 ms each);
 /// batching cuts that to a handful. Missing/error lines fall back to the
-/// in-process walk, never to another spawn.
+/// in-process walk. A run that printed nothing at all is retried once against
+/// the second binary in the list; once a binary has printed something, what is
+/// left goes to the walk rather than to another spawn.
 ///
 /// `du` separates size and path with a tab. Paths containing newlines cannot
 /// round-trip through line parsing; unmatched lines fall back safely, but a

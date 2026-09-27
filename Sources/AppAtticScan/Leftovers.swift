@@ -158,7 +158,8 @@ public final class DataItem {
     /// `status` as a typed value, or nil when it is not a known status.
     public var leftoverStatus: LeftoverStatus? { LeftoverStatus(rawValue: status) }
 
-    /// True for the rows the leftover lists keep: orphaned and shadow.
+    /// True for the rows the leftover lists keep: orphaned and shadow
+    /// (`visibleOrphanedLeftovers` applies this test).
     public var isListedLeftover: Bool { isListedLeftoverStatus(status) }
 
     public func toLeftoverItem() -> LeftoverItem {

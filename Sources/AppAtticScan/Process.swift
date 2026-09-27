@@ -40,8 +40,9 @@ public func whichCommand(_ name: String) -> String? {
 /// against the directories the machine had at launch, and the scan cache
 /// fingerprint is built from those same lookups, so a tool installed since
 /// would leave the fingerprint unchanged and the stale snapshot serving.
-/// `runFullScan` calls `resetWhichSearchDirectories()` before it collects,
-/// which is the one point where the list has to be right.
+/// `performScan` calls `resetWhichSearchDirectories()` before it collects,
+/// which is the one point where the list has to be right (`runFullScan` is a
+/// forward to it).
 private let whichDirectoriesLock = NSLock()
 nonisolated(unsafe) private var cachedWhichDirectories: [String]? = nil
 

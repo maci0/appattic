@@ -26,7 +26,8 @@ fn skipName(name: []const u8) bool {
     return name.len == 0 or name[0] == '.' or std.mem.eql(u8, name, "deno") or std.mem.eql(u8, name, "deno.exe");
 }
 
-/// Parse `ls -1 ~/.deno/bin`. Skip the deno runtime itself.
+/// Parse `ls -1 ~/.deno/bin`. Dot names and the `deno` / `deno.exe` runtime are
+/// skipped; everything else that passes `jsonbuf.isSafeCmdIdent` is reported.
 pub fn parseDenoGlobalList(text: []const u8, out: []DenoGlobal) usize {
     var n: usize = 0;
     var lines = std.mem.splitScalar(u8, text, '\n');

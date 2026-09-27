@@ -62,10 +62,10 @@ public final class ScanResult {
     /// throws `EncodingError.invalidValue` rather than writing one, so a
     /// non-finite duration fails the whole `--json` report instead of printing
     /// a duration. The freshly measured value is clamped where it is taken
-    /// (`runFullScan`), but `scanResult(from:)` copies `duration_s` back out of
-    /// `last-scan.json` unchecked, and a `1e999` in that file decodes to an
-    /// infinity. A negative one is not an encoder failure but still reaches the
-    /// UI as "-3.5s" for a scan that took no time at all.
+    /// (`performScan`), and `scanResult(from:)` clamps the `duration_s` it
+    /// decodes from `last-scan.json` the same way, so a `1e999` or a negative
+    /// in that file reads as 0 rather than reaching the UI as an infinity or as
+    /// "-3.5s" for a scan that took no time at all.
     func reportDuration() -> Double {
         guard durationS.isFinite, durationS > 0 else { return 0 }
         return (durationS * 10).rounded() / 10

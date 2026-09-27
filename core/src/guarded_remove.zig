@@ -42,8 +42,10 @@ pub fn writeWholeGuard(w: *jsonbuf.W, present: []const u8, action: []const u8) v
 /// Every generated script runs under `set -e`, so a second run over a target
 /// the first run already removed would exit nonzero there and strand every
 /// line below it. The guard makes an already-removed target a no-op. Same
-/// shape as Swift `guardedRemoveCommand`, so the Qt `rootcmd` escalation reads
-/// both the same way.
+/// `if <query> <name>; then <action> <name>; fi` shape as Swift
+/// `guardedRemoveCommand`, without its ` >/dev/null 2>&1`: the query is a
+/// package manager or a `test`, so its own output is already the answer. The Qt
+/// `rootcmd` escalation reads both the same way.
 pub fn writeNameGuard(
     w: *jsonbuf.W,
     q_buf: []u8,

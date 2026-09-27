@@ -290,7 +290,8 @@ test "fuzz pacman listing parsers" {
 }
 
 /// Both parsers cut names that reach `pacman -R` lines, so a name must pass
-/// `isSafeIdent` and every field must be a slice of the input. The version of
+/// `jsonbuf.isSafeCmdIdent`, the stricter rule that also rejects a leading `-`,
+/// and every field must be a slice of the input. The version of
 /// a `-Qdt` row is optional, but a `-Qu` row needs all three fields.
 fn fuzzPacmanListings(_: void, smith: *std.testing.Smith) !void {
     var raw: [4096]u8 = undefined;

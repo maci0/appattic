@@ -259,9 +259,11 @@ fn query_impl(present: i32) i32 {
     var installed_names: [64][]const u8 = undefined;
     const n_installed = parseInstalledSnapNames(snap_text, installed_names[0..]);
     note.addTruncatedRows(n_installed, installed_names.len);
-    // Room for every name the array above can hold at the length a name in
-    // `~/snap` can have (`NAME_MAX` is 255), plus its separator. An install
-    // with names longer than that cannot make the join run out.
+    // Room for 64 names of 255 bytes each (`NAME_MAX` on `~/snap`, so the
+    // longest directory a snap name can make) plus their separators. The parser
+    // caps no name length, so a longer row from `snap list --all` overflows
+    // this; `keepFromNames` then returns null and the orphan list is skipped
+    // whole, rather than built from a partial keep list.
     var keep_buf: [64 * (255 + 1)]u8 = undefined;
     const keep = keepFromNames(installed_names[0..n_installed], &keep_buf);
 

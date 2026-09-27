@@ -445,8 +445,11 @@ func isSteamClientSoftware(_ item: SoftwareItem) -> Bool {
 }
 
 /// KEEP / REVIEW / REMOVE / SYSTEM from usage age, data size, and how easy reinstall is.
-/// System apps and the Steam client are never REMOVE. Missing last-used is REVIEW unless
-/// a brew formula has a long enough shell-history span.
+/// System apps and the Steam client are never REMOVE. With no last-used date at
+/// all, the verdict is KEEP when the install date is younger than `activeDays`
+/// or the row is a Homebrew cask with no app bundle, KEEP or REMOVE for a brew
+/// formula depending on whether `historySpanDays` reaches `staleDays`, and
+/// REVIEW otherwise.
 public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
     if sw.source == "system" {
         return Verdict(software: sw, tier: StaleTier.system.rawValue, reason: "System app: leave alone")

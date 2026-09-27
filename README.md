@@ -286,15 +286,18 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 
 | Path | Role |
 |------|------|
-| `Sources/AppAtticScan/` | Discover, usage, brew, outdated, packages, recommend, full scan. One file per feature, with the leftovers cluster split by concern: `Leftovers` (scan, roots, item model), `Identity` (who owns a name), `LeftoverText` (labels, reasons, blurbs), `LeftoverGroups` (grouping and collapsing), `Overlays` (PATH dirs, broken links, shadows). Plus the shared support modules it is built on: `Process` (subprocess, `which`), `Paths` (XDG, identity, redaction), `DiskSize` (`du`, directory walks), `Dates`, `Format`, `Text`, `ShellScript` (quoting for generated `sh`), `FilePermissions`, `Concurrency`, `Platform` (os-release, distro package manager), `Version` (the one version declaration) |
+| `Sources/AppAtticScan/` | Discover, usage, brew, outdated, packages, recommend, full scan. One file per feature (`Discover`, `Usage`, `BrewInfo`, `Outdated`, `Packages`, `Recommend`, `Scan`, `DiskUsage`, `Cache`, `Cleanup`, `Settings`, `CrossOver`, `Steam`, `StartPage`, `Models`, `Errors`), with the leftovers cluster split by concern: `Leftovers` (scan, roots, item model), `Identity` (who owns a name), `LeftoverText` (labels, reasons, blurbs), `LeftoverGroups` (grouping and collapsing), `Overlays` (PATH dirs, broken links, shadows). Plus the shared support modules it is built on: `CLIParse` (argv and the `--help` text), `Process` (subprocess, `which`), `Paths` (XDG, identity, redaction), `DiskSize` (`du`, directory walks), `Dates`, `Format`, `Text`, `ShellScript` (quoting for generated `sh`), `FilePermissions`, `Concurrency`, `Platform` (os-release, distro package manager), `Version` (the one version declaration) |
 | `Sources/AppAtticCLI/` | `appattic` command line |
 | `Sources/AppAttic/` | SwiftCrossUI app (AppKit on macOS) |
-| `ui/linux-qt/` | C++ Qt 6 Widgets shell (Linux). Window, findings, settings, WASM host paths, scan worker, and smoke are separate files |
+| `ui/linux-qt/` | C++ Qt 6 Widgets shell (Linux). The window (`main`), findings, settings, the WASM host paths (`corehost`), disk usage and its charts, script execution, and smoke are separate files |
 | `tests/AppAtticScanTests/` | XCTest port of the old scanner cases, plus seeded mutation harnesses for the parsers that read foreign text: the CLI argv and `COLORFGBG`, package manager listings, `settings.json`, and ISO timestamps |
 | `DESIGN.md` | Native UI visual rules |
 | `docs/specs/` | Requirement and architecture records (index: [`docs/specs/README.md`](docs/specs/README.md)). The Zig WASM core record is accepted and implemented; the Swift scan port record is implemented and superseded, kept in `archive/` |
 | `docs/privacy.md` | What a scan reads, what is stored and where, what reaches the network, and how to export or erase it |
 | `core/` | Zig `wasm32` scan core (loader + plugins + C Wasmtime embedder). The Linux window runs on it |
+| `scripts/` | Contributor gates: `check.sh` (fast local loop), `test.sh`, `lint.sh`, the tool finders, and the packaging, AppImage, Flatpak and release steps. Every script finds the project root itself, so run it by path from anywhere |
+| `packaging/` | Desktop entry, AppStream metainfo, man page, macOS `Info.plist` and icons, and the Flatpak manifest. `scripts/check-packaging.sh` is what keeps the copies in step |
+| `benchmarks/AppAtticBench/` | The `appattic-bench` executable target, on the scan library |
 
 ## Notes
 

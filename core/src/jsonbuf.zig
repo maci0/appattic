@@ -274,9 +274,11 @@ fn writeOutdatedRow(
     w.raw("}");
 }
 
-/// Longest package name a name check accepts. Every registry plugin (npm,
-/// Packagist, Homebrew) shares one bound so a name the core validates for one
-/// manager is not rejected for another.
+/// Longest package name a name check accepts, in bytes. `isSafePkgName` (npm),
+/// `isSafeComposerName` (Packagist) and `isSafeBrewName` (Homebrew) share it, so
+/// a name the core validates for one of those is not rejected for another. The
+/// managers that gate on `isSafeCmdIdent` instead set no length bound, so a
+/// name longer than this can still reach an apt or gem command.
 pub const max_pkg_name_len = 214;
 
 /// Unscoped ident, or one npm-style `@scope/name`. No `..`, no extra `/`.

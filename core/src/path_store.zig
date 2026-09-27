@@ -58,9 +58,12 @@ pub fn joinPath(dir: []const u8, name: []const u8, store: []u8, used: *usize) ?[
     return store[start..used.*];
 }
 
-/// Names an `ls -1` listing carries: one basename per line, dot names and
-/// names a shell or a package manager would read as an option or a command
-/// dropped. `keep` is a newline name list to skip as well; pass "" for none.
+/// Names an `ls -1` listing carries: one basename per line. Dot names, empty
+/// names, and names outside `jsonbuf.isSafeIdent` are dropped. A leading `-` is
+/// kept: these names are always joined onto a constant root before they reach a
+/// command, so a dash there is inert. A name a package manager reads as its own
+/// argument needs `jsonbuf.isSafeCmdIdent` instead.
+/// `keep` is a newline name list to skip as well; pass "" for none.
 pub fn listingNames(listing: []const u8, names: [][]const u8, keep: []const u8) usize {
     var n: usize = 0;
     var lines = std.mem.splitScalar(u8, listing, '\n');
