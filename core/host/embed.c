@@ -107,11 +107,45 @@ static int g_mod_count;
    alive: without this count, a shutdown on the teardown thread frees the
    engine and its modules under a scan that is still executing. */
 static pthread_mutex_t g_life_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_life_idle = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_life_idle_monotonic;
+static pthread_cond_t g_life_idle_realtime = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t *g_life_idle;
+static pthread_once_t g_life_once = PTHREAD_ONCE_INIT;
+static int g_life_clock_monotonic;
 static int g_runs_active;
 
 /* How long the teardown waits for those runs before giving up on the cache. */
 #define SHUTDOWN_DRAIN_TIMEOUT_S 5
+
+/* The drain wait is bounded so a run that never returns cannot wedge the
+   teardown, and a bound measured on the wall clock is not one: an NTP step
+   backwards between here and the wait moves the deadline forward by the size of
+   the step, so the bounded wait becomes an unbounded one on exactly the
+   wedged run it exists for. CLOCK_MONOTONIC is the only clock a bounded wait
+   can be expressed in, and hostexec.c already times its kill grace on it.
+
+   pthread_cond_timedwait reads the absolute abstime through the condattr's
+   clock, so the condvar and the deadline have to be switched together, which
+   means this cannot stay a static initializer. Both a successful
+   pthread_cond_init and a failed one leave a usable condvar behind, the second
+   one on the default CLOCK_REALTIME, and the caller reads the clock the condvar
+   was actually built with. */
+static void life_cond_init(void) {
+    pthread_condattr_t attr;
+    if (pthread_condattr_init(&attr) != 0) {
+        g_life_idle = &g_life_idle_realtime;
+        return;
+    }
+    const int mono = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) == 0
+                     && pthread_cond_init(&g_life_idle_monotonic, &attr) == 0;
+    pthread_condattr_destroy(&attr);
+    if (!mono) {
+        g_life_idle = &g_life_idle_realtime;
+        return;
+    }
+    g_life_clock_monotonic = 1;
+    g_life_idle = &g_life_idle_monotonic;
+}
 
 /* Free every cached module. Only legal when no run is active, since a running
    scan may still hold one. Both locks are held by the caller, in that order,
@@ -127,6 +161,7 @@ static void cache_clear_locked(void) {
 }
 
 static void run_enter(void) {
+    pthread_once(&g_life_once, life_cond_init);
     pthread_mutex_lock(&g_life_lock);
     /* An entry is keyed by (path, size, mtime), so rebuilding a plugin leaves
        the old one behind forever and the cache only ever filled. A cache that
@@ -143,9 +178,10 @@ static void run_enter(void) {
 }
 
 static void run_leave(void) {
+    pthread_once(&g_life_once, life_cond_init);
     pthread_mutex_lock(&g_life_lock);
     g_runs_active--;
-    if (g_runs_active == 0) pthread_cond_broadcast(&g_life_idle);
+    if (g_runs_active == 0) pthread_cond_broadcast(g_life_idle);
     pthread_mutex_unlock(&g_life_lock);
 }
 
@@ -678,11 +714,12 @@ fail_plugin:
    teardown, so the wait is bounded and the modules are then left to the exit. */
 void appattic_wasm_shutdown(void) {
     struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
+    pthread_once(&g_life_once, life_cond_init);
+    clock_gettime(g_life_clock_monotonic ? CLOCK_MONOTONIC : CLOCK_REALTIME, &deadline);
     deadline.tv_sec += SHUTDOWN_DRAIN_TIMEOUT_S;
     pthread_mutex_lock(&g_life_lock);
     while (g_runs_active > 0) {
-        if (pthread_cond_timedwait(&g_life_idle, &g_life_lock, &deadline) != 0) break;
+        if (pthread_cond_timedwait(g_life_idle, &g_life_lock, &deadline) != 0) break;
     }
     const int busy = g_runs_active;
     if (busy > 0) {
