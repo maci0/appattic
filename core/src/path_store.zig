@@ -3,6 +3,31 @@ const jsonbuf = @import("jsonbuf.zig");
 
 /// Path helpers shared by the path plugins. Findings keep their names and
 /// paths in one caller-owned byte store instead of allocating per root.
+/// The placeholder a path plugin writes in place of the account's home
+/// directory. A guest has no environment, so a root it names has to be a
+/// constant; `host.exec` rewrites the placeholder to `$HOME` (or to the XDG
+/// root the variable points at) in the argv it executes, and the native shell
+/// rewrites it in the finding paths and commands it reads back
+/// (`expandHomeUserPlaceholder`, `ui/linux-qt/finding.cpp`). Mirrored on the
+/// host as `APPATTIC_HOME_SENTINEL` in `core/host/hostexec.h`.
+///
+/// Every root a path plugin names starts with this, and a root is either the
+/// placeholder itself or the placeholder followed by `/`: the host's rewrite
+/// matches the prefix and then requires that boundary, so a root like
+/// `/home/userdata` would be listed under a name no account has and turned
+/// into an `rm -rf` target from that listing. `isHomeRoot` is that rule, and
+/// `path_listing.specById` refuses a table entry that breaks it at compile
+/// time rather than at scan time.
+pub const home_sentinel = "/home/user";
+
+/// True when `path` is `home_sentinel` or a path below it. Mirrors
+/// `rewrite_home_user_argv` in `core/host/hostexec.c`.
+pub fn isHomeRoot(path: []const u8) bool {
+    if (!std.mem.startsWith(u8, path, home_sentinel)) return false;
+    const rest = path[home_sentinel.len..];
+    return rest.len == 0 or rest[0] == '/';
+}
+
 pub fn basenameOf(path: []const u8) []const u8 {
     if (std.mem.lastIndexOfScalar(u8, path, '/')) |i| return path[i + 1 ..];
     return path;
@@ -65,6 +90,16 @@ pub fn nameInList(name: []const u8, list: []const u8) bool {
         if (std.mem.eql(u8, k, name)) return true;
     }
     return false;
+}
+
+test "isHomeRoot takes the placeholder and what is under it" {
+    try std.testing.expect(isHomeRoot(home_sentinel));
+    try std.testing.expect(isHomeRoot("/home/user/.config"));
+    try std.testing.expect(isHomeRoot("/home/user/.local/share/app"));
+    try std.testing.expect(!isHomeRoot("/home/userdata"));
+    try std.testing.expect(!isHomeRoot("/etc/apt"));
+    try std.testing.expect(!isHomeRoot(""));
+    try std.testing.expect(!isHomeRoot("/home"));
 }
 
 test "basenameOf takes the last path segment" {

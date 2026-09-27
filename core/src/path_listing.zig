@@ -25,6 +25,15 @@ pub const Spec = struct {
     allow: []const u8 = "",
 };
 
+/// The contract `root` has to keep for the host's rewrite and for `ls`:
+/// under the home placeholder, and free of whitespace because `host.exec`
+/// splits a command on it. `specById` checks a table entry at compile time;
+/// this is the rule it checks, exposed so the table and the check cannot
+/// drift apart.
+pub fn rootIsWellFormed(root: []const u8) bool {
+    return pstore.isHomeRoot(root) and std.mem.indexOfAny(u8, root, " \t") == null;
+}
+
 /// Every spec-only path plugin in one table: the roots differ, the code does
 /// not. Each root module names its spec here and binds it, so adding a path
 /// root is a table entry instead of another copy of the plugin.
@@ -32,7 +41,7 @@ pub const spec_table = [_]Spec{
     .{
         .id = "path-home-dot",
         .root_label = "home",
-        .root = "/home/user",
+        .root = pstore.home_sentinel,
         .keep = "dconf\n",
         .missing_note = "$HOME is missing. Plugin inactive.",
         .dialog_title = "Remove leftover home dirs?",
@@ -42,7 +51,7 @@ pub const spec_table = [_]Spec{
     .{
         .id = "path-var-app",
         .root_label = ".var/app",
-        .root = "/home/user/.var/app",
+        .root = pstore.home_sentinel ++ "/.var/app",
         .keep = "dconf\n",
         .missing_note = "~/.var/app is missing. Plugin inactive.",
         .dialog_title = "Remove leftover Flatpak data?",
@@ -50,7 +59,7 @@ pub const spec_table = [_]Spec{
     .{
         .id = "path-xdg-cache",
         .root_label = ".cache",
-        .root = "/home/user/.cache",
+        .root = pstore.home_sentinel ++ "/.cache",
         .keep = "fontconfig\nthumbnails\nmesa_shader_cache\ndconf\n",
         .missing_note = "~/.cache is missing. Plugin inactive.",
         .dialog_title = "Remove leftover cache?",
@@ -58,7 +67,7 @@ pub const spec_table = [_]Spec{
     .{
         .id = "path-xdg-config",
         .root_label = ".config",
-        .root = "/home/user/.config",
+        .root = pstore.home_sentinel ++ "/.config",
         .keep = "dconf\n",
         .missing_note = "~/.config is missing. Plugin inactive.",
         .dialog_title = "Remove leftover config?",
@@ -66,7 +75,7 @@ pub const spec_table = [_]Spec{
     .{
         .id = "path-xdg-data",
         .root_label = ".local/share",
-        .root = "/home/user/.local/share",
+        .root = pstore.home_sentinel ++ "/.local/share",
         .keep = "applications\nicons\nthemes\nflatpak\nmime\ndconf\n",
         .missing_note = "~/.local/share is missing. Plugin inactive.",
         .dialog_title = "Remove leftover data?",
@@ -74,7 +83,7 @@ pub const spec_table = [_]Spec{
     .{
         .id = "path-xdg-lib",
         .root_label = ".local/lib",
-        .root = "/home/user/.local/lib",
+        .root = pstore.home_sentinel ++ "/.local/lib",
         .keep = "dconf\n",
         .missing_note = "~/.local/lib is missing. Plugin inactive.",
         .dialog_title = "Remove leftover libraries?",
@@ -82,7 +91,7 @@ pub const spec_table = [_]Spec{
     .{
         .id = "path-xdg-state",
         .root_label = ".local/state",
-        .root = "/home/user/.local/state",
+        .root = pstore.home_sentinel ++ "/.local/state",
         .keep = "dconf\n",
         .missing_note = "~/.local/state is missing. Plugin inactive.",
         .dialog_title = "Remove leftover state?",
@@ -92,15 +101,27 @@ pub const spec_table = [_]Spec{
 /// The spec a root module binds, checked at compile time.
 pub fn specById(comptime id: []const u8) Spec {
     inline for (spec_table) |spec| {
-        if (comptime std.mem.eql(u8, spec.id, id)) return spec;
+        if (comptime std.mem.eql(u8, spec.id, id)) {
+            // A root the host cannot rewrite, or that `ls` cannot be handed,
+            // is a compile error rather than a scan of something else: the
+            // names that come back are joined onto this root and become
+            // `rm -rf` lines, so a wrong root is a wrong deletion target.
+            if (comptime !rootIsWellFormed(spec.root)) {
+                @compileError("root " ++ spec.root ++ " for " ++ spec.id ++
+                    " must be the home placeholder or a path under it, with no whitespace");
+            }
+            return spec;
+        }
     }
     @compileError("no path plugin spec named " ++ id);
 }
 
-/// `ls` the leftover root. Roots with spaces stay as `query_cmd` only:
-/// host.exec splits on whitespace and cannot take `Application Support`.
+/// `ls` the leftover root. The root is always named: a root with whitespace
+/// would split into extra argv tokens and the host refuses the command, which
+/// the plugin reports as a command that did not answer. Dropping the root
+/// instead used to make `ls` list the process working directory, and those
+/// names were then joined onto the root that was never listed.
 pub fn queryCommand(comptime spec: Spec) []const u8 {
-    if (std.mem.indexOfAny(u8, spec.root, " \t") != null) return spec.query_cmd;
     return spec.query_cmd ++ " " ++ spec.root;
 }
 
@@ -511,7 +532,7 @@ test "parseListing keeps utf8 leftover names" {
     try std.testing.expectEqualStrings("gone-app", hits[1].name);
 }
 
-test "queryCommand appends root unless the root has spaces" {
+test "queryCommand always names the root" {
     const linux = Spec{
         .id = "path-xdg-config",
         .root_label = ".config",
@@ -531,15 +552,29 @@ test "queryCommand appends root unless the root has spaces" {
         .query_cmd = "ls -1A",
     };
     try std.testing.expectEqualStrings("ls -1A /home/user", queryCommand(home_dot));
+    // A root the host cannot take is named and refused, not dropped: dropping
+    // it made `ls` list the process working directory, and those names were
+    // then joined onto a root the run never listed.
     const spaced = Spec{
         .id = "path-xdg-config",
         .root_label = "Application Support",
-        .root = "/tmp/Application Support",
+        .root = "/home/user/Application Support",
         .keep = "",
         .missing_note = "",
         .dialog_title = "",
     };
-    try std.testing.expectEqualStrings("ls -1", queryCommand(spaced));
+    try std.testing.expectEqualStrings("ls -1 /home/user/Application Support", queryCommand(spaced));
+    try std.testing.expect(!rootIsWellFormed(spaced.root));
+}
+
+test "every spec table root is a path the host can rewrite and ls can take" {
+    for (spec_table) |spec| {
+        try std.testing.expect(rootIsWellFormed(spec.root));
+    }
+    try std.testing.expect(!rootIsWellFormed("/etc/apt/sources.list.d"));
+    try std.testing.expect(!rootIsWellFormed("/home/userdata"));
+    try std.testing.expect(!rootIsWellFormed(pstore.home_sentinel ++ "/Application Support"));
+    try std.testing.expect(rootIsWellFormed(pstore.home_sentinel ++ "/.config"));
 }
 
 test "render keeps a large leftover list" {

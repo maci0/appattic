@@ -555,12 +555,13 @@ static const char *xdg_root_for(const char *arg, size_t *rel_len) {
         {"/.cache", "XDG_CACHE_HOME"},
     };
     size_t i;
-    if (strncmp(arg, "/home/user", 10) != 0) return NULL;
+    if (strncmp(arg, APPATTIC_HOME_SENTINEL, APPATTIC_HOME_SENTINEL_LEN) != 0) return NULL;
     for (i = 0; i < sizeof kRoots / sizeof kRoots[0]; i++) {
         const size_t n = strlen(kRoots[i].rel);
         const char *v;
-        if (strncmp(arg + 10, kRoots[i].rel, n) != 0) continue;
-        if (arg[10 + n] != '\0' && arg[10 + n] != '/') continue;
+        if (strncmp(arg + APPATTIC_HOME_SENTINEL_LEN, kRoots[i].rel, n) != 0) continue;
+        if (arg[APPATTIC_HOME_SENTINEL_LEN + n] != '\0' &&
+            arg[APPATTIC_HOME_SENTINEL_LEN + n] != '/') continue;
         v = getenv(kRoots[i].env);
         if (!v || v[0] != '/') continue;
         *rel_len = n;
@@ -580,14 +581,15 @@ static void rewrite_home_user_argv(char **argv) {
         size_t rel_len = 0;
         const char *xdg = xdg_root_for(a, &rel_len);
         if (xdg) {
-            if (snprintf(storage[slot], PATH_MAX, "%s%s", xdg, a + 10 + rel_len) >= PATH_MAX) continue;
+            if (snprintf(storage[slot], PATH_MAX, "%s%s", xdg,
+                         a + APPATTIC_HOME_SENTINEL_LEN + rel_len) >= PATH_MAX) continue;
             argv[i] = storage[slot];
             slot++;
             continue;
         }
         if (!home || !home[0]) continue;
-        if (strncmp(a, "/home/user", 10) != 0) continue;
-        rest = a + 10;
+        if (strncmp(a, APPATTIC_HOME_SENTINEL, APPATTIC_HOME_SENTINEL_LEN) != 0) continue;
+        rest = a + APPATTIC_HOME_SENTINEL_LEN;
         if (rest[0] != '\0' && rest[0] != '/') continue;
         if (snprintf(storage[slot], PATH_MAX, "%s%s", home, rest) >= PATH_MAX) continue;
         argv[i] = storage[slot];
@@ -869,7 +871,8 @@ static int fixture_for(const char *cmdline, char *scratch, size_t scratchn, cons
             if (strstr(t, "/snap") != NULL) { *out = FIXTURE_LS_SNAP; return 1; }
             if (strstr(t, "/.deno/bin") != NULL) { *out = FIXTURE_LS_DENO; return 1; }
             if (strstr(t, "/.local/bin") != NULL) { *out = FIXTURE_LS_USER_BIN; return 1; }
-            if (eq(t, "/home/user/bin") || strstr(t, "/home/user/bin/") != NULL) {
+            if (eq(t, APPATTIC_HOME_SENTINEL "/bin") ||
+                strstr(t, APPATTIC_HOME_SENTINEL "/bin/") != NULL) {
                 *out = FIXTURE_LS_USER_HOME_BIN; return 1;
             }
             if (strstr(t, "/usr/bin") != NULL) { *out = FIXTURE_LS_USR_BIN; return 1; }

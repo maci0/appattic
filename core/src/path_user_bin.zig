@@ -13,8 +13,8 @@ const Root = struct {
 };
 
 const roots = [_]Root{
-    .{ .path = "/home/user/.local/bin", .label = ".local/bin" },
-    .{ .path = "/home/user/bin", .label = "bin" },
+    .{ .path = pstore.home_sentinel ++ "/.local/bin", .label = ".local/bin" },
+    .{ .path = pstore.home_sentinel ++ "/bin", .label = "bin" },
 };
 
 const keep = "dconf\n";

@@ -11,6 +11,17 @@ extern "C" {
 #define APPATTIC_HOST_EXEC_FAIL (-2)
 #define APPATTIC_HOST_EXEC_BAD (-3)
 
+/* The placeholder a WASM path plugin writes in place of the account's home
+   directory, because a guest has no environment to read $HOME from. Every such
+   argv token is rewritten to the XDG root the matching variable points at, or
+   to $HOME when it is unset, empty, or relative. Mirrored in the guest as
+   `home_sentinel` in core/src/path_store.zig, which is also where the rule for
+   what counts as a home root (this prefix, then end-of-string or '/') is
+   written down and checked at compile time. The length is named because the
+   rewrite indexes past the match with it. */
+#define APPATTIC_HOME_SENTINEL "/home/user"
+#define APPATTIC_HOME_SENTINEL_LEN 10
+
 /* 1 if argv0 is snap/pacman/paru/yay/pikaur/apt-get/apt/dpkg/ls/readlink/realpath/test/dnf/dnf5/yum/zypper/flatpak
    /npm/pnpm/bun/pipx/pip/pip3/uv/brew/gem/composer/docker/podman and argv is a read-only query.
    docker/podman: images -f dangling=true, volume ls -f dangling=true,

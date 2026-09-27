@@ -234,8 +234,8 @@ const none_json =
     \\{"plugin":"path-shadow","engine":null,"findings":[],"script":null,"dialog":{"title":"No overlay roots","body":"Overlay PATH dirs missing. Plugin inactive."},"note":"path missing"}
 ;
 
-const overlay_fixture = "/home/user/.local/bin";
-const overlay_home_bin = "/home/user/bin";
+const overlay_fixture = pstore.home_sentinel ++ "/.local/bin";
+const overlay_home_bin = pstore.home_sentinel ++ "/bin";
 const package_fixture = "/usr/bin";
 
 fn renderShadows(hits: []const ShadowFinding) bool {
