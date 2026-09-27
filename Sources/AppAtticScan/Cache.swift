@@ -150,8 +150,21 @@ public func isScanCacheStale(
     return isScanCacheExpired(cache, now: now, maxAge: maxAge)
 }
 
-public func clearScanCache(at url: URL = defaultScanCacheURL()) {
-    try? FileManager.default.removeItem(at: url)
+/// Remove the stored snapshot. True when a file was there and is now gone.
+///
+/// A removal that failed is false, not a silent success: the snapshot is a full
+/// inventory of the account's paths, and a caller that tells the user it is off
+/// the disk while it is still there is worse than one that says the removal did
+/// not land. Nothing was there to delete, so that is false too, never a failure.
+@discardableResult
+public func clearScanCache(at url: URL = defaultScanCacheURL()) -> Bool {
+    guard FileManager.default.fileExists(atPath: url.path) else { return false }
+    do {
+        try FileManager.default.removeItem(at: url)
+    } catch {
+        return false
+    }
+    return true
 }
 
 /// Delete the stored snapshot on request, whatever its age, and report whether
@@ -196,6 +209,9 @@ public struct EraseResult: Codable, Sendable {
 /// read again. Only age is a reason: a snapshot whose fingerprint no longer
 /// matches is one rescan from usable, and it is the only copy left when a scan
 /// races an install and `commitScanCache` refuses to write over it.
+///
+/// False covers both "not expired" and "the removal did not land"; either way
+/// the snapshot is still on disk, which is what a caller has to know.
 @discardableResult
 public func deleteExpiredScanCache(
     _ cache: ScanCacheFile,
@@ -204,8 +220,7 @@ public func deleteExpiredScanCache(
     at url: URL = defaultScanCacheURL()
 ) -> Bool {
     guard isScanCacheExpired(cache, now: now, maxAge: maxAge) else { return false }
-    clearScanCache(at: url)
-    return true
+    return clearScanCache(at: url)
 }
 
 /// Save only when the inventory stamp is unchanged across the scan and the

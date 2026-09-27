@@ -528,7 +528,6 @@ public func listDiskVolumes(
     for raw in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
         let parts = raw.split(whereSeparator: \.isWhitespace).map(String.init)
         guard parts.count >= 3 else { continue }
-        let device = parts[0]
         let root = unescapeProcMountField(parts[1])
         let fs = parts[2]
         if seen.contains(root) { continue }

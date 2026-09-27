@@ -381,7 +381,7 @@ func readDesktop(_ path: String) -> [String: String] {
     while i < n {
         var j = i
         while j < n, bytes[j] != 0x0A { j += 1 }
-        var (s, e) = trim(i, j)
+        let (s, e) = trim(i, j)
         // One CRLF (or run of breaks) is one boundary.
         while j < n, bytes[j] == 0x0A || bytes[j] == 0x0D { j += 1 }
         i = j

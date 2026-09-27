@@ -352,6 +352,8 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
         if (!perr && pre) {
             if (!cache_put(path, &st, pre)) {
                 fail_msg(e, "module cache is full");
+                /* Nothing took the module, so this call has to drop it. */
+                wasmtime_module_delete(pre);
                 return NULL;
             }
             return pre;
@@ -371,6 +373,7 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
     }
     if (!cache_put(path, &st, module)) {
         fail_msg(e, "module cache is full");
+        wasmtime_module_delete(module);
         return NULL;
     }
     return module;
@@ -494,7 +497,12 @@ static wasm_functype_t *functype_i32x4_i32(void) {
     wasm_valtype_vec_t params, results;
     wasm_valtype_vec_new(&params, 4, ps);
     wasm_valtype_vec_new(&results, 1, rs);
-    return wasm_functype_new(&params, &results);
+    /* wasm_functype_new copies the valtypes, so the five above are the
+       caller's to free. A scan that re-runs leaks them each time. */
+    wasm_functype_t *ty = wasm_functype_new(&params, &results);
+    for (int i = 0; i < 4; i++) wasm_valtype_delete(ps[i]);
+    wasm_valtype_delete(rs[0]);
+    return ty;
 }
 
 static wasm_trap_t *host_exec_cb(
@@ -780,13 +788,22 @@ static int precompile_locked(
         wasm_byte_vec_delete(&image);
         return 1;
     }
+    /* A flush or fsync that failed leaves bytes the kernel never took, and the
+       rename below would publish the image and the stamp that makes a reader
+       accept it: a truncated module deserialized as a valid one. Same rule as
+       write_stamp, so both halves of the pair report it. */
     const size_t wrote = fwrite(image.data, 1, n, f);
-    if (wrote == n && fflush(f) == 0) fsync(fileno(f));
+    const int flushed = fflush(f) == 0 && fsync(fileno(f)) == 0;
     fclose(f);
     wasm_byte_vec_delete(&image);
     if (wrote != n) {
         unlink(tmp_path);
         fail_msg(&e, "short write");
+        return 1;
+    }
+    if (!flushed) {
+        unlink(tmp_path);
+        fail_msg(&e, "cannot flush precompiled module");
         return 1;
     }
     if (rename(tmp_path, out_path) != 0) {
@@ -870,18 +887,21 @@ static int wasm_run_locked(
     }
     if (core_abi.kind != WASMTIME_EXTERN_FUNC) {
         fail_msg(&e, "core exports must be functions");
+        wasmtime_extern_delete(&core_abi);
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
         return 1;
     }
     int32_t abi = 0;
     if (call_i32(ctx, &core_abi.of.func, &abi, &e) != 0) {
+        wasmtime_extern_delete(&core_abi);
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
         return 1;
     }
     if (abi != 1) {
         fail_msg(&e, "unsupported core abi");
+        wasmtime_extern_delete(&core_abi);
         wasmtime_store_delete(store);
         wasmtime_linker_delete(linker);
         return 1;

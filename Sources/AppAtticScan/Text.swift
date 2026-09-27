@@ -161,7 +161,7 @@ public func sanitizeForTerminal(_ s: String) -> String {
             if look.next() == "[", let first = look.next(), first.value >= 0x30, first.value <= 0x3F {
                 var ok = true
                 var param = first
-                while param.value != "m" {
+                while param.value != 0x6D {
                     guard let next = look.next(), next.value >= 0x20, next.value <= 0x3F else { ok = false; break }
                     param = next
                 }
@@ -169,7 +169,7 @@ public func sanitizeForTerminal(_ s: String) -> String {
                     out.append(scalar)
                     out.append("[")
                     out.append(first)
-                    while param.value != "m" {
+                    while param.value != 0x6D {
                         out.append(param)
                         guard let next = look.next() else { break }
                         param = next

@@ -373,7 +373,8 @@ public enum TimestampFormat {
         guard let then = calendar.date(byAdding: .day, value: -days, to: today) else {
             return formatters.date.string(from: date)
         }
-        guard let relativeDays = formatters.relativeDays else { return "\(days) d" }
-        return relativeDays(then, today)
+        guard let relativeDays = formatters.relativeDays,
+              let label = relativeDays(then, today) else { return "\(days) d" }
+        return label
     }
 }

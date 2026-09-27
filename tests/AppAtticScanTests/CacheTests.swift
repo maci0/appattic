@@ -520,9 +520,11 @@ final class CacheTests: XCTestCase {
         let data = sampleScanData()
         try writeScanCache(ScanCacheFile(fingerprint: "fp", includeSystem: false, data: data), to: url)
         XCTAssertNotNil(loadScanCache(from: url))
-        clearScanCache(at: url)
+        // True only while a file is there to take, so a caller that promises the
+        // snapshot is gone cannot say it over a removal that failed.
+        XCTAssertTrue(clearScanCache(at: url))
         XCTAssertNil(loadScanCache(from: url))
-        clearScanCache(at: url)
+        XCTAssertFalse(clearScanCache(at: url))
     }
 
     /// The cache is a full inventory of the account's paths, so a snapshot past

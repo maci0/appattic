@@ -366,7 +366,9 @@ public struct ScanData: Codable, Sendable {
     public let scanned_at: String
     public let duration_s: Double
     public let brew_available: Bool
-    public let totals: ScanTotals
+    /// Var, not let, for the same reason as `outdated`: an export restores the
+    /// nil in the totals when the check they came from did not run.
+    public var totals: ScanTotals
     public let leftovers: [LeftoverItem]
     public let software: [SoftwareItem]
     /// Var, not let, for the same reason as `ScanTotals.outdated_apps`: an

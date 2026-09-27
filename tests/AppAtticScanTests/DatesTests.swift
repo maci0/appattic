@@ -214,6 +214,10 @@ final class DatesTests: XCTestCase {
     /// `DateFormatter` keeps the locale it was built with, so a formatter held
     /// from the first call answers in the old language for the rest of the
     /// session: German reads "25.02.2026", English "Feb 25, 2026".
+    ///
+    /// Darwin only: swift-corelibs-foundation declares `Locale.current`
+    /// get-only, so there is no way to switch it and nothing to assert.
+    #if canImport(Darwin)
     func testTimestampFormatFollowsALocaleChange() {
         let saved = Locale.current
         defer { Locale.current = saved }
@@ -224,4 +228,5 @@ final class DatesTests: XCTestCase {
         let german = TimestampFormat.date.string(from: instant)
         XCTAssertNotEqual(english, german, "the date formatter kept the old locale")
     }
+    #endif
 }

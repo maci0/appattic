@@ -130,7 +130,7 @@ final class FuzzXMLUsageTests: XCTestCase {
         var rng = FuzzRandom(seed: 0x5EED_58EE)
         let path = try scratchPath("usage.xml")
         let url = URL(fileURLWithPath: path)
-        let readers: [(String, ([String: Date]) -> [String: Date])] = [
+        let readers: [(String, (String) -> [String: Date])] = [
             ("xbel", { parseRecentlyUsedXbel($0, now: FuzzXMLUsageTests.now) }),
             ("gnome-state", { parseGnomeApplicationState($0, now: FuzzXMLUsageTests.now) }),
         ]
