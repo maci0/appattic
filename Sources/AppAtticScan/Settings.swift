@@ -91,6 +91,92 @@ public func effectiveIncludeSystem(cliFlag: Bool, settings: AppAtticSettings) ->
     cliFlag || settings.includeSystem
 }
 
+/// The configuration one run actually uses, with every layer named: the
+/// settings file, the file values, the flag that overrides them, and the
+/// environment roots the paths resolved to. `appattic config` prints it so two
+/// machines can be diffed, which is the only way to tell a wrong value from a
+/// wrong path. Encodable only: nothing reads configuration back out of a report.
+public struct EffectiveConfig: Encodable, Equatable, Sendable {
+    public let settingsPath: String
+    public let settingsFileExists: Bool
+    public let includeSystemFile: Bool
+    public let includeSystemFlag: Bool
+    public let confirmDelete: Bool
+    public let ignoredLeftoverPaths: [String]
+    public let scanCachePath: String
+    public let dataHome: String
+    public let configHome: String
+    public let cacheHome: String
+    public let stateHome: String
+    public let dataDirs: String
+
+    /// The merged value the scan and the report use.
+    public var includeSystem: Bool { includeSystemFlag || includeSystemFile }
+
+    private enum CodingKeys: String, CodingKey {
+        case settingsPath, settingsFileExists
+        case includeSystem, includeSystemFile, includeSystemFlag
+        case confirmDelete, ignoredLeftoverPaths, scanCachePath
+        case dataHome, configHome, cacheHome, stateHome, dataDirs
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        let c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(settingsPath, forKey: .settingsPath)
+        try c.encode(settingsFileExists, forKey: .settingsFileExists)
+        try c.encode(includeSystem, forKey: .includeSystem)
+        try c.encode(includeSystemFile, forKey: .includeSystemFile)
+        try c.encode(includeSystemFlag, forKey: .includeSystemFlag)
+        try c.encode(confirmDelete, forKey: .confirmDelete)
+        try c.encode(ignoredLeftoverPaths, forKey: .ignoredLeftoverPaths)
+        try c.encode(scanCachePath, forKey: .scanCachePath)
+        try c.encode(dataHome, forKey: .dataHome)
+        try c.encode(configHome, forKey: .configHome)
+        try c.encode(cacheHome, forKey: .cacheHome)
+        try c.encode(stateHome, forKey: .stateHome)
+        try c.encode(dataDirs, forKey: .dataDirs)
+    }
+
+    public init(
+        settings: AppAtticSettings,
+        settingsURL: URL = defaultSettingsURL(),
+        includeSystemFlag: Bool = false,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        self.settingsPath = settingsURL.path
+        self.settingsFileExists = FileManager.default.fileExists(atPath: settingsURL.path)
+        self.includeSystemFile = settings.includeSystem
+        self.includeSystemFlag = includeSystemFlag
+        self.confirmDelete = settings.confirmDelete
+        self.ignoredLeftoverPaths = settings.ignoredLeftoverPaths
+        self.scanCachePath = defaultScanCacheURL().path
+        self.dataHome = xdgDataHome(env: env)
+        self.configHome = xdgConfigHome(env: env)
+        self.cacheHome = xdgCacheHome(env: env)
+        self.stateHome = xdgStateHome(env: env)
+        self.dataDirs = xdgSystemDirs(env: env)
+    }
+
+    /// One `key: value` line per setting, in the order a reader meets them.
+    /// `includeSystem` shows where the value came from, since the file and the
+    /// flag combine with OR and the flag is the only one that can turn it on.
+    public var lines: [String] {
+        let source = includeSystemFlag ? "on (--include-system)" : (settingsFileExists ? "file" : "default")
+        return [
+            "settings file: \(settingsPath)\(settingsFileExists ? "" : " (missing, using defaults)")",
+            "includeSystem: \(includeSystem) [\(source)]",
+            "confirmDelete: \(confirmDelete)",
+            "ignoredLeftoverPaths: \(ignoredLeftoverPaths.count)",
+            "scan cache: \(scanCachePath)",
+            "XDG_DATA_HOME: \(dataHome)",
+            "XDG_CONFIG_HOME: \(configHome)",
+            "XDG_CACHE_HOME: \(cacheHome)",
+            "XDG_STATE_HOME: \(stateHome)",
+            "XDG_DATA_DIRS: \(dataDirs)",
+        ]
+    }
+}
+
 /// Load settings.json. A missing file is defaults. Empty JSON, unknown keys, or wrong types are errors.
 public func loadSettings(from url: URL = defaultSettingsURL()) throws -> AppAtticSettings {
     let path = url.path

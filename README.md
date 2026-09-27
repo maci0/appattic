@@ -22,6 +22,7 @@ Swift 5.10.1 (`.swift-version`). `./build.sh` uses `swift` on PATH, then `/opt/s
 ./build.sh              # release
 ./build.sh debug
 ./run.sh report
+./run.sh config
 ./run.sh leftovers
 ./run.sh stale
 ./run.sh outdated
@@ -41,6 +42,26 @@ Equivalent without `run.sh` after a build:
 Useful flags: `--json FILE`, `--include-system`, `--fresh` (ignore the last-scan cache), `--dry-run` (print the script for this command), `--top N` (largest leftovers, or largest entries per folder on `disk`), `--category CAT` (repeatable), `--leftovers-only`, `--stale-only`, `--all-file-systems` and `--allocated` (on `disk`), `--no-color`, `--yes` (`update` only), `--version` (`-v`), `--help` (`-h`). Progress and status (including JSON written to FILE) go to stderr so reports and `--dry-run` scripts stay pipeable. Exit 0 on success, 1 when the run failed or an update was cancelled, 2 on a usage error.
 
 A flag that names one command (`--yes` on `update`, `--allocated` and `--all-file-systems` on `disk`, `--leftovers-only` and `--stale-only` on `report`) is a usage error on every other command, so `appattic report --allocated` fails instead of printing a report that ignored it. `--help` wins over a usage error anywhere on the line, so `appattic --nope --help` still prints the help; with several bad tokens, the first one is the error reported.
+
+`appattic config` scans nothing. It prints the settings file this machine resolved, whether it exists, every setting value with the layer it came from, and the paths the XDG variables resolved to. Use it to tell a wrong value from a wrong path, and `--json FILE` to diff two machines:
+
+```bash
+appattic config
+appattic config --include-system --json config.json
+```
+
+```
+settings file: /home/u/.local/share/appattic/settings.json
+includeSystem: false [default]
+confirmDelete: true
+ignoredLeftoverPaths: 0
+scan cache: /home/u/.local/share/appattic/last-scan.json
+XDG_DATA_HOME: /home/u/.local/share
+XDG_CONFIG_HOME: /home/u/.config
+XDG_CACHE_HOME: /home/u/.cache
+XDG_STATE_HOME: /home/u/.local/state
+XDG_DATA_DIRS: /usr/local/share:/usr/share
+```
 
 `appattic update` asks for confirmation on a terminal. With stdin redirected (cron, CI, a pipeline) it stops with exit 2 unless you pass `--yes`, so an unattended upgrade is always something you asked for:
 
@@ -62,7 +83,7 @@ Settings live in `settings.json` next to the scan cache (same file for CLI, macO
 }
 ```
 
-`includeSystem` defaults to false (OS system apps stay out of the stale list). The CLI also reads it; `--include-system` turns it on for that run. There is no flag to turn it off when the file already has `true`. `confirmDelete` defaults to true and is UI-only. `ignoredLeftoverPaths` hides those leftovers in both the UI and CLI. A missing file uses those defaults. A malformed file is an error: the CLI exits 2, the UI shows the path and does not overwrite the file until you save settings.
+`includeSystem` defaults to false (OS system apps stay out of the stale list). The CLI also reads it; `--include-system` turns it on for that run. There is no flag to turn it off when the file already has `true`. `confirmDelete` defaults to true and is UI-only. `ignoredLeftoverPaths` hides those leftovers in both the UI and CLI. A missing file uses those defaults. A malformed file is an error: the CLI exits 2, the UI shows the path and does not overwrite the file until you save settings. `appattic config` prints the file it resolved and the values in force, which is how you check a setting that looks ignored.
 
 Environment:
 

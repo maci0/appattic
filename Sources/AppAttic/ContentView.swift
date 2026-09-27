@@ -88,7 +88,7 @@ private struct VRule: View {
 
 struct ContentView: View {
     @State var vm = ScannerViewModel()
-    @State private var selected: SidebarItem = ContentView.initialSidebar()
+    @State private var selected: SidebarItem = ContentView.initialSidebarItem
     @State private var leftoverSel: String? = nil
     @State private var staleSel: String? = nil
     @State private var outdatedSel: String? = nil
@@ -103,17 +103,23 @@ struct ContentView: View {
     @State private var settingsLoadError = ""
     @State private var scriptCopied = false
 
-    private static func initialSidebar() -> SidebarItem {
-        switch ProcessInfo.processInfo.environment["APPATTIC_PAGE"] {
-        case "leftovers": return .leftovers
-        case "stale": return .stale
-        case "outdated": return .outdated
-        case "packages": return .packages
-        case "disk": return .diskUsage
-        case "settings": return .settings
-        default: return .overview
+    /// Read once: the page cannot change while the window is open, and a
+    /// misconfigured `APPATTIC_PAGE` is reported once, not on every rebuild.
+    private static let initialSidebarItem: SidebarItem = {
+        let resolved = resolveStartPage()
+        if let warning = resolved.warning {
+            FileHandle.standardError.write(Data((warning + "\n").utf8))
         }
-    }
+        switch resolved.page {
+        case .overview: return .overview
+        case .leftovers: return .leftovers
+        case .stale: return .stale
+        case .outdated: return .outdated
+        case .packages: return .packages
+        case .disk: return .diskUsage
+        case .settings: return .settings
+        }
+    }()
 
     private var leftoverRows: [LeftoverItem] { vm.leftoverRows }
     private var staleRows: [SoftwareItem] { vm.staleRows }

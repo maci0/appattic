@@ -99,7 +99,7 @@ public struct CLIOptions {
     }
 }
 
-let cliCommands: Set<String> = ["report", "leftovers", "stale", "outdated", "packages", "update", "disk"]
+let cliCommands: Set<String> = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk"]
 
 /// Options that stand alone: the flag name and the field it sets. `cliHelpText`
 /// lists these; `parseCLIArguments` walks the table.
@@ -157,6 +157,7 @@ usage: appattic [--version] [--help] [command] [options]
 Find leftover data from uninstalled apps, unused installed software, unused distro/language packages, outdated packages, and disk usage.
 
 commands:
+  config        print the settings and paths this machine resolves, then exit
   report        full report: leftovers + stale + outdated + packages (default)
   leftovers     only orphaned data and PATH overlays from uninstalled apps
   stale         unused installed software (review and remove)
@@ -199,6 +200,7 @@ examples:
   appattic leftovers --category caches --category browser
   appattic update --dry-run
   appattic update --yes
+  appattic config
 
 settings.json (includeSystem, confirmDelete, ignored leftover paths):
   Linux: $XDG_DATA_HOME/appattic/settings.json
@@ -206,6 +208,7 @@ settings.json (includeSystem, confirmDelete, ignored leftover paths):
   Missing file uses defaults (includeSystem false, confirmDelete true).
   A malformed file is an error. --include-system turns includeSystem on for this run.
   It cannot turn includeSystem off when the file already has true.
+  'appattic config' prints the values and paths this machine resolves.
 """
 
 public let cliUsageHint = "Try 'appattic --help' for more information."

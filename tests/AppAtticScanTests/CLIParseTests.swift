@@ -32,7 +32,7 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertEqual(serve.parseError, .unknownCommand("serve"))
         XCTAssertEqual(
             serve.error,
-            "unknown command: serve; try one of: disk, leftovers, outdated, packages, report, stale, update"
+            "unknown command: serve; try one of: config, disk, leftovers, outdated, packages, report, stale, update"
         )
         let leaves = parseCLIArguments(["brew-leaves"])
         XCTAssertEqual(leaves.parseError, .unknownCommand("brew-leaves"))
@@ -49,6 +49,16 @@ final class CLIFlagTests: XCTestCase {
             "unknown command: dusk (did you mean 'disk'?)"
         )
         XCTAssertNil(nearestCLICommand("serve"))
+    }
+
+    func testConfigCommandTakesNoPositionalArgument() {
+        XCTAssertEqual(parseCLIArguments(["config"]).command, "config")
+        XCTAssertNil(parseCLIArguments(["config"]).error)
+        XCTAssertTrue(cliHelpText.contains("appattic config"), cliHelpText)
+        XCTAssertEqual(
+            parseCLIArguments(["config", "extra"]).parseError,
+            .unexpectedArgument("extra")
+        )
     }
 
     func testUpdateCommand() {

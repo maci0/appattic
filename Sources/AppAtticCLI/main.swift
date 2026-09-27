@@ -35,6 +35,10 @@ enum AppAtticCLI {
             Foundation.exit(2)
         }
         let includeSystem = effectiveIncludeSystem(cliFlag: opts.includeSystem, settings: settings)
+        if opts.command == "config" {
+            runConfigCommand(opts, settings: settings)
+            return
+        }
         let now = Date()
         let resolved = resolveScan(
             includeSystem: includeSystem,
@@ -125,6 +129,28 @@ enum AppAtticCLI {
                 printOutdated(result)
                 printPackages(result)
             }
+        }
+    }
+}
+
+/// Print the configuration this run resolves: the settings file and its
+/// values, the flag that overrides them, and the paths the XDG variables
+/// resolved to. Nothing is scanned, so it is safe to run anywhere.
+func runConfigCommand(_ opts: CLIOptions, settings: AppAtticSettings) {
+    let config = EffectiveConfig(settings: settings, includeSystemFlag: opts.includeSystem)
+    for line in config.lines {
+        print(line)
+    }
+    if let jsonPath = opts.json {
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let payload = try encoder.encode(config)
+            try writeOwnerOnlyFile(payload, to: URL(fileURLWithPath: jsonPath))
+            fputs("JSON written to \(jsonPath)\n", stderr)
+        } catch {
+            fputs("error writing JSON: \(error.localizedDescription)\n", stderr)
+            Foundation.exit(1)
         }
     }
 }
