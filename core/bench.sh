@@ -20,7 +20,21 @@ benchmark: "<name> <iters> <ns/op> <checksum>", then a final "sink=<n>".
 EOF
         exit 0
         ;;
+    -*)
+        echo "error: unknown argument: $1" >&2
+        echo "Usage: $0 [filter-substr]" >&2
+        echo "       $0 --help" >&2
+        exit 2
+        ;;
 esac
+# Only the first argument is the filter; a second one used to be dropped in
+# silence, so a mistyped pair of filters ran every benchmark.
+if [[ $# -gt 1 ]]; then
+    echo "error: expected at most one filter, got $#" >&2
+    echo "Usage: $0 [filter-substr]" >&2
+    echo "       $0 --help" >&2
+    exit 2
+fi
 if [[ "$(uname -s)" != Linux ]]; then
     echo "core/bench.sh needs Linux (std.os.linux timer)" >&2
     exit 2

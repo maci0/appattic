@@ -3297,6 +3297,31 @@ static bool argvHas(int argc, char **argv, const char *flag) {
     return false;
 }
 
+/* A misspelled long option used to fall through to the window: `appattic-qt
+   --smok` opened a GUI and ran no check, which a script reads as a hang. Qt's
+   own options are single-dash (-platform, -style, -widgetcount, ...), so a
+   double-dash token is this binary's own and has to be named or exit 2. The
+   release build already rejects --dev-check the same way. */
+static int rejectUnknownOptions(int argc, char **argv) {
+    for (int i = 1; i < argc; ++i) {
+        const char *a = argv[i];
+        if (std::strcmp(a, "--help") == 0 || std::strcmp(a, "--version") == 0
+            || std::strcmp(a, "--smoke") == 0) {
+            continue;
+        }
+        if (std::strcmp(a, "--dev-check") == 0) {
+            ++i; /* the check name, and the optional shot dir, are not options */
+            continue;
+        }
+        if (a[0] == '-' && a[1] == '-' && a[2] != '\0') {
+            std::fprintf(stderr, "error: unknown option: %s\n", a);
+            std::fprintf(stderr, "Try 'appattic-qt --help' for more information.\n");
+            return 2;
+        }
+    }
+    return 0;
+}
+
 static int runHelp() {
     /* The dev-only gates are listed only in a build that has them, so a
        release user is not sent to a flag the binary compiled out. */
@@ -3428,6 +3453,7 @@ int main(int argc, char **argv) {
     if (argvHas(argc, argv, "--version")) {
         return runVersion(argc, argv);
     }
+    if (const int rc = rejectUnknownOptions(argc, argv); rc != 0) return rc;
 #ifndef NDEBUG
     /* Dev-only gates: table model, streaming rows, disk streaming, renders.
        Release ships only --smoke, which the AppImage step self-checks with. */

@@ -42,6 +42,15 @@ EOF
         exit 2
         ;;
 esac
+# Only the configuration is read. A second argument used to be dropped in
+# silence, so `./build.sh release --smoke` built a release and ignored the
+# rest; scripts/test.sh and core/build.sh already reject the extra token.
+if [[ $# -gt 1 ]]; then
+    echo "error: expected at most one configuration, got $#" >&2
+    echo "Usage: $0 [release|debug]" >&2
+    echo "       $0 --help" >&2
+    exit 2
+fi
 
 # shellcheck source=scripts/find-swift.sh
 . "$ROOT/scripts/find-swift.sh"

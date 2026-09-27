@@ -15,6 +15,13 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     exit 0
 fi
 
+if [ "$#" -gt 1 ] && [ "${1:-}" != "test" ]; then
+    echo "error: expected at most one argument, got $#" >&2
+    echo "Usage: $0 [test <name.zig> [testName] | test-core]" >&2
+    echo "       $0 --help" >&2
+    exit 2
+fi
+
 if [ "${1:-}" = "test" ] && [ -z "${2:-}" ]; then
     echo "error: missing plugin name" >&2
     echo "Usage: $0 test <name.zig> [testName]" >&2

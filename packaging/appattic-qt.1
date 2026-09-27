@@ -48,6 +48,13 @@ Debug build only. Run one gate and exit:
 The gate is compiled out of a release build, which rejects the option with
 exit 2 rather than opening the window. A gate name outside that list is
 rejected with exit 2 before the window is built.
+.PP
+An unknown
+.B \-\-option
+is reported by name and exits 2, rather than opening the window and running
+nothing. Qt's own options are single-dash, so
+.BI \- platform " name"
+and the rest still pass through.
 .SH ENVIRONMENT
 .TP
 .B APPATTIC_CORE_OUT

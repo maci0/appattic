@@ -1,17 +1,74 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import AppAtticScan
 
 // Repeatable micro-benchmarks for AppAtticScan hotpaths.
 // Build: swift build -c release --product appattic-bench
-// Run:   .build/release/appattic-bench [--json]
+// Run:   .build/release/appattic-bench [--json] [filter-substr]
 // One line per benchmark: "<name> <iters> <ns/op> <checksum>".
 
 var sink = 0
 
 setvbuf(stdout, nil, _IONBF, 0)
 
+/// One benchmark's row. `Encodable` so `--json` writes the same numbers the
+/// text lines carry, instead of a second set a reader has to trust.
+struct BenchResult: Encodable {
+    let name: String
+    let iters: Int
+    let nsPerOp: Double
+    let checksum: Int
+}
+
+struct BenchReport: Encodable {
+    let sink: Int
+    let benchmarks: [BenchResult]
+}
+
+let benchUsage = """
+usage: appattic-bench [--json] [filter-substr]
+
+  (no filter)   run every benchmark
+  filter-substr run only the benchmarks whose name contains this substring
+
+  --json      write the results as JSON on stdout instead of text lines
+  --help, -h  print this help and exit
+
+Output is one line per benchmark: "<name> <iters> <ns/op> <checksum>", then a
+final "sink=<n>" so the optimizer cannot drop a benchmarked loop.
+"""
+
+var benchResults: [BenchResult] = []
+var asJSON = false
 // Optional argv filter: `appattic-bench isodate` runs only matching benchmarks.
-let benchFilter: String? = CommandLine.arguments.dropFirst().first
+var benchFilter: String?
+var benchRest: [String] = []
+for arg in CommandLine.arguments.dropFirst() {
+    switch arg {
+    case "-h", "--help":
+        print(benchUsage)
+        Foundation.exit(0)
+    case "--json":
+        asJSON = true
+    default:
+        if arg.hasPrefix("-") {
+            fputs("error: unknown option: \(arg)\n", stderr)
+            fputs(benchUsage, stderr)
+            Foundation.exit(2)
+        }
+        benchRest.append(arg)
+    }
+}
+if benchRest.count > 1 {
+    fputs("error: expected at most one filter, got \(benchRest.count)\n", stderr)
+    fputs(benchUsage, stderr)
+    Foundation.exit(2)
+}
+benchFilter = benchRest.first
 
 @inline(never)
 func bench(_ name: String, iters: Int, _ body: () -> Int) {
@@ -26,6 +83,8 @@ func bench(_ name: String, iters: Int, _ body: () -> Int) {
     let elapsed = clock.now - start
     let ns = Double(elapsed.components.seconds) * 1e9 + Double(elapsed.components.attoseconds) / 1e9
     let perOp = ns / Double(iters)
+    benchResults.append(BenchResult(name: name, iters: iters, nsPerOp: perOp, checksum: local))
+    if asJSON { return }
     let padded = name.padding(toLength: 28, withPad: " ", startingAt: 0)
     print("\(padded) \(String(format: "%8d", iters)) \(String(format: "%12.1f", perOp)) \(local)")
 }
@@ -253,4 +312,17 @@ bench("expand_name_aliases", iters: 200) { names.reduce(0) { $0 + expandNameAlia
 bench("human_size", iters: 20_000) { humanSize(names[0].count * 12345).count }
 bench("shell_quote", iters: 20_000) { shellQuote(oneName).count }
 
-print("sink=\(sink)")
+if asJSON {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    do {
+        let data = try encoder.encode(BenchReport(sink: sink, benchmarks: benchResults))
+        FileHandle.standardOutput.write(data)
+        print()
+    } catch {
+        fputs("error: could not encode the benchmark report: \(error.localizedDescription)\n", stderr)
+        Foundation.exit(1)
+    }
+} else {
+    print("sink=\(sink)")
+}

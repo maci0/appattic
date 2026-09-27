@@ -29,6 +29,31 @@ if [[ $# -gt 1 ]]; then
     exit 2
 fi
 
+# A flag has to say so, not read as a version name: `--help` used to fall
+# through and report "no <description> for release --help", which is exit 1
+# and a message about a release nobody cut.
+case "${1:-}" in
+    -h|--help)
+        cat <<'EOF'
+Usage: bash scripts/release-notes.sh [VERSION]
+
+  (no version)  the notes for the declared version, read through
+                check-version.sh
+  VERSION       the notes for that release (a v* ref name or a bare version)
+
+Prints the AppStream <description> of the release and nothing else. Exits 1
+when that release carries no notes, since a release with no note is silent.
+EOF
+        exit 0
+        ;;
+    -*)
+        echo "error: unknown argument: $1" >&2
+        echo "Usage: bash scripts/release-notes.sh [VERSION]" >&2
+        echo "       bash scripts/release-notes.sh --help" >&2
+        exit 2
+        ;;
+esac
+
 version="${1:-$(bash "$_script_dir/check-version.sh")}"
 version="${version#v}"
 
