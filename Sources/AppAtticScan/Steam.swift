@@ -146,7 +146,10 @@ func skipLiveDu(_ a: AppRecord) -> Bool {
 func steamBundles(in dir: String, depth: Int) -> [String] {
     guard depth >= 1, let entries = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [] }
     var out: [String] = []
-    for name in entries where !name.hasPrefix(".") {
+    // Sorted: `contentsOfDirectory` hands back readdir order, and
+    // `steamGameBundle` takes the first bundle matching a manifest name, so
+    // an unsorted read picks a different survivor on every process.
+    for name in entries.sorted() where !name.hasPrefix(".") {
         let child = (dir as NSString).appendingPathComponent(name)
         if name.hasSuffix(".app") {
             if !name.posixLowercased().contains("helper") {

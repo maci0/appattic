@@ -278,6 +278,16 @@ public func runAndWait(_ process: Process, timeout: TimeInterval) throws -> Bool
 /// caller cannot tell a missing binary from a hang and must report the tool as
 /// unavailable either way.
 public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, String, String) {
+    runCommand(cmd, timeout: timeout, clock: monotonicSeconds)
+}
+
+/// `runCommand` with the elapsed-time source of the pipe drain window taken
+/// from `clock`. The window is the only deadline here that a replayed run
+/// could not otherwise step, and it decides whether stdout is whole or cut at
+/// a partial read: a scan that inherits a loaded host's uptime reports a
+/// truncated listing with the command's own exit status, which no caller
+/// treats as a failure.
+func runCommand(_ cmd: [String], timeout: TimeInterval, clock: MonotonicFn) -> (Int32, String, String) {
     guard let exe = cmd.first else { return (127, "", "empty command") }
     let resolved: String
     if exe.hasPrefix("/") {
@@ -300,7 +310,7 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
     process.standardOutput = outPipe
     process.standardError = errPipe
     process.standardInput = FileHandle.nullDevice
-    let collected = CommandPipes()
+    let collected = CommandPipes(clock: clock)
     let group = DispatchGroup()
     // Dedicated threads: pmap workers already occupy the GCD pool. Queueing
     // pipe reads on that pool deadlocks (workers wait for readers, readers wait
@@ -457,10 +467,16 @@ public func runGeneratedScript(
 
 private final class CommandPipes: @unchecked Sendable {
     private let lock = NSLock()
+    private let clock: MonotonicFn
     private var _out = Data()
     private var _err = Data()
     private var drainDeadline = TimeInterval.greatestFiniteMagnitude
     private var _overflowed = false
+
+    init(clock: @escaping MonotonicFn = monotonicSeconds) {
+        self.clock = clock
+    }
+
     var out: Data {
         get { lock.lock(); defer { lock.unlock() }; return _out }
         set { lock.lock(); defer { lock.unlock() }; _out = newValue }
@@ -481,14 +497,14 @@ private final class CommandPipes: @unchecked Sendable {
     /// be cut off at its timeout.
     func closeDrainWindow() {
         lock.lock()
-        drainDeadline = monotonicSeconds() + commandPipeDrainGrace
+        drainDeadline = clock() + commandPipeDrainGrace
         lock.unlock()
     }
 
     private func drainTimeLeft() -> TimeInterval {
         lock.lock()
         defer { lock.unlock() }
-        return drainDeadline - monotonicSeconds()
+        return drainDeadline - clock()
     }
 
     private func appendCapped(_ slice: ArraySlice<UInt8>, to data: inout Data) {

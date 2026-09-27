@@ -116,8 +116,8 @@ bool outdatedIsUpdatable(const QString &manager, const QString &kind);
 bool hasUsageTiming(const Finding &f);
 bool isStaleTierStatus(const QString &status);
 bool isStale(const Finding &f);
-void enrichLeftoverUsageTiming(Finding &f);
-void enrichFindingsUsageTiming(QVector<Finding> &findings);
+void enrichLeftoverUsageTiming(Finding &f, const QDateTime &now = QDateTime::currentDateTime());
+void enrichFindingsUsageTiming(QVector<Finding> &findings, const QDateTime &now = QDateTime::currentDateTime());
 void enrichLeftoverSizes(
     QVector<Finding> &findings,
     bool (*cancelled)(void *user) = nullptr,

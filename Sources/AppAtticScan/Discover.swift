@@ -110,7 +110,9 @@ public func appBundleBases(_ appPath: String) -> [String] {
     var isDir: ObjCBool = false
     if FileManager.default.fileExists(atPath: wrapper, isDirectory: &isDir), isDir.boolValue {
         if let names = try? FileManager.default.contentsOfDirectory(atPath: wrapper) {
-            for name in names where name.hasSuffix(".app") {
+            // Sorted: readdir order decides which of several wrapped bundles
+            // is reported first, and it varies between processes.
+            for name in names.sorted() where name.hasSuffix(".app") {
                 add((wrapper as NSString).appendingPathComponent(name))
             }
         }

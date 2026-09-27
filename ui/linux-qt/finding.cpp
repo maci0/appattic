@@ -854,19 +854,19 @@ bool isStale(const Finding &f) {
     return false;
 }
 
-void enrichLeftoverUsageTiming(Finding &f) {
+void enrichLeftoverUsageTiming(Finding &f, const QDateTime &now) {
     if (!isLeftover(f) || isShadowFinding(f) || hasUsageTiming(f) || f.path.isEmpty()) return;
     const QFileInfo fi(f.path);
     if (!fi.exists()) return;
     const QDateTime mt = fi.lastModified();
     if (!mt.isValid()) return;
     f.mtime = mt.toUTC().toString(Qt::ISODate);
-    const qint64 days = localCalendarDaysSince(mt, QDateTime::currentDateTime());
+    const qint64 days = localCalendarDaysSince(mt, now);
     f.idleDays = days < 0 ? 0 : days;
 }
 
-void enrichFindingsUsageTiming(QVector<Finding> &findings) {
-    for (Finding &f : findings) enrichLeftoverUsageTiming(f);
+void enrichFindingsUsageTiming(QVector<Finding> &findings, const QDateTime &now) {
+    for (Finding &f : findings) enrichLeftoverUsageTiming(f, now);
 }
 
 void enrichLeftoverSizes(

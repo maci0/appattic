@@ -32,6 +32,11 @@ public:
 public slots:
     void run(const QString &core, const QStringList &pluginSpecs, int token) {
         m_token = token;
+        /* One reference instant for the whole scan. Read per row instead, a
+           scan that runs across local midnight dates the rows before it and
+           the rows after it against two different days, and the same scan
+           replayed an hour later stores a different idle count. */
+        m_scanNow = QDateTime::currentDateTime();
         /* Clear first so every exit path below leaves the process-global cancel
            clear; the previous order left it armed when the run never started. */
         clearCoreWasmCancel();
@@ -75,7 +80,7 @@ private:
         QVector<Finding> batch;
         appendFindingsFromBlob(batch, QByteArray(json, int(len)));
         if (batch.isEmpty()) return;
-        enrichFindingsUsageTiming(batch);
+        enrichFindingsUsageTiming(batch, m_scanNow);
         bool anyLeftover = false;
         for (const Finding &f : batch) {
             if (isLeftover(f)) {
@@ -110,6 +115,7 @@ private:
 
     QAtomicInteger<int> m_wanted{0};
     int m_token = 0;
+    QDateTime m_scanNow;
     QVector<Finding> m_partial;
 };
 

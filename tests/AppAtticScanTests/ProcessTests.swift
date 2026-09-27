@@ -59,6 +59,28 @@ final class ProcessTests: XCTestCase {
         )
     }
 
+    /// The window that bounds the drain is the one deadline in this file a
+    /// replayed run cannot step unless it is passed in, and a closed window
+    /// reports a partial listing under the command's own exit status, which no
+    /// caller reads as a failure. A stepping clock closes it, so the same
+    /// command whose pipe a grandchild holds open still returns: this hangs
+    /// for the grandchild's 8 seconds if the window reads the host's uptime.
+    func testRunCommandDrainWindowReadsTheInjectedClock() {
+        var elapsed: TimeInterval = 0
+        let clock: MonotonicFn = {
+            elapsed += 0.5
+            return elapsed
+        }
+        let start = monotonicSeconds()
+        let (rc, _, err) = runCommand(["/bin/sh", "-c", "sleep 8 & exit 0"], timeout: 5, clock: clock)
+        XCTAssertEqual(rc, 0, err)
+        XCTAssertLessThan(
+            monotonicSeconds() - start,
+            Self.timingSlack,
+            "a stepped clock has to close the drain window without the host's uptime"
+        )
+    }
+
     /// Bounded output is not the same as a bounded reader: a reader that gives
     /// up only on the caller's grace period outlives the call with its
     /// descriptor open. A scan runs dozens of commands, so those accumulate
