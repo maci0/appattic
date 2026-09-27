@@ -87,7 +87,7 @@ fn query_impl(present: i32) i32 {
     var outdated: [128]AurOutdated = undefined;
     var used: []const u8 = outdated_cmds[0];
     var n_out: usize = 0;
-    const nq = host_exec.runFirst(&exec_up_buf, &outdated_cmds, &used);
+    const nq = host_exec.runFirst(&exec_up_buf, &outdated_cmds, &used, &note);
     if (nq >= 0) n_out = parseAurQua(exec_up_buf[0..@intCast(nq)], &outdated);
     while (true) {
         if (renderAur(outdated[0..n_out], helperFromCmd(used))) return 0;

@@ -423,10 +423,15 @@ pub fn run(cmd: []const u8, out: []u8) i32 {
     return nativeRun(cmd, out);
 }
 
-/// Run the first of `cmds` the host answers, reporting which one ran.
-pub fn runFirst(buf: []u8, cmds: []const []const u8, used: *[]const u8) i32 {
+/// Run the first of `cmds` the host answers, reporting which one ran. Every
+/// command that did not answer goes to `log`, so a run where all of them
+/// failed still names them instead of looking like a clean scan. `log` is a
+/// `*querynote.Log`; it is a parameter rather than an import so this module
+/// stays the one host_exec callers compile in.
+pub fn runFirst(buf: []u8, cmds: []const []const u8, used: *[]const u8, log: anytype) i32 {
     for (cmds) |cmd| {
         const n = run(cmd, buf);
+        log.add(cmd, n);
         if (n >= 0) {
             used.* = cmd;
             return n;

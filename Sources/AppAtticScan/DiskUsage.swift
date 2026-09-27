@@ -111,7 +111,7 @@ private func unixMetaFromStat(_ st: stat) -> UnixMeta {
     let isDir = (mode & Int32(S_IFMT)) == Int32(S_IFDIR) && !isLink
     return UnixMeta(
         apparent: Int(st.st_size),
-        allocated: addBytes(Int(st.st_blocks), bytesPerBlock),
+        allocated: mulBytes(Int(st.st_blocks), bytesPerBlock),
         mtime: Date(timeIntervalSince1970: unixMtime(st)),
         isDir: isDir,
         isLink: isLink,
@@ -462,7 +462,6 @@ public func listDiskVolumes(
         let fs = parts[2]
         if seen.contains(root) { continue }
         if virtualFs.contains(fs) && root != "/" { continue }
-        seen.insert(root)
         var total = 0
         var avail = 0
         var st = statvfs()
@@ -471,6 +470,9 @@ public func listDiskVolumes(
             avail = Int(st.f_frsize) * Int(st.f_bavail)
         }
         if total <= 0 && root != "/" { continue }
+        // Claimed only once it is really a volume: an over-mount that statvfs
+        // could not resolve must not lock out the real mount listed after it.
+        seen.insert(root)
         out.append(DiskVolume(
             name: root == "/" ? "File system" : (root as NSString).lastPathComponent,
             rootPath: root,
@@ -480,7 +482,6 @@ public func listDiskVolumes(
             isRoot: root == "/",
             isHome: home == root || home.hasPrefix(root == "/" ? "/" : root + "/")
         ))
-        _ = device
     }
     return out.sorted { a, b in
         if a.isRoot != b.isRoot { return a.isRoot }

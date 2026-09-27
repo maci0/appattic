@@ -177,13 +177,16 @@ pub fn walkObject(cur: *Cursor, comptime Ctx: type, ctx: *Ctx) void {
 }
 
 /// Run `Item` over every object element of an array whose `[` was already
-/// consumed, calling `Item.finish` after each element. A non-object element is
-/// skipped. `Item` needs `onPair` and `finish`.
+/// consumed, calling `Item.reset` before each element and `Item.finish` after
+/// it, so a field one element leaves out never inherits the previous element's
+/// value. A non-object element is skipped. `Item` needs `reset`, `onPair` and
+/// `finish`.
 pub fn eachObjectInArray(cur: *Cursor, comptime Item: type, item: *Item) void {
     while (true) {
         const t = cur.next();
         if (t == .array_end or t == .end) return;
         if (t == .object_begin) {
+            Item.reset(item);
             walkObject(cur, Item, item);
             Item.finish(item);
         } else {

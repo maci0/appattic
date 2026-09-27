@@ -10,7 +10,9 @@ let envAssignRE = try! NSRegularExpression(pattern: #"^[A-Za-z_]\w*="#)
 let cmdTokenRE = try! NSRegularExpression(pattern: #"^[A-Za-z0-9_][\w.+-]*$"#)
 let tsRE = try! NSRegularExpression(pattern: #"^:\s+(\d{9,11}):\d+;(.*)$"#)
 let fishCmdRE = try! NSRegularExpression(pattern: #"^- cmd:\s+(.*)$"#)
-let fishWhenRE = try! NSRegularExpression(pattern: #"^\s*when:\s+(\d+)$"#)
+// Bounded to the same epoch width tsRE and hxDigitsValue use: an unbounded
+// run makes TimeInterval(line[r]) +infinity for a corrupt history file.
+let fishWhenRE = try! NSRegularExpression(pattern: #"^\s*when:\s+(\d{9,11})$"#)
 let appExeRE = try! NSRegularExpression(pattern: #"\.app/Contents/MacOS/([^/\s]+)"#, options: [.caseInsensitive])
 let appBundleRE = try! NSRegularExpression(pattern: #"/([^/]+)\.app(?:/|$)"#, options: [.caseInsensitive])
 

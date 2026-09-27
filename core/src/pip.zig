@@ -51,6 +51,12 @@ const ItemCtx = struct {
         return .skip;
     }
 
+    pub fn reset(self: *ItemCtx) void {
+        self.name = "";
+        self.current = "";
+        self.latest = "";
+    }
+
     pub fn finish(self: *ItemCtx) void {
         if (self.n >= self.out.len) return;
         if (!jsonbuf.isSafeIdent(self.name)) return;
@@ -264,4 +270,18 @@ test "plugin_query missing is empty findings" {
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pip missing") != null);
+}
+
+test "parsePipOutdatedJSON does not carry a field across elements" {
+    var buf: [4]PipOutdated = undefined;
+    const text =
+        \\[{"name":"a","version":"1.0","latest_version":"2.0"},{"name":"b","latest_version":"3.0"}]
+    ;
+    const n = parsePipOutdatedJSON(text, &buf);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqualStrings("a", buf[0].name);
+    try std.testing.expectEqualStrings("1.0", buf[0].current);
+    try std.testing.expectEqualStrings("b", buf[1].name);
+    try std.testing.expectEqualStrings("", buf[1].current);
+    try std.testing.expectEqualStrings("3.0", buf[1].latest);
 }

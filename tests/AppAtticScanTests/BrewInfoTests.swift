@@ -70,6 +70,24 @@ final class BrewInfoTests: XCTestCase {
         )
     }
 
+    /// A cask can ship several artifacts under one dict. The name has to be the
+    /// same on every run: Dictionary order is hash-seeded per process.
+    func testCaskArtifactDictNameIsDeterministic() {
+        let artifacts: [Any] = [[
+            "args": ["--no-quarantine"],
+            "target": "ZeroTier.app",
+            "zap": true,
+        ]]
+        for _ in 0..<32 {
+            XCTAssertEqual(caskArtifactAppNames(artifacts), ["ZeroTier.app"])
+        }
+        // Sorted key order picks "Bin" over "Doc", and only every run, not once.
+        XCTAssertEqual(
+            caskArtifactAppNames([["Bin": ["target": "Tool.app"], "Doc": ["target": "Guide.app"]]]),
+            ["Tool.app"]
+        )
+    }
+
     func testRefusedCasksParseTap() {
         let err = "Error: Refusing to load cask dail8859/notepadnext/notepadnext from untrusted tap dail8859/notepadnext.\n"
         let hits = refusedCasks(from: err)

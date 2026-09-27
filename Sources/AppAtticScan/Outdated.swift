@@ -775,8 +775,10 @@ public func versionNewer(latest: String?, current: String?) -> Bool {
         var cur = 0
         var inDigits = false
         for ch in src {
-            if ch.isNumber {
-                cur = cur * 10 + ch.wholeNumberValue!
+            // ASCII 0-9 only. `Character.isNumber` is also true for numeric
+            // punctuation such as ½, which has no wholeNumberValue.
+            if ch.isNumber, ch.isASCII, let digit = ch.wholeNumberValue {
+                cur = cur * 10 + digit
                 inDigits = true
             } else if inDigits {
                 nums.append(cur)

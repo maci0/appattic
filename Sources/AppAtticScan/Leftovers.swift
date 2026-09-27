@@ -1161,7 +1161,7 @@ func mergeOrphanGroup(_ group: [DataItem]) -> DataItem {
     }
     primary.extraPaths = extras.sorted()
     primary.sizeBytes = group.reduce(0) { addBytes($0, $1.sizeBytes) }
-    primary.sizeMeasured = group.contains { $0.sizeMeasured }
+    primary.sizeMeasured = group.allSatisfy(\.sizeMeasured)
     primary.mtime = group.compactMap(\.mtime).max() ?? primary.mtime
     primary.activityMtime = group.compactMap(\.activityMtime).max() ?? primary.activityMtime
     return primary

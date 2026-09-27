@@ -52,6 +52,14 @@ fn splitNameVer(s: []const u8) ?BunGlobal {
     return .{ .name = name, .version = version };
 }
 
+/// `bun pm ls -g` prefixes every package row with a box-drawing glyph. The
+/// global `node_modules` path it prints on the first line is not a row: with an
+/// `@` anywhere in `$HOME` it splits into a package and a version, and the scan
+/// offers to remove a directory that is not one.
+fn isTreeRow(line: []const u8) bool {
+    return std.mem.startsWith(u8, line, "\u{251C}") or std.mem.startsWith(u8, line, "\u{2514}");
+}
+
 /// Parse `bun pm ls -g` tree (`name@version` rows). Path headers skipped.
 pub fn parseBunGlobalList(text: []const u8, out: []BunGlobal) usize {
     var n: usize = 0;
@@ -60,6 +68,7 @@ pub fn parseBunGlobalList(text: []const u8, out: []BunGlobal) usize {
         if (n == out.len) break;
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0) continue;
+        if (!isTreeRow(line)) continue;
         const rest = stripTree(line);
         const hit = splitNameVer(rest) orelse continue;
         out[n] = hit;
@@ -172,4 +181,20 @@ test "plugin_query missing is empty findings" {
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "bun missing") != null);
+}
+
+test "parseBunGlobalList skips the node_modules header with an at in the home" {
+    var buf: [8]BunGlobal = undefined;
+    const text =
+        \\/home/first.last@corp.example.com/.bun/install/global/node_modules
+        \\├── typescript@5.4.5
+        \\└── prettier@3.3.0
+        \\
+    ;
+    const n = parseBunGlobalList(text, &buf);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqualStrings("typescript", buf[0].name);
+    try std.testing.expectEqualStrings("5.4.5", buf[0].version);
+    try std.testing.expectEqualStrings("prettier", buf[1].name);
+    try std.testing.expectEqualStrings("3.3.0", buf[1].version);
 }

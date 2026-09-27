@@ -190,6 +190,13 @@ public func infoJSONForNames(
     return [:]
 }
 
+/// The app one cask artifact entry names, if any.
+private func artifactAppName(_ key: String, _ value: Any?) -> String? {
+    if let s = value as? String { return s }
+    if let opts = value as? [String: Any], let target = opts["target"] as? String { return target }
+    return key
+}
+
 public func caskArtifactAppNames(_ items: [Any]) -> [String] {
     var names: [String] = []
     for item in items {
@@ -201,18 +208,13 @@ public func caskArtifactAppNames(_ items: [Any]) -> [String] {
                 names.append(contentsOf: caskArtifactAppNames(app as? [Any] ?? [app]))
                 continue
             }
-            for (src, dest) in dict {
-                if let dest = dest as? String {
-                    name = dest
-                } else if let dest = dest as? [String: Any] {
-                    if let target = dest["target"] as? String {
-                        name = target
-                    } else {
-                        name = src
-                    }
-                } else {
-                    name = src
-                }
+            // Keys are walked sorted, not in Dictionary order: that order is
+            // hash-seeded per process, so a plain `for` picks a different
+            // artifact on each run of the same scan.
+            for key in dict.keys.sorted() {
+                guard let candidate = artifactAppName(key, dict[key]),
+                      candidate.hasSuffix(".app") else { continue }
+                name = candidate
                 break
             }
         }

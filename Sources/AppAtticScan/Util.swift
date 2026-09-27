@@ -937,6 +937,12 @@ public func addBytes(_ a: Int, _ b: Int) -> Int {
     return overflow ? Int.max : sum
 }
 
+/// Saturating product for non-negative byte totals. Overflow becomes Int.max.
+public func mulBytes(_ a: Int, _ b: Int) -> Int {
+    let (product, overflow) = a.multipliedReportingOverflow(by: b)
+    return overflow ? Int.max : product
+}
+
 /// Decimal separator of the current locale, read once. `String(format:)` pays
 /// for locale setup on every call (~1.2 µs); the separator is a single lookup.
 let localeDecimalSeparator: String = {
@@ -947,8 +953,8 @@ let localeDecimalSeparator: String = {
     return f.decimalSeparator ?? "."
 }()
 
-/// One decimal place without `String(format:)`. Rounds half away from zero the
-/// way `%.1f` prints, using the locale's decimal separator.
+/// One decimal place without `String(format:)` (~1.2 µs/call from locale +
+/// varargs overhead). Rounds half away from zero the way `%.1f` prints.
 func oneDecimal(_ n: Double) -> String {
     let neg = n < 0
     let tenths = Int((abs(n) * 10).rounded())

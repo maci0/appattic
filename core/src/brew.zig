@@ -84,6 +84,12 @@ const ItemCtx = struct {
         return .skip;
     }
 
+    pub fn reset(self: *ItemCtx) void {
+        self.name = "";
+        self.current = "";
+        self.latest = "";
+    }
+
     pub fn finish(self: *ItemCtx) void {
         if (self.n.* >= self.out.len) return;
         if (!isSafeBrewName(self.name)) return;
@@ -325,4 +331,18 @@ fn fuzzBrewOutdated(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(h.name.len <= 214);
         try std.testing.expect(isSafeBrewName(h.name));
     }
+}
+
+test "parseBrewOutdatedJSON does not carry a field across elements" {
+    var buf: [4]BrewOutdated = undefined;
+    const text =
+        \\{"formulae":[{"name":"wget","installed_versions":["1.21.4"],"current_version":"1.24.5"},{"name":"curl","current_version":"8.0"}]}
+    ;
+    const n = parseBrewOutdatedJSON(text, &buf);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqualStrings("wget", buf[0].name);
+    try std.testing.expectEqualStrings("1.21.4", buf[0].current);
+    try std.testing.expectEqualStrings("curl", buf[1].name);
+    try std.testing.expectEqualStrings("", buf[1].current);
+    try std.testing.expectEqualStrings("8.0", buf[1].latest);
 }

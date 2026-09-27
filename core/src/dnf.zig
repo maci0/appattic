@@ -179,13 +179,13 @@ fn query_impl(present: i32) i32 {
     var orphans: [128]DnfOrphan = undefined;
     var n_orph: usize = 0;
     var used_q: []const u8 = query_cmds[0];
-    const nexec = host_exec.runFirst(&exec_buf, &query_cmds, &used_q);
+    const nexec = host_exec.runFirst(&exec_buf, &query_cmds, &used_q, &note);
     if (nexec >= 0) n_orph = parseDnfUnneeded(exec_buf[0..@intCast(nexec)], &orphans);
 
     var outdated: [128]DnfOutdated = undefined;
     var n_out: usize = 0;
     var used_u: []const u8 = outdated_cmds[0];
-    const nq = host_exec.runFirst(&exec_up_buf, &outdated_cmds, &used_u);
+    const nq = host_exec.runFirst(&exec_up_buf, &outdated_cmds, &used_u, &note);
     if (nq >= 0) n_out = parseDnfUpgrades(exec_up_buf[0..@intCast(nq)], &outdated);
 
     const mgr = if (nexec >= 0) managerFromCmd(used_q) else managerFromCmd(used_u);
@@ -276,4 +276,15 @@ test "parseDnfUpgrades skips empty obsoleting" {
     var buf: [4]DnfOutdated = undefined;
     try std.testing.expectEqual(@as(usize, 0), parseDnfUpgrades("", &buf));
     try std.testing.expectEqual(@as(usize, 0), parseDnfUpgrades("Obsoleting Packages\n", &buf));
+}
+
+test "runFirst names every command that did not answer" {
+    const none = [_][]const u8{ "appattic-no-such-cmd one", "appattic-no-such-cmd two" };
+    var log = querynote.Log{};
+    var used: []const u8 = none[0];
+    var buf: [64]u8 = undefined;
+    try std.testing.expectEqual(host_exec.fail, host_exec.runFirst(&buf, &none, &used, &log));
+    try std.testing.expectEqual(@as(usize, 2), log.n);
+    try std.testing.expectEqualStrings("appattic-no-such-cmd one", log.items[0][0]);
+    try std.testing.expectEqualStrings("appattic-no-such-cmd two", log.items[1][0]);
 }
