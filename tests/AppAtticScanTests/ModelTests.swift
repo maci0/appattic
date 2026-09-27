@@ -257,4 +257,22 @@ final class ModelTests: XCTestCase {
             )
         }
     }
+
+    /// `updateCommand` and `upgradableManager` are one model, so a manager that
+    /// reports updatable must also produce a command, and vice versa.
+    func testUpdateCommandMatchesUpgradableManagers() {
+        for manager in UpgradableManager.allCases {
+            let pkg = OutdatedPkg(name: "pkg-1", manager: manager.rawValue)
+            let cmd = updateCommand(pkg)
+            XCTAssertNotNil(cmd, "\(manager.rawValue) should have an upgrade command")
+            XCTAssertTrue(cmd?.contains("pkg-1") == true, "\(manager.rawValue) command should name the package")
+        }
+        for raw in ["snap", "app-store", "pip", "npm", "future-manager"] {
+            XCTAssertNil(updateCommand(OutdatedPkg(name: "pkg-1", manager: raw)), "\(raw) is report-only")
+        }
+        XCTAssertNil(
+            updateCommand(OutdatedPkg(name: "pkg-1", manager: "brew-cask", kind: "untrusted")),
+            "an untrusted cask gets no upgrade command"
+        )
+    }
 }

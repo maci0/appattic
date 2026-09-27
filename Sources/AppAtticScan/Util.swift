@@ -116,11 +116,18 @@ public func linuxDistroFamily(osRelease: String) -> String {
 }
 
 /// Distro package manager used for orphans and outdated queries.
+///
+/// `dpkg` is not a query target: `resolveDistroPackageManager` never returns
+/// it, and `dpkg -l` rc rows are collected inside the `.apt` query because
+/// both belong to Debian. The case still exists so `DistroPackageManager(rawValue:)`
+/// admits every `PackageEntry.manager` a collector can emit, which is what
+/// `PackageEntry.canMarkManual` asks.
 public enum DistroPackageManager: String, Sendable {
     case pacman
     case apt
+    case dpkg
     case dnf
-    case zypper
+    case zzypper
 }
 
 /// Family from os-release, then PATH order pacman, dnf, zypper, apt.

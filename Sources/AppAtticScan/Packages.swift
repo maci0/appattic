@@ -132,7 +132,7 @@ public func packageMarkManualCommand(_ entry: PackageEntry) -> String? {
     guard entry.canMarkManual else { return nil }
     let q = shellQuote(entry.name)
     switch entry.manager {
-    case "apt":
+    case "apt", "dpkg":
         return "apt-mark manual \(q)"
     case "pacman":
         return "pacman -D --asexplicit \(q)"
@@ -543,7 +543,7 @@ public func collectPackages(
                 ) else { return [] }
                 return parsePacmanOrphans(text)
             }
-        case .apt:
+        case .apt, .dpkg:
             queries.append {
                 var result: [PackageEntry] = []
                 if let text = runPackageQuery(

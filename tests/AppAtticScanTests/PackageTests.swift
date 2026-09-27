@@ -48,7 +48,10 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(pkgs[0].kind, "orphan")
         XCTAssertEqual(pkgs[0].version, "1.0-1")
         XCTAssertEqual(packageRemoveCommand(pkgs[0]), "apt-get purge -y oldpkg")
-        XCTAssertFalse(pkgs[0].canMarkManual)
+        // An rc row is a Debian distro package, so it takes the apt manual
+        // marker. Losing this hid the only corrective action on a config remnant.
+        XCTAssertTrue(pkgs[0].canMarkManual)
+        XCTAssertEqual(packageMarkManualCommand(pkgs[0]), "apt-mark manual oldpkg")
     }
 
     func testParseDnfUnneededNames() {

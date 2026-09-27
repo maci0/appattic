@@ -94,6 +94,11 @@ public final class OutdatedPkg {
 
     public var updatable: Bool { outdatedIsUpdatable(manager: manager, kind: kind) }
 
+    /// The manager behind `updatable`, or nil for report-only managers and untrusted casks.
+    public var upgradableManager: UpgradableManager? {
+        kind == "untrusted" ? nil : UpgradableManager(rawValue: manager)
+    }
+
     public func toEntry() -> OutdatedEntry {
         OutdatedEntry(
             name: name,
@@ -193,29 +198,27 @@ func aurHelperBin(_ which: WhichFn = whichCommand) -> String {
 }
 
 public func updateCommand(_ pkg: OutdatedPkg) -> String? {
-    guard pkg.updatable else { return nil }
+    guard let manager = pkg.upgradableManager else { return nil }
     let quoted = shellQuote(pkg.name)
-    switch pkg.manager {
-    case "brew-formula":
+    switch manager {
+    case .brewFormula:
         return "brew upgrade \(quoted)"
-    case "brew-cask":
+    case .brewCask:
         return "brew upgrade --cask \(quoted)"
-    case "flatpak":
+    case .flatpak:
         return "flatpak update -y \(quoted)"
-    case "apt":
+    case .apt:
         return "apt-get -y install --only-upgrade \(quoted)"
-    case "pacman":
+    case .pacman:
         return "pacman --noconfirm -S \(quoted)"
-    case "aur":
+    case .aur:
         return "\(aurHelperBin()) --noconfirm -S \(quoted)"
-    case "dnf":
+    case .dnf:
         return "dnf upgrade -y \(quoted)"
-    case "yum":
+    case .yum:
         return "yum upgrade -y \(quoted)"
-    case "zypper":
+    case .zypper:
         return "zypper --non-interactive update \(quoted)"
-    default:
-        return nil
     }
 }
 
@@ -1216,7 +1219,7 @@ public func collectLinux(
         queries.append { queryDnf(which: which, run: run) }
     case .zypper:
         queries.append { queryZypper(which: which, run: run) }
-    case .apt:
+    case .apt, .dpkg:
         queries.append { queryApt(which: which, run: run) }
     case nil:
         break
