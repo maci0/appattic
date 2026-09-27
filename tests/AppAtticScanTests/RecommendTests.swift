@@ -634,4 +634,60 @@ final class RecommendTests: XCTestCase {
         )
         XCTAssertEqual(softwareDisplaySummary(item), "Installed application")
     }
+
+    /// A data directory whose mtime sits days past the scan (restored from a
+    /// backup made on a machine whose clock ran ahead) used to read as "written
+    /// 1 h ago" and pin the app to KEEP forever.
+    func testFutureDataMtimeIsNotTreatedAsActiveUse() {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let sw = Software(
+            name: "iTerm",
+            kind: "app",
+            path: "/Applications/iTerm.app",
+            source: "pkg/other",
+            dataMtime: now.addingTimeInterval(5 * 86400),
+            installedAt: now.addingTimeInterval(-400 * 86400)
+        )
+        let v = evaluate(sw, now: now)
+        XCTAssertEqual(v.tier, "review", v.reason)
+        XCTAssertFalse(v.reason.contains("actively in use"), v.reason)
+    }
+
+    /// A last-used timestamp past the scan is not usage. Skew inside the
+    /// tolerance still counts, or every running app would lose its signal.
+    func testFutureLastUsedIsNotTreatedAsActiveUse() {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let stale = Software(
+            name: "iTerm",
+            kind: "app",
+            path: "/Applications/iTerm.app",
+            source: "pkg/other",
+            lastUsed: now.addingTimeInterval(2 * 86400)
+        )
+        XCTAssertEqual(evaluate(stale, now: now).tier, "review")
+        let skewed = Software(
+            name: "iTerm",
+            kind: "app",
+            path: "/Applications/iTerm.app",
+            source: "pkg/other",
+            lastUsed: now.addingTimeInterval(60)
+        )
+        XCTAssertEqual(evaluate(skewed, now: now).tier, "keep")
+    }
+
+    /// Same for the install date: a future one reads as "installed 1 h ago",
+    /// which is the "too new to judge" verdict with no way to age out.
+    func testFutureInstallDateDoesNotAgeTheAppToKeep() {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let sw = Software(
+            name: "Windows App",
+            kind: "app",
+            path: "/Applications/Windows App.app",
+            source: "pkg/other",
+            installedAt: now.addingTimeInterval(3 * 86400)
+        )
+        let v = evaluate(sw, now: now)
+        XCTAssertEqual(v.tier, "review", v.reason)
+        XCTAssertFalse(v.reason.contains("too new"), v.reason)
+    }
 }

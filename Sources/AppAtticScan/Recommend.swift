@@ -425,9 +425,18 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
     if sw.runningService {
         return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Running as a brew service (daemon)")
     }
-    var used = sw.lastUsed
+    // A usage signal ahead of the scan by more than the skew tolerance is not a
+    // usage signal: a data directory restored from a backup taken on a machine
+    // whose clock ran ahead, a prefs mtime written by a desktop still catching
+    // up, a Steam `last-seen` from a client with a wrong clock. `daysSince`
+    // clamps a future date to 0, which reads as "used this second" and pins the
+    // app to KEEP with no way to prove it idle. Same bound the launch sources
+    // apply at ingestion (`droppingTimestampsAfter`, `isPlausibleLaunchDate`),
+    // applied here so it also covers a data mtime.
+    let plausible: (Date?) -> Date? = { $0.flatMap { isPlausibleLaunchDate($0, now: now) ? $0 : nil } }
+    var used = plausible(sw.lastUsed)
     var fromData = false
-    if let dm = sw.dataMtime, used == nil || dm > used! {
+    if let dm = plausible(sw.dataMtime), used == nil || dm > used! {
         used = dm
         fromData = true
     }
@@ -442,7 +451,9 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
     }
 
     if days == nil {
-        let ageDays = sw.installedAt != nil ? daysSince(sw.installedAt, now: now) : nil
+        // Same bound: an install date in the future reads as "installed 1 h
+        // ago", which is the "too new to judge" verdict with no way to age out.
+        let ageDays = plausible(sw.installedAt).map { daysSince($0, now: now) }
         if let ageDays, ageDays < Double(activeDays) {
             return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Installed \(humanDays(ageDays)) ago: too new to judge")
         }

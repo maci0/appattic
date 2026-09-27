@@ -723,6 +723,7 @@ func runningCommBasenames(run: CommandRun) -> Set<String> {
 func mdlsMeta(
     _ path: String,
     dropIfNearCreated: Bool = true,
+    now: Date = Date(),
     run: CommandRun
 ) -> (Date?, Date?, String?) {
     let (rc, out, _) = run([
@@ -734,9 +735,9 @@ func mdlsMeta(
         path,
     ], 20)
     if rc != 0 { return (nil, nil, nil) }
-    var lastUsed: Date?
-    var dateAdded: Date?
-    var created: Date?
+    var rawLastUsed: Date?
+    var rawDateAdded: Date?
+    var rawCreated: Date?
     var description: String?
     for line in out.split(separator: "\n", omittingEmptySubsequences: false) {
         let s = String(line)
@@ -757,10 +758,18 @@ func mdlsMeta(
             continue
         }
         let dt = parseMdlsDate(value)
-        if k == "kMDItemLastUsedDate" { lastUsed = dt }
-        else if k == "kMDItemDateAdded" { dateAdded = dt }
-        else if k == "kMDItemFSCreationDate" { created = dt }
+        if k == "kMDItemLastUsedDate" { rawLastUsed = dt }
+        else if k == "kMDItemDateAdded" { rawDateAdded = dt }
+        else if k == "kMDItemFSCreationDate" { rawCreated = dt }
     }
+    // Spotlight keeps these in its own index, so they survive a clock step and a
+    // restore from a machine whose clock ran ahead, and can sit well past the
+    // scan. `daysSince` clamps a future date to 0, so an unchecked value reads
+    // as "used this second" and pins the app to KEEP with no way to prove it
+    // idle. Same bound, and the same reason, as `droppingTimestampsAfter`.
+    let lastUsed = rawLastUsed.flatMap { isPlausibleLaunchDate($0, now: now) ? $0 : nil }
+    let dateAdded = rawDateAdded.flatMap { isPlausibleLaunchDate($0, now: now) ? $0 : nil }
+    let created = rawCreated.flatMap { isPlausibleLaunchDate($0, now: now) ? $0 : nil }
     let installed = dateAdded ?? created
     var used = effectiveLastUsed(lastUsed, dateAdded)
     if dropIfNearCreated, used != nil, dateAdded == nil {
@@ -772,9 +781,10 @@ func mdlsMeta(
 public func mdlsDates(
     _ path: String,
     dropIfNearCreated: Bool = true,
+    now: Date = Date(),
     run: CommandRun = runCommand
 ) -> (Date?, Date?) {
-    let (used, installed, _) = mdlsMeta(path, dropIfNearCreated: dropIfNearCreated, run: run)
+    let (used, installed, _) = mdlsMeta(path, dropIfNearCreated: dropIfNearCreated, now: now, run: run)
     return (used, installed)
 }
 
@@ -843,7 +853,7 @@ public func fillAppUsage(
     }
 
     progress("  · checking Spotlight usage metadata for \(apps.count) apps…")
-    let results = pmap(apps.map(\.path), workers: 16) { mdlsMeta($0, run: run) }
+    let results = pmap(apps.map(\.path), workers: 16) { mdlsMeta($0, now: now, run: run) }
     for i in apps.indices {
         let (lastUsed, installedAt, description) = results[i]
         if let lastUsed, !hasAuthoritativeUsage(apps[i]), apps[i].lastUsed == nil || lastUsed > apps[i].lastUsed! {
@@ -868,7 +878,7 @@ public func fillAppUsage(
         }
     }
     if !needInner.isEmpty {
-        let innerDates = pmap(needInner.map(\.1), workers: 16) { mdlsDates($0, run: run) }
+        let innerDates = pmap(needInner.map(\.1), workers: 16) { mdlsDates($0, now: now, run: run) }
         for (pair, dates) in zip(needInner, innerDates) {
             let i = pair.0
             let used = effectiveLastUsed(dates.0, apps[i].installedAt)

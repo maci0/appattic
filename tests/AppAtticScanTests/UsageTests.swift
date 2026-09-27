@@ -179,6 +179,48 @@ final class UsageTests: XCTestCase {
         XCTAssertNil(used)
     }
 
+    /// Spotlight outlives a clock step, so a last-used date can sit days past
+    /// the scan. `daysSince` clamps it to 0, which would read as "used this
+    /// second" and pin the app to KEEP forever.
+    func testMdlsDropsLastUsedBeyondTheFutureTolerance() {
+        let now = date(2026, 1, 10, 12, 0)
+        let out = """
+        kMDItemLastUsedDate   = 2026-01-12 12:00:00 +0000
+        kMDItemDateAdded      = 2025-01-01 00:00:00 +0000
+        kMDItemFSCreationDate = 2025-01-01 00:00:00 +0000
+        """
+        let (used, installed) = mdlsDates("/fake/Future.app", now: now) { _, _ in (0, out, "") }
+        XCTAssertNil(used)
+        XCTAssertEqual(installed, date(2025, 1, 1, 0, 0))
+    }
+
+    /// A future install date is as unusable as a future last-used date: an
+    /// app that looks "installed 1 h ago" is kept as too new to judge.
+    func testMdlsDropsDateAddedBeyondTheFutureTolerance() {
+        let now = date(2026, 1, 10, 12, 0)
+        let out = """
+        kMDItemLastUsedDate   = (null)
+        kMDItemDateAdded      = 2026-03-01 00:00:00 +0000
+        kMDItemFSCreationDate = 2026-03-01 00:00:00 +0000
+        """
+        let (used, installed) = mdlsDates("/fake/Future.app", now: now) { _, _ in (0, out, "") }
+        XCTAssertNil(used)
+        XCTAssertNil(installed)
+    }
+
+    /// Skew inside the tolerance still counts, the same as every other source.
+    func testMdlsKeepsLastUsedInsideTheFutureTolerance() throws {
+        let now = date(2026, 1, 10, 12, 0)
+        let out = """
+        kMDItemLastUsedDate   = 2026-01-10 18:00:00 +0000
+        kMDItemDateAdded      = 2025-01-01 00:00:00 +0000
+        kMDItemFSCreationDate = 2025-01-01 00:00:00 +0000
+        """
+        let (used, _) = mdlsDates("/fake/Skewed.app", now: now) { _, _ in (0, out, "") }
+        let seen = try XCTUnwrap(used)
+        XCTAssertEqual(utcCalendar().component(.hour, from: seen), 18)
+    }
+
     func testInnerMdlsKeepsLastUsedWhenFarFromCreation() throws {
         let out = """
         kMDItemLastUsedDate   = 2026-06-15 20:16:06 +0000

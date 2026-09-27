@@ -53,7 +53,13 @@ enum AppAtticCLI {
             }
         )
         if resolved.fromCache {
-            fputs("using cached scan from \(resolved.data.scanned_at) (pass --fresh to scan now)\n", stderr)
+            // In the reader's own zone, like every other timestamp the CLI
+            // prints: the cache file holds the instant as UTC, so the raw
+            // string showed a wall time hours away from the one the rest of
+            // the report uses.
+            let when = parseISODate(resolved.data.scanned_at)
+                .map { TimestampFormat.string(from: $0) } ?? resolved.data.scanned_at
+            fputs("using cached scan from \(when) (pass --fresh to scan now)\n", stderr)
         }
         if let cacheFailure = resolved.cacheWriteFailure {
             fputs("warning: scan not cached: \(redactHomePaths(cacheFailure)); the next run rescans\n", stderr)
