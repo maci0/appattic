@@ -53,7 +53,7 @@ public final class DiskUsageNode {
                 let am = a.metric(allocatedSize: allocatedSize)
                 let bm = b.metric(allocatedSize: allocatedSize)
                 if am != bm { return am > bm }
-                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+                return collatedBefore(a.name, b.name, tieBreak: a.path, b.path)
             }
         }
         for c in children { c.sortChildren(allocatedSize: allocatedSize) }

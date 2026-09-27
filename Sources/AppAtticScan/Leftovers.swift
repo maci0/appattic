@@ -1674,7 +1674,10 @@ func preferredBrokenLinkName(_ names: [String], toolFolder: String) -> String {
         toolFolder.replacingOccurrences(of: "_", with: "-"),
     ]
     if let hit = names.first(where: { variants.contains($0) }) { return hit }
-    let sorted = names.sorted { $0.count < $1.count }
+    // `sort` is unstable, so an equal-length pair could come out either way.
+    // Name breaks the tie in both picks below, lowest first, matching the
+    // order `names` already arrived in.
+    let sorted = names.sorted { a, b in a.count == b.count ? a < b : a.count < b.count }
     if let short = sorted.first,
        names.allSatisfy({
            $0 == short
@@ -1686,7 +1689,9 @@ func preferredBrokenLinkName(_ names: [String], toolFolder: String) -> String {
         return short
     }
     let noDot = names.filter { !$0.contains(".") }
-    return (noDot.isEmpty ? names : noDot).max(by: { $0.count < $1.count }) ?? names[0]
+    return (noDot.isEmpty ? names : noDot).max { a, b in
+        a.count == b.count ? a > b : a.count < b.count
+    } ?? names[0]
 }
 
 func defaultUserToolDirs() -> [String] {

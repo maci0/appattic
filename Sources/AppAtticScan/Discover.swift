@@ -541,7 +541,9 @@ private func finishAppDiscovery(_ apps: inout [AppRecord], seen: inout Set<Strin
         apps[i].sizeBytes = pair.0
         apps[i].sizeMeasured = pair.1
     }
-    apps.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    apps.sort {
+        collatedBefore($0.displayName, $1.displayName, tieBreak: $0.path, $1.path)
+    }
 }
 
 public func findApps(progress: (String) -> Void = { _ in }) -> [AppRecord] {
@@ -651,5 +653,8 @@ func iterApps(in root: String, maxDepth: Int = 3) -> [String] {
             enumerator.skipDescendants()
         }
     }
-    return out
+    // The enumerator yields in filesystem order, which differs between runs and
+    // between filesystems. Callers dedup on first sight, so an unsorted walk
+    // picks a different survivor of the same bundle name each time.
+    return out.sorted()
 }

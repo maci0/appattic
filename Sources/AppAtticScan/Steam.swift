@@ -248,7 +248,9 @@ public func findSteamApps(libraryRoots: [String]? = nil) -> [AppRecord] {
             apps.append(app)
         }
     }
-    apps.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    apps.sort {
+        collatedBefore($0.displayName, $1.displayName, tieBreak: $0.path, $1.path)
+    }
     return apps
 }
 

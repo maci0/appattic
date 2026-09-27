@@ -257,7 +257,7 @@ func fmtDt(_ dt: Date?) -> String {
 }
 
 func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
-    var orphans = result.orphanedItems.sorted { $0.sizeBytes > $1.sizeBytes }
+    var orphans = orphanedBySize(result)
     if !category.isEmpty {
         orphans = orphans.filter { leftoverMatchesCategory($0, categories: category) }
     }

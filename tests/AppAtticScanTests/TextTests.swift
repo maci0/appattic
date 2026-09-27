@@ -41,4 +41,18 @@ final class TextTests: XCTestCase {
         XCTAssertEqual(displayWidth("한국어"), 6)
         XCTAssertEqual(displayWidth("👩‍👩‍👧"), 2)
     }
+
+
+    func testCollatedBeforeOrdersByName() {
+        XCTAssertTrue(collatedBefore("Alpha", "Beta", tieBreak: "/a", "/b"))
+        XCTAssertFalse(collatedBefore("Beta", "Alpha", tieBreak: "/b", "/a"))
+    }
+
+
+    func testCollatedBeforeBreaksTiesOnTheUniqueKey() {
+        // Same name, so the record order comes down to the tie-break rather
+        // than to whatever order the filesystem listed the directory in.
+        XCTAssertTrue(collatedBefore("Zoom", "Zoom", tieBreak: "/Applications/Zoom.app", "/Users/x/Zoom.app"))
+        XCTAssertFalse(collatedBefore("Zoom", "Zoom", tieBreak: "/Users/x/Zoom.app", "/Applications/Zoom.app"))
+    }
 }

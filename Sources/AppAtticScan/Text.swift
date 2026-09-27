@@ -124,3 +124,19 @@ public func asciiHasByte(_ s: String, _ b: UInt8) -> Bool {
         return false
     } ?? s.utf8.contains(b)
 }
+
+/// Collated order (`localizedStandardCompare`, so "Über" sorts with the Latin
+/// names rather than after every ASCII one) with a byte-order tie-break on a
+/// unique key.
+///
+/// `sort` is not stable, so a comparator that calls two records equal leaves
+/// their final order up to the input order, and a directory walk hands over
+/// whatever order the filesystem listed. Ties therefore reorder between runs
+/// on the same machine, which breaks replaying a scan from a recorded input.
+public func collatedBefore(_ lhs: String, _ rhs: String, tieBreak lhsKey: String, _ rhsKey: String) -> Bool {
+    switch lhs.localizedStandardCompare(rhs) {
+    case .orderedAscending: return true
+    case .orderedDescending: return false
+    case .orderedSame: return lhsKey < rhsKey
+    }
+}

@@ -427,8 +427,20 @@ func scriptStamp(_ date: Date) -> String {
     return f.string(from: date)
 }
 
+/// Largest first, path breaking size ties.
+///
+/// Size alone is not a total order, and this order decides which entries
+/// survive `--top N` and where they land in the generated script, so an
+/// untied order would print a different report for the same scan on the next
+/// process.
+public func orphanedBySize(_ result: ScanResult) -> [DataItem] {
+    result.orphanedItems.sorted { a, b in
+        a.sizeBytes == b.sizeBytes ? a.path < b.path : a.sizeBytes > b.sizeBytes
+    }
+}
+
 func leftoverDryRunItems(_ result: ScanResult, category: [String], top: Int?) -> [DataItem] {
-    var orphans = result.orphanedItems.sorted { $0.sizeBytes > $1.sizeBytes }
+    var orphans = orphanedBySize(result)
     if !category.isEmpty {
         orphans = orphans.filter { leftoverMatchesCategory($0, categories: category) }
     }

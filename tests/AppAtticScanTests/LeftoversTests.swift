@@ -77,4 +77,18 @@ final class LeftoversTests: XCTestCase {
         XCTAssertFalse(isUUID("G23E4567-E89B-12D3-A456-426614174000"), "the first group is hex too")
         XCTAssertFalse(isUUID(""))
     }
+
+    func testOrphanedBySizeBreaksEqualSizeOnPath() {
+        // Two leftovers of the same size used to swap places between processes,
+        // which changed the report order and the `--top N` cut.
+        let result = ScanResult()
+        result.dataItems = [
+            DataItem(path: "/u/Library/Caches/beta", name: "beta", rootLabel: "Caches", kind: "dir", status: "orphaned", sizeBytes: 10),
+            DataItem(path: "/u/Library/Caches/alpha", name: "alpha", rootLabel: "Caches", kind: "dir", status: "orphaned", sizeBytes: 10),
+            DataItem(path: "/u/Library/Caches/huge", name: "huge", rootLabel: "Caches", kind: "dir", status: "orphaned", sizeBytes: 99),
+        ]
+        XCTAssertEqual(orphanedBySize(result).map(\.name), ["huge", "alpha", "beta"])
+        result.dataItems.reverse()
+        XCTAssertEqual(orphanedBySize(result).map(\.name), ["huge", "alpha", "beta"])
+    }
 }

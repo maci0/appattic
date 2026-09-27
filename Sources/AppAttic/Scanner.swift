@@ -53,12 +53,17 @@ final class ScannerViewModel {
 
     var overviewLeftovers: [LeftoverItem] {
         visibleOrphanedLeftovers(scanData?.leftovers ?? [], ignoring: ignoredLeftovers)
-            .sorted { ($0.size_bytes ?? 0) > ($1.size_bytes ?? 0) }
+            .sorted { a, b in
+                let (ls, rs) = (a.size_bytes ?? 0, b.size_bytes ?? 0)
+                return ls == rs ? a.path < b.path : ls > rs
+            }
     }
 
     var overviewStale: [SoftwareItem] {
         visibleStaleSoftware(scanData?.software ?? [], includeSystem: includeSystem)
-            .sorted { $0.totalBytes > $1.totalBytes }
+            .sorted { a, b in
+                a.totalBytes == b.totalBytes ? a.path < b.path : a.totalBytes > b.totalBytes
+            }
     }
 
     var listedStaleCount: Int {
@@ -105,7 +110,10 @@ final class ScannerViewModel {
                 || (item.summary ?? "").posixLowercased().contains(q)
                 || (item.shadows ?? "").posixLowercased().contains(q)
                 || (item.extra_paths ?? []).contains { $0.posixLowercased().contains(q) }
-        }.sorted { ($0.size_bytes ?? 0) > ($1.size_bytes ?? 0) }
+        }.sorted { a, b in
+            let (ls, rs) = (a.size_bytes ?? 0, b.size_bytes ?? 0)
+            return ls == rs ? a.path < b.path : ls > rs
+        }
         cachedStale = visibleStaleSoftware(data.software, includeSystem: includeSystem).filter { item in
             if q.isEmpty { return true }
             return item.name.posixLowercased().contains(q)
@@ -115,7 +123,9 @@ final class ScannerViewModel {
                 || (item.reason ?? "").posixLowercased().contains(q)
                 || (item.summary ?? "").posixLowercased().contains(q)
                 || (item.outdated == true && "outdated".hasPrefix(q))
-        }.sorted { $0.totalBytes > $1.totalBytes }
+        }.sorted { a, b in
+            a.totalBytes == b.totalBytes ? a.path < b.path : a.totalBytes > b.totalBytes
+        }
         let outdated = data.outdated ?? []
         if q.isEmpty {
             cachedOutdated = outdated

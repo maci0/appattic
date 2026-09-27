@@ -261,6 +261,17 @@ final class DiscoverTests: XCTestCase {
         XCTAssertTrue(names.contains("SomePkg"))
     }
 
+    func testIterAppsReturnsPathsInSortedOrder() throws {
+        let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
+        // Created deepest-last, so a filesystem that hands back newest-first
+        // would otherwise return these reversed.
+        try FileManager.default.createDirectory(at: td.appendingPathComponent("Zed.app"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: td.appendingPathComponent("Alpha.app"), withIntermediateDirectories: true)
+        let found = iterApps(in: td.path)
+        XCTAssertEqual(found.map { URL(fileURLWithPath: $0).lastPathComponent }, ["Alpha.app", "Zed.app"])
+    }
+
     func testWrapperFolderContainingAppIsNotSoftware() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: td) }

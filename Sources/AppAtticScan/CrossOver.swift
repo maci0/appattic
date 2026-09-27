@@ -29,7 +29,11 @@ func listCrossOverBottleDirs(bottlesDir: String? = nil) -> [String] {
         }
     }
     return out.sorted {
-        URL(fileURLWithPath: $0).lastPathComponent.localizedStandardCompare(URL(fileURLWithPath: $1).lastPathComponent) == .orderedAscending
+        collatedBefore(
+            URL(fileURLWithPath: $0).lastPathComponent,
+            URL(fileURLWithPath: $1).lastPathComponent,
+            tieBreak: $0, $1
+        )
     }
 }
 
