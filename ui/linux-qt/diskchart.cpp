@@ -11,11 +11,25 @@
 #include <algorithm>
 #include <cmath>
 
-static QColor diskChartColor(int index) {
-    static const int kHue[] = {211, 8, 48, 145, 280, 32, 190, 330, 90, 250};
-    const int hue = kHue[index % 10];
-    const int sat = 160 - (index / 10) * 20;
-    return QColor::fromHsv(hue, qBound(80, sat, 180), 220);
+// The hue cycle opens on the app accents (accent blue, remove red, review
+// amber, keep green) so a chart reads as AppAttic rather than a stock rainbow,
+// then adds distinct hues for deeper siblings. Value and saturation follow the
+// window palette, so a dark window gets chart fills that sit with dark chrome
+// instead of the same mid brightness light mode uses.
+static const int kChartHue[] = {211, 8, 48, 145, 280, 32, 190, 330, 90, 250};
+static const int kChartHueCount = 10;
+
+static QColor diskChartColor(int index, bool dark) {
+    const int hue = kChartHue[index % kChartHueCount];
+    const int sat = qBound(80, 160 - (index / kChartHueCount) * 20, 180);
+    return QColor::fromHsv(hue, dark ? sat / 2 : sat, dark ? 170 : 220);
+}
+
+// Cell labels need the better of black or white against the fill they land on.
+// A fixed white is unreadable on a light-mode cell; a fixed black is unreadable
+// on a dark-mode one.
+static QColor onChartColor(const QColor &fill) {
+    return fill.lightnessF() < 0.5 ? QColor(255, 255, 255) : QColor(20, 20, 20);
 }
 
 DiskChart::DiskChart(QWidget *parent) : QWidget(parent) {
@@ -131,9 +145,10 @@ void DiskChart::paintRings(QPainter &p, const QRect &box) {
             path.arcTo(inn, start + span, -span);
             path.closeSubpath();
         }
+        const bool dark = palette().window().color().lightness() < 128;
         QColor col = sl.depth == 0
             ? palette().button().color()
-            : diskChartColor(sl.colorIndex);
+            : diskChartColor(sl.colorIndex, dark);
         if (m_hover == sl.node) col = col.lighter(118);
         p.setBrush(col);
         p.setPen(QPen(palette().window().color(), 1));
@@ -254,7 +269,8 @@ void DiskChart::paintTreemap(QPainter &p, const QRect &box) {
     for (int i = 0; i < kids.size() && i < rects.size(); ++i) {
         const QRectF r = rects[i];
         if (r.width() < 2 || r.height() < 2) continue;
-        QColor col = diskChartColor(i);
+        const bool dark = palette().window().color().lightness() < 128;
+        QColor col = diskChartColor(i, dark);
         if (m_hover == kids[i]) col = col.lighter(118);
         p.setBrush(col);
         p.setPen(QPen(palette().window().color(), 1));
@@ -265,7 +281,7 @@ void DiskChart::paintTreemap(QPainter &p, const QRect &box) {
         hit.ring = false;
         m_hits.append(hit);
         if (r.width() > 48 && r.height() > 22) {
-            p.setPen(QColor(255, 255, 255));
+            p.setPen(onChartColor(col));
             p.setFont(aaTitleFont());
             p.drawText(r.adjusted(4, 4, -4, -4), Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, kids[i]->name);
             p.setFont(aaNumericFont());

@@ -134,7 +134,7 @@ struct ContentView: View {
                 if let error = vm.errorMessage, vm.scanData != nil || vm.isScanning {
                     HStack(alignment: .top, spacing: 8) {
                         Text(error)
-                            .font(.system(size: 13))
+                            .font(.system(size: TypeScale.body))
                             .foregroundColor(Color.appRed)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Button("Dismiss") {
@@ -217,12 +217,12 @@ struct ContentView: View {
                 let on = selected == item
                 HStack {
                     Text(item.rawValue)
-                        .font(.system(size: 13))
+                        .font(.system(size: TypeScale.body))
                         .foregroundColor(on ? Color.appOnAccent : Color.appText)
                     Spacer()
                     if let count = sidebarCount(item) {
                         Text("\(count)")
-                            .font(.system(size: 11))
+                            .font(.system(size: TypeScale.small))
                             .foregroundColor(on ? Color.appOnAccent.opacity(0.9) : Color.appDim)
                     }
                 }
@@ -265,27 +265,27 @@ struct ContentView: View {
         HStack(spacing: 8) {
             if let count = toolbarCount {
                 Text(count)
-                    .font(.system(size: 11))
+                    .font(.system(size: TypeScale.small))
                     .foregroundColor(Color.appDim)
             }
             if !vm.isScanning, !vm.statusText.isEmpty, toolbarCount != nil {
                 Text(vm.statusText)
-                    .font(.system(size: 11))
+                    .font(.system(size: TypeScale.small))
                     .foregroundColor(Color.appDim)
             }
             Spacer()
             if vm.isScanning {
                 Text(vm.progressMessage)
-                    .font(.system(size: 13))
+                    .font(.system(size: TypeScale.body))
                     .foregroundColor(Color.appDim)
             } else if toolbarCount == nil, !vm.statusText.isEmpty {
                 Text(vm.statusText)
-                    .font(.system(size: 11))
+                    .font(.system(size: TypeScale.small))
                     .foregroundColor(Color.appDim)
             }
             if vm.scanData != nil && (selected == .leftovers || selected == .stale || selected == .outdated || selected == .packages) {
                 TextField("Search", text: $vm.searchText)
-                    .font(.system(size: 13))
+                    .font(.system(size: TypeScale.body))
                     .frame(width: 200)
             }
             if selected == .packages {
@@ -321,9 +321,9 @@ struct ContentView: View {
         VStack(spacing: 8) {
             Spacer()
             Text("Scanning")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
             Text(vm.progressMessage)
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.body))
                 .foregroundColor(Color.appDim)
                 .frame(maxWidth: 360)
             Spacer()
@@ -336,16 +336,16 @@ struct ContentView: View {
         VStack(spacing: 8) {
             Spacer()
             Text(vm.holdsSettingsError ? "Settings could not be loaded" : "Scan failed")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
                 .foregroundColor(Color.appRed)
             Text(error)
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.body))
                 .foregroundColor(Color.appDim)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
             if vm.holdsSettingsError {
                 Text("Fix the file, or change a setting to write a new one.")
-                    .font(.system(size: 13))
+                    .font(.system(size: TypeScale.body))
                     .foregroundColor(Color.appDim)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
@@ -486,7 +486,7 @@ struct ContentView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -508,11 +508,11 @@ struct ContentView: View {
 
     func overviewStat(_ label: String, _ value: String, _ color: Color = Color.appText) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.system(size: 11))
+            Text(label.uppercased())
+                .font(.system(size: TypeScale.label))
                 .foregroundColor(Color.appDim)
             Text(value)
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.value, weight: .semibold))
                 .foregroundColor(color)
         }
     }
@@ -640,7 +640,7 @@ struct ContentView: View {
     func packageFilterChip(_ title: String, _ filter: PackageListFilter) -> some View {
         let on = packageFilter == filter
         return Text(title)
-            .font(.system(size: 11))
+            .font(.system(size: TypeScale.small))
             .foregroundColor(on ? Color.appOnAccent : Color.appText)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -805,7 +805,7 @@ struct ContentView: View {
         HStack(spacing: 8) {
             columns()
         }
-        .font(.system(size: 11, weight: .semibold))
+        .font(.system(size: TypeScale.label, weight: .semibold))
         .foregroundColor(Color.appDim)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
@@ -817,15 +817,15 @@ struct ContentView: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(name)
-                    .font(.system(size: 13))
+                    .font(.system(size: TypeScale.body))
                     .foregroundColor(Color.appText)
                 Text(detail)
-                    .font(.system(size: 11))
+                    .font(.system(size: TypeScale.small))
                     .foregroundColor(Color.appDim)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(trailing)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: TypeScale.monoSmall))
                 .foregroundColor(Color.appDim)
                 .frame(minWidth: Col.size, alignment: .trailing)
         }
@@ -835,7 +835,7 @@ struct ContentView: View {
 
     func rowMarkCell(_ marked: Bool, selected: Bool) -> some View {
         Text(marked ? "in" : "")
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: TypeScale.label, weight: .semibold))
             .foregroundColor(selected ? Color.appOnAccent : Color.appBlue)
             .frame(width: Col.mark, alignment: .leading)
     }
@@ -845,19 +845,19 @@ struct ContentView: View {
         return HStack(spacing: 8) {
             rowMarkCell(marked, selected: selected)
             Text(leftoverName(item))
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.body))
                 .foregroundColor(selected ? Color.appOnAccent : leftoverNameColor(item))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(leftoverLocationLabel(rootLabel: item.root, extraCount: item.extra_paths?.count ?? 0))
-                .font(.system(size: 11))
+                .font(.system(size: TypeScale.small))
                 .foregroundColor(selected ? Color.appOnAccent.opacity(0.9) : leftoverSecondaryColor(item))
                 .frame(width: Col.loc, alignment: .leading)
             Text(formatDate(item.mtime))
-                .font(.system(size: 11))
+                .font(.system(size: TypeScale.small))
                 .foregroundColor(rowSecondary(selected))
                 .frame(width: Col.date, alignment: .leading)
             Text(leftoverSizeLabel(item))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: TypeScale.monoSmall))
                 .foregroundColor(rowSecondary(selected))
                 .frame(width: Col.size, alignment: .trailing)
         }
@@ -871,19 +871,19 @@ struct ContentView: View {
         return HStack(spacing: 8) {
             rowMarkCell(marked, selected: selected)
             Text(item.name)
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.body))
                 .foregroundColor(rowPrimary(selected))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(status)
-                .font(.system(size: 11))
+                .font(.system(size: TypeScale.small))
                 .foregroundColor(selected ? Color.appOnAccent : tierColor(item.tier))
                 .frame(width: Col.tier, alignment: .leading)
             Text(formatDate(item.last_used))
-                .font(.system(size: 11))
+                .font(.system(size: TypeScale.small))
                 .foregroundColor(rowSecondary(selected))
                 .frame(width: Col.date, alignment: .leading)
             Text(staleSizeLabel(item))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: TypeScale.monoSmall))
                 .foregroundColor(rowSecondary(selected))
                 .frame(width: Col.size, alignment: .trailing)
         }
@@ -901,15 +901,15 @@ struct ContentView: View {
         return HStack(spacing: 8) {
             rowMarkCell(marked, selected: selected)
             Text(item.displayName)
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.body))
                 .foregroundColor(rowPrimary(selected))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(item.manager.replacingOccurrences(of: "-", with: " "))
-                .font(.system(size: 11))
+                .font(.system(size: TypeScale.small))
                 .foregroundColor(rowSecondary(selected))
                 .frame(width: Col.mgr, alignment: .leading)
             Text(ver)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: TypeScale.monoSmall))
                 .foregroundColor(selected ? Color.appOnAccent : Color.appYellow)
                 .frame(width: Col.ver, alignment: .trailing)
         }
@@ -923,19 +923,19 @@ struct ContentView: View {
         return HStack(spacing: 8) {
             rowMarkCell(marked, selected: selected)
             Text(item.name)
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.body))
                 .foregroundColor(rowPrimary(selected))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(item.manager.replacingOccurrences(of: "-", with: " "))
-                .font(.system(size: 11))
+                .font(.system(size: TypeScale.small))
                 .foregroundColor(rowSecondary(selected))
                 .frame(width: Col.mgr, alignment: .leading)
             Text(kind)
-                .font(.system(size: 11))
+                .font(.system(size: TypeScale.small))
                 .foregroundColor(selected ? Color.appOnAccent : kindColor)
                 .frame(width: Col.kind, alignment: .leading)
             Text(packageSizeLabel(item))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: TypeScale.monoSmall))
                 .foregroundColor(rowSecondary(selected))
                 .frame(width: Col.size, alignment: .trailing)
         }
@@ -1042,7 +1042,7 @@ struct ContentView: View {
     func leftoverInspector(_ item: LeftoverItem) -> some View {
         inspectorPane {
             Text(leftoverName(item))
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
             infoBlock("What", leftoverWhat(item))
             infoBlock("Why", leftoverWhy(item))
             inspectorSection(topPad: 4) {
@@ -1066,7 +1066,7 @@ struct ContentView: View {
             inspectorSection {
                 HStack {
                     Text("Include in cleanup")
-                        .font(.system(size: 13))
+                        .font(.system(size: TypeScale.body))
                     Spacer()
                     Toggle("", isOn: leftoverToggle(item.path))
                         .toggleStyle(.switch)
@@ -1084,7 +1084,7 @@ struct ContentView: View {
     func staleInspector(_ item: SoftwareItem) -> some View {
         inspectorPane {
             Text(item.name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
             infoBlock("What", staleWhat(item))
             infoBlock("Why", staleWhy(item))
             inspectorSection(topPad: 4) {
@@ -1112,7 +1112,7 @@ struct ContentView: View {
                 if StaleTier.isSelectable(item.tierKind) {
                     HStack {
                         Text("Include in cleanup")
-                            .font(.system(size: 13))
+                            .font(.system(size: TypeScale.body))
                         Spacer()
                         Toggle("", isOn: staleToggle(item.path))
                             .toggleStyle(.switch)
@@ -1126,10 +1126,10 @@ struct ContentView: View {
     func outdatedInspector(_ item: OutdatedEntry) -> some View {
         inspectorPane {
             Text(item.displayName)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
             if let title = item.title, !title.isEmpty, title != item.name {
                 Text(item.name)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: TypeScale.monoSmall))
                     .foregroundColor(Color.appDim)
             }
             infoBlock("What", outdatedWhat(item))
@@ -1148,14 +1148,14 @@ struct ContentView: View {
                 if item.updatable {
                     HStack {
                         Text("Include in update")
-                            .font(.system(size: 13))
+                            .font(.system(size: TypeScale.body))
                         Spacer()
                         Toggle("", isOn: outdatedToggle(item.id))
                             .toggleStyle(.switch)
                     }
                 } else if item.kind == "untrusted" {
                     Text("Listed so you can see it. AppAttic will not trust the tap.")
-                        .font(.system(size: 11))
+                        .font(.system(size: TypeScale.small))
                         .foregroundColor(Color.appDim)
                 }
             }
@@ -1165,7 +1165,7 @@ struct ContentView: View {
     func packageInspector(_ item: PackageEntry) -> some View {
         inspectorPane {
             Text(item.name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
             infoBlock("What", item.summary ?? packageWhatText(manager: item.manager, kind: item.kind))
             infoBlock("Why", item.reason ?? packageWhyText(manager: item.manager, kind: item.kind))
             inspectorSection(topPad: 4) {
@@ -1187,7 +1187,7 @@ struct ContentView: View {
             inspectorSection {
                 HStack {
                     Text("Include in remove")
-                        .font(.system(size: 13))
+                        .font(.system(size: TypeScale.body))
                     Spacer()
                     Toggle("", isOn: packageToggle(item.id))
                         .toggleStyle(.switch)
@@ -1195,7 +1195,7 @@ struct ContentView: View {
                 if item.canMarkManual {
                     HStack {
                         Text("Mark as manually installed")
-                            .font(.system(size: 13))
+                            .font(.system(size: TypeScale.body))
                         Spacer()
                         Toggle("", isOn: markManualToggle(item.id))
                             .toggleStyle(.switch)
@@ -1227,12 +1227,12 @@ struct ContentView: View {
 
     func infoRow(_ label: String, _ value: String, color: Color = Color.appText, mono: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Text(label)
-                .font(.system(size: 11))
+            Text(label.uppercased())
+                .font(.system(size: TypeScale.label, weight: .semibold))
                 .foregroundColor(Color.appDim)
                 .frame(width: 88, alignment: .trailing)
             Text(value)
-                .font(mono ? .system(size: 13, design: .monospaced) : .system(size: 13))
+                .font(mono ? .system(size: TypeScale.monoBody) : .system(size: TypeScale.body))
                 .foregroundColor(color)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -1241,12 +1241,12 @@ struct ContentView: View {
 
     func infoBlock(_ label: String, _ value: String, mono: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Text(label)
-                .font(.system(size: 11))
+            Text(label.uppercased())
+                .font(.system(size: TypeScale.label, weight: .semibold))
                 .foregroundColor(Color.appDim)
                 .frame(width: 88, alignment: .trailing)
             Text(value)
-                .font(mono ? .system(size: 11, design: .monospaced) : .system(size: 13))
+                .font(mono ? .system(size: TypeScale.monoSmall) : .system(size: TypeScale.body))
                 .foregroundColor(Color.appText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1263,9 +1263,9 @@ struct ContentView: View {
         VStack(spacing: 8) {
             Spacer()
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
             Text(detail)
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.body))
                 .foregroundColor(Color.appDim)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
@@ -1285,45 +1285,45 @@ struct ContentView: View {
                 settingsSection("Scan") {
                     HStack {
                         Text("Include system apps in scan")
-                            .font(.system(size: 13))
+                            .font(.system(size: TypeScale.body))
                         Spacer()
                         Toggle("", isOn: includeSystemBinding)
                             .toggleStyle(.switch)
                             .disabled(vm.isScanning)
                     }
                     Text("Off by default. System apps are easy to misread as unused.")
-                        .font(.system(size: 11))
+                        .font(.system(size: TypeScale.small))
                         .foregroundColor(Color.appDim)
                 }
                 settingsSection("Deletion") {
                     HStack {
                         Text("Confirm before running")
-                            .font(.system(size: 13))
+                            .font(.system(size: TypeScale.body))
                         Spacer()
                         Toggle("", isOn: confirmDeleteBinding)
                             .toggleStyle(.switch)
                     }
                     Text("Shows an alert before rm, brew uninstall, package remove, or named package updates.")
-                        .font(.system(size: 11))
+                        .font(.system(size: TypeScale.small))
                         .foregroundColor(Color.appDim)
                 }
                 settingsSection("Ignored leftovers") {
                     if vm.ignoredLeftovers.isEmpty {
                         Text("None. Ignore a leftover from its inspector to hide it on later scans.")
-                            .font(.system(size: 11))
+                            .font(.system(size: TypeScale.small))
                             .foregroundColor(Color.appDim)
                     } else {
                         Text(ignoredCountLabel)
-                            .font(.system(size: 11))
+                            .font(.system(size: TypeScale.small))
                             .foregroundColor(Color.appDim)
                         ForEach(Array(vm.ignoredLeftovers.sorted().prefix(12)), id: \.self) { path in
                             Text(ignoredPathLabel(path))
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: TypeScale.monoSmall))
                                 .foregroundColor(Color.appText)
                         }
                         if vm.ignoredLeftovers.count > 12 {
                             Text("and \(vm.ignoredLeftovers.count - 12) more")
-                                .font(.system(size: 11))
+                                .font(.system(size: TypeScale.small))
                                 .foregroundColor(Color.appDim)
                         }
                         Button("Clear ignored leftovers") {
@@ -1336,7 +1336,7 @@ struct ContentView: View {
             .padding(16)
             Spacer()
             Text("AppAttic \(appAtticVersion)")
-                .font(.system(size: 11))
+                .font(.system(size: TypeScale.small))
                 .foregroundColor(Color.appDim)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
@@ -1347,7 +1347,7 @@ struct ContentView: View {
     func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
             content()
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -1356,11 +1356,11 @@ struct ContentView: View {
     var actionBar: some View {
         HStack(spacing: 8) {
             Text("\(vm.selectionCount) selected")
-                .font(.system(size: 11))
+                .font(.system(size: TypeScale.small))
                 .foregroundColor(Color.appDim)
             if vm.cleanupSelectionCount > 0 {
                 Text(humanSize(vm.selectionReclaimableBytes))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: TypeScale.monoSmall))
                     .foregroundColor(Color.appGreen)
             }
             Spacer()
@@ -1424,13 +1424,13 @@ struct ContentView: View {
     var scriptSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Review Script")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: TypeScale.title, weight: .semibold))
             Text("Review every line before running.")
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.body))
                 .foregroundColor(Color.appDim)
             ScrollView {
                 Text(vm.generateScript())
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: TypeScale.monoSmall))
                     .foregroundColor(Color.appText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelectionEnabled()

@@ -18,16 +18,34 @@ typography:
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.35
-  title:
-    fontFamily: "system-ui, -apple-system, sans-serif"
-    fontSize: "13px"
-    fontWeight: 700
-    lineHeight: 1.2
-  label:
+  small:
     fontFamily: "system-ui, -apple-system, sans-serif"
     fontSize: "11px"
     fontWeight: 400
     lineHeight: 1.2
+  title:
+    fontFamily: "system-ui, -apple-system, sans-serif"
+    fontSize: "13px"
+    fontWeight: 600
+    lineHeight: 1.2
+  label:
+    fontFamily: "system-ui, -apple-system, sans-serif"
+    fontSize: "11px"
+    fontWeight: 600
+    lineHeight: 1.2
+    transform: "uppercase"
+    letterSpacing: "1.15px (Qt; macOS uppercases only)"
+  value:
+    fontFamily: "system-ui, -apple-system, sans-serif"
+    fontSize: "15px"
+    fontWeight: 600
+    lineHeight: 1.2
+    fontFeature: "tnum"
+  mono:
+    fontFamily: "ui-monospace, SFMono-Regular, monospace"
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.35
 rounded:
   sm: "4px"
   md: "6px"
@@ -67,6 +85,8 @@ The product mark (`packaging/appattic.svg`) uses that same dark fill `#1e1e1e`, 
 
 macOS uses 13pt body and 11pt secondary columns on the system UI face. Linux Qt uses Selawik when it is installed (TMOG's application font), otherwise the desktop UI font. Page and section titles use bundled Michroma (OFL), the TMOG display face. Instrument and inspector labels are small, uppercase, and tracked. Values sit under those labels at body size plus two points, DemiBold, with tabular figures on sizes. Paths and scripts use the desktop fixed-width font. No VFD digit grid. No oversized marketing numerals.
 
+The roles are named, not retyped at each call site. `TypeScale` in `Sources/AppAttic/Theme.swift` and the `aa*Font` functions in `ui/linux-qt/uistyle.h` are the same scale on both platforms: body, small, title, label, value, mono. A level means the same thing on macOS and Linux, so neither shell grows a private size literal.
+
 The Linux sidebar is a source list (window fill, theme icons, style-drawn rows) with Settings pinned at the bottom, like TMOG. The detail pane carries a Michroma page title. Toolbars are QToolBar.
 
 ## Layout
@@ -75,7 +95,7 @@ The Linux sidebar is a source list (window fill, theme icons, style-drawn rows) 
 
 Overview is a cockpit: one row of instruments (uppercase label, value, semantic color on leftovers), then three dense lists. Installed apps stay "Not scanned" on Linux. Empty structure stays visible while a scan runs.
 
-Sidebar items: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settings. Disk Usage is a devices list plus a scan view (tree, ring or treemap, allocated vs apparent, this-file-system-only). Charts are native Qt painting on Linux. macOS shows the tree and devices. Delete from this page is Move to Trash after confirm, not a shell script.
+Sidebar items: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settings. Disk Usage is a devices list plus a scan view (tree, ring or treemap, allocated vs apparent, this-file-system-only). Charts are native Qt painting on Linux. Their categorical palette opens on the app accents (blue, red, amber, green) before adding extra hues, scales value and saturation to the window palette so light and dark charts differ, and picks the better of black or white for each cell label instead of painting white text on a pale cell. macOS shows the tree and devices. Delete from this page is Move to Trash after confirm, not a shell script.
 
 Lists are compact table-style rows with a header and secondary columns, sorted by size. Empty, scanning, and error states are short copy. Delete uses a system alert. Script preview is a sheet.
 

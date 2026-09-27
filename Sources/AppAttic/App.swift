@@ -6,7 +6,7 @@ struct AppAtticApp: App {
     var body: some Scene {
         WindowGroup("AppAttic") {
             ContentView()
-                .font(.system(size: 13))
+                .font(.system(size: TypeScale.body))
         }
         .defaultSize(width: 1180, height: 720)
     }

@@ -52,7 +52,7 @@ struct DiskUsageView: View {
             HRule()
             if scanning {
                 Text(status.isEmpty ? "Scanning" : status)
-                    .font(.system(size: 13))
+                    .font(.system(size: TypeScale.body))
                     .foregroundColor(Color.appDim)
                     .padding(16)
                 Spacer()
@@ -63,10 +63,10 @@ struct DiskUsageView: View {
                         self.selected = nil
                     }
                     Text(root.path)
-                        .font(.system(size: 13))
+                        .font(.system(size: TypeScale.body))
                     Spacer()
                     Text(humanSize(root.metric(allocatedSize: allocated)))
-                        .font(.system(size: 13))
+                        .font(.system(size: TypeScale.body))
                         .foregroundColor(Color.appDim)
                 }
                 .padding(.horizontal, 16)
@@ -94,14 +94,14 @@ struct DiskUsageView: View {
                     }
                     Spacer()
                     Text(status)
-                        .font(.system(size: 11))
+                        .font(.system(size: TypeScale.small))
                         .foregroundColor(Color.appDim)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             } else {
                 Text("Devices")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: TypeScale.title, weight: .semibold))
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
                 ScrollView {
@@ -110,14 +110,14 @@ struct DiskUsageView: View {
                             Button(action: { scan(vol.rootPath) }) {
                                 HStack {
                                     Text(vol.name)
-                                        .font(.system(size: 13))
+                                        .font(.system(size: TypeScale.body))
                                         .foregroundColor(Color.appText)
                                     Spacer()
                                     Text(vol.rootPath)
-                                        .font(.system(size: 11))
+                                        .font(.system(size: TypeScale.small))
                                         .foregroundColor(Color.appDim)
                                     Text(humanSize(vol.bytesTotal))
-                                        .font(.system(size: 11))
+                                        .font(.system(size: TypeScale.small))
                                         .foregroundColor(Color.appDim)
                                         .frame(width: 72, alignment: .trailing)
                                 }
@@ -145,11 +145,11 @@ struct DiskUsageView: View {
         Button(action: { selected = node }) {
             HStack {
                 Text(String(repeating: "  ", count: depth) + node.name)
-                    .font(.system(size: 13))
+                    .font(.system(size: TypeScale.body))
                     .foregroundColor(selected?.path == node.path ? Color.appOnAccent : Color.appText)
                 Spacer()
                 Text(humanSize(node.metric(allocatedSize: allocated)))
-                    .font(.system(size: 11))
+                    .font(.system(size: TypeScale.small))
                     .foregroundColor(selected?.path == node.path ? Color.appOnAccent : Color.appDim)
                     .frame(width: 72, alignment: .trailing)
             }
