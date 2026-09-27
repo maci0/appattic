@@ -180,7 +180,11 @@ func walkLogicalBytes(
             if errno != 0 { sawError = true }
             break
         }
-        let name = direntName(ent)
+        guard let name = direntName(ent) else {
+            // A name that is not UTF-8 has no byte-faithful path to descend.
+            sawError = true
+            continue
+        }
         if name == "." || name == ".." { continue }
         var st = stat()
         guard name.withCString({ fstatat(fd, $0, &st, AT_SYMLINK_NOFOLLOW) }) == 0 else {

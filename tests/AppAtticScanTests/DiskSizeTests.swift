@@ -1,4 +1,9 @@
 import XCTest
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 @testable import AppAtticScan
 
 final class DiskSizeTests: XCTestCase {
@@ -49,6 +54,35 @@ final class DiskSizeTests: XCTestCase {
         XCTAssertFalse(ok, "timeout is a partial measurement")
         XCTAssertGreaterThanOrEqual(bytes, 0)
         XCTAssertLessThan(bytes, 8 * 1024 + 1)
+    }
+
+
+    func testDirectoryByteSizeReportsNameThatIsNotUTF8() throws {
+        // A POSIX name may hold any byte but NUL and `/`. Decoding 0xff with a
+        // lossy decoder yields U+FFFD, whose re-encoded bytes name a different
+        // file, so the walk must refuse the entry and say the total is partial
+        // rather than attribute some other file's size to it.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("du-badname-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data(repeating: 0x61, count: 1024).write(to: root.appendingPathComponent("measured.bin"))
+        // The path is passed to `open` as raw bytes, not as a Swift String: a
+        // U+FFFD in a String re-encodes to two bytes and names a different file.
+        var badName: [UInt8] = Array((root.path + "/bad-").utf8) + [0xFF, 0x00]
+        let fd = badName.withUnsafeBufferPointer { buf in
+            buf.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buf.count) {
+                open($0, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+            }
+        }
+        try XCTSkipIf(fd < 0, "filesystem refuses a name that is not UTF-8")
+        close(fd)
+        badName.removeLast()
+        defer { try? FileManager.default.removeItem(atPath: String(decoding: badName, as: UTF8.self)) }
+
+        let (bytes, ok) = directoryByteSize(root.path, timeout: 6)
+        XCTAssertFalse(ok, "an undecodable entry means the walk is not complete")
+        XCTAssertEqual(bytes, 1024, "the named file is still measured")
     }
 
 
