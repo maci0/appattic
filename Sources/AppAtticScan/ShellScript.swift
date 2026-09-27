@@ -34,11 +34,16 @@ public func isSafeCommandArgument(_ value: String) -> Bool {
     !value.isEmpty && !value.hasPrefix("-")
 }
 
-/// `if <present> >/dev/null 2>&1; then <action>; fi`, the wrapper a removal and
-/// a guarded upgrade share. `present` is a read-only query that exits 0 only
-/// while the target is still in the state the action acts on.
+/// `if <present>; then <action>; fi`, the wrapper a removal and a guarded
+/// upgrade share. `present` is a read-only query that exits 0 only while the
+/// target is still in the state the action acts on.
+///
+/// The query's own chatter is the caller's to silence: a guard is read back by
+/// `parseGuardedRemove`, which splits the two halves on the `; then ` the
+/// wrapper writes, so a redirection spliced in here would become part of
+/// `present` and stop every exact-shape reader from recognising the line.
 public func guardedCommand(present: String, action: String) -> String {
-    "if \(present) >/dev/null 2>&1; then \(action); fi"
+    "if \(present); then \(action); fi"
 }
 
 /// Wrap a removal so an already-removed target is a no-op instead of a failure.
@@ -78,7 +83,7 @@ public func parseGuardedRemove(_ cmd: String) -> GuardedRemove? {
     // Nothing may follow the guard: the callers judge only these two halves,
     // so a tail after the last `; fi` would run unjudged.
     guard t[fi.upperBound...].trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-    let present = String(t[t.index(t.startIndex, offsetBy: 3)..<then.upperBound])
+    let present = String(t[t.index(t.startIndex, offsetBy: 3)..<then.lowerBound])
     let action = String(t[then.upperBound..<fi.lowerBound]).trimmingCharacters(in: .whitespaces)
     return GuardedRemove(present: present, action: action)
 }

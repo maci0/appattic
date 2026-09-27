@@ -299,7 +299,7 @@ public func updateCommand(_ pkg: OutdatedPkg) -> String? {
         // only while the package is still behind, which is the same question
         // the scan asked, so the second run skips the line.
         return guardedCommand(
-            present: "pacman -Qu \(quoted)",
+            present: "pacman -Qu \(quoted) >/dev/null 2>&1",
             action: "pacman --noconfirm -S \(quoted)"
         )
     case .aur:
@@ -308,7 +308,7 @@ public func updateCommand(_ pkg: OutdatedPkg) -> String? {
         // of an AUR package is not in any sync database.
         let helper = aurHelperBin()
         return guardedCommand(
-            present: "\(helper) -Qu \(quoted)",
+            present: "\(helper) -Qu \(quoted) >/dev/null 2>&1",
             action: "\(helper) --noconfirm -S \(quoted)"
         )
     case .dnf:

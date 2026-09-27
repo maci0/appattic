@@ -83,7 +83,7 @@ final class FuzzGuardedRemoveTests: XCTestCase {
                 XCTAssertTrue(split.action.contains(q), "action lost the name: \(line.debugDescription) \(where_)")
                 // Rewriting the halves reproduces the line, so the split and
                 // the writer agree on where the boundaries are.
-                XCTAssertEqual(guardedRemoveCommand(present: split.present, action: split.action), line, where_)
+                XCTAssertEqual(guardedRemoveCommand(present: split.present, remove: split.action), line, where_)
                 // The escalation belongs to the action; the query is a read.
                 if commandNeedsRoot(line) {
                     XCTAssertTrue(
@@ -109,7 +109,7 @@ final class FuzzGuardedRemoveTests: XCTestCase {
         }
         let guards = [
             "if test -e '/a b'; then rm -rf '/a b'; fi",
-            "if dpkg -s libfoo >/dev/null 2>&1; then apt-get purge -y libfoo; fi",
+            "if dpkg -s libfoo; then apt-get purge -y libfoo; fi",
         ]
         var rng = FuzzRandom(seed: 0x5EED_7A1E)
         for base in guards {
