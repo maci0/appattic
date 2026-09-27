@@ -237,6 +237,39 @@ final class UtilTests: XCTestCase {
         XCTAssertNil(parseMdlsDate("2026-02-31 15:00:00 +0000"))
     }
 
+    /// The process-wide date formatters are shared objects, and Foundation's
+    /// `date(from:)` / `string(from:)` mutate internal parse state, so the
+    /// parallel mdls and ISO paths that `pmap` drives have to be safe. This
+    /// hammers both formatters plus the ISO fallback list from 16 workers: an
+    /// unsynchronized shared formatter drops or mangles parses under that load.
+    func testDateParsingAndFormattingSurviveParallelPmapWorkers() {
+        let n = 96
+        let results = pmap(Array(0..<n), workers: 16) { i -> (Date?, Date?, String?) in
+            let seconds = i * 7
+            let mdls = parseMdlsDate(
+                String(format: "2026-08-15 00:00:%02d +0000", seconds % 60)
+            )
+            // Space instead of "T": the integer fast path rejects it, so this
+            // lands on the shared DateFormatter fallback list.
+            let iso = parseISODate(
+                String(format: "2026-08-15 00:00:%02d +0000", seconds % 60)
+            )
+            return (mdls, iso, isoString(mdls))
+        }
+        XCTAssertEqual(results.count, n)
+        for i in 0..<n {
+            let seconds = i * 7 % 60
+            let mdls = try? XCTUnwrap(results[i].0, "mdls parse dropped at \(i)")
+            let iso = try? XCTUnwrap(results[i].1, "ISO fallback parse dropped at \(i)")
+            XCTAssertEqual(
+                mdls.map { $0.timeIntervalSince1970.rounded() },
+                iso.map { $0.timeIntervalSince1970.rounded() },
+                "mdls and ISO disagree at \(i)"
+            )
+            XCTAssertNotNil(results[i].2, "isoString returned nil at \(i)")
+        }
+    }
+
     func testParseISODateUtcInstantIsPreviousLocalDayInNewYork() throws {
         let tz = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
         var cal = Calendar(identifier: .gregorian)

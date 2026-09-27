@@ -502,7 +502,22 @@ func truncateISOFractionalSeconds(_ s: String, maxDigits: Int = 3) -> String {
     return String(s[..<keepEnd]) + String(s[digitEnd...])
 }
 
-/// Configured once and never mutated, so concurrent `date(from:)` is safe.
+/// Foundation date formatters are reference types whose `date(from:)` and
+/// `string(from:)` mutate internal parse state, so configuring one once and
+/// leaving it alone does not make it reentrant. `pmap` parses mdls timestamps
+/// on 16 threads at once, which corrupts a shared instance. One lock over every
+/// process-wide formatter below is enough: a parse is a rounding error next to
+/// the subprocess whose output it reads. Leaf lock, never held across a call
+/// back into scanning code, so it cannot order against `redactHomeLock` or
+/// `cachedUsernameLock`.
+private let dateFormatterLock = NSLock()
+
+private func withDateFormatterLock<T>(_ body: () -> T) -> T {
+    dateFormatterLock.lock()
+    defer { dateFormatterLock.unlock() }
+    return body()
+}
+
 private let isoFractionalFormatter: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -525,8 +540,8 @@ private let isoFallbackFormats = [
     "yyyy-MM-dd'T'HH:mm:ss.SSS",
 ]
 
-/// One formatter per format, built once. `dateFormat` is never mutated after this,
-/// so parallel parses do not race on shared mutable state.
+/// One formatter per format, built once. Reached only under
+/// `dateFormatterLock`.
 private let isoFallbackFormatters: [DateFormatter] = isoFallbackFormats.map { fmt in
     let f = DateFormatter()
     f.locale = Locale(identifier: "en_US_POSIX")
@@ -667,6 +682,10 @@ private func isoDaysFromCivil(_ y: Int, _ m: Int, _ d: Int) -> Int {
 }
 
 func parseISODateViaFormatters(_ raw: String) -> Date? {
+    withDateFormatterLock { parseISODateViaFormattersLocked(raw) }
+}
+
+private func parseISODateViaFormattersLocked(_ raw: String) -> Date? {
     func tryISO(_ s: String) -> Date? {
         isoFractionalFormatter.date(from: s) ?? isoBasicFormatter.date(from: s)
     }
@@ -701,7 +720,7 @@ func parseISODateViaFormatters(_ raw: String) -> Date? {
     return nil
 }
 
-/// Configured once and never mutated, so concurrent `string(from:)` is safe.
+/// Reached only under `dateFormatterLock`.
 private let isoStringFormatter: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime]
@@ -711,7 +730,7 @@ private let isoStringFormatter: ISO8601DateFormatter = {
 
 public func isoString(_ date: Date?) -> String? {
     guard let date else { return nil }
-    return isoStringFormatter.string(from: date)
+    return withDateFormatterLock { isoStringFormatter.string(from: date) }
 }
 
 /// Instant from a Unix epoch that may be seconds, milliseconds, or microseconds.
@@ -1305,8 +1324,7 @@ func walkLogicalBytes(
     return true
 }
 
-/// One formatter, built once. `dateFormat` is never mutated after this,
-/// so parallel parses do not race on shared mutable state.
+/// One formatter, built once. Reached only under `dateFormatterLock`.
 private let mdlsDateFormatter: DateFormatter = {
     let f = DateFormatter()
     f.locale = Locale(identifier: "en_US_POSIX")
@@ -1321,7 +1339,7 @@ public func parseMdlsDate(_ value: String) -> Date? {
     var v = value.trimmingCharacters(in: .whitespacesAndNewlines)
     v = v.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
     if v.isEmpty || v == "(null)" { return nil }
-    return mdlsDateFormatter.date(from: v)
+    return withDateFormatterLock { mdlsDateFormatter.date(from: v) }
 }
 
 public func daysSince(_ date: Date?, now: Date = Date()) -> Double? {
