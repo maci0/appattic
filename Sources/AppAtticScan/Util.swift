@@ -289,8 +289,20 @@ public func pathIdentityKey(_ path: String) -> String {
 
 /// Standardized home, cached: `homeDirectoryForCurrentUser` (6.7 µs) plus
 /// `standardizingPath` (4 µs) dominated this function, not the scan itself.
+/// Bounded: `redactHomePaths` takes a caller-supplied home, so the key space is
+/// whatever a long-lived process passes in, and the map outlives every scan.
 private let redactHomeLock = NSLock()
+private let redactHomeCacheLimit = 8
 nonisolated(unsafe) private var redactHomeCache: [String: String] = [:]
+
+/// Drop one entry once the map is over the limit. Which entry goes is the
+/// dictionary's hash order, not an age: the two real callers pass the process
+/// home, so the bound exists to cap a caller that feeds it unbounded keys, not
+/// to serve a working set.
+private func trimRedactHomeCache() {
+    guard redactHomeCache.count > redactHomeCacheLimit, let victim = redactHomeCache.keys.first else { return }
+    redactHomeCache.removeValue(forKey: victim)
+}
 
 private func standardizedHome(_ home: String) -> String {
     redactHomeLock.lock()
@@ -298,6 +310,7 @@ private func standardizedHome(_ home: String) -> String {
     if let cached = redactHomeCache[home] { return cached }
     let std = (home as NSString).standardizingPath
     redactHomeCache[home] = std
+    trimRedactHomeCache()
     return std
 }
 
@@ -309,6 +322,7 @@ private func processHome() -> String {
     if let cached = redactHomeCache[""] { return cached }
     let std = (FileManager.default.homeDirectoryForCurrentUser.path as NSString).standardizingPath
     redactHomeCache[""] = std
+    trimRedactHomeCache()
     return std
 }
 

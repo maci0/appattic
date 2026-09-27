@@ -563,6 +563,19 @@ final class UtilTests: XCTestCase {
         )
     }
 
+    func testRedactHomePathsStaysCorrectPastTheMemoBound() {
+        // The standardized-home memo is bounded; a caller that keeps handing it
+        // fresh keys must still get redacted output, not a stale or missing entry.
+        for i in 0..<32 {
+            let home = "/tmp/redact-bound-\(i)"
+            XCTAssertEqual(
+                redactHomePaths("rm: cannot remove '\(home)/Caches/Foo': denied", home: home),
+                "rm: cannot remove '~/Caches/Foo': denied",
+                "home \(home)"
+            )
+        }
+    }
+
     func testWriteOwnerOnlyFileIsOwnerReadable() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("owner-only-\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: url) }
