@@ -3,6 +3,7 @@ const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
 
 pub const Orphan = struct {
     name: []const u8,
@@ -572,4 +573,87 @@ test "every spec-only path plugin binds, filters and reports" {
     try std.testing.expect(std.mem.indexOf(u8, json, "/home/user/.wine") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, ".bashrc") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, ".config") == null);
+}
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
+
+const fuzz_listing_names = packFuzzSlice("dconf\ngone-app\nhtop\n.cache-secret\n");
+const fuzz_listing_abs = packFuzzSlice("/home/user/.cache/gone-app\n.cache-secret\n.\n..\n\n");
+const fuzz_listing_home_dot = packFuzzSlice(".mozilla\n.wine\n.\n..\n.bashrc\ndconf\n");
+const fuzz_listing_systems = packFuzzSlice("gtk-3.0\n.git\n.ssh\n.aws\n.docker\ngnome-42\ncore22\ndolphinrc\nxrc\n");
+const fuzz_listing_shell = packFuzzSlice("x'; reboot; '\nrm -rf /\n$(id)\n`id`\na b\na|b\n~/x\n--flag\n");
+const fuzz_listing_utf8 = packFuzzSlice("café\nnaïve\n\u{1F600}\n\xc3\n\xff\xfe\n");
+const fuzz_listing_crlf = packFuzzSlice("  gone-app \r\n\tgone\t \r\n\rcr-app\r\n");
+const fuzz_listing_dupes = packFuzzSlice("gone-app\ngone-app\n./gone-app\n../gone-app\n/home/user/x/gone-app\n");
+const fuzz_listing_trunc = packFuzzSlice("gone-ap");
+const fuzz_listing_empty = packFuzzSlice("");
+const fuzz_listing_ws = packFuzzSlice(" \t \n\n\r");
+const fuzz_listing_slashes = packFuzzSlice("/\n//\n///\na/\n/a\n./x\n");
+const fuzz_listing_long = packFuzzSlice("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+
+test "fuzz parseListing" {
+    try std.testing.fuzz({}, fuzzParseListing, .{ .corpus = &.{
+        &fuzz_listing_names,
+        &fuzz_listing_abs,
+        &fuzz_listing_home_dot,
+        &fuzz_listing_systems,
+        &fuzz_listing_shell,
+        &fuzz_listing_utf8,
+        &fuzz_listing_crlf,
+        &fuzz_listing_dupes,
+        &fuzz_listing_trunc,
+        &fuzz_listing_empty,
+        &fuzz_listing_ws,
+        &fuzz_listing_slashes,
+        &fuzz_listing_long,
+    } });
+}
+
+/// `parseListing` turns directory names an untrusted process (any program that
+/// can write into a leftover root) chose into `rm -rf` lines the UI runs under
+/// pkexec. Every spec in the table is exercised each round so the whitelist
+/// root and the denylist roots share one corpus.
+fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    for (spec_table) |spec| {
+        var hits: [16]Orphan = undefined;
+        var paths: [2048]u8 = undefined;
+        const n = parseListing(text, spec.keep, spec.root, &hits, &paths, spec.allow);
+        try std.testing.expect(n <= hits.len);
+        for (hits[0..n]) |hit| {
+            // The name is a slice of the listing, never a copy the parser built.
+            try std.testing.expect(sliceInside(text, hit.name));
+            // A leftover that reaches the script must survive shell quoting
+            // unchanged, so nothing the parser kept can carry a metacharacter.
+            try std.testing.expect(jsonbuf.isSafeIdent(hit.name));
+            try std.testing.expect(!isSystemLeftoverName(hit.name));
+            try std.testing.expect(!nameInKeep(hit.name, spec.keep));
+            if (spec.allow.len != 0) try std.testing.expect(nameInKeep(hit.name, spec.allow));
+
+            // The path is either the absolute line `ls` printed, or a
+            // root-joined copy inside the store. A path from anywhere else is a
+            // pointer into a dead frame.
+            const in_store = sliceInside(&paths, hit.path);
+            try std.testing.expect(in_store or sliceInside(text, hit.path));
+            try std.testing.expectEqualStrings(hit.name, basenameOf(hit.path));
+            if (in_store) {
+                const joined = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ spec.root, hit.name });
+                defer std.testing.allocator.free(joined);
+                try std.testing.expectEqualStrings(joined, hit.path);
+            }
+        }
+
+        // `out` is fixed, so a listing longer than it must stop at the bound
+        // instead of writing past it.
+        var one: [1]Orphan = undefined;
+        var one_path: [16]u8 = undefined;
+        const n1 = parseListing(text, spec.keep, spec.root, &one, &one_path, spec.allow);
+        try std.testing.expect(n1 <= 1);
+        if (n1 == 1) {
+            try std.testing.expect(sliceInside(&one_path, one[0].path) or sliceInside(text, one[0].path));
+        }
+    }
 }

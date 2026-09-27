@@ -4,6 +4,7 @@ const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const listing = @import("path_listing.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
 
 const plugin_id = "snapd";
 const query_cmd = "snap list --all";
@@ -298,4 +299,109 @@ test "renderSnapd shell-quotes a snap name and an orphan path" {
     try std.testing.expect(std.mem.indexOf(u8, json, "rm -rf /home/user/snap/a'; reboot; '") == null);
     // The finding id is JSON, so a quote in the name must be escaped there too.
     try std.testing.expect(std.mem.indexOf(u8, json, "\"id\":\"x'; reboot; '_1; reboot; '\"") != null);
+}
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
+
+const fuzz_snap_fixture = packFuzzSlice(
+    \\Name     Version                     Rev    Tracking         Publisher     Notes
+    \\bare     1.0                         5      latest/stable    canonical**   base
+    \\core22   20240111                    1122   latest/stable    canonical*    base
+    \\core22   20231123                    1033   latest/stable    canonical*    disabled
+    \\chromium 120.0.6099.224              1846   latest/stable    canonical**   disabled
+    \\core20   20230622                    1974   latest/stable    canonical**   base,disabled
+    \\firefox  129.0                       4336   latest/stable    mozilla**     -
+    \\
+);
+const fuzz_snap_header = packFuzzSlice("Name Version Rev Tracking Publisher Notes\n");
+const fuzz_snap_empty = packFuzzSlice("");
+const fuzz_snap_ws = packFuzzSlice(" \t\r\n  \n\t\n");
+const fuzz_snap_trunc = packFuzzSlice("core22  20231123  1033  latest/sta");
+const fuzz_snap_short_rows = packFuzzSlice("core22\ncore22  1\ncore22  1  2\ncore22  1  2  3  disabled\n");
+const fuzz_snap_notes = packFuzzSlice("a 1 2 t p disabled\nb 1 2 t p disabled,disabled\nc 1 2 t p xdisabled\nd 1 2 t p DISABLED\n");
+const fuzz_snap_shell = packFuzzSlice("x'; reboot; ' 1; reboot; ' t p disabled\n$(id) 1 t p disabled\n`id` 1 t p disabled\nrm -rf / 1 t p disabled\n");
+const fuzz_snap_utf8 = packFuzzSlice("café 1 2 t p disabled\nnaïve 1 2 t p disabled\n\xff\xfe 1 2 t p disabled\n");
+const fuzz_snap_dupes = packFuzzSlice("core22 1 2 t p disabled\ncore22 3 4 t p disabled\ncore22 5 6 t p -\n");
+const fuzz_snap_crlf = packFuzzSlice("core22\t1\t2\tt\tp\tdisabled\r\n\r\n");
+
+test "fuzz snap list parsers" {
+    try std.testing.fuzz({}, fuzzSnapList, .{ .corpus = &.{
+        &fuzz_snap_fixture,
+        &fuzz_snap_header,
+        &fuzz_snap_empty,
+        &fuzz_snap_ws,
+        &fuzz_snap_trunc,
+        &fuzz_snap_short_rows,
+        &fuzz_snap_notes,
+        &fuzz_snap_shell,
+        &fuzz_snap_utf8,
+        &fuzz_snap_dupes,
+        &fuzz_snap_crlf,
+    } });
+}
+
+/// `snap list --all` is a table of names and revisions the scanner turns into
+/// `snap remove --revision N` and `rm -rf` script lines, so every field that
+/// reaches a finding has to be a safe ident sliced from the listing.
+fn fuzzSnapList(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var disabled: [16]DisabledRev = undefined;
+    const nd = parseSnapListAll(text, &disabled);
+    try std.testing.expect(nd <= disabled.len);
+    for (disabled[0..nd]) |row| {
+        try std.testing.expect(sliceInside(text, row.name));
+        try std.testing.expect(sliceInside(text, row.revision));
+        try std.testing.expect(jsonbuf.isSafeIdent(row.name));
+        try std.testing.expect(jsonbuf.isSafeIdent(row.revision));
+        // Only a disabled row is a finding, and a disabled row whose snap is
+        // still installed must not be a duplicate of a name already emitted.
+        try std.testing.expect(!std.ascii.eqlIgnoreCase(row.name, "Name"));
+    }
+
+    var names: [16][]const u8 = undefined;
+    const nn = parseInstalledSnapNames(text, &names);
+    try std.testing.expect(nn <= names.len);
+    for (names[0..nn], 0..) |name, i| {
+        try std.testing.expect(sliceInside(text, name));
+        try std.testing.expect(jsonbuf.isSafeIdent(name));
+        // The parser dedups: a snap with any active revision appears once.
+        for (names[0..i]) |earlier| {
+            try std.testing.expect(!std.mem.eql(u8, earlier, name));
+        }
+    }
+    // A snap can be both installed and have a disabled old revision, so the
+    // two parsers overlap by design; only each one's own output is checked.
+
+    // keepFromNames is what bounds the snap-home probe list, so its output
+    // must always be whole names joined by single newlines: no leading,
+    // trailing, or doubled separator, and nothing truncated mid-name.
+    var store: [64]u8 = undefined;
+    const kept = keepFromNames(names[0..nn], &store);
+    try std.testing.expect(sliceInside(&store, kept));
+    try std.testing.expect(kept.len == 0 or kept[kept.len - 1] != '\n');
+    if (nn != 0 and kept.len != 0) try std.testing.expect(kept[0] != '\n');
+    try std.testing.expect(std.mem.indexOf(u8, kept, "\n\n") == null);
+    var lines = std.mem.splitScalar(u8, kept, '\n');
+    var seen: usize = 0;
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        seen += 1;
+        try std.testing.expect(jsonbuf.isSafeIdent(line));
+        // A name is dropped whole or kept whole, never clipped to the store.
+        try std.testing.expect(std.mem.indexOf(u8, text, line) != null);
+    }
+    try std.testing.expect(seen <= nn);
+
+    // The store is the only bound on the join, so a store of any size can
+    // never yield more bytes than it holds. A zero-byte store is the branch
+    // where an off-by-one would write the separator alone.
+    inline for (.{ 0, 1, 2, 3, 8, 33 }) |cap| {
+        var buf: [cap]u8 = undefined;
+        const joined = keepFromNames(names[0..nn], &buf);
+        try std.testing.expect(joined.len <= cap);
+        try std.testing.expect(sliceInside(&buf, joined));
+    }
 }
