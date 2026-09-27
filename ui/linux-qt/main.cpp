@@ -341,10 +341,6 @@ public slots:
             emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
             return;
         }
-        if (isCancelled()) {
-            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
-            return;
-        }
         emit finished(m_partial, QString::fromUtf8(err), rc);
     }
 signals:
@@ -936,13 +932,23 @@ public:
             m_worker->requestCancel();
         }
         m_scanThread->quit();
-        if (!m_scanThread->wait(8000)) {
+        bool stopped = m_scanThread->wait(8000);
+        if (!stopped) {
             m_scanThread->terminate();
-            m_scanThread->wait(2000);
+            stopped = m_scanThread->wait(2000);
+        }
+        clearCoreWasmCancel();
+        /* The PATH rewrite and the engine registry are process-global, and a
+           run that never stopped is still reading and writing them. Tearing
+           them down beside a live run is the race the host's own drain guard
+           cannot see, so they wait until the thread is gone. A run that
+           outlives the wait keeps the engine until exit. */
+        if (!stopped) {
+            std::fprintf(stderr, "scan thread still running at dispose, keeping the engine\n");
+            return;
         }
         /* Inverse of requestCancel above: leave the process-global cancel in
            the state dispose found it, and drop the scan's PATH rewrite. */
-        clearCoreWasmCancel();
         restoreCoreWasmPath();
         delete m_worker;
         m_worker = nullptr;

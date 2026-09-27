@@ -553,11 +553,16 @@ void appattic_wasm_shutdown(void) {
         if (pthread_cond_timedwait(&g_life_idle, &g_life_lock, &deadline) != 0) break;
     }
     const int busy = g_runs_active;
-    pthread_mutex_unlock(&g_life_lock);
     if (busy > 0) {
+        pthread_mutex_unlock(&g_life_lock);
         fprintf(stderr, "wasm: %d run(s) still active, keeping the engine\n", busy);
         return;
     }
+    /* g_life_lock stays held across the teardown, and run_enter takes it
+       first: a run that starts after the drain would otherwise take the engine
+       and a cached module from under the delete below. g_life_lock is the
+       outer lock everywhere (run_enter/run_leave touch no other lock), so
+       taking g_mod_lock under it cannot invert against another path. */
     pthread_mutex_lock(&g_mod_lock);
     for (int i = 0; i < g_mod_count; i++) {
         wasmtime_module_delete(g_mods[i].module);
@@ -571,6 +576,7 @@ void appattic_wasm_shutdown(void) {
         g_engine = NULL;
     }
     pthread_mutex_unlock(&g_mod_lock);
+    pthread_mutex_unlock(&g_life_lock);
 }
 
 /* Compile `wasm_path` and write the serialized image to `out_path`, so

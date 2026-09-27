@@ -1,6 +1,7 @@
 #include "hostexec.h"
 
 #include <limits.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -328,6 +329,10 @@ static char g_user_path[USER_PATH_CAP];
 /* PATH as it was before apply, so the effect has an inverse. */
 static char g_user_path_prev[USER_PATH_CAP];
 static int g_user_path_prev_valid = 0;
+/* The apply/restore pair is process-global state, and the UI calls it from the
+   thread that starts a scan while a running scan restores it on the thread
+   that ran it. The statics above and the setenv they drive need one owner. */
+static pthread_mutex_t g_user_path_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int dir_ok(const char *p) {
     struct stat st;
@@ -376,7 +381,10 @@ static void path_prepend_nvm(char *dst, size_t cap, const char *home) {
     (void)closedir(d);
 }
 
-void appattic_host_apply_user_path(void) {
+/* The body of the apply/restore pair. Callers either hold g_user_path_lock or
+   are a forked child, where no other thread exists and the inherited
+   g_user_path_lock may have been held at fork time. */
+static void apply_user_path_locked(void) {
     const char *home;
     const char *old;
     static const char *const rel[] = {
@@ -426,12 +434,24 @@ void appattic_host_apply_user_path(void) {
     (void)setenv("PATH", g_user_path, 1);
 }
 
-void appattic_host_restore_user_path(void) {
+void appattic_host_apply_user_path(void) {
+    pthread_mutex_lock(&g_user_path_lock);
+    apply_user_path_locked();
+    pthread_mutex_unlock(&g_user_path_lock);
+}
+
+static void restore_user_path_locked(void) {
     if (!g_user_path_applied) return;
     g_user_path_applied = 0;
     if (!g_user_path_prev_valid) return;
     g_user_path_prev_valid = 0;
     (void)setenv("PATH", g_user_path_prev, 1);
+}
+
+void appattic_host_restore_user_path(void) {
+    pthread_mutex_lock(&g_user_path_lock);
+    restore_user_path_locked();
+    pthread_mutex_unlock(&g_user_path_lock);
 }
 
 static void rewrite_home_user_argv(char **argv) {
@@ -846,7 +866,9 @@ static int run_live(char **argv, char *out, size_t cap) {
             (void)dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
-        appattic_host_apply_user_path();
+        /* Forked child: one thread, and g_user_path_lock may have been held by
+           another thread at fork time, so the body runs without taking it. */
+        apply_user_path_locked();
         rewrite_home_user_argv(argv);
         if (appattic_host_in_flatpak()) {
             char *spawn_argv[MAX_TOK + 6];

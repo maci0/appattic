@@ -1,4 +1,30 @@
 import Foundation
+/// Slot buffer for `pmap`. A captured local `var` array would be written through
+/// its closure box, and Swift's exclusivity check on that box is not lock
+/// aware: two workers storing at once trip "Simultaneous accesses" in a debug
+/// build and leave the write unordered in a release one. A class-owned array
+/// under one lock has neither problem.
+private final class PmapSlots<R>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [R?]
+
+    init(count: Int) {
+        values = Array(repeating: nil, count: count)
+    }
+
+    func set(_ value: R, at index: Int) {
+        lock.lock()
+        values[index] = value
+        lock.unlock()
+    }
+
+    func collected() -> [R] {
+        lock.lock()
+        defer { lock.unlock() }
+        return values.map { $0! }
+    }
+}
+
 /// Map over `items` in parallel, preserving input order. `workers` bounds how
 /// many calls to `fn` run at once; `concurrentPerform` still gets one iteration
 /// per item, with a semaphore holding the rest. A single item or a `workers`
@@ -6,8 +32,7 @@ import Foundation
 public func pmap<T, R>(_ items: [T], workers: Int = 16, _ fn: (T) -> R) -> [R] {
     guard !items.isEmpty else { return [] }
     if items.count == 1 || workers <= 1 { return items.map(fn) }
-    var results = [R?](repeating: nil, count: items.count)
-    let lock = NSLock()
+    let slots = PmapSlots<R>(count: items.count)
     let sem = DispatchSemaphore(value: max(workers, 1))
     // `concurrentPerform` keeps `fn` non-escaping end to end. Handing it to
     // `queue.async` needs `withoutActuallyEscaping`, whose runtime check is
@@ -15,13 +40,10 @@ public func pmap<T, R>(_ items: [T], workers: Int = 16, _ fn: (T) -> R) -> [R] {
     // process with "non-escaping closure has escaped" mid-scan.
     DispatchQueue.concurrentPerform(iterations: items.count) { i in
         sem.wait()
-        let value = fn(items[i])
-        lock.lock()
-        results[i] = value
-        lock.unlock()
+        slots.set(fn(items[i]), at: i)
         sem.signal()
     }
-    return results.map { $0! }
+    return slots.collected()
 }
 
 /// Split into consecutive runs of at most `n` elements.

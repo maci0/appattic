@@ -5,6 +5,7 @@
 #include <string.h>
 
 #if !defined(_WIN32)
+#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -84,6 +85,49 @@ static int check_user_path_restores(void) {
     (void)rmdir(bin);
     (void)rmdir(local);
     (void)rmdir(home);
+    return 0;
+}
+
+/* The UI applies the user PATH on the thread that starts a scan and restores
+   it on the thread that ran it, so the pair runs concurrently. Unsynchronized,
+   a restore could read a half-written g_user_path_prev and put a truncated PATH
+   into the environment for the rest of the process. Under helgrind or tsan the
+   unlocked statics also report the write/read pair outright. */
+static void *hammer_user_path(void *arg) {
+    (void)arg;
+    for (int i = 0; i < 2000; i++) {
+        appattic_host_apply_user_path();
+        appattic_host_restore_user_path();
+    }
+    return NULL;
+}
+
+static int check_user_path_concurrent(void) {
+    const char *before = getenv("PATH");
+    char saved[4096];
+    if (snprintf(saved, sizeof saved, "%s", before ? before : "") >= (int)sizeof saved) {
+        return fail("PATH too long for the concurrency check");
+    }
+    pthread_t threads[4];
+    for (int i = 0; i < 4; i++) {
+        if (pthread_create(&threads[i], NULL, hammer_user_path, NULL) != 0) {
+            return fail("pthread_create for the PATH hammer");
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        if (pthread_join(threads[i], NULL) != 0) return fail("pthread_join for the PATH hammer");
+    }
+    const char *after = getenv("PATH");
+    if (!after || strcmp(after, saved) != 0) {
+        return fail("concurrent apply/restore left PATH changed");
+    }
+    /* Still re-armable once the threads are done. */
+    appattic_host_apply_user_path();
+    appattic_host_restore_user_path();
+    after = getenv("PATH");
+    if (!after || strcmp(after, saved) != 0) {
+        return fail("apply/restore not re-armed after the concurrent run");
+    }
     return 0;
 }
 #endif
@@ -679,6 +723,7 @@ int main(void) {
     if (rc != 0) return 1;
 #if !defined(_WIN32)
     rc |= check_user_path_restores();
+    rc |= check_user_path_concurrent();
 #endif
     if (rc != 0) return 1;
     printf("hostexec_test: ok\n");
