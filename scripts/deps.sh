@@ -170,6 +170,7 @@ check_table_coverage() {
         assert_json_safe "table version" "$version"
         assert_json_safe "table url" "$url"
     done <<<"$ARTIFACTS"
+
     local listed
     while IFS= read -r name; do
         [[ -n "$name" ]] || continue
@@ -403,7 +404,35 @@ check_swiftpm_pins() {
             fail "SwiftPM pin $identity carries no revision; a branch pin is not a pin"
         fi
     done < <(swiftpm_pins)
+    check_swiftpm_pin_spelling
     check_swiftpm_declarations
+}
+
+# swiftpm_declared() reads one spelling: .package(url: "...", .exact("x")) with
+# the url and the version on the same line. A version range, a branch, or a
+# revision writes the pin in some other spelling, and then the declaration is
+# not in the list the cross-check below compares against, so the cross-check
+# runs over an empty set and passes: an unpinned dependency, in a tree whose
+# only claim is that its pins were reviewed. A count of declarations alone
+# cannot see it either, so the declarations are read here and named, and the
+# count is against the rows the reader actually produced. Comment lines go
+# first, because prose about a package is not a declaration, and the file is
+# joined into a single line so a call broken across lines is still one
+# declaration to report.
+check_swiftpm_pin_spelling() {
+    local code declaration total parsed
+    code="$(grep -v '^[[:space:]]*//' "$ROOT/Package.swift" | tr '\n' ' ' || true)"
+    total="$(printf '%s' "$code" | grep -oE '\.package\([[:space:]]*url:' | wc -l || true)"
+    parsed="$(swiftpm_declared | wc -l || true)"
+    while IFS= read -r declaration; do
+        [[ -n "$declaration" ]] || continue
+        if [[ "$declaration" != *'.exact('* ]]; then
+            fail "Package.swift declares ${declaration} with no inline .exact(\"version\") pin"
+        fi
+    done < <(printf '%s' "$code" | grep -oE '\.package\([[:space:]]*url:[[:space:]]*"[^"]*"[^)]*\)' || true)
+    if [[ "$parsed" -ne "$total" ]]; then
+        fail "Package.swift has $total .package(url:) declaration(s) and the pin reader sees $parsed; keep the url and its .exact(\"version\") on one line"
+    fi
 }
 
 # Every dependency Package.swift declares must resolve to the version the
@@ -430,13 +459,18 @@ check_swiftpm_declarations() {
 
 # identity|version|url for every .package(url:, .exact()) in Package.swift.
 # SwiftPM derives a package identity from the URL by dropping the scheme and
-# the .git suffix, so this reads the same key Package.resolved records.
+# the .git suffix, and by lowercasing what is left, so this reads the same key
+# Package.resolved records: a URL whose last component has capitals in it still
+# matches the pin instead of reporting one that is not there. A declaration
+# spelled any other way never reaches this function, and
+# check_swiftpm_pin_spelling() is what makes that fail rather than pass.
 swiftpm_declared() {
     local url version identity
     while IFS=$'\t' read -r url version; do
         [[ -n "$url" ]] || continue
         identity="${url##*/}"
         identity="${identity%.git}"
+        identity="$(printf '%s' "$identity" | tr '[:upper:]' '[:lower:]')"
         printf '%s\t%s\t%s\n' "$identity" "$version" "$url"
     done < <(
         sed -n 's/.*\.package(url:[[:space:]]*"\([^"]*\)"[[:space:]]*,[[:space:]]*\.exact("\([^"]*\)").*/\1\t\2/p' \
@@ -526,10 +560,10 @@ run_sbom() {
         fi
         IFS='|' read -r hash version purl url <<<"$row"
         assert_json_safe "sbom name" "$name"
-        components+=("$(artifact_component "$name" "$version" "$purl" "$url" "$hash" SHA-256)")
+        components+=("$(artifact_component "$name" "$version" "$purl" "$url" "$hash" SHA-256 "$(artifact_arch_qualifier "$name" "$url")")")
     done < <(parse_checksums | awk -F'\t' '$1 == "OK" { print $2 }' | sort)
 
-    local identity rev location
+    local identity rev location purl
     while IFS=$'\t' read -r identity version location rev; do
         [[ -n "$identity" ]] || continue
         if [[ -z "$rev" ]]; then
@@ -539,7 +573,9 @@ run_sbom() {
         assert_json_safe "sbom swiftpm identity" "$identity"
         assert_json_safe "sbom swiftpm version" "$version"
         assert_json_safe "sbom swiftpm location" "$location"
-        components+=("$(artifact_component "$identity" "$version" "pkg:swift/${identity}" "$location" "$rev" SHA-1)")
+        purl="$(swiftpm_purl "$location")"
+        assert_json_safe "sbom swiftpm purl" "$purl"
+        components+=("$(artifact_component "$identity" "$version" "$purl" "$location" "$rev" SHA-1 "")")
     done < <(swiftpm_pins | sort)
 
     # Vendored files are already in the binary, so an inventory that stops at
@@ -594,13 +630,44 @@ run_sbom() {
     echo "deps: wrote $out (${#components[@]} components)"
 }
 
+# The purl a consumer matches a Swift package by, without its version, which
+# artifact_component appends. It carries the host and the owner as well as the
+# package name: pkg:swift/swift-log names no source to fetch, and two packages
+# called swift-log under different owners would carry the same purl, so the
+# inventory would list one component twice and a scanner would read the first.
+# The location is the source SwiftPM resolved the pin from, so the namespace
+# is read out of it rather than kept in a second table that could disagree.
+swiftpm_purl() {
+    local namespace="${1#https://}"
+    namespace="${namespace%.git}"
+    namespace="${namespace%/}"
+    printf 'pkg:swift/%s' "$namespace"
+}
+
+# One release of an artifact is fetched once per architecture, and every other
+# field a purl carries is the same for both. Without the qualifier the two rows
+# have one purl, and a consumer that matches on it holds whichever row it read
+# first, with the digest of the other architecture's file. How a download site
+# spells an architecture is not one vocabulary: a tarball carries it in its own
+# name, and download.swift.org names the aarch64 build in the release path and
+# leaves the x86_64 one unnamed. Both spellings are named here rather than
+# guessed at, and a row that matches neither gets no qualifier, which
+# testSBOMPurlsAreUnique fails on when the two rows then collide.
+artifact_arch_qualifier() {
+    case "$1 $2" in
+        *aarch64*|*arm64*) printf '?arch=aarch64' ;;
+        *x86_64*|*amd64*|*/ubuntu2204/*) printf '?arch=x86_64' ;;
+        *) printf '' ;;
+    esac
+}
+
 artifact_component() {
-    local name="$1" version="$2" purl="$3" url="$4" hash="$5" alg="$6"
+    local name="$1" version="$2" purl="$3" url="$4" hash="$5" alg="$6" qualifier="$7"
     printf '    {\n'
     printf '      "type": "library",\n'
     printf '      "name": "%s",\n' "$name"
     printf '      "version": "%s",\n' "$version"
-    printf '      "purl": "%s@%s",\n' "$purl" "$version"
+    printf '      "purl": "%s@%s%s",\n' "$purl" "$version" "$qualifier"
     printf '      "hashes": [\n'
     printf '        { "alg": "%s", "content": "%s" }\n' "$alg" "$hash"
     printf '      ],\n'
