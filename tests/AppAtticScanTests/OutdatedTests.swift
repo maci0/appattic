@@ -70,7 +70,8 @@ final class OutdatedTests: XCTestCase {
                 "desc": "Open-source code editor",
             ]],
         ]
-        let (summaries, titles) = brewPackageMeta(data)
+        let meta = brewPackageMeta(from: data)
+        let (summaries, titles) = (meta.summaries, meta.titles)
         XCTAssertEqual(summaries["wget"], "Internet file retriever")
         XCTAssertEqual(summaries["visual-studio-code"], "Open-source code editor")
         XCTAssertEqual(titles["visual-studio-code"], "Visual Studio Code")

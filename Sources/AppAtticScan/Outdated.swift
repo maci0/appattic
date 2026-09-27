@@ -1169,6 +1169,13 @@ public func attachItunesMeta(
     }
 }
 
+/// The App Store check through `mas`, the one `query*` function whose return
+/// is optional. `nil` means the lookup is unavailable: `mas` is not installed,
+/// or it ran and failed. A caller cannot tell those two apart, and does not
+/// need to, because both mean the same thing: fall back to `collectAppstore`'s
+/// iTunes Search path. Every other `query*` function returns a plain array,
+/// where an empty one means that manager reported nothing, and a failed check
+/// is already recorded by `noteScanCheckFailed`.
 public func queryMas(
     progress: ((String) -> Void)? = nil,
     which: WhichFn = whichCommand,

@@ -339,7 +339,8 @@ public func collectBrew(
     let formulae = data["formulae"] as? [[String: Any]] ?? []
     let casksJSON = data["casks"] as? [[String: Any]] ?? []
     if !formulae.isEmpty || !casksJSON.isEmpty {
-        (descMap, titleMap) = brewPackageMeta(data)
+        let meta = brewPackageMeta(from: data)
+        (descMap, titleMap) = (meta.summaries, meta.titles)
         for i in info.formulas.indices {
             if info.formulas[i].desc == nil {
                 info.formulas[i].desc = descMap[info.formulas[i].name]
@@ -474,7 +475,23 @@ func queryBrewStatus(
     return (parseBrewOutdatedJSON(out), false)
 }
 
-public func brewPackageMeta(_ data: [String: Any]) -> ([String: String], [String: String]) {
+/// The two lookup tables `brewPackageMeta` reads out of `brew info --json=v2`:
+/// `summaries` maps a formula name or cask token to its `desc`, and `titles`
+/// maps a cask token to the pretty `name` the cask file installs under. A
+/// token is absent from `titles` when the pretty name is empty or is the token
+/// itself, so a caller that fills a display name from this map never repeats
+/// what the token already says.
+public struct BrewPackageMeta: Equatable, Sendable {
+    public var summaries: [String: String]
+    public var titles: [String: String]
+
+    public init(summaries: [String: String] = [:], titles: [String: String] = [:]) {
+        self.summaries = summaries
+        self.titles = titles
+    }
+}
+
+public func brewPackageMeta(from data: [String: Any]) -> BrewPackageMeta {
     var summaries: [String: String] = [:]
     var titles: [String: String] = [:]
     for f in data["formulae"] as? [[String: Any]] ?? [] {
@@ -498,7 +515,16 @@ public func brewPackageMeta(_ data: [String: Any]) -> ([String: String], [String
             titles[token] = pretty
         }
     }
-    return (summaries, titles)
+    return BrewPackageMeta(summaries: summaries, titles: titles)
+}
+
+/// The two maps as a positional tuple. Both are `[String: String]`, so the
+/// order is the only thing telling them apart; `brewPackageMeta(from:)` names
+/// them and is what a caller should use. This stays for callers written
+/// against the tuple form.
+public func brewPackageMeta(_ data: [String: Any]) -> ([String: String], [String: String]) {
+    let meta = brewPackageMeta(from: data)
+    return (meta.summaries, meta.titles)
 }
 
 public func attachSummaries(

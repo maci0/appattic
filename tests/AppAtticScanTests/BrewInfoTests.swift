@@ -45,6 +45,27 @@ final class BrewInfoTests: XCTestCase {
         XCTAssertTrue(calls.contains { $0.contains("info") && !$0.contains("notepadnext") })
     }
 
+    func testBrewPackageMetaTupleMatchesNamedForm() {
+        let data: [String: Any] = [
+            "formulae": [["name": "wget", "full_name": "wget", "desc": "Internet file retriever"]],
+            "casks": [[
+                "token": "visual-studio-code",
+                "name": ["Visual Studio Code"],
+                "desc": "Open-source code editor",
+            ]],
+        ]
+        let meta = brewPackageMeta(from: data)
+        XCTAssertEqual(meta.summaries["wget"], "Internet file retriever")
+        XCTAssertEqual(meta.summaries["visual-studio-code"], "Open-source code editor")
+        XCTAssertEqual(meta.titles["visual-studio-code"], "Visual Studio Code")
+        // A token whose pretty name is the token is not repeated in `titles`.
+        XCTAssertNil(meta.titles["wget"])
+        let (summaries, titles) = brewPackageMeta(data)
+        XCTAssertEqual(summaries, meta.summaries)
+        XCTAssertEqual(titles, meta.titles)
+        XCTAssertEqual(brewPackageMeta(from: [:]), BrewPackageMeta())
+    }
+
     func testCaskArtifactDictYieldsAppName() {
         XCTAssertEqual(caskArtifactAppNames(["Firefox.app"]), ["Firefox.app"])
         XCTAssertEqual(caskArtifactAppNames([["Source.app": "Firefox.app"]]), ["Firefox.app"])

@@ -470,7 +470,9 @@ public func leftoverBlurbsFromBrew(
     }.prefix(limit).map { $0 }
     guard !names.isEmpty else { return [:] }
     let data = infoJSONForNames(brew: brew, names: names, run: run)
-    let (summaries, titles) = brewPackageMeta(data)
+    let meta = brewPackageMeta(from: data)
+    let summaries = meta.summaries
+    let titles = meta.titles
     var catalog: [String: String] = [:]
     for (name, desc) in summaries {
         catalog[name.posixLowercased()] = desc
