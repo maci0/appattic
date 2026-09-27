@@ -257,12 +257,20 @@ final class ScannerViewModel {
             }
             var cacheWriteFailure: String?
             do {
-                _ = try commitScanCache(
+                // `false` here is a snapshot dropped on purpose, not a write
+                // that happened: the inventory moved under the scan, so what
+                // was measured is a mixture. The next launch would rescan
+                // anyway, and saying so beats a report that reads like it was
+                // saved. The CLI reports the same two cases the same way.
+                let committed = try commitScanCache(
                     includeSystem: includeSystem,
                     data: result,
                     before: before,
                     after: after
                 )
+                if !committed, result.incomplete != true {
+                    cacheWriteFailure = "installed software changed while the scan was running"
+                }
             } catch {
                 cacheWriteFailure = error.localizedDescription
             }

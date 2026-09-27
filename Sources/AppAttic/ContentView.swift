@@ -150,7 +150,10 @@ struct ContentView: View {
                 vm.start(includeSystem: includeSystem)
             } catch {
                 settingsLoadFailed = true
-                settingsLoadError = redactHomePaths(error.localizedDescription)
+                // The wording the user reads, kept for `persistSettings` to
+                // re-show: the raw description names the account's home path
+                // and says nothing about what AppAttic will not overwrite.
+                settingsLoadError = settingsErrorUserMessage(error)
                 vm.errorMessage = settingsErrorUserMessage(error)
                 vm.holdsSettingsError = true
             }

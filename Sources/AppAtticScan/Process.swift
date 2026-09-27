@@ -143,16 +143,31 @@ public func readCommandOutputTail(
     from url: URL,
     maxBytes: Int = commandOutputTailBytes
 ) -> String {
-    guard maxBytes > 0, let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+    readCommandOutputTailIfPresent(from: url, maxBytes: maxBytes) ?? ""
+}
+
+/// The same tail, or nil when the file could not be read at all. A file that is
+/// there and empty is not a failure and reads as `""`.
+///
+/// The two are different to a caller reporting a failed run: a script that
+/// wrote nothing to stderr and a stderr that could not be read both arrive as
+/// an empty string, and the first is a real answer while the second leaves the
+/// operator with a nonzero exit and no reason for it.
+private func readCommandOutputTailIfPresent(
+    from url: URL,
+    maxBytes: Int
+) -> String? {
+    guard maxBytes > 0, let handle = try? FileHandle(forReadingFrom: url) else { return nil }
     defer { try? handle.close() }
-    guard let size = try? handle.seekToEnd(), size > 0 else { return "" }
+    guard let size = try? handle.seekToEnd() else { return nil }
+    if size == 0 { return "" }
     let start = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
     do {
         try handle.seek(toOffset: start)
-        guard let data = try handle.read(upToCount: maxBytes), !data.isEmpty else { return "" }
+        guard let data = try handle.read(upToCount: maxBytes) else { return nil }
         return String(decoding: trimPartialLeadingUTF8(Array(data)), as: UTF8.self)
     } catch {
-        return ""
+        return nil
     }
 }
 
@@ -377,7 +392,12 @@ public func runGeneratedScript(
     try? errHandle.close()
     openErrHandle = nil
     var status = process.terminationStatus
-    var stderr = readCommandOutputTail(from: errURL)
+    // The stderr tail is the only thing that says which line of `set -e`
+    // stopped the script, so a read that failed is not an empty stderr: it is
+    // a run whose reason is unknown, and the report says so rather than
+    // printing a bare exit status.
+    var stderr = readCommandOutputTailIfPresent(from: errURL, maxBytes: commandOutputTailBytes)
+        ?? "the script's error output could not be read, so the reason for this run is unknown"
     if !finished {
         // A script blocked on a stale package lock, an unreachable mirror, or
         // a prompt nothing can answer would otherwise wait forever. What it

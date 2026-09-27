@@ -1233,7 +1233,7 @@ public func queryFlatpak(
     // `remote-ls` (network) and `list` (local metadata walk, ~2.4 s itself)
     // are independent: overlap them. `concurrentPerform` keeps `run`
     // non-escaping, so no `withoutActuallyEscaping` check can abort the scan.
-    func pair(withMeta: Bool) -> (rc: Int32, updates: String, installed: String) {
+    func pair(withMeta: Bool) -> (rc: Int32, updates: String, installed: String, listRc: Int32) {
         let r1 = LockBox<(Int32, String)>((127, ""))
         let r2 = LockBox<(Int32, String)>((127, ""))
         let args = [
@@ -1246,9 +1246,9 @@ public func queryFlatpak(
         }
         let (rc1, updates) = r1.value
         let (rc2, installed) = r2.value
-        return (rc1, updates, rc2 == 0 ? installed : "")
+        return (rc1, updates, rc2 == 0 ? installed : "", rc2)
     }
-    var (rc, updates, installed) = pair(withMeta: true)
+    var (rc, updates, installed, listRc) = pair(withMeta: true)
     // Non-nil once `updates` has been parsed with no installed text, which is
     // exactly what the final call computes. The retry path used to parse the
     // same `flatpak list` output a third time.
@@ -1261,7 +1261,7 @@ public func queryFlatpak(
     if rc != 0 {
         let first = parseFlatpakUpdates(updates)
         if first.isEmpty, installed.isEmpty {
-            (rc, updates, installed) = pair(withMeta: false)
+            (rc, updates, installed, listRc) = pair(withMeta: false)
             let retried = parseFlatpakUpdates(updates)
             if rc != 0, retried.isEmpty {
                 noteScanCheckFailed("flatpak")
@@ -1272,6 +1272,12 @@ public func queryFlatpak(
             parsed = first
         }
     }
+    // The update list answered, so the outdated rows are real, but without the
+    // installed list every one of them reports no current version, and that is
+    // what the report prints and the scan cache stores. An unknown is not the
+    // same as "up to date from nothing", so the check is recorded and the scan
+    // is not kept as a complete answer.
+    if listRc != 0 { noteScanCheckFailed("flatpak-list") }
     if let parsed, installed.isEmpty { return parsed }
     return parseFlatpakUpdates(updates, installedText: installed)
 }
@@ -1299,6 +1305,10 @@ public func querySnap(
         return []
     }
     let (rc2, listed) = r2.value
+    // `refresh --list` names the snaps that have an update, and `list` says
+    // which version is installed. Without the second every row reports no
+    // current version, and that is what the report and the scan cache store.
+    if rc2 != 0 { noteScanCheckFailed("snap-list") }
     return parseSnapRefreshList(refresh, installedText: rc2 == 0 ? listed : "")
 }
 

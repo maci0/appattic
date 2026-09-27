@@ -128,6 +128,41 @@ final class OutdatedTests: XCTestCase {
         XCTAssertEqual(pkgs[0].summary, "Fast, Private & Safe Web Browser")
     }
 
+    /// `remote-ls` says which updates exist and `list` says which version is
+    /// installed. With the second one failing every row reports no current
+    /// version, and that is what the report prints and the scan cache stores:
+    /// an unknown, recorded so the scan is not kept as a complete answer.
+    func testFailedFlatpakListIsRecordedNotAVersionOfNothing() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let updates = "org.mozilla.firefox\t128.0.3\tFirefox\tFast, Private & Safe Web Browser\n"
+        let pkgs = queryFlatpak(
+            which: { _ in "/usr/bin/flatpak" },
+            run: { cmd, _ in cmd.contains("remote-ls") ? (0, updates, "") : (1, "", "boom") }
+        )
+        XCTAssertEqual(pkgs.map(\.name), ["org.mozilla.firefox"])
+        XCTAssertNil(pkgs[0].currentVersion)
+        XCTAssertEqual(scanCheckFailures(), ["flatpak-list"])
+    }
+
+    /// The same for `snap`: the refresh list answered, so the update is real,
+    /// but the current version behind it is unknown, not absent.
+    func testFailedSnapListIsRecordedNotAVersionOfNothing() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let refresh = """
+        Name     Version  Rev   Size   Publisher   Notes
+        firefox  129.0    4336  250MB  mozilla*    -
+        """
+        let pkgs = querySnap(
+            which: { _ in "/usr/bin/snap" },
+            run: { cmd, _ in cmd.contains("refresh") ? (0, refresh, "") : (1, "", "boom") }
+        )
+        XCTAssertEqual(pkgs.map(\.name), ["firefox"])
+        XCTAssertNil(pkgs[0].currentVersion)
+        XCTAssertEqual(scanCheckFailures(), ["snap-list"])
+    }
+
     func testParseSnapRefreshList() {
         let refresh = """
         Name     Version  Rev   Size   Publisher   Notes

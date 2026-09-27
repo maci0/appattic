@@ -594,10 +594,10 @@ func runPackageQuery(
             // A success status carrying a payload that is not JSON is a broken
             // answer, not the empty listing the parser would return from it. It
             // is not recorded here: a chain has further spellings to try, and
-            // records the manager only when none of them answers.
-            if json && !jsonListingIsUsable(out) {
-                return PackageQueryResult(output: nil, failed: true)
-            }
+            // records the manager only when none of them answers. The next
+            // binary is tried too, because `names` are alternate spellings of
+            // one manager: a broken `pip` must not shadow a `pip3` that answers.
+            if json && !jsonListingIsUsable(out) { continue }
             return PackageQueryResult(output: out, failed: false)
         }
     }

@@ -660,6 +660,38 @@ final class PackageTests: XCTestCase {
         XCTAssertTrue(scanCheckFailures().isEmpty, "\(scanCheckFailures())")
     }
 
+    /// The same rule across the binaries of one manager: `names` are alternate
+    /// spellings, so a `pip` that answers with something that is not JSON has
+    /// not answered for pip. Stopping there reports "no global packages" and
+    /// records the check as failed while a `pip3` that would have answered is
+    /// never run.
+    func testUnparsableJSONFromFirstBinaryTriesTheNextBinary() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let listing = "[{\"name\": \"requests\", \"version\": \"2.31.0\"}]"
+        let pkgs = collectPackages(
+            which: { name in ["pip", "pip3"].contains(name) ? "/usr/bin/\(name)" : nil },
+            run: { cmd, _ in cmd.first == "/usr/bin/pip" ? (0, "not json", "") : (0, listing, "") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertEqual(pkgs.map(\.name), ["requests"])
+        XCTAssertTrue(scanCheckFailures().isEmpty, "\(scanCheckFailures())")
+    }
+
+    /// The other end of it: no binary answering with JSON is still a failed
+    /// check, whichever binary the scan happened to try first.
+    func testUnparsableJSONFromEveryBinaryIsRecorded() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let pkgs = collectPackages(
+            which: { name in ["pip", "pip3"].contains(name) ? "/usr/bin/\(name)" : nil },
+            run: { _, _ in (0, "not json", "") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertTrue(pkgs.isEmpty)
+        XCTAssertEqual(scanCheckFailures(), ["pip"])
+    }
+
     /// The failure has to survive into the scan the cache sees, or the empty
     /// list is still written and still served for a day. Every manager reads
     /// as installed and every command fails, so the check is attempted on any
