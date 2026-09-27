@@ -168,14 +168,20 @@ fn query_impl(present: i32) i32 {
     var n_glob: usize = 0;
     const nlist = runQuery(&list_cmds, &exec_buf);
     if (nlist >= 0) n_glob = parsePipOutdatedJSON(exec_buf[0..@intCast(nlist)], &globals);
+    note.addTruncatedRows(n_glob, globals.len);
 
     var outdated: [128]PipOutdated = undefined;
     var n_out: usize = 0;
     const nq = runQuery(&outdated_cmds, &exec_out_buf);
     if (nq >= 0) n_out = parsePipOutdatedJSON(exec_out_buf[0..@intCast(nq)], &outdated);
+    note.addTruncatedRows(n_out, outdated.len);
 
+    const n_parsed = n_glob + n_out;
     while (true) {
-        if (renderPip(globals[0..n_glob], outdated[0..n_out])) return 0;
+        if (renderPip(globals[0..n_glob], outdated[0..n_out])) {
+            note.addDroppedRows(n_parsed - (n_glob + n_out));
+            return 0;
+        }
         if (n_glob > 0) {
             n_glob -= 1;
             continue;

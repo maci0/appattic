@@ -367,6 +367,35 @@ static int verifyHelpers() {
         std::fprintf(stderr, "updatable: omitted updatable should follow manager brew-cask\n");
         return 1;
     }
+
+    // A plugin note is the only signal that a row's list is short of the
+    // machine: a command that did not answer, or more rows than the plugin's
+    // table holds. A per-row reason must not bury it, because the user
+    // confirms a deletion from this list.
+    rows.clear();
+    appendFindingsFromBlob(rows, QByteArrayLiteral(
+        "{\"plugin\":\"apt\",\"note\":\"1 list hit the row limit: more rows exist than were shown\","
+        "\"dialog\":{\"title\":\"Remove apt orphans?\",\"body\":\"Named autoremove leaves only.\"},"
+        "\"findings\":[{\"kind\":\"orphan\",\"id\":\"libfoo\",\"name\":\"libfoo\","
+        "\"status\":\"orphaned\",\"manager\":\"apt\","
+        "\"reason\":\"nothing needs it any more\"}]}"));
+    if (rows.size() != 1
+        || !rows[0].dialogBody.contains(QLatin1String("hit the row limit"))) {
+        std::fprintf(stderr, "note: a truncated list must reach the row despite its reason\n");
+        return 1;
+    }
+
+    rows.clear();
+    appendFindingsFromBlob(rows, QByteArrayLiteral(
+        "{\"plugin\":\"apt\",\"dialog\":{\"title\":\"t\",\"body\":\"Named autoremove leaves only.\"},"
+        "\"findings\":[{\"kind\":\"orphan\",\"id\":\"libfoo\",\"name\":\"libfoo\","
+        "\"status\":\"orphaned\",\"manager\":\"apt\"}]}"));
+    if (rows.size() != 1
+        || rows[0].dialogBody.contains(QLatin1String("Scan incomplete"))) {
+        std::fprintf(stderr, "note: a complete scan must not claim to be incomplete\n");
+        return 1;
+    }
+
     Finding leftover;
     leftover.plugin = QStringLiteral("path-home-dot");
     leftover.status = QStringLiteral("orphaned");

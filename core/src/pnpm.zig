@@ -85,8 +85,13 @@ fn query_impl(present: i32) i32 {
     }
     var hits: [128]PnpmGlobal = undefined;
     var n = parsePnpmGlobalList(exec_buf[0..@intCast(nexec)], &hits);
+    note.addTruncatedRows(n, hits.len);
+    const n_parsed = n;
     while (true) {
-        if (renderPnpm(hits[0..n])) return 0;
+        if (renderPnpm(hits[0..n])) {
+            note.addDroppedRows(n_parsed - n);
+            return 0;
+        }
         if (n == 0) return 1;
         n -= 1;
     }

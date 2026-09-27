@@ -93,8 +93,13 @@ fn query_impl(present: i32) i32 {
     var n_out: usize = 0;
     const nq = host_exec.runFirst(&exec_up_buf, &outdated_cmds, &used, &note);
     if (nq >= 0) n_out = parseAurQua(exec_up_buf[0..@intCast(nq)], &outdated);
+    note.addTruncatedRows(n_out, outdated.len);
+    const n_parsed = n_out;
     while (true) {
-        if (renderAur(outdated[0..n_out], helperFromCmd(used))) return 0;
+        if (renderAur(outdated[0..n_out], helperFromCmd(used))) {
+            note.addDroppedRows(n_parsed - n_out);
+            return 0;
+        }
         if (n_out == 0) return 1;
         n_out -= 1;
     }

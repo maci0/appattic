@@ -106,13 +106,50 @@ pub fn queryCommand(comptime spec: Spec) []const u8 {
 
 const linux_system_names = @embedFile("linux-system-names.txt");
 
+/// Entry count and lowered-byte total the embedded list needs, measured at
+/// comptime. The tables are sized from these instead of from round numbers: a
+/// name that does not fit a fixed table is dropped, and a dropped name reads
+/// as a leftover orphan, so the table would grow an `rm -rf` for a system
+/// directory the day someone added enough lines. Sizing from the file makes
+/// that unreachable, and a list that no longer fits is a compile error rather
+/// than a silent truncation at scan time.
+const sys_table_entries = blk: {
+    @setEvalBranchQuota(10000);
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, linux_system_names, '\n');
+    while (it.next()) |raw| {
+        if (std.mem.trim(u8, raw, " \t\r").len != 0) n += 1;
+    }
+    break :blk n;
+};
+
+const sys_table_bytes = blk: {
+    @setEvalBranchQuota(10000);
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, linux_system_names, '\n');
+    while (it.next()) |raw| n += std.mem.trim(u8, raw, " \t\r").len;
+    break :blk n;
+};
+
+/// Longest name in the list, so the candidate buffer below cannot be the
+/// thing that decides a system name is not one.
+const sys_table_max_name = blk: {
+    @setEvalBranchQuota(10000);
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, linux_system_names, '\n');
+    while (it.next()) |raw| {
+        n = @max(n, std.mem.trim(u8, raw, " \t\r").len);
+    }
+    break :blk n;
+};
+
 /// Sorted table of the embedded names, stored lowered. Parsed once on first
 /// use into static storage (WASM plugins are single-threaded; no atomics).
 /// The old code re-split and re-trimmed the whole text per candidate with
 /// `eqlIgnoreCase` per entry: ~1.5 µs per miss. Binary search: ~8 probes.
-var sys_name_table: [256][]const u8 = undefined;
+var sys_name_table: [sys_table_entries][]const u8 = undefined;
 var sys_name_count: usize = 0;
-var sys_table_low: [4096]u8 = undefined;
+var sys_table_low: [sys_table_bytes]u8 = undefined;
 var sys_table_ready: bool = false;
 
 fn ensureSysTable() void {
@@ -122,8 +159,8 @@ fn ensureSysTable() void {
     while (lines.next()) |raw| {
         const k = std.mem.trim(u8, raw, " \t\r");
         if (k.len == 0) continue;
-        if (sys_name_count == sys_name_table.len) break;
-        if (used + k.len > sys_table_low.len) break;
+        std.debug.assert(sys_name_count < sys_name_table.len);
+        std.debug.assert(used + k.len <= sys_table_low.len);
         for (k) |c| {
             sys_table_low[used] = if (c >= 'A' and c <= 'Z') c + 32 else c;
             used += 1;
@@ -131,6 +168,8 @@ fn ensureSysTable() void {
         sys_name_table[sys_name_count] = sys_table_low[used - k.len .. used];
         sys_name_count += 1;
     }
+    std.debug.assert(used == sys_table_low.len);
+    std.debug.assert(sys_name_count == sys_name_table.len);
     // Insertion sort: one entry per line of the embedded table, trivial.
     var i: usize = 1;
     while (i < sys_name_count) : (i += 1) {
@@ -146,12 +185,12 @@ fn ensureSysTable() void {
 }
 
 /// Case-insensitive membership in the system-names table. The candidate is
-/// lowered once into a stack buffer; a name longer than that buffer cannot
-/// match (the longest table entry is 23 bytes) and skips the search.
+/// lowered into a buffer sized from the longest table entry, so no name the
+/// list can hold is skipped for want of buffer.
 fn nameInSysTable(name: []const u8) bool {
-    if (name.len == 0 or name.len > 64) return false;
+    if (name.len == 0 or name.len > sys_table_max_name) return false;
     ensureSysTable();
-    var low: [64]u8 = undefined;
+    var low: [sys_table_max_name]u8 = undefined;
     for (name, 0..) |c, i| low[i] = if (c >= 'A' and c <= 'Z') c + 32 else c;
     const key = low[0..name.len];
     var lo: usize = 0;
@@ -330,8 +369,13 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     var hits: [256]Orphan = undefined;
     var paths: [32768]u8 = undefined;
     var n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths, spec.allow);
+    note.addTruncatedRows(n, hits.len);
+    const n_parsed = n;
     while (true) {
-        if (render(spec, hits[0..n])) return 0;
+        if (render(spec, hits[0..n])) {
+            note.addDroppedRows(n_parsed - n);
+            return 0;
+        }
         if (n == 0) return 1;
         n -= 1;
     }
@@ -654,4 +698,55 @@ fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
             try std.testing.expect(sliceInside(&one_path, one[0].path) or sliceInside(text, one[0].path));
         }
     }
+}
+
+test "the system-name table holds every line of the embedded list" {
+    ensureSysTable();
+    var expected: usize = 0;
+    var it = std.mem.splitScalar(u8, linux_system_names, '\n');
+    while (it.next()) |raw| {
+        if (std.mem.trim(u8, raw, " \t\r").len == 0) continue;
+        expected += 1;
+    }
+    try std.testing.expectEqual(expected, sys_name_count);
+    try std.testing.expectEqual(expected, sys_name_table.len);
+    // Every entry is reachable: the table is sorted and the search is a
+    // binary search over it, so a name that never compares equal is a name
+    // the scan would report as a deletable leftover.
+    for (sys_name_table[0..sys_name_count]) |entry| {
+        try std.testing.expect(nameInSysTable(entry));
+        var upper: [sys_table_max_name]u8 = undefined;
+        for (entry, 0..) |c, i| {
+            upper[i] = if (c >= 'a' and c <= 'z') c - 32 else c;
+        }
+        try std.testing.expect(nameInSysTable(upper[0..entry.len]));
+    }
+}
+
+test "a full finding array reaches the result JSON as a note" {
+    // The plugin's own array is 256 rows; a listing past that is a machine
+    // with more leftovers than the table holds, which is the case that used to
+    // report the first 256 as if they were all of them.
+    var listing: [4096]u8 = undefined;
+    var used: usize = 0;
+    var i: usize = 0;
+    while (i < 300) : (i += 1) {
+        const line = try std.fmt.bufPrint(listing[used..], "gone-{d}\n", .{i});
+        used += line.len;
+    }
+    var hits: [256]Orphan = undefined;
+    var paths: [32768]u8 = undefined;
+    const spec = specById("path-xdg-data");
+    const n = parseListing(listing[0..used], spec.keep, spec.root, &hits, &paths, spec.allow);
+    try std.testing.expectEqual(hits.len, n);
+
+    var log = querynote.Log{};
+    log.addTruncatedRows(n, hits.len);
+    var buf: [256]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    log.write(&w);
+    try std.testing.expectEqualStrings(
+        ",\"note\":\"1 list hit the row limit: more rows exist than were shown\"",
+        w.slice().?,
+    );
 }

@@ -257,6 +257,7 @@ fn query_impl(present: i32) i32 {
     const nexec = host_exec.run(query_cmd, &exec_buf);
     note.add(query_cmd, nexec);
     if (nexec >= 0) n = parseFlatpakUnused(exec_buf[0..@intCast(nexec)], &hits);
+    note.addTruncatedRows(n, hits.len);
 
     var outdated: [128]FlatpakOutdated = undefined;
     var n_out: usize = 0;
@@ -269,9 +270,14 @@ fn query_impl(present: i32) i32 {
         if (nl >= 0) installed = exec_list_buf[0..@intCast(nl)];
         n_out = parseFlatpakUpdates(exec_up_buf[0..@intCast(nq)], installed, &outdated);
     }
+    note.addTruncatedRows(n_out, outdated.len);
 
+    const n_parsed = n + n_out;
     while (true) {
-        if (renderFlatpak(hits[0..n], outdated[0..n_out])) return 0;
+        if (renderFlatpak(hits[0..n], outdated[0..n_out])) {
+            note.addDroppedRows(n_parsed - (n + n_out));
+            return 0;
+        }
         if (n_out > 0) {
             n_out -= 1;
             continue;

@@ -22,6 +22,13 @@ pub const Log = struct {
     /// reads exactly like a scan that had no more than that: a truncated
     /// count is a clean-looking count.
     dropped: usize = 0,
+    /// Rows a parser had to drop because the plugin's fixed finding array was
+    /// full. A full array means the answer was longer than the table, so the
+    /// finding list is short of the machine for the same reason a command
+    /// that did not answer leaves it short: without this the run reads as
+    /// "these are all of them", and an all-of-them list is what the user
+    /// confirms a deletion from.
+    dropped_rows: usize = 0,
 
     pub fn add(self: *Log, cmd: []const u8, rc: i32) void {
         if (rc >= 0) return;
@@ -33,10 +40,27 @@ pub const Log = struct {
         self.n += 1;
     }
 
-    /// Append the `note` field. Writes nothing when every command answered, so
-    /// a clean result keeps the shape it had before.
+    /// Record rows a parser could not keep. `kept == cap` is the signal: the
+    /// parser filled the array, so at least one more row existed. Anything
+    /// less means the array was not the limit and nothing was dropped.
+    pub fn addTruncatedRows(self: *Log, kept: usize, cap: usize) void {
+        if (kept >= cap) self.dropped_rows += 1;
+    }
+
+    /// Record one row a render gave up to make the result fit its buffer. The
+    /// plugins shed rows from the end until the render succeeds, so a machine
+    /// with more findings than `result_buf` holds is reported as the shorter
+    /// list. The user confirms a deletion from that list, so the rows that
+    /// went missing have to be visible the same way a missing command is.
+    pub fn addDroppedRows(self: *Log, dropped: usize) void {
+        self.dropped_rows += dropped;
+    }
+
+    /// Append the `note` field. Writes nothing when every command answered and
+    /// no parser ran out of room, so a clean result keeps the shape it had
+    /// before.
     pub fn write(self: *const Log, w: *jsonbuf.W) void {
-        if (self.n == 0 and self.dropped == 0) return;
+        if (self.n == 0 and self.dropped == 0 and self.dropped_rows == 0) return;
         w.raw(",\"note\":\"");
         for (self.items[0..self.n], 0..) |item, i| {
             if (i > 0) w.raw("; ");
@@ -52,6 +76,15 @@ pub const Log = struct {
                 "{d} more command{s} did not answer",
                 .{ self.dropped, if (self.dropped == 1) @as([]const u8, "") else "s" },
             ) catch "more commands did not answer");
+        }
+        if (self.dropped_rows > 0) {
+            if (self.n > 0 or self.dropped > 0) w.raw("; ");
+            var tail: [96]u8 = undefined;
+            w.escaped(std.fmt.bufPrint(
+                &tail,
+                "{d} list{s} hit the row limit: more rows exist than were shown",
+                .{ self.dropped_rows, if (self.dropped_rows == 1) @as([]const u8, "") else "s" },
+            ) catch "a list hit the row limit");
         }
         w.raw("\"");
     }
@@ -117,4 +150,38 @@ test "the dropped count is the real overflow, not the bound" {
     try std.testing.expect(
         std.mem.indexOf(u8, w.slice().?, "12 more commands did not answer") != null,
     );
+}
+
+test "a full finding array is named in the note" {
+    var buf: [512]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    var log = Log{};
+    log.addTruncatedRows(128, 128);
+    log.write(&w);
+    try std.testing.expectEqualStrings(
+        ",\"note\":\"1 list hit the row limit: more rows exist than were shown\"",
+        w.slice().?,
+    );
+}
+
+test "a list that did not fill its array adds no note" {
+    var buf: [64]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    var log = Log{};
+    log.addTruncatedRows(12, 128);
+    log.write(&w);
+    try std.testing.expect(w.slice().?.len == 0);
+}
+
+test "truncated lists and failed commands share one note" {
+    var buf: [512]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    var log = Log{};
+    log.add("apt list --upgradable", host_exec.fail);
+    log.addTruncatedRows(32, 32);
+    log.addTruncatedRows(32, 32);
+    log.write(&w);
+    const note = w.slice().?;
+    try std.testing.expect(std.mem.indexOf(u8, note, "apt list --upgradable did not answer") != null);
+    try std.testing.expect(std.mem.indexOf(u8, note, "2 lists hit the row limit") != null);
 }

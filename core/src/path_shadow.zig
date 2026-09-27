@@ -289,8 +289,13 @@ fn query_impl(present: i32) i32 {
     var hits: [32]ShadowFinding = undefined;
     var paths: [2048]u8 = undefined;
     var n = findShadows(&overlays, &packages, &hits, &paths);
+    note.addTruncatedRows(n, hits.len);
+    const n_parsed = n;
     while (true) {
-        if (renderShadows(hits[0..n])) return 0;
+        if (renderShadows(hits[0..n])) {
+            note.addDroppedRows(n_parsed - n);
+            return 0;
+        }
         if (n == 0) return 1;
         n -= 1;
     }

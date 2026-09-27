@@ -236,10 +236,17 @@ fn query_impl(present: i32) i32 {
     var volumes: [16]Hit = undefined;
     var containers: [16]Hit = undefined;
     var nimg = parseDanglingImages(parseBuf(ni, &images_buf), &images);
+    note.addTruncatedRows(nimg, images.len);
     var nvol = parseDanglingVolumes(parseBuf(nv, &volumes_buf), &volumes);
+    note.addTruncatedRows(nvol, volumes.len);
     var nps = parseExitedContainers(parseBuf(np, &ps_buf), &containers);
+    note.addTruncatedRows(nps, containers.len);
+    const n_parsed = nps + nvol + nimg;
     while (true) {
-        if (renderCtr(engine, images[0..nimg], volumes[0..nvol], containers[0..nps])) return 0;
+        if (renderCtr(engine, images[0..nimg], volumes[0..nvol], containers[0..nps])) {
+            note.addDroppedRows(n_parsed - (nps + nvol + nimg));
+            return 0;
+        }
         if (nps > 0) {
             nps -= 1;
             continue;

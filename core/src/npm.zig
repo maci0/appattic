@@ -91,15 +91,21 @@ fn query_impl(present: i32) i32 {
     const nexec = host_exec.run(query_cmd, &exec_buf);
     note.add(query_cmd, nexec);
     if (nexec >= 0) n = parseNpmGlobalList(exec_buf[0..@intCast(nexec)], &hits);
+    note.addTruncatedRows(n, hits.len);
 
     var outdated: [128]jsonscan.NamedVer = undefined;
     var n_out: usize = 0;
     const nq = host_exec.run(outdated_cmd, &exec_out_buf);
     note.add(outdated_cmd, nq);
     if (nq >= 0) n_out = jsonscan.parseJsonNamedOutdated(exec_out_buf[0..@intCast(nq)], &outdated);
+    note.addTruncatedRows(n_out, outdated.len);
 
+    const n_parsed = n + n_out;
     while (true) {
-        if (renderNpm(hits[0..n], outdated[0..n_out])) return 0;
+        if (renderNpm(hits[0..n], outdated[0..n_out])) {
+            note.addDroppedRows(n_parsed - (n + n_out));
+            return 0;
+        }
         if (n_out > 0) {
             n_out -= 1;
             continue;

@@ -230,27 +230,35 @@ fn query_impl(present: i32) i32 {
     const nexec = host_exec.run(query_cmd, &exec_buf);
     note.add(query_cmd, nexec);
     if (nexec >= 0) n_orph = parseAptAutoremove(exec_buf[0..@intCast(nexec)], &orphans);
+    note.addTruncatedRows(n_orph, orphans.len);
 
     var outdated: [128]AptOutdated = undefined;
     var n_out: usize = 0;
     const nq = host_exec.run(outdated_cmd, &exec_up_buf);
     note.add(outdated_cmd, nq);
     if (nq >= 0) n_out = parseAptUpgradable(exec_up_buf[0..@intCast(nq)], &outdated);
+    note.addTruncatedRows(n_out, outdated.len);
 
     var rc_pkgs: [128]DpkgRc = undefined;
     var n_rc: usize = 0;
     const nd = host_exec.run(dpkg_cmd, &exec_dpkg_buf);
     note.add(dpkg_cmd, nd);
     if (nd >= 0) n_rc = parseDpkgRc(exec_dpkg_buf[0..@intCast(nd)], &rc_pkgs);
+    note.addTruncatedRows(n_rc, rc_pkgs.len);
 
     var ppas: [32]PpaSource = undefined;
     var n_ppa: usize = 0;
     const np = host_exec.run(ppa_cmd, &exec_ppa_buf);
     note.add(ppa_cmd, np);
     if (np >= 0) n_ppa = parsePpaSources(exec_ppa_buf[0..@intCast(np)], &ppas);
+    note.addTruncatedRows(n_ppa, ppas.len);
 
+    const n_parsed = n_out + n_ppa + n_rc + n_orph;
     while (true) {
-        if (renderApt(orphans[0..n_orph], outdated[0..n_out], rc_pkgs[0..n_rc], ppas[0..n_ppa])) return 0;
+        if (renderApt(orphans[0..n_orph], outdated[0..n_out], rc_pkgs[0..n_rc], ppas[0..n_ppa])) {
+            note.addDroppedRows(n_parsed - (n_out + n_ppa + n_rc + n_orph));
+            return 0;
+        }
         if (n_out > 0) {
             n_out -= 1;
             continue;

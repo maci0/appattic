@@ -149,15 +149,21 @@ fn query_impl(present: i32) i32 {
     const nexec = host_exec.run(query_cmd, &exec_buf);
     note.add(query_cmd, nexec);
     if (nexec >= 0) n_orph = parseZypperUnneeded(exec_buf[0..@intCast(nexec)], &orphans);
+    note.addTruncatedRows(n_orph, orphans.len);
 
     var outdated: [128]ZypperOutdated = undefined;
     var n_out: usize = 0;
     const nq = host_exec.run(outdated_cmd, &exec_up_buf);
     note.add(outdated_cmd, nq);
     if (nq >= 0) n_out = parseZypperListUpdates(exec_up_buf[0..@intCast(nq)], &outdated);
+    note.addTruncatedRows(n_out, outdated.len);
 
+    const n_parsed = n_out + n_orph;
     while (true) {
-        if (renderZypper(orphans[0..n_orph], outdated[0..n_out])) return 0;
+        if (renderZypper(orphans[0..n_orph], outdated[0..n_out])) {
+            note.addDroppedRows(n_parsed - (n_out + n_orph));
+            return 0;
+        }
         if (n_out > 0) {
             n_out -= 1;
             continue;

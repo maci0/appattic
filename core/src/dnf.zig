@@ -185,16 +185,22 @@ fn query_impl(present: i32) i32 {
     var used_q: []const u8 = query_cmds[0];
     const nexec = host_exec.runFirst(&exec_buf, &query_cmds, &used_q, &note);
     if (nexec >= 0) n_orph = parseDnfUnneeded(exec_buf[0..@intCast(nexec)], &orphans);
+    note.addTruncatedRows(n_orph, orphans.len);
 
     var outdated: [128]DnfOutdated = undefined;
     var n_out: usize = 0;
     var used_u: []const u8 = outdated_cmds[0];
     const nq = host_exec.runFirst(&exec_up_buf, &outdated_cmds, &used_u, &note);
     if (nq >= 0) n_out = parseDnfUpgrades(exec_up_buf[0..@intCast(nq)], &outdated);
+    note.addTruncatedRows(n_out, outdated.len);
 
     const mgr = if (nexec >= 0) managerFromCmd(used_q) else managerFromCmd(used_u);
+    const n_parsed = n_out + n_orph;
     while (true) {
-        if (renderDnf(orphans[0..n_orph], outdated[0..n_out], mgr)) return 0;
+        if (renderDnf(orphans[0..n_orph], outdated[0..n_out], mgr)) {
+            note.addDroppedRows(n_parsed - (n_out + n_orph));
+            return 0;
+        }
         if (n_out > 0) {
             n_out -= 1;
             continue;

@@ -69,7 +69,9 @@ Result JSON:
 }
 ```
 
-`note` is optional and present whenever a query command did not answer (refused, failed, timed out, or output truncated): `"<cmd> did not answer: <reason>"` per command, `; ` separated, capped at 8 (`core/src/querynote.zig`). A run where every command answered has no `note`, so an empty `findings` list means a clean scan rather than a silent one.
+`note` is optional and present whenever the result is short of the machine. Two causes, same signal. A query command that did not answer (refused, failed, timed out, or output truncated): `"<cmd> did not answer: <reason>"` per command, `; ` separated, capped at 8. Or a list that hit the plugin's row limit: `"<n> list(s) hit the row limit: more rows exist than were shown"`. The row limit is the plugin's fixed finding array (`querynote.Log.addTruncatedRows`) and the rows a render sheds to fit `result_buf` (`addDroppedRows`). A run where every command answered and no list overflowed has no `note`, so an empty `findings` list means a clean scan rather than a silent one. Every row of a plugin carrying a `note` gets the note in its `dialogBody` (`ui/linux-qt/finding.cpp`), appended after the row's own `reason` so the reason cannot bury it: a user confirms a deletion from this list, and a list that is quietly incomplete must say so next to the checkbox.
+
+The `note` is a fact about the whole plugin result, not about one row. It travels in `dialogBody` because that is the one field every row of a plugin shares and the one the confirm sheet shows.
 
 `script` is null when nothing named. Host intercept rejects bulk wipes (`system prune`, `rmi -f`, `volume prune`, `snap remove --purge '*'`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`, `rm /usr/bin/flatpak`; `core/host/embed.c:559`).
 

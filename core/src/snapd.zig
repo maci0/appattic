@@ -195,9 +195,11 @@ fn query_impl(present: i32) i32 {
     const snap_text = exec_buf[0..@intCast(nexec)];
     var disabled: [32]DisabledRev = undefined;
     var n_disabled = parseSnapListAll(snap_text, &disabled);
+    note.addTruncatedRows(n_disabled, disabled.len);
 
     var installed_names: [64][]const u8 = undefined;
     const n_installed = parseInstalledSnapNames(snap_text, installed_names[0..]);
+    note.addTruncatedRows(n_installed, installed_names.len);
     var keep_buf: [512]u8 = undefined;
     const keep = keepFromNames(installed_names[0..n_installed], &keep_buf);
 
@@ -215,10 +217,15 @@ fn query_impl(present: i32) i32 {
             &paths,
             "",
         );
+        note.addTruncatedRows(n_orphans, orphans.len);
     }
 
+    const n_parsed = n_orphans + n_disabled;
     while (true) {
-        if (renderSnapd(disabled[0..n_disabled], orphans[0..n_orphans])) return 0;
+        if (renderSnapd(disabled[0..n_disabled], orphans[0..n_orphans])) {
+            note.addDroppedRows(n_parsed - (n_orphans + n_disabled));
+            return 0;
+        }
         if (n_orphans > 0) {
             n_orphans -= 1;
             continue;

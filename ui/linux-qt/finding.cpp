@@ -1040,6 +1040,18 @@ void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line) {
         dialogBody = jsonStr(dialog.toObject(), "body");
     }
     const QString note = jsonStr(obj, "note");
+    // The note is a fact about the scan, not about any one row: a command
+    // that did not answer, or a list longer than the plugin's table, means
+    // every row below is short of the machine. It rides on dialogBody and is
+    // appended to the row's own reason, because the reason is what the user
+    // reads next to the checkbox they are about to tick, and burying the note
+    // under it is how an incomplete list gets confirmed as a complete one.
+    if (!note.isEmpty()) {
+        if (!dialogBody.isEmpty()) {
+            dialogBody += QLatin1Char('\n');
+        }
+        dialogBody += QStringLiteral("Scan incomplete: ") + note;
+    }
     const QJsonArray findings = obj.value(QStringLiteral("findings")).toArray();
     for (const QJsonValue &v : findings) {
         const QJsonObject f = v.toObject();
@@ -1069,7 +1081,9 @@ void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line) {
             row.rootLabel = overlayRootLabel(row.path);
         }
         row.dialogBody = row.reason.isEmpty() ? dialogBody : row.reason;
-        if (row.dialogBody.isEmpty()) row.dialogBody = note;
+        if (!dialogBody.isEmpty() && row.dialogBody != dialogBody) {
+            row.dialogBody += QLatin1Char('\n') + dialogBody;
+        }
         row.bytes = jsonIntAny(f, {"bytes", "size_bytes", "size"});
         row.idleDays = jsonIntAny(f, {"idleDays", "idle_days", "idle"});
         row.updatable = parseUpdatable(f, row);
