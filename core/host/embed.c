@@ -346,20 +346,17 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
        through to compiling the wasm, which is what shipped trees without one
        did anyway. */
     char cwasm[4096];
-    if (image_path_for(path, cwasm, sizeof cwasm)) {
-        struct stat cs;
-        if (stat(cwasm, &cs) == 0 && stamp_matches_wasm(cwasm, &st)) {
-            wasmtime_module_t *pre = NULL;
-            wasmtime_error_t *perr = wasmtime_module_deserialize_file(engine, cwasm, &pre);
-            if (!perr && pre) {
-                if (!cache_put(path, &st, pre)) {
-                    fail_msg(e, "module cache is full");
-                    return NULL;
-                }
-                return pre;
+    if (image_path_for(path, cwasm, sizeof cwasm) && stamp_matches_wasm(cwasm, &st)) {
+        wasmtime_module_t *pre = NULL;
+        wasmtime_error_t *perr = wasmtime_module_deserialize_file(engine, cwasm, &pre);
+        if (!perr && pre) {
+            if (!cache_put(path, &st, pre)) {
+                fail_msg(e, "module cache is full");
+                return NULL;
             }
-            if (perr) wasmtime_error_delete(perr);
+            return pre;
         }
+        if (perr) wasmtime_error_delete(perr);
     }
 
     size_t len = 0;

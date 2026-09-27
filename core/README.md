@@ -10,27 +10,30 @@ Every manager and leftover path is a plugin: one `<id>.zig` compiled to `<id>.wa
 > grammars are implemented twice: here (`core/src/<id>.zig`, loaded by the
 > Linux Qt UI) and in Swift (`Sources/AppAtticScan/{Outdated,Packages,BrewInfo}.swift`,
 > used by the CLI and macOS UI), which never loads this core. A grammar fix on
-> one side must land on the other: `core/src/apt.zig` ↔ `parseAptUpgradable` /
-> `parseAptAutoremove` / `parseDpkgRc`, `pacman.zig` ↔ `parsePacmanQu` /
-> `parsePacmanOrphans`, `dnf.zig` ↔ `parseDnfUpgrades` / `parseDnfUnneeded`,
-> `zypper.zig` ↔ `parseZypperListUpdates` / `parseZypperUnneeded`,
-> `flatpak.zig` ↔ `parseFlatpakUpdates`, `npm/pnpm/bun.zig` ↔ `parseNpmGlobalList` /
-> `parsePnpmGlobalList` / `parseBunGlobalList` (npm and pnpm over `jsonscan.zig` ↔
-> `jsonDependencyEntries`), `pipx.zig` ↔ `parsePipxList`, `uv.zig` ↔ `parseUvToolList`,
-> `brew.zig` ↔ `parseBrewOutdatedJSON`, `pip.zig` ↔ `parsePipUserList` (Zig reads the
-> user-global list out of `pip list --user --outdated --format=json`, where Swift starts from
-> `pip list --user --not-required --format=json`, and the `--outdated` rows it also reports
-> are Zig-only so far), `deno.zig` ↔
-> `listDenoGlobals`. `gem.zig`, `composer.zig`, and `apt.zig`'s `parsePpaSources` have no
-> Swift counterpart yet. One behavior is Swift-only in the other direction:
-> `BrewInfo.swift` reads Homebrew's "Refusing to load cask ... from untrusted tap"
-> error and marks those rows report-only, and `brew.zig` does not, so every
-> outdated cask it finds is updatable. The Swift
+> one side must land on the other. The Swift
 > `ParserParityTests` pin edge behavior; mirror new
 > edges there too. `linux-system-names.txt` is mirrored the same way, with
 > `core/src/linux-system-names.txt` as the declaration: `@embedFile` and a
 > SwiftPM resource each need the file inside their own tree, and
-> `scripts/lint.sh` fails when the two copies differ. Overlay findings are `path-shadow`. Darwin leftover roots stay in Swift `AppAtticScan`. Query plugins call `host.exec`. The embedder allowlists `snap`, `pacman` (any `-Q` query, including `-Qdt` and `-Qu`), `paru`/`yay`/`pikaur` (same `-Q` rule, so `-Qua`), `apt`/`apt-get` (`-s autoremove` / `list --upgradable`), `dpkg -l`, `dnf`/`dnf5`/`yum` (`repoquery --unneeded`, `list --upgrades`, `check-update`), `zypper` (`packages --unneeded`, `list-updates`), `flatpak` (`uninstall --unused` / `remove --unused`, `remote-ls --updates --app`, `list --app`), `npm`, `pnpm`, `bun`, `pipx`, `uv`, `brew` (`outdated` with json flags), `gem outdated`, `composer global outdated`, `pip`/`pip3` (`list` with `--user` and a json format, which is what the plugin asks for), `docker`/`podman` (dangling images, dangling volumes, exited containers), `ls`, `readlink` (`-f` / `-n`), `realpath` (one path, no flags), and `test` (`-e` / `-f` / `-h` / `-L`), and denies destructive argv (`rm`, `rmi`, `snap remove`, `system prune`, `volume prune`, `purge`, `upgrade`, `install`, `-y`, `pacman -Syu`/`-R*`, `paru`/`yay` `-S`/`-R*`, `dnf leaves`/`remove`/`upgrade`, `zypper rm`/`dup`/`update`, `apt-get upgrade`, `dpkg --purge`, `flatpak uninstall -y`, `npm uninstall`, `pnpm remove`, `bun remove`, `pipx uninstall`, `uv tool uninstall`, `pip install`/`pip uninstall`, `pip list` without `--user`, `brew uninstall`/`brew upgrade`, `gem uninstall`/`gem update`, `composer global update`/`composer global remove`). A `paru`/`yay`/`pikaur` command is admitted by its `-Q` token alone, so a denied token only catches it when no `-Q` is present. Distro and AUR outdated findings are named upgrades after confirm (`updatable` true, command in JSON). `host.exec` never runs those commands. Language queries are user-global only (`npm ls -g` / `npm outdated -g`, `pnpm ls -g`, `bun pm ls -g`, `pipx list`, `uv tool list`, `gem outdated`, `composer global outdated`, `pip list --user --outdated`). Homebrew reports user-global outdated formulae/casks. npm globals, Gem, Composer globals, and pip user-site are report-only (`updatable` false). Darwin injects fixtures so tests do not need those daemons. Tag `0` means the coeffect is missing (plugin inactive).
+> `scripts/lint.sh` fails when the two copies differ.
+>
+> Which argv the host will run, and which findings it refuses to run at all,
+> is `appattic_host_exec_allowed` (`core/host/hostexec.h:35`) and the
+> per-manager Inventory table in the spec. Read those rather than a list
+> restated here.
+>
+> Two asymmetries a table of pairs would hide: `gem.zig`, `composer.zig` and
+> `apt.zig`'s `parsePpaSources` have no Swift counterpart yet, and Swift reads
+> the user-global pip list with `pip list --user --not-required --format=json`
+> where Zig uses `pip list --user --outdated --format=json` and also reports
+> the `--outdated` rows. `BrewInfo.swift` reads Homebrew's "Refusing to load
+> cask ... from untrusted tap" error and marks those rows report-only;
+> `brew.zig` does not, so every outdated cask it finds is updatable.
+>
+> Overlay findings are `path-shadow`. Darwin leftover roots stay in Swift
+> `AppAtticScan`. Query plugins call `host.exec`. Tag `0` means the coeffect is
+> missing (plugin inactive). Darwin injects fixtures so tests do not need those
+> daemons.
 
 ```bash
 ./core/build.sh test brew.zig
@@ -73,13 +76,7 @@ The Linux Qt 6 window (`ui/linux-qt`) links `core/host/embed.c` and the same Was
 
 ## Backlog
 
-Not built. Not on the host load list. See spec heading **Backlog**.
-
-| id | Scope |
-|---|---|
-| `chocolatey` | Windows Chocolatey outdated/orphan packages |
-| `nuget` | User-global NuGet leftovers (not every project `packages.config`) |
-| `appstore` | Microsoft Store leftovers and outdated on Windows. macOS App Store / `mas` stays in Swift until a later `mas` plugin; that is a different id |
-| `steam` | Steam games/leftovers on Windows. Linux/macOS Steam stays in Swift for now. Remaining Steam leftover work as this plugin later |
+Not built. Not on the host load list. See spec heading **Backlog** for the
+ids and their scope.
 
 The Swift scan library (`AppAtticScan`) and macOS UI are not linked to this directory. Linux Qt 6 loads `appattic_core.wasm` through `embed.c`.

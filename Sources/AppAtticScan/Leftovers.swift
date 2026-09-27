@@ -318,8 +318,7 @@ public func scanLeftovers(
     clock: MonotonicFn = monotonicSeconds,
     run: CommandRun = runCommand
 ) -> ([DataItem], [OrphanAgent]) {
-    // One walk of the tool directories feeds both halves of Identity; they
-    // used to enumerate and stat the same directories independently.
+    // One walk of the tool directories feeds both halves of Identity.
     let toolEntries = executableToolEntries(in: nil)
     let ident = Identity(
         apps: apps + appsFromPathBinaries(entries: toolEntries),

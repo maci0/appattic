@@ -360,12 +360,10 @@ public func collectBrew(
                 info.casks[i].desc = descMap[info.casks[i].name]
             }
         }
-        // Installed name -> index, first occurrence wins, so a lookup lands on
-        // the same entry `firstIndex(where:)` did. Both keys a row can match
-        // on, `name` and `full_name`, are compared against the installed name,
-        // so one index serves both and the earlier of the two hits is the
-        // match. The linear scan this replaces ran once per JSON row over a
-        // few thousand installed formulae.
+        // Installed name -> index, first occurrence wins. Both keys a row can
+        // match on, `name` and `full_name`, are compared against the installed
+        // name, so one index serves both and the earlier of the two hits is the
+        // match.
         var formulaByName: [String: Int] = [:]
         formulaByName.reserveCapacity(info.formulas.count)
         for (i, entry) in info.formulas.enumerated() where formulaByName[entry.name] == nil {
@@ -443,26 +441,21 @@ public func collectBrew(
     info.outdatedFailed = brewOutdated.failed
     attachSummaries(info.outdated, summaries: descMap, titles: titleMap)
     var unique: [UntrustedCask] = []
-    var keys: [String] = []
     var seen = Set<String>()
     for u in refused {
-        let key = u.name.posixLowercased()
-        guard seen.insert(key).inserted else { continue }
+        guard seen.insert(u.name.posixLowercased()).inserted else { continue }
         unique.append(u)
-        keys.append(key)
     }
     info.untrustedCasks = unique
-    // Lowercased installed name -> index, first occurrence wins, matching the
-    // `firstIndex(where:)` this replaces. The lowered form is computed once per
-    // cask here rather than twice per comparison over the whole list.
+    // Lowercased installed name -> index, first occurrence wins.
     var caskByLowered: [String: Int] = [:]
     caskByLowered.reserveCapacity(info.casks.count)
     for (i, entry) in info.casks.enumerated() {
         let key = entry.name.posixLowercased()
         if caskByLowered[key] == nil { caskByLowered[key] = i }
     }
-    for (k, u) in unique.enumerated() {
-        if let i = caskByLowered[keys[k]] { info.casks[i].untrustedTap = u.tap }
+    for u in unique {
+        if let i = caskByLowered[u.name.posixLowercased()] { info.casks[i].untrustedTap = u.tap }
     }
     return info
 }

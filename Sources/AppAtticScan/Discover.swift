@@ -288,7 +288,7 @@ public func makeApp(from appPath: String) -> AppRecord? {
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: real, isDirectory: &isDir), isDir.boolValue else { return nil }
     // One bundle-base resolution, which stats and lists `WrappedBundle` and
-    // `Wrapper`; the plist read and the receipt probe used to do it each.
+    // `Wrapper`.
     let bases = appBundleBases(real)
     let info = readInfoPlist(real, bases: bases)
     let name = stripBidiControls(

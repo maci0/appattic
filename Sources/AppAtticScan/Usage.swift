@@ -283,6 +283,18 @@ func historyBytesAreASCII(_ bytes: [UInt8]) -> Bool {
     (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || b == 0x5F
 }
 
+/// The line at `pos`: its end (past the newline, or `b.count` at EOF) and the
+/// end with every trailing CR dropped, not just one. A `\r\r\n` line would
+/// otherwise leave a CR on the token this keeps whole, where the regex path
+/// normalizes the CRLF away and reads the command.
+func hxLine(_ b: [UInt8], _ pos: Int) -> (end: Int, stop: Int) {
+    var end = pos
+    while end < b.count, b[end] != 0x0A { end += 1 }
+    var stop = end
+    while stop > pos, b[stop - 1] == 0x0D { stop -= 1 }
+    return (end, stop)
+}
+
 /// Longest digit run that still reads as a unix epoch: 11 digits reaches the
 /// year 5138, and a longer run is not a timestamp. History files are user
 /// data, so the run length is checked rather than trusted: 19 digits of them
@@ -400,14 +412,7 @@ func parseHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Set<St
     while pos <= count {
         if lineNo >= maxHistoryLines { break }
         lineNo += 1
-        var end = pos
-        while end < count, bytes[end] != 0x0A { end += 1 }
-        var stop = end
-        // Every trailing CR, not just one: a `\r\r\n` line leaves a CR on the
-        // token the byte path keeps whole, and the regex path normalizes the
-        // CRLF away and reads the command.
-        while stop > pos, bytes[stop - 1] == 0x0D { stop -= 1 }
-
+        let (end, stop) = hxLine(bytes, pos)
         var trimmedStart = pos
         while trimmedStart < stop, hxTrimEdge(bytes[trimmedStart]) { trimmedStart += 1 }
         let blank = trimmedStart >= stop
@@ -476,13 +481,7 @@ func parseFishHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Se
     while pos <= count {
         if lineNo >= maxHistoryLines { break }
         lineNo += 1
-        var end = pos
-        while end < count, bytes[end] != 0x0A { end += 1 }
-        var stop = end
-        // Every trailing CR, not just one: a `\r\r\n` line leaves a CR on the
-        // token the byte path keeps whole, and the regex path normalizes the
-        // CRLF away and reads the command.
-        while stop > pos, bytes[stop - 1] == 0x0D { stop -= 1 }
+        let (end, stop) = hxLine(bytes, pos)
 
         var handledByCmd = false
         if stop - pos >= 6,

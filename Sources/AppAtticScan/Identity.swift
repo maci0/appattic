@@ -518,10 +518,6 @@ public final class Identity {
         }
         if labels.count >= 2, isTeamId(labels[0]) {
             let tokens = teamIdVendors[labels[0].posixLowercased()] ?? []
-            // Membership tested per token: the union this replaces copied
-            // `affinity`, `names` and `stems` into two fresh hash tables to
-            // test one or two team ids, and this runs for every bundle-id
-            // leftover and again on each recursion.
             if tokens.contains(where: { affinity.contains($0) || names.contains($0) || stems.contains($0) }) {
                 return ("owned", nil)
             }

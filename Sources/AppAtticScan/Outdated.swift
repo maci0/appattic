@@ -242,9 +242,7 @@ private func outdatedReason(
 /// place; only newly added rows are exclusive to the returned array.
 public func applyUntrustedCasks(_ pkgs: [OutdatedPkg], refused: [UntrustedCask]) -> [OutdatedPkg] {
     var out = pkgs
-    // Lowercased brew-cask name -> the row, so each refusal is one lookup. The
-    // linear scan this replaces recomputed `posixLowercased()` on every
-    // candidate and widened as the loop appended.
+    // Lowercased brew-cask name -> the row, so each refusal is one lookup.
     var caskByLowered: [String: OutdatedPkg] = [:]
     for pkg in out where pkg.manager == "brew-cask" {
         let key = pkg.name.posixLowercased()
