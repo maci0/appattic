@@ -51,22 +51,7 @@ final class CacheTests: XCTestCase {
     }
 
     func testStaleWhenFingerprintOrIncludeSystemOrAgeChanges() {
-        let data = ScanData(
-            scanned_at: "2026-08-17T12:00:00Z",
-            duration_s: 1,
-            brew_available: false,
-            totals: ScanTotals(
-                apps_installed: 0,
-                orphaned_items: 0,
-                orphaned_bytes: 0,
-                system_leftover_bytes: 0,
-                reclaimable_bytes: 0,
-                stale_apps: 0,
-                outdated_apps: 0
-            ),
-            leftovers: [],
-            software: []
-        )
+        let data = sampleScanData()
         let cache = ScanCacheFile(fingerprint: "a", includeSystem: false, data: data)
         let now = parseISODate("2026-08-17T12:30:00Z")!
         XCTAssertFalse(isScanCacheStale(cache, includeSystem: false, fingerprint: "a", now: now, maxAge: 3600))
@@ -408,22 +393,7 @@ final class CacheTests: XCTestCase {
     func testCommitScanCacheSkipsWhenFingerprintMovesOrIncomplete() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-commit-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
-        let data = ScanData(
-            scanned_at: "2026-08-17T12:00:00Z",
-            duration_s: 1,
-            brew_available: false,
-            totals: ScanTotals(
-                apps_installed: 0,
-                orphaned_items: 0,
-                orphaned_bytes: 0,
-                system_leftover_bytes: 0,
-                reclaimable_bytes: 0,
-                stale_apps: 0,
-                outdated_apps: 0
-            ),
-            leftovers: [],
-            software: []
-        )
+        let data = sampleScanData()
         XCTAssertFalse(try commitScanCache(includeSystem: false, data: data, before: "a", after: "b", to: url))
         XCTAssertNil(loadScanCache(from: url))
         var incomplete = data
@@ -437,22 +407,7 @@ final class CacheTests: XCTestCase {
 
     func testCommitScanCacheReportsWriteFailure() throws {
         let blocked = try blockedCacheParent("commit")
-        let data = ScanData(
-            scanned_at: "2026-08-17T12:00:00Z",
-            duration_s: 1,
-            brew_available: false,
-            totals: ScanTotals(
-                apps_installed: 0,
-                orphaned_items: 0,
-                orphaned_bytes: 0,
-                system_leftover_bytes: 0,
-                reclaimable_bytes: 0,
-                stale_apps: 0,
-                outdated_apps: 0
-            ),
-            leftovers: [],
-            software: []
-        )
+        let data = sampleScanData()
 
         XCTAssertThrowsError(try commitScanCache(
             includeSystem: false,
@@ -498,22 +453,7 @@ final class CacheTests: XCTestCase {
     func testClearScanCacheRemovesFile() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-clear-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
-        let data = ScanData(
-            scanned_at: "2026-08-17T12:00:00Z",
-            duration_s: 1,
-            brew_available: false,
-            totals: ScanTotals(
-                apps_installed: 0,
-                orphaned_items: 0,
-                orphaned_bytes: 0,
-                system_leftover_bytes: 0,
-                reclaimable_bytes: 0,
-                stale_apps: 0,
-                outdated_apps: 0
-            ),
-            leftovers: [],
-            software: []
-        )
+        let data = sampleScanData()
         try writeScanCache(ScanCacheFile(fingerprint: "fp", includeSystem: false, data: data), to: url)
         XCTAssertNotNil(loadScanCache(from: url))
         clearScanCache(at: url)

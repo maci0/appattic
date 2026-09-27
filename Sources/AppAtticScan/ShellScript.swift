@@ -12,12 +12,6 @@ public func shellQuote(_ value: String) -> String {
     if value.isEmpty { return "''" }
     // Byte scan: `CharacterSet.inverted` + `rangeOfCharacter` cost ~2.9 µs per
     // call, and this runs on every scripted path.
-    //
-    // The non-contiguous fallback applies the same predicate instead of
-    // assuming "needs quoting": values bridged from NSString (Darwin) are not
-    // contiguous, and guessing there made the same command quote differently
-    // per platform.
-    // Cold path (one call per script line): plain stdlib iteration.
     let needsQuote = value.utf8.contains { !isSafeShellByte($0) }
     if !needsQuote { return value }
     // Only `'` needs escaping inside single quotes.
