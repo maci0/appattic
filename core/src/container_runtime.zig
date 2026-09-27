@@ -372,6 +372,7 @@ test "parseExitedContainers skips empty and header" {
 test "plugin_query docker JSON comes from dangling images volumes ps fixtures" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"container-runtime\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"engine\":\"docker\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "dangling-image") != null);
@@ -397,6 +398,7 @@ test "plugin_query docker JSON comes from dangling images volumes ps fixtures" {
 test "plugin_query podman JSON uses podman named commands" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(2));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"engine\":\"podman\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "podman rmi a1b2c3d4e5f6") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "podman volume rm orphvol") != null);
@@ -409,6 +411,7 @@ test "plugin_query podman JSON uses podman named commands" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "no container engine") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "system prune") == null);

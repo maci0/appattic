@@ -102,20 +102,13 @@ pub fn parsePipxList(text: []const u8, out: []PipxTool) usize {
 fn renderPipx(hits: []const PipxTool) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"pipx\",\"engine\":\"pipx\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
-        w.raw("{\"kind\":\"global\",\"id\":");
-        w.str(h.name);
-        w.raw(",\"name\":");
-        w.str(h.name);
-        if (h.version.len > 0) {
-            w.raw(",\"version\":");
-            w.str(h.version);
-        }
-        w.raw(",\"status\":\"global\",\"command\":\"");
-        guard.writeRowGuard(&w, &q_buf, "pipx list", .{ .before = "package ", .after = " " }, "pipx uninstall ", h.name);
-        w.raw("\",\"manager\":\"pipx\"}");
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeRowGuard(&cmd_w, &q_buf, "pipx list", .{ .before = "package ", .after = " " }, "pipx uninstall ", h.name);
+        jsonbuf.writeGlobal(&w, h.name, h.version, cmd_w.slice(), "pipx");
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
@@ -231,6 +224,7 @@ fn fuzzPipxList(_: void, smith: *std.testing.Smith) !void {
 test "plugin_query present JSON comes from pipx list fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"pipx\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "httpie") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "3.2.2") != null);
@@ -242,6 +236,7 @@ test "plugin_query present JSON comes from pipx list fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pipx missing") != null);
 }

@@ -5,6 +5,19 @@ const packFuzzSlice = fuzzsupport.packFuzzSlice;
 const isQuotedValue = fuzzsupport.isQuotedValue;
 const unquote = fuzzsupport.unquote;
 
+/// True when `text` is exactly one complete JSON document. Plugin results
+/// cross the WASM boundary as text and the host parses them, so a renderer that
+/// splices a raw value in without its quotes must fail here rather than in the
+/// UI. Test-side only: the plugins themselves never allocate.
+pub fn isValidJson(text: []const u8) bool {
+    var scan = std.json.Scanner.initCompleteInput(std.heap.page_allocator, text);
+    defer scan.deinit();
+    while (true) {
+        const tok = scan.next() catch return false;
+        if (tok == .end_of_document) return true;
+    }
+}
+
 /// Fixed-buffer JSON writer for WASM plugins. No allocator.
 pub const W = struct {
     buf: []u8,
@@ -179,6 +192,52 @@ pub fn rawShQuote(w: *W, buf: []u8, value: []const u8) void {
         return;
     };
     w.raw(q);
+}
+
+/// `"command":<prefix><shell-quoted path>`, the one shape a path plugin's
+/// removal finding takes. `prefix` is `rm `, `rm -f ` or `rm -rf `.
+///
+/// The quoted path is escaped rather than written raw: a value holding `'`
+/// comes back from `shQuote` as `'\''`, and that backslash is a JSON escape
+/// the host parser would reject.
+pub fn writeRmCommand(w: *W, buf: []u8, prefix: []const u8, path: []const u8) void {
+    const quoted = shQuote(buf, path) orelse {
+        w.failed = true;
+        return;
+    };
+    w.raw("\"command\":");
+    w.escaped(prefix);
+    w.escaped(quoted);
+}
+
+/// Global-install finding. `version` is left out when empty. `command` is the
+/// guarded removal the caller has already built whole, quoted by its own guard;
+/// null means it did not fit the caller's buffer, and the render fails rather
+/// than emitting a truncated command.
+pub fn writeGlobal(
+    w: *W,
+    name: []const u8,
+    version: []const u8,
+    command: ?[]const u8,
+    manager: []const u8,
+) void {
+    const cmd = command orelse {
+        w.failed = true;
+        return;
+    };
+    w.raw("{\"kind\":\"global\",\"id\":");
+    w.str(name);
+    w.raw(",\"name\":");
+    w.str(name);
+    if (version.len > 0) {
+        w.raw(",\"version\":");
+        w.str(version);
+    }
+    w.raw(",\"status\":\"global\",\"command\":\"");
+    w.raw(cmd);
+    w.raw("\",\"manager\":");
+    w.str(manager);
+    w.raw("}");
 }
 
 /// Named outdated finding. `updatable` means the confirm script may run `command`.

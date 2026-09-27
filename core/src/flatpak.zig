@@ -181,6 +181,25 @@ pub fn parseFlatpakUpdates(updates_text: []const u8, installed_text: []const u8,
     return n;
 }
 
+/// `if flatpak info <name>[/<branch>] >/dev/null 2>&1; then flatpak uninstall -y
+/// <name>[/<branch>]; fi`. The presence query keeps a rerun past a runtime the
+/// first run already removed, which `set -e` would otherwise stop at.
+fn writeFlatpakUninstallGuard(w: *jsonbuf.W, q_buf: []u8, name: []const u8, branch: []const u8) void {
+    w.raw("if flatpak info ");
+    jsonbuf.rawShQuote(w, q_buf, name);
+    if (branch.len > 0) {
+        w.raw("//");
+        jsonbuf.rawShQuote(w, q_buf, branch);
+    }
+    w.raw(" >/dev/null 2>&1; then flatpak uninstall -y ");
+    jsonbuf.rawShQuote(w, q_buf, name);
+    if (branch.len > 0) {
+        w.raw("//");
+        jsonbuf.rawShQuote(w, q_buf, branch);
+    }
+    w.raw("; fi");
+}
+
 fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
@@ -200,19 +219,9 @@ fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated)
         // `set -e` stops the script at the first nonzero line, so a rerun that
         // already removed this runtime would never reach the runtimes after it.
         // The presence query makes an already-removed runtime a no-op.
-        w.raw(",\"status\":\"orphaned\",\"command\":\"if flatpak info ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
-        if (h.branch.len > 0) {
-            w.raw("//");
-            jsonbuf.rawShQuote(&w, &q_buf, h.branch);
-        }
-        w.raw(" >/dev/null 2>&1; then flatpak uninstall -y ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
-        if (h.branch.len > 0) {
-            w.raw("//");
-            jsonbuf.rawShQuote(&w, &q_buf, h.branch);
-        }
-        w.raw("; fi\",\"manager\":\"flatpak\"}");
+        w.raw(",\"status\":\"orphaned\",\"command\":\"");
+        writeFlatpakUninstallGuard(&w, &q_buf, h.name, h.branch);
+        w.raw("\",\"manager\":\"flatpak\"}");
     }
     for (outdated) |h| {
         if (!first) w.raw(",");
@@ -225,19 +234,8 @@ fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated)
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic flatpak. Review before running.\\n");
         for (hits) |h| {
-            w.raw("if flatpak info ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
-            if (h.branch.len > 0) {
-                w.raw("//");
-                jsonbuf.rawShQuote(&w, &q_buf, h.branch);
-            }
-            w.raw(" >/dev/null 2>&1; then flatpak uninstall -y ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
-            if (h.branch.len > 0) {
-                w.raw("//");
-                jsonbuf.rawShQuote(&w, &q_buf, h.branch);
-            }
-            w.raw("; fi\\n");
+            writeFlatpakUninstallGuard(&w, &q_buf, h.name, h.branch);
+            w.raw("\\n");
         }
         w.raw("\"");
     }
@@ -324,6 +322,7 @@ test "parseFlatpakUnused ref form after number" {
 test "plugin_query present JSON comes from unused fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"flatpak\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "unused-runtime") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "org.freedesktop.Platform.GL.default") != null);
@@ -357,6 +356,7 @@ test "parseFlatpakUpdates joins current from list" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "flatpak missing") != null);
 }

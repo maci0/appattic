@@ -131,6 +131,7 @@ comptime {
 test "plugin_query present JSON includes AUR outdated from paru -Qua fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"aur\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "coreutils") != null);
@@ -149,6 +150,7 @@ test "plugin_query present JSON includes AUR outdated from paru -Qua fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "aur helper missing") != null);
 }

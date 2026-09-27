@@ -37,20 +37,13 @@ pub fn parsePnpmGlobalList(text: []const u8, out: []PnpmGlobal) usize {
 fn renderPnpm(hits: []const PnpmGlobal) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"pnpm\",\"engine\":\"pnpm\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
-        w.raw("{\"kind\":\"global\",\"id\":");
-        w.str(h.name);
-        w.raw(",\"name\":");
-        w.str(h.name);
-        if (h.version.len > 0) {
-            w.raw(",\"version\":");
-            w.str(h.version);
-        }
-        w.raw(",\"status\":\"global\",\"command\":\"");
-        guard.writeRowGuard(&w, &q_buf, "pnpm ls -g --depth=0", .{ .after = "@" }, "pnpm remove -g ", h.name);
-        w.raw("\",\"manager\":\"pnpm\"}");
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeRowGuard(&cmd_w, &q_buf, "pnpm ls -g --depth=0", .{ .after = "@" }, "pnpm remove -g ", h.name);
+        jsonbuf.writeGlobal(&w, h.name, h.version, cmd_w.slice(), "pnpm");
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
@@ -120,6 +113,7 @@ test "parsePnpmGlobalList empty" {
 test "plugin_query present JSON comes from pnpm ls -g fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"pnpm\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "nx") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "19.0.0") != null);
@@ -132,6 +126,7 @@ test "plugin_query present JSON comes from pnpm ls -g fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pnpm missing") != null);
 }

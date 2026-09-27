@@ -39,22 +39,15 @@ pub fn parseNpmGlobalList(text: []const u8, out: []NpmGlobal) usize {
 fn renderNpm(hits: []const NpmGlobal, outdated: []const jsonscan.NamedVer) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"npm\",\"engine\":\"npm\",\"findings\":[");
     var first = true;
     for (hits) |h| {
         if (!first) w.raw(",");
         first = false;
-        w.raw("{\"kind\":\"global\",\"id\":");
-        w.str(h.name);
-        w.raw(",\"name\":");
-        w.str(h.name);
-        if (h.version.len > 0) {
-            w.raw(",\"version\":");
-            w.str(h.version);
-        }
-        w.raw(",\"status\":\"global\",\"command\":\"");
-        guard.writeRowGuard(&w, &q_buf, "npm ls -g --depth=0", .{ .after = "@" }, "npm -g uninstall ", h.name);
-        w.raw("\",\"manager\":\"npm\"}");
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeRowGuard(&cmd_w, &q_buf, "npm ls -g --depth=0", .{ .after = "@" }, "npm -g uninstall ", h.name);
+        jsonbuf.writeGlobal(&w, h.name, h.version, cmd_w.slice(), "npm");
     }
     for (outdated) |h| {
         if (!first) w.raw(",");
@@ -129,6 +122,7 @@ test "parseNpmGlobalList empty junk" {
 test "plugin_query present JSON comes from npm ls -g fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"npm\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"global\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "typescript") != null);
@@ -146,6 +140,7 @@ test "plugin_query present JSON comes from npm ls -g fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "npm missing") != null);
 }

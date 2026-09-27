@@ -252,21 +252,28 @@ fn renderShadows(hits: []const ShadowFinding) bool {
         w.str(h.path);
         w.raw(",\"status\":\"shadow\",\"shadows\":");
         w.str(h.shadows);
-        w.raw(",\"command\":\"rm -f ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.path);
-        w.raw("\"}");
+        jsonbuf.writeRmCommand(&w, &q_buf, "rm -f ", h.path);
+        w.raw("}");
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
         w.raw("null");
     } else {
-        w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic path-shadow. Review before running.\\n");
+        var script_buf: [8192]u8 = undefined;
+        var s_w = jsonbuf.W{ .buf = &script_buf };
+        s_w.raw("#!/bin/sh\nset -e\n# AppAttic path-shadow. Review before running.\n");
         for (hits) |h| {
-            w.raw("rm -f ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.path);
-            w.raw("\\n");
+            s_w.raw("rm -f ");
+            s_w.raw(jsonbuf.shQuote(&q_buf, h.path) orelse {
+                s_w.failed = true;
+                break;
+            });
+            s_w.raw("\n");
         }
-        w.raw("\"");
+        w.str(s_w.slice() orelse {
+            w.failed = true;
+            return false;
+        });
     }
     w.raw(",\"dialog\":{\"title\":\"Remove shadowing files?\",\"body\":\"Overlay files hide packaged copies. Nothing runs until you confirm.\"}}");
     note.write(&w);
@@ -406,6 +413,7 @@ test "findShadows reaches a later root after a long run of non-shadowing files" 
 test "plugin_query present JSON includes shadow finding" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"path-shadow\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"dialog\":") != null);
@@ -414,6 +422,7 @@ test "plugin_query present JSON includes shadow finding" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
 }
 
@@ -421,5 +430,6 @@ test "a note from one run does not reach the next" {
     note.add("ls -1 /home/user/.local/bin", host_exec.fail);
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "did not answer") == null);
 }

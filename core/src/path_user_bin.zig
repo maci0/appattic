@@ -98,23 +98,31 @@ fn render(hits: []const BrokenLink) bool {
         w.str(h.path);
         w.raw(",\"rootLabel\":");
         w.str(h.root_label);
-        w.raw(",\"status\":\"orphaned\",\"command\":\"rm ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.path);
-        w.raw("\"}");
+        w.raw(",\"status\":\"orphaned\",");
+        jsonbuf.writeRmCommand(&w, &q_buf, "rm ", h.path);
+        w.raw("}");
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
         w.raw("null");
     } else {
-        w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic ");
-        w.raw(plugin_id);
-        w.raw(". Review before running.\\n");
+        var script_buf: [8192]u8 = undefined;
+        var s_w = jsonbuf.W{ .buf = &script_buf };
+        s_w.raw("#!/bin/sh\nset -e\n# AppAttic ");
+        s_w.raw(plugin_id);
+        s_w.raw(". Review before running.\n");
         for (hits) |h| {
-            w.raw("rm ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.path);
-            w.raw("\\n");
+            s_w.raw("rm ");
+            s_w.raw(jsonbuf.shQuote(&q_buf, h.path) orelse {
+                s_w.failed = true;
+                break;
+            });
+            s_w.raw("\n");
         }
-        w.raw("\"");
+        w.str(s_w.slice() orelse {
+            w.failed = true;
+            return false;
+        });
     }
     w.raw(",\"dialog\":{\"title\":\"Remove leftover user binaries?\",\"body\":\"Named dirs only. Nothing runs until you confirm.\"}}");
     note.write(&w);

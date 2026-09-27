@@ -240,6 +240,7 @@ test "parseDnfUnneeded skips empty packages finding" {
 test "plugin_query present JSON comes from dnf repoquery --unneeded fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"dnf\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "libfoo") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "python3-bar") != null);
@@ -251,6 +252,7 @@ test "plugin_query present JSON comes from dnf repoquery --unneeded fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "dnf missing") != null);
 }
@@ -258,6 +260,7 @@ test "plugin_query missing is empty findings" {
 test "plugin_query present JSON includes dnf list --upgrades outdated" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"git\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "2.45.1-1.fc40") != null);

@@ -97,11 +97,14 @@ pub fn parseZypperUnneeded(text: []const u8, out: []ZypperOrphan) usize {
 fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"zypper\",\"engine\":\"zypper\",\"findings\":[");
     var first = true;
     for (orphans) |h| {
         if (!first) w.raw(",");
         first = false;
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeNameGuard(&cmd_w, &q_buf, "rpm -q ", "zypper --non-interactive rm ", h.name);
         w.raw("{\"kind\":\"orphan\",\"id\":");
         w.str(h.name);
         w.raw(",\"name\":");
@@ -111,8 +114,11 @@ fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated)
             w.str(h.version);
         }
         w.raw(",\"status\":\"orphaned\",\"command\":");
-        guard.writeNameGuard(&w, &q_buf, "rpm -q ", "zypper --non-interactive rm ", h.name);
-        w.raw("\",\"manager\":\"zypper\"}");
+        w.str(cmd_w.slice() orelse {
+            w.failed = true;
+            return false;
+        });
+        w.raw(",\"manager\":\"zypper\"}");
     }
     for (outdated) |h| {
         if (!first) w.raw(",");
@@ -194,6 +200,7 @@ test "parseZypperUnneeded skips empty and separator" {
 test "plugin_query present JSON comes from zypper packages --unneeded fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"zypper\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "libfoo") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "1.2.3-1") != null);
@@ -207,6 +214,7 @@ test "plugin_query present JSON comes from zypper packages --unneeded fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "zypper missing") != null);
 }
@@ -214,6 +222,7 @@ test "plugin_query missing is empty findings" {
 test "plugin_query present JSON includes zypper list-updates outdated" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"git\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "2.43.0-1.1") != null);

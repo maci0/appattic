@@ -81,20 +81,13 @@ pub fn parseBunGlobalList(text: []const u8, out: []BunGlobal) usize {
 fn renderBun(hits: []const BunGlobal) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"bun\",\"engine\":\"bun\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
-        w.raw("{\"kind\":\"global\",\"id\":");
-        w.str(h.name);
-        w.raw(",\"name\":");
-        w.str(h.name);
-        if (h.version.len > 0) {
-            w.raw(",\"version\":");
-            w.str(h.version);
-        }
-        w.raw(",\"status\":\"global\",\"command\":\"");
-        guard.writeRowGuard(&w, &q_buf, "bun pm ls -g", .{ .after = "@" }, "bun remove -g ", h.name);
-        w.raw("\",\"manager\":\"bun\"}");
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeRowGuard(&cmd_w, &q_buf, "bun pm ls -g", .{ .after = "@" }, "bun remove -g ", h.name);
+        jsonbuf.writeGlobal(&w, h.name, h.version, cmd_w.slice(), "bun");
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
@@ -130,15 +123,7 @@ fn query_impl(present: i32) i32 {
     var hits: [128]BunGlobal = undefined;
     var n = parseBunGlobalList(exec_buf[0..@intCast(nexec)], &hits);
     note.addTruncatedRows(n, hits.len);
-    const n_parsed = n;
-    while (true) {
-        if (renderBun(hits[0..n])) {
-            note.addDroppedRows(n_parsed - n);
-            return 0;
-        }
-        if (n == 0) return 1;
-        n -= 1;
-    }
+    return note.renderShrinking(renderBun, &hits, &n);
 }
 
 comptime {
@@ -174,6 +159,7 @@ test "parseBunGlobalList scoped and empty" {
 test "plugin_query present JSON comes from bun pm ls -g fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"bun\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "typescript") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "prettier") != null);
@@ -186,6 +172,7 @@ test "plugin_query present JSON comes from bun pm ls -g fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "bun missing") != null);
 }

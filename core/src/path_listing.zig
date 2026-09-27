@@ -344,23 +344,34 @@ fn render(comptime spec: Spec, hits: []const Orphan) bool {
         w.str(h.path);
         w.raw(",\"rootLabel\":");
         w.str(spec.root_label);
-        w.raw(",\"status\":\"orphaned\",\"command\":\"rm -rf ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.path);
-        w.raw("\"}");
+        w.raw(",\"status\":\"orphaned\",");
+        jsonbuf.writeRmCommand(&w, &q_buf, "rm -rf ", h.path);
+        w.raw("}");
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
         w.raw("null");
     } else {
-        w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic ");
-        w.raw(spec.id);
-        w.raw(". Review before running.\\n");
+        // Built whole and escaped once: the `'\''` that `shQuote` writes for a
+        // value holding a quote would be a broken JSON escape if the lines were
+        // written raw.
+        var script_buf: [8192]u8 = undefined;
+        var s_w = jsonbuf.W{ .buf = &script_buf };
+        s_w.raw("#!/bin/sh\nset -e\n# AppAttic ");
+        s_w.raw(spec.id);
+        s_w.raw(". Review before running.\n");
         for (hits) |h| {
-            w.raw("rm -rf ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.path);
-            w.raw("\\n");
+            s_w.raw("rm -rf ");
+            s_w.raw(jsonbuf.shQuote(&q_buf, h.path) orelse {
+                s_w.failed = true;
+                break;
+            });
+            s_w.raw("\n");
         }
-        w.raw("\"");
+        w.str(s_w.slice() orelse {
+            w.failed = true;
+            return false;
+        });
     }
     w.raw(",\"dialog\":{\"title\":");
     w.str(spec.dialog_title);

@@ -86,23 +86,16 @@ fn nameIn(hits: []const PipOutdated, name: []const u8) bool {
 fn renderPip(outdated: []const PipOutdated, globals: []const PipOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"pip\",\"engine\":\"pip\",\"findings\":[");
     var first = true;
     for (globals) |h| {
         if (nameIn(outdated, h.name)) continue;
         if (!first) w.raw(",");
         first = false;
-        w.raw("{\"kind\":\"global\",\"id\":");
-        w.str(h.name);
-        w.raw(",\"name\":");
-        w.str(h.name);
-        if (h.current.len > 0) {
-            w.raw(",\"version\":");
-            w.str(h.current);
-        }
-        w.raw(",\"status\":\"global\",\"command\":\"");
-        guard.writeNameGuard(&w, &q_buf, "pip show ", "pip uninstall -y --user ", h.name);
-        w.raw("\",\"manager\":\"pip\"}");
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeNameGuard(&cmd_w, &q_buf, "pip show ", "pip uninstall -y --user ", h.name);
+        jsonbuf.writeGlobal(&w, h.name, h.current, cmd_w.slice(), "pip");
     }
     for (outdated) |h| {
         if (!first) w.raw(",");
@@ -235,6 +228,7 @@ test "renderPip keeps a large user-site list" {
     }
     try std.testing.expect(renderPip(&.{}, &hits));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "pkg-00") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pkg-79") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pip uninstall -y --user pkg-00") != null);
@@ -243,6 +237,7 @@ test "renderPip keeps a large user-site list" {
 test "plugin_query present JSON comes from pip list --user --outdated fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"pip\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"global\"") != null);
@@ -261,6 +256,7 @@ test "plugin_query present JSON comes from pip list --user --outdated fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pip missing") != null);
 }

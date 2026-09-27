@@ -47,16 +47,13 @@ pub fn parseDenoGlobalList(text: []const u8, out: []DenoGlobal) usize {
 fn renderDeno(hits: []const DenoGlobal) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"deno\",\"engine\":\"deno\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
-        w.raw("{\"kind\":\"global\",\"id\":");
-        w.str(h.name);
-        w.raw(",\"name\":");
-        w.str(h.name);
-        w.raw(",\"status\":\"global\",\"command\":\"");
-        guard.writeNameGuard(&w, &q_buf, "test -e ~/.deno/bin/", "deno uninstall --global ", h.name);
-        w.raw("\",\"manager\":\"deno\"}");
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeNameGuard(&cmd_w, &q_buf, "test -e ~/.deno/bin/", "deno uninstall --global ", h.name);
+        jsonbuf.writeGlobal(&w, h.name, "", cmd_w.slice(), "deno");
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
@@ -123,6 +120,7 @@ test "parseDenoGlobalList empty and unsafe" {
 test "plugin_query present JSON comes from deno bin listing fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"deno\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "file_server") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deployctl") != null);
@@ -135,6 +133,7 @@ test "plugin_query present JSON comes from deno bin listing fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deno missing") != null);
 }

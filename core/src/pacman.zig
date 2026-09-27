@@ -78,11 +78,14 @@ pub fn parsePacmanQdt(text: []const u8, out: []PacmanOrphan) usize {
 fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"pacman\",\"engine\":\"pacman\",\"findings\":[");
     var first = true;
     for (orphans) |h| {
         if (!first) w.raw(",");
         first = false;
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeNameGuard(&cmd_w, &q_buf, "pacman -Qq ", "pacman --noconfirm -Rns ", h.name);
         w.raw("{\"kind\":\"orphan\",\"id\":");
         w.str(h.name);
         w.raw(",\"name\":");
@@ -92,15 +95,17 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
             w.str(h.version);
         }
         w.raw(",\"status\":\"orphaned\",\"command\":");
-        guard.writeNameGuard(&w, &q_buf, "pacman -Qq ", "pacman --noconfirm -Rns ", h.name);
-        w.raw("\",\"manager\":\"pacman\"}");
+        w.str(cmd_w.slice() orelse {
+            w.failed = true;
+            return false;
+        });
+        w.raw(",\"manager\":\"pacman\"}");
     }
     for (outdated) |h| {
         if (!first) w.raw(",");
         first = false;
         // Guarded: `pacman -S` on a package already at the scanned version
         // reinstalls it, so a script that runs twice would do the work twice.
-        var cmd_buf: [1024]u8 = undefined;
         var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
         guard.writeUpgradeGuard(&cmd_w, &q_buf, "pacman -Qu", "pacman --noconfirm -S", h.name);
         const cmd = cmd_w.slice() orelse {
@@ -182,6 +187,7 @@ test "parsePacmanQdt skips error warning empty" {
 test "plugin_query present JSON comes from pacman -Qdt fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"pacman\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "libfoo") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "1.2.3-1") != null);
@@ -202,12 +208,14 @@ test "plugin_query present JSON comes from pacman -Qdt fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
 }
 
 test "plugin_query present JSON includes pacman -Qu outdated" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "coreutils") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "9.5-1") != null);

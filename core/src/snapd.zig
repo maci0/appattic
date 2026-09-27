@@ -138,45 +138,40 @@ const snap_file_dir = "/var/lib/snapd/snaps/";
 const max_snap_cmd_len = 512;
 
 /// `if test -e <dir><name>_<rev>.snap; then snap remove <name> --revision
-/// <rev>; fi`. A removal naming two values, so neither half is one appended
-/// name, and the query is a path rather than a manager listing. Each quoted
-/// value gets its own buffer, since `shQuote` returns a slice of the one it
-/// wrote and the next call would overwrite it under the reader's feet.
-fn writeSnapRemove(w: *jsonbuf.W, name: []const u8, rev: []const u8) void {
+/// <rev>; fi` into `buf`, or null when it does not fit. A removal naming two
+/// values, so neither half is one appended name, and the query is a path rather
+/// than a manager listing. Each quoted value gets its own buffer, since
+/// `shQuote` returns a slice of the one it wrote and the next call would
+/// overwrite it under the reader's feet.
+///
+/// The caller writes the result with `W.str`, not `W.raw`: `shQuote` writes a
+/// value containing `'` as `'\''`, and the backslash of that escape is a JSON
+/// escape the host parser would reject.
+fn snapRemoveCommand(buf: []u8, name: []const u8, rev: []const u8) ?[]const u8 {
     var name_buf: [jsonbuf.max_pkg_name_len + 8]u8 = undefined;
     var rev_buf: [jsonbuf.max_pkg_name_len + 8]u8 = undefined;
     var file_buf: [max_snap_cmd_len]u8 = undefined;
-    const file = std.fmt.bufPrint(&file_buf, "{s}{s}_{s}.snap", .{ snap_file_dir, name, rev }) catch {
-        w.failed = true;
-        return;
-    };
+    const file = std.fmt.bufPrint(&file_buf, "{s}{s}_{s}.snap", .{ snap_file_dir, name, rev }) catch return null;
     var present: [max_snap_cmd_len]u8 = undefined;
-    const query = std.fmt.bufPrint(&present, "test -e {s}", .{jsonbuf.shQuote(&name_buf, file) orelse {
-        w.failed = true;
-        return;
-    }}) catch {
-        w.failed = true;
-        return;
-    };
+    const query = std.fmt.bufPrint(&present, "test -e {s}", .{jsonbuf.shQuote(&name_buf, file) orelse return null}) catch return null;
     var action: [max_snap_cmd_len]u8 = undefined;
-    const remove = std.fmt.bufPrint(
-        &action,
-        "snap remove {s} --revision {s}",
-        .{
-            jsonbuf.shQuote(&name_buf, name) orelse {
-                w.failed = true;
-                return;
-            },
-            jsonbuf.shQuote(&rev_buf, rev) orelse {
-                w.failed = true;
-                return;
-            },
-        },
-    ) catch {
-        w.failed = true;
-        return;
-    };
-    guard.writeWholeGuard(w, query, remove);
+    const remove = std.fmt.bufPrint(&action, "snap remove {s} --revision {s}", .{
+        jsonbuf.shQuote(&name_buf, name) orelse return null,
+        jsonbuf.shQuote(&rev_buf, rev) orelse return null,
+    }) catch return null;
+    var w = jsonbuf.W{ .buf = buf };
+    guard.writeWholeGuard(&w, query, remove);
+    return w.slice();
+}
+
+/// `rm -rf <shell-quoted path>` into `buf`, or null when it does not fit.
+fn rmrfCommand(buf: []u8, q_buf: []u8, path: []const u8) ?[]const u8 {
+    const quoted = jsonbuf.shQuote(q_buf, path) orelse return null;
+    const prefix = "rm -rf ";
+    if (prefix.len + quoted.len > buf.len) return null;
+    @memcpy(buf[0..prefix.len], prefix);
+    @memcpy(buf[prefix.len..][0..quoted.len], quoted);
+    return buf[0 .. prefix.len + quoted.len];
 }
 
 fn renderSnapd(
@@ -185,6 +180,7 @@ fn renderSnapd(
 ) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [3 * max_snap_cmd_len]u8 = undefined;
     w.raw("{\"plugin\":\"snapd\",\"engine\":\"snap\",\"findings\":[");
     var first = true;
     for (disabled) |h| {
@@ -198,9 +194,12 @@ fn renderSnapd(
         w.str(h.name);
         w.raw(",\"revision\":");
         w.str(h.revision);
-        w.raw(",\"status\":\"orphaned\",\"command\":\"");
-        writeSnapRemove(&w, h.name, h.revision);
-        w.raw("\"}");
+        w.raw(",\"status\":\"orphaned\",\"command\":");
+        w.str(snapRemoveCommand(&cmd_buf, h.name, h.revision) orelse {
+            w.failed = true;
+            return false;
+        });
+        w.raw("}");
     }
     for (orphans) |h| {
         if (!first) w.raw(",");
@@ -211,25 +210,41 @@ fn renderSnapd(
         w.str(h.name);
         w.raw(",\"path\":");
         w.str(h.path);
-        w.raw(",\"rootLabel\":\"snap\",\"status\":\"orphaned\",\"command\":\"rm -rf ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.path);
-        w.raw("\"}");
+        w.raw(",\"rootLabel\":\"snap\",\"status\":\"orphaned\",\"command\":");
+        w.str(rmrfCommand(&cmd_buf, &q_buf, h.path) orelse {
+            w.failed = true;
+            return false;
+        });
+        w.raw("}");
     }
     w.raw("],\"script\":");
     if (disabled.len == 0 and orphans.len == 0) {
         w.raw("null");
     } else {
-        w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic snapd. Review before running.\\n");
+        // The script is one JSON string, so it is built whole and handed to
+        // `w.str`. Writing its lines raw would leave a shell quote escape's
+        // backslash unescaped in the JSON.
+        var script_buf: [8192]u8 = undefined;
+        var s_w = jsonbuf.W{ .buf = &script_buf };
+        s_w.raw("#!/bin/sh\nset -e\n# AppAttic snapd. Review before running.\n");
         for (disabled) |h| {
-            writeSnapRemove(&w, h.name, h.revision);
-            w.raw("\\n");
+            s_w.raw(snapRemoveCommand(&cmd_buf, h.name, h.revision) orelse {
+                s_w.failed = true;
+                break;
+            });
+            s_w.raw("\n");
         }
         for (orphans) |h| {
-            w.raw("rm -rf ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.path);
-            w.raw("\\n");
+            s_w.raw(rmrfCommand(&cmd_buf, &q_buf, h.path) orelse {
+                s_w.failed = true;
+                break;
+            });
+            s_w.raw("\n");
         }
-        w.raw("\"");
+        w.str(s_w.slice() orelse {
+            w.failed = true;
+            return false;
+        });
     }
     w.raw(",\"dialog\":{\"title\":\"Remove snap leftovers?\",\"body\":\"Named disabled revisions and orphan ~/snap dirs only. Installed snap apps stay on Stale Apps. Nothing runs until you confirm.\"}}");
     note.write(&w);
@@ -345,6 +360,7 @@ test "parseSnapListAll empty and header-only" {
 test "plugin_query present JSON comes from snap list --all fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"snapd\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "disabled-revision") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "chromium") != null);
@@ -377,6 +393,7 @@ test "plugin_query present JSON comes from snap list --all fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
 }
 
@@ -385,10 +402,12 @@ test "renderSnapd shell-quotes a snap name and an orphan path" {
     const orphans = [_]listing.Orphan{.{ .name = "a b", .path = "/home/user/snap/a'; reboot; '" }};
     try std.testing.expect(renderSnapd(&disabled, &orphans));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     // The injected `;` is inside one single-quoted word, so the script that
-    // gets run under pkexec holds one argv entry per value.
-    try std.testing.expect(std.mem.indexOf(u8, json, "rm -rf '/home/user/snap/a'\\''; reboot; '\\'''") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "snap remove 'x'\\''; reboot; '\\''' --revision '1; reboot; '") != null);
+    // gets run under pkexec holds one argv entry per value. The backslash of
+    // `'\''` is JSON-escaped in the result, so the text carries `\\''`.
+    try std.testing.expect(std.mem.indexOf(u8, json, "rm -rf '/home/user/snap/a'\\\\''; reboot; '\\\\'''") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "snap remove 'x'\\\\''; reboot; '\\\\''' --revision '1; reboot; '") != null);
     // Unquoted, the name would have ended the word and run a second command.
     try std.testing.expect(std.mem.indexOf(u8, json, "rm -rf /home/user/snap/a'; reboot; '") == null);
     // The finding id is JSON, so a quote in the name must be escaped there too.

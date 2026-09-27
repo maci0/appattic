@@ -47,20 +47,13 @@ pub fn parseUvToolList(text: []const u8, out: []UvTool) usize {
 fn renderUv(hits: []const UvTool) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
+    var cmd_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":\"uv\",\"engine\":\"uv\",\"findings\":[");
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
-        w.raw("{\"kind\":\"global\",\"id\":");
-        w.str(h.name);
-        w.raw(",\"name\":");
-        w.str(h.name);
-        if (h.version.len > 0) {
-            w.raw(",\"version\":");
-            w.str(h.version);
-        }
-        w.raw(",\"status\":\"global\",\"command\":\"");
-        guard.writeRowGuard(&w, &q_buf, "uv tool list", .{ .after = " v" }, "uv tool uninstall ", h.name);
-        w.raw("\",\"manager\":\"uv\"}");
+        var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
+        guard.writeRowGuard(&cmd_w, &q_buf, "uv tool list", .{ .after = " v" }, "uv tool uninstall ", h.name);
+        jsonbuf.writeGlobal(&w, h.name, h.version, cmd_w.slice(), "uv");
     }
     w.raw("],\"script\":");
     if (hits.len == 0) {
@@ -129,6 +122,7 @@ test "parseUvToolList empty" {
 test "plugin_query present JSON comes from uv tool list fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"uv\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "ruff") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "0.6.8") != null);
@@ -142,6 +136,7 @@ test "plugin_query present JSON comes from uv tool list fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "uv missing") != null);
 }

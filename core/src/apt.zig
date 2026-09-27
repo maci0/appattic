@@ -144,6 +144,32 @@ pub fn parseAptAutoremove(text: []const u8, out: []AptOrphan) usize {
     return n;
 }
 
+/// One `kind: orphan` finding. `orphans` and `rc_pkgs` differ only in the
+/// manager they name and the tail that explains why the package is listed.
+fn writeAptOrphan(
+    w: *jsonbuf.W,
+    q_buf: []u8,
+    h: anytype,
+    manager: []const u8,
+    tail: []const u8,
+) void {
+    w.raw("{\"kind\":\"orphan\",\"id\":");
+    w.str(h.name);
+    w.raw(",\"name\":");
+    w.str(h.name);
+    if (h.version.len > 0) {
+        w.raw(",\"version\":");
+        w.str(h.version);
+    }
+    w.raw(",\"status\":\"orphaned\",\"command\":\"");
+    guard.writeNameGuard(w, q_buf, "dpkg -s ", "apt-get purge -y ", h.name);
+    w.raw("\",\"manager\":\"");
+    w.raw(manager);
+    w.raw("\"");
+    w.raw(tail);
+    w.raw("}");
+}
+
 fn renderApt(
     orphans: []const AptOrphan,
     outdated: []const AptOutdated,
@@ -157,32 +183,12 @@ fn renderApt(
     for (orphans) |h| {
         if (!first) w.raw(",");
         first = false;
-        w.raw("{\"kind\":\"orphan\",\"id\":");
-        w.str(h.name);
-        w.raw(",\"name\":");
-        w.str(h.name);
-        if (h.version.len > 0) {
-            w.raw(",\"version\":");
-            w.str(h.version);
-        }
-        w.raw(",\"status\":\"orphaned\",\"command\":\"");
-        guard.writeNameGuard(&w, &q_buf, "dpkg -s ", "apt-get purge -y ", h.name);
-        w.raw("\",\"manager\":\"apt\"}");
+        writeAptOrphan(&w, &q_buf, h, "apt", "");
     }
     for (rc_pkgs) |h| {
         if (!first) w.raw(",");
         first = false;
-        w.raw("{\"kind\":\"orphan\",\"id\":");
-        w.str(h.name);
-        w.raw(",\"name\":");
-        w.str(h.name);
-        if (h.version.len > 0) {
-            w.raw(",\"version\":");
-            w.str(h.version);
-        }
-        w.raw(",\"status\":\"orphaned\",\"command\":\"");
-        guard.writeNameGuard(&w, &q_buf, "dpkg -s ", "apt-get purge -y ", h.name);
-        w.raw("\",\"manager\":\"dpkg\",\"summary\":\"Removed package still has config files\",\"reason\":\"dpkg status rc: the package is gone, config remnants remain. Purge drops them.\"}");
+        writeAptOrphan(&w, &q_buf, h, "dpkg", ",\"summary\":\"Removed package still has config files\",\"reason\":\"dpkg status rc: the package is gone, config remnants remain. Purge drops them.\"");
     }
     for (ppas) |h| {
         if (!first) w.raw(",");
@@ -191,8 +197,10 @@ fn renderApt(
         w.str(h.name);
         w.raw(",\"name\":");
         w.str(h.name);
+        // The surrounding quotes come from the two raw literals, so the name
+        // goes in escaped but unquoted.
         w.raw(",\"path\":\"/etc/apt/sources.list.d/");
-        w.str(h.name);
+        w.escaped(h.name);
         w.raw("\",\"status\":\"review\",\"manager\":\"apt\",\"summary\":\"Third-party apt source\",\"reason\":\"PPA or Launchpad source under /etc/apt/sources.list.d. Removing it needs root and is not done automatically.\"}");
     }
     for (outdated) |h| {
@@ -314,6 +322,7 @@ test "parseAptAutoremove skips empty and summary" {
 test "plugin_query present JSON comes from apt-get -s autoremove fixture" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"plugin\":\"apt\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "libfoo0") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "1.2.3") != null);
@@ -329,6 +338,7 @@ test "plugin_query present JSON comes from apt-get -s autoremove fixture" {
 test "plugin_query missing is empty findings" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(0));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "apt missing") != null);
 }
@@ -336,6 +346,7 @@ test "plugin_query missing is empty findings" {
 test "plugin_query present JSON includes apt list --upgradable outdated" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"git\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "1:2.39.2-1.1") != null);
@@ -400,6 +411,7 @@ test "parsePpaSources keeps ppa files" {
 test "plugin_query present JSON includes dpkg rc and ppa source" {
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
+    try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "oldpkg") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"manager\":\"dpkg\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deadsnakes-ubuntu-ppa-noble.list") != null);
