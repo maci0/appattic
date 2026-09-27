@@ -46,6 +46,14 @@ jobs:
           persist-credentials: false
       - name: Install shellcheck
         run: sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends shellcheck
+      - name: Install yamllint
+        run: uv tool install yamllint
+      - name: Install zig
+        run: sudo bash scripts/linux-deps.sh --install-zig
+      - name: Put zig on PATH
+        run: |
+          echo /opt/zig >> "$GITHUB_PATH"
+          echo /usr/local/bin >> "$GITHUB_PATH"
       - name: Lint
         run: bash scripts/lint.sh
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shellcheck, hostexec warnings-as-errors, and zig fmt when zig is on PATH.
+# Shellcheck, yamllint, host C warnings-as-errors, and zig fmt when zig is on PATH.
 # Usage: bash scripts/lint.sh
 set -euo pipefail
 
@@ -14,7 +14,8 @@ case "${1:-}" in
         cat <<'EOF'
 Usage: bash scripts/lint.sh
 
-  shellcheck on build/run scripts, hostexec warnings-as-errors, zig fmt --check
+  shellcheck on the shell scripts, yamllint on the YAML,
+  host C warnings-as-errors, zig fmt --check
 EOF
         exit 0
         ;;
@@ -31,7 +32,14 @@ if ! command -v shellcheck >/dev/null 2>&1; then
     echo "error: shellcheck missing" >&2
     exit 1
 fi
-shellcheck -x -P SCRIPTDIR "$ROOT/build.sh" "$ROOT/run.sh" "$ROOT/core/build.sh" "$ROOT/scripts"/*.sh
+shellcheck -x -P SCRIPTDIR "$ROOT/build.sh" "$ROOT/run.sh" "$ROOT/core/build.sh" \
+    "$ROOT/core/bench.sh" "$ROOT/scripts"/*.sh
+
+if ! command -v yamllint >/dev/null 2>&1; then
+    echo "error: yamllint missing" >&2
+    exit 1
+fi
+yamllint -c "$ROOT/.yamllint" "$ROOT"/.github/workflows/*.yml "$ROOT"/packaging/flatpak/*.yml
 
 if ! command -v cc >/dev/null 2>&1; then
     echo "error: cc missing" >&2
@@ -39,6 +47,11 @@ if ! command -v cc >/dev/null 2>&1; then
 fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+cc -O2 -Wall -Wextra -Werror -Wformat=2 -Wformat-security \
+    -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference \
+    -I "$ROOT/core/host" \
+    -c "$ROOT/core/host/stub.c" \
+    -o "$tmp/stub.o"
 cc -O2 -Wall -Wextra -Werror -Wformat=2 -Wformat-security \
     -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference \
     -I "$ROOT/core/host" \
@@ -60,7 +73,13 @@ if ! command -v zig >/dev/null 2>&1; then
     fi
 fi
 if command -v zig >/dev/null 2>&1; then
-    zig fmt --check "$ROOT/core/src"
+    zig fmt --check "$ROOT/core/src" "$ROOT/core/bench"
 else
+    # A local checkout without zig skips the check, but CI must never pass on
+    # the skip: the lint job installs the pinned toolchain first.
+    if [[ "${CI:-}" == "true" ]]; then
+        echo "error: zig missing in CI; run: bash scripts/linux-deps.sh --install-zig" >&2
+        exit 1
+    fi
     echo "note: zig not on PATH, skip zig fmt --check" >&2
 fi

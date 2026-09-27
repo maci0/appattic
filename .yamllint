@@ -1,0 +1,14 @@
+extends: default
+
+rules:
+  # The workflows carry long `if:` conditions and pinned-action comments.
+  line-length:
+    max: 200
+  # `on:` is the correct key in a GitHub workflow, not a boolean typo.
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
+  braces:
+    max-spaces-inside: 1
