@@ -1068,8 +1068,11 @@ func collapseBundleIdChildBuckets(_ buckets: inout [String: [DataItem]]) {
         }
         bucketWeight[key] = best
     }
-    // Snapshot keys: removals below must not disturb iteration.
-    for childKey in buckets.keys.sorted(by: { $0.count > $1.count }) {
+    // Snapshot keys: removals below must not disturb iteration. Order by
+    // length then key: `buckets.keys` comes out of a hash table whose seed
+    // varies per process, and Swift's sort is not stable, so equal-length
+    // children would be collapsed in a different order from run to run.
+    for childKey in buckets.keys.sorted(by: { $0.count == $1.count ? $0 < $1 : $0.count > $1.count }) {
         guard let childItems = buckets[childKey] else { continue }
         var bestParent: String?
         var bestLen = 0
@@ -1081,7 +1084,9 @@ func collapseBundleIdChildBuckets(_ buckets: inout [String: [DataItem]]) {
             while let dot = prefix.lastIndex(of: ".") {
                 prefix = String(prefix[..<dot])
                 guard asciiHasByte(prefix, 0x2E) else { break }
-                for parentKey in labelOwners[prefix] ?? [] where parentKey != childKey {
+                // Sorted: `labelOwners[prefix]` is a Set, so parents of equal
+                // label length would race for `bestParent` by hash order.
+                for parentKey in (labelOwners[prefix] ?? []).sorted() where parentKey != childKey {
                     let plen = bucketWeight[parentKey] ?? 0
                     if plen > bestLen {
                         bestLen = plen
@@ -1110,12 +1115,23 @@ func collapseVendorPrefixBuckets(_ buckets: inout [String: [DataItem]]) {
         guard prefixes.count == 1, let prefix = prefixes.first else { continue }
         byPrefix[prefix, default: []].append(key)
     }
-    for keys in byPrefix.values where keys.count > 1 {
-        let primary = keys.max { a, b in
-            (buckets[a]?.reduce(0) { addBytes($0, $1.sizeBytes) } ?? 0)
-                < (buckets[b]?.reduce(0) { addBytes($0, $1.sizeBytes) } ?? 0)
-        }!
-        for key in keys where key != primary {
+    // Prefix-major order, and a key tie-break on equal totals: both loops walk
+    // hash tables whose seed varies per process, so a run must not pick a
+    // different survivor than the previous one.
+    for prefix in byPrefix.keys.sorted() {
+        let keys = byPrefix[prefix] ?? []
+        guard keys.count > 1 else { continue }
+        var totals: [String: Int] = [:]
+        for key in keys {
+            totals[key] = buckets[key]?.reduce(0) { addBytes($0, $1.sizeBytes) } ?? 0
+        }
+        // Largest total wins; an exact tie goes to the first key so the same
+        // inputs always collapse to the same survivor.
+        let primary = keys.sorted { a, b in
+            let (ta, tb) = (totals[a] ?? 0, totals[b] ?? 0)
+            return ta == tb ? a > b : ta < tb
+        }.last!
+        for key in keys.sorted() where key != primary {
             if let moving = buckets.removeValue(forKey: key) {
                 buckets[primary, default: []].append(contentsOf: moving)
             }
@@ -1628,6 +1644,9 @@ public func listShadowingOverlays(
 }
 
 func preferredBrokenLinkName(_ names: [String], toolFolder: String) -> String {
+    // Callers hand in `contentsOfDirectory` order, which the filesystem is
+    // free to vary; the first-match and longest-name picks below must not.
+    let names = names.sorted()
     let variants = [
         toolFolder,
         toolFolder.replacingOccurrences(of: "-", with: "_"),
