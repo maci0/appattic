@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
 const plugin_id = "dnf";
@@ -18,6 +19,7 @@ const outdated_cmds = [_][]const u8{
 };
 
 var result_buf: [65536]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 var exec_buf: [65536]u8 = undefined;
 var exec_up_buf: [65536]u8 = undefined;
@@ -161,6 +163,7 @@ fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager:
         w.raw("\"");
     }
     w.raw(",\"dialog\":{\"title\":\"Remove dnf unneeded?\",\"body\":\"Named repoquery --unneeded packages only. Named dnf/yum upgrade waits for confirm. Not a full distro upgrade. Nothing runs until you confirm.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -169,6 +172,7 @@ fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager:
 fn runQuery(buf: []u8, cmds: []const []const u8, used: *[]const u8) i32 {
     for (cmds) |cmd| {
         const n = host_exec.run(cmd, buf);
+        note.add(cmd, n);
         if (n >= 0) {
             used.* = cmd;
             return n;
@@ -178,6 +182,7 @@ fn runQuery(buf: []u8, cmds: []const []const u8, used: *[]const u8) i32 {
 }
 
 fn query_impl(present: i32) i32 {
+    note = .{};
     if (present == 0) {
         @memcpy(result_buf[0..none_json.len], none_json);
         result_nbytes = @intCast(none_json.len);

@@ -1,6 +1,7 @@
 const std = @import("std");
 const abi = @import("abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
 pub const Orphan = struct {
@@ -269,6 +270,7 @@ pub fn parseListing(
 }
 
 var result_buf: [65536]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 var exec_buf: [65536]u8 = undefined;
 var none_json_buf: [512]u8 = undefined;
@@ -309,6 +311,7 @@ fn render(comptime spec: Spec, hits: []const Orphan) bool {
     w.raw(",\"dialog\":{\"title\":");
     w.str(spec.dialog_title);
     w.raw(",\"body\":\"Named dirs only. Nothing runs until you confirm.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -325,6 +328,7 @@ fn missingJson(comptime spec: Spec) []const u8 {
 }
 
 pub fn query(comptime spec: Spec, present: i32) i32 {
+    note = .{};
     if (present == 0) {
         const none = missingJson(spec);
         @memcpy(result_buf[0..none.len], none);
@@ -332,6 +336,7 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
         return 0;
     }
     const nexec = host_exec.run(queryCommand(spec), &exec_buf);
+    note.add(queryCommand(spec), nexec);
     if (nexec < 0) {
         if (!render(spec, &.{})) return 1;
         return 0;

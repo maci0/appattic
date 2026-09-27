@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
 
@@ -8,6 +9,7 @@ const plugin_id = "pnpm";
 const query_cmd = "pnpm ls -g --depth=0 --json";
 
 var result_buf: [65536]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 var exec_buf: [32768]u8 = undefined;
 
@@ -61,18 +63,21 @@ fn renderPnpm(hits: []const PnpmGlobal) bool {
         w.raw("\"");
     }
     w.raw(",\"dialog\":{\"title\":\"Remove pnpm globals?\",\"body\":\"User-global -g packages only. Not project lockfiles. Named remove waits for confirm.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
 }
 
 fn query_impl(present: i32) i32 {
+    note = .{};
     if (present == 0) {
         @memcpy(result_buf[0..none_json.len], none_json);
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
     const nexec = host_exec.run(query_cmd, &exec_buf);
+    note.add(query_cmd, nexec);
     if (nexec < 0) {
         if (!renderPnpm(&.{})) return 1;
         return 0;

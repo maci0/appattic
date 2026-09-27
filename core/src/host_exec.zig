@@ -1,8 +1,20 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
+pub const deny: i32 = -1;
 pub const fail: i32 = -2;
 pub const bad: i32 = -3;
+
+/// What a negative `run` result means, in operator words. Mirrors
+/// APPATTIC_HOST_EXEC_* in core/host/hostexec.h.
+pub fn reason(rc: i32) []const u8 {
+    return switch (rc) {
+        deny => "the host refused it as not an allowlisted query",
+        fail => "it failed, was cancelled, or hit the 60s timeout",
+        bad => "its output did not fit the buffer",
+        else => "unknown host error",
+    };
+}
 
 const apt_fixture =
     \\Reading package lists... Done

@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const listing = @import("path_listing.zig");
 
@@ -93,6 +94,7 @@ fn keepFromNames(names: []const []const u8, buf: []u8) []const u8 {
 }
 
 var result_buf: [65536]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 var exec_buf: [65536]u8 = undefined;
 var snap_home_exec_buf: [16384]u8 = undefined;
@@ -169,18 +171,21 @@ fn renderSnapd(
         w.raw("\"");
     }
     w.raw(",\"dialog\":{\"title\":\"Remove snap leftovers?\",\"body\":\"Named disabled revisions and orphan ~/snap dirs only. Installed snap apps stay on Stale Apps. Nothing runs until you confirm.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
 }
 
 fn query_impl(present: i32) i32 {
+    note = .{};
     if (present == 0) {
         @memcpy(result_buf[0..none_json.len], none_json);
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
     const nexec = host_exec.run(query_cmd, &exec_buf);
+    note.add(query_cmd, nexec);
     if (nexec < 0) {
         if (!renderSnapd(&.{}, &.{})) return 1;
         return 0;
@@ -198,6 +203,7 @@ fn query_impl(present: i32) i32 {
     var paths: [1024]u8 = undefined;
     var n_orphans: usize = 0;
     const nls = host_exec.run(snap_home_cmd, &snap_home_exec_buf);
+    note.add(snap_home_cmd, nls);
     if (nls >= 0) {
         n_orphans = listing.parseListing(
             snap_home_exec_buf[0..@intCast(nls)],

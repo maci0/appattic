@@ -1,12 +1,14 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
 const plugin_id = "composer";
 const query_cmd = "composer global outdated";
 
 var result_buf: [65536]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 var exec_buf: [32768]u8 = undefined;
 
@@ -56,18 +58,21 @@ fn renderComposer(hits: []const ComposerOutdated) bool {
     }
     w.raw("],\"script\":null");
     w.raw(",\"dialog\":{\"title\":\"Outdated Composer globals?\",\"body\":\"Global composer.json packages only. Not project vendor. Report-only. Named composer global update waits for confirm. AppAttic does not run this upgrade.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
 }
 
 fn query_impl(present: i32) i32 {
+    note = .{};
     if (present == 0) {
         @memcpy(result_buf[0..none_json.len], none_json);
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
     const nexec = host_exec.run(query_cmd, &exec_buf);
+    note.add(query_cmd, nexec);
     if (nexec < 0) {
         if (!renderComposer(&.{})) return 1;
         return 0;

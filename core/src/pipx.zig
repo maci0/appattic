@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
 
@@ -11,6 +12,7 @@ const query_cmds = [_][]const u8{
 };
 
 var result_buf: [65536]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 var exec_buf: [32768]u8 = undefined;
 
@@ -125,6 +127,7 @@ fn renderPipx(hits: []const PipxTool) bool {
         w.raw("\"");
     }
     w.raw(",\"dialog\":{\"title\":\"Remove pipx tools?\",\"body\":\"User-global pipx tools only. Named uninstall waits for confirm.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -133,12 +136,14 @@ fn renderPipx(hits: []const PipxTool) bool {
 fn runQuery() i32 {
     for (query_cmds) |cmd| {
         const n = host_exec.run(cmd, &exec_buf);
+        note.add(cmd, n);
         if (n >= 0) return n;
     }
     return host_exec.fail;
 }
 
 fn query_impl(present: i32) i32 {
+    note = .{};
     if (present == 0) {
         @memcpy(result_buf[0..none_json.len], none_json);
         result_nbytes = @intCast(none_json.len);

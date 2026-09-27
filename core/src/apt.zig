@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
 const plugin_id = "apt";
@@ -10,6 +11,7 @@ const dpkg_cmd = "dpkg -l";
 const ppa_cmd = "ls -1 /etc/apt/sources.list.d";
 
 var result_buf: [65536]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 var exec_buf: [65536]u8 = undefined;
 var exec_up_buf: [65536]u8 = undefined;
@@ -208,12 +210,14 @@ fn renderApt(
         w.raw("\"");
     }
     w.raw(",\"dialog\":{\"title\":\"Remove apt orphans?\",\"body\":\"Named autoremove leaves only. Named apt install --only-upgrade waits for confirm. Not a full apt upgrade. Nothing runs until you confirm.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
 }
 
 fn query_impl(present: i32) i32 {
+    note = .{};
     if (present == 0) {
         @memcpy(result_buf[0..none_json.len], none_json);
         result_nbytes = @intCast(none_json.len);
@@ -222,21 +226,25 @@ fn query_impl(present: i32) i32 {
     var orphans: [128]AptOrphan = undefined;
     var n_orph: usize = 0;
     const nexec = host_exec.run(query_cmd, &exec_buf);
+    note.add(query_cmd, nexec);
     if (nexec >= 0) n_orph = parseAptAutoremove(exec_buf[0..@intCast(nexec)], &orphans);
 
     var outdated: [128]AptOutdated = undefined;
     var n_out: usize = 0;
     const nq = host_exec.run(outdated_cmd, &exec_up_buf);
+    note.add(outdated_cmd, nq);
     if (nq >= 0) n_out = parseAptUpgradable(exec_up_buf[0..@intCast(nq)], &outdated);
 
     var rc_pkgs: [128]DpkgRc = undefined;
     var n_rc: usize = 0;
     const nd = host_exec.run(dpkg_cmd, &exec_dpkg_buf);
+    note.add(dpkg_cmd, nd);
     if (nd >= 0) n_rc = parseDpkgRc(exec_dpkg_buf[0..@intCast(nd)], &rc_pkgs);
 
     var ppas: [32]PpaSource = undefined;
     var n_ppa: usize = 0;
     const np = host_exec.run(ppa_cmd, &exec_ppa_buf);
+    note.add(ppa_cmd, np);
     if (np >= 0) n_ppa = parsePpaSources(exec_ppa_buf[0..@intCast(np)], &ppas);
 
     while (true) {

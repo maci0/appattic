@@ -18,6 +18,13 @@ pub const W = struct {
 
     pub fn str(self: *W, s: []const u8) void {
         self.raw("\"");
+        self.escaped(s);
+        self.raw("\"");
+    }
+
+    /// Escape for a JSON string body, without the surrounding quotes. Use
+    /// inside a string the writer has already opened.
+    pub fn escaped(self: *W, s: []const u8) void {
         var i: usize = 0;
         while (i < s.len) {
             const c = s[i];
@@ -73,7 +80,6 @@ pub const W = struct {
                 },
             }
         }
-        self.raw("\"");
     }
 
     pub fn slice(self: W) ?[]const u8 {

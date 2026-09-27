@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
 const plugin_id = "pacman";
@@ -8,6 +9,7 @@ const query_cmd = "pacman -Qdt";
 const outdated_cmd = "pacman -Qu";
 
 var result_buf: [65536]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 var exec_buf: [65536]u8 = undefined;
 var exec_up_buf: [65536]u8 = undefined;
@@ -105,12 +107,14 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
         w.raw("\"");
     }
     w.raw(",\"dialog\":{\"title\":\"Remove pacman orphans?\",\"body\":\"Named -Qdt leaves only. Named pacman -S waits for confirm. Not a full system upgrade. Nothing runs until you confirm.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
 }
 
 fn query_impl(present: i32) i32 {
+    note = .{};
     if (present == 0) {
         @memcpy(result_buf[0..none_json.len], none_json);
         result_nbytes = @intCast(none_json.len);
@@ -119,11 +123,13 @@ fn query_impl(present: i32) i32 {
     var orphans: [128]PacmanOrphan = undefined;
     var n_orph: usize = 0;
     const nexec = host_exec.run(query_cmd, &exec_buf);
+    note.add(query_cmd, nexec);
     if (nexec >= 0) n_orph = parsePacmanQdt(exec_buf[0..@intCast(nexec)], &orphans);
 
     var outdated: [128]PacmanOutdated = undefined;
     var n_out: usize = 0;
     const nq = host_exec.run(outdated_cmd, &exec_up_buf);
+    note.add(outdated_cmd, nq);
     if (nq >= 0) n_out = parsePacmanQu(exec_up_buf[0..@intCast(nq)], &outdated);
 
     while (true) {

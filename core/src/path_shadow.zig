@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
 const Io = std.Io;
@@ -133,6 +134,7 @@ fn findShadowsExec(
     out: []ShadowFinding,
     path_store: []u8,
 ) usize {
+    note = .{};
     var n: usize = 0;
     var used: usize = 0;
     var ls_buf: [65536]u8 = undefined;
@@ -146,6 +148,7 @@ fn findShadowsExec(
         var cmd_buf: [512]u8 = undefined;
         const ls_cmd = std.fmt.bufPrint(&cmd_buf, "ls -1 {s}", .{odir}) catch continue;
         const ls_n = host_exec.run(ls_cmd, &ls_buf);
+        note.add(ls_cmd, ls_n);
         if (ls_n < 0) continue;
         const raw_n = listingNames(ls_buf[0..@intCast(ls_n)], &names);
         var copied: usize = 0;
@@ -198,6 +201,7 @@ pub fn findShadows(
 }
 
 var result_buf: [8192]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 
 const none_json =
@@ -238,6 +242,7 @@ fn renderShadows(hits: []const ShadowFinding) bool {
         w.raw("\"");
     }
     w.raw(",\"dialog\":{\"title\":\"Remove shadowing files?\",\"body\":\"Overlay files hide packaged copies. Nothing runs until you confirm.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

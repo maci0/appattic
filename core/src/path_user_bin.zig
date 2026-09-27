@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
 const plugin_id = "path-user-bin";
@@ -90,6 +91,7 @@ fn isDanglingSymlink(path: []const u8) bool {
 }
 
 pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
+    note = .{};
     var n: usize = 0;
     var used: usize = 0;
     var ls_buf: [2048]u8 = undefined;
@@ -99,6 +101,7 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
         var cmd_buf: [512]u8 = undefined;
         const ls_cmd = std.fmt.bufPrint(&cmd_buf, "ls -1 {s}", .{root.path}) catch continue;
         const ls_n = host_exec.run(ls_cmd, &ls_buf);
+        note.add(ls_cmd, ls_n);
         if (ls_n < 0) continue;
         const name_n = listingNames(ls_buf[0..@intCast(ls_n)], &names);
 
@@ -115,6 +118,7 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
 }
 
 var result_buf: [65536]u8 = undefined;
+var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 var path_store: [8192]u8 = undefined;
 
@@ -152,6 +156,7 @@ fn render(hits: []const BrokenLink) bool {
         w.raw("\"");
     }
     w.raw(",\"dialog\":{\"title\":\"Remove leftover user binaries?\",\"body\":\"Named dirs only. Nothing runs until you confirm.\"}}");
+    note.write(&w);
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
