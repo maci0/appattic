@@ -38,8 +38,9 @@ fn isDanglingSymlink(path: []const u8) bool {
     return !testFlagOk(path, "-e");
 }
 
-pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
+pub fn findBrokenLinks(out: []BrokenLink, paths: []u8, dropped: *usize) usize {
     note = .{};
+    dropped.* = 0;
     var n: usize = 0;
     var used: usize = 0;
     var ls_buf: [2048]u8 = undefined;
@@ -59,8 +60,14 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8) usize {
             // leaves no path behind, so a root with more files than the store
             // holds still reaches its last entry.
             var probe = used;
-            const stable_name = pstore.copyInto(name, paths, &probe) orelse continue;
-            const link_path = pstore.joinPath(root.path, stable_name, paths, &probe) orelse continue;
+            const stable_name = pstore.copyInto(name, paths, &probe) orelse {
+                dropped.* += 1;
+                continue;
+            };
+            const link_path = pstore.joinPath(root.path, stable_name, paths, &probe) orelse {
+                dropped.* += 1;
+                continue;
+            };
             if (!isDanglingSymlink(link_path)) continue;
             out[n] = .{ .name = stable_name, .path = link_path, .root_label = root.label };
             used = probe;
@@ -127,8 +134,10 @@ fn query_impl(present: i32) i32 {
         return 0;
     }
     var found: [128]BrokenLink = undefined;
-    var n = findBrokenLinks(&found, &path_store);
+    var store_dropped: usize = 0;
+    var n = findBrokenLinks(&found, &path_store, &store_dropped);
     note.addTruncatedRows(n, found.len);
+    note.addDroppedRows(store_dropped);
     return note.renderShrinking(render, &found, &n);
 }
 
@@ -142,7 +151,8 @@ pub fn resultSlice() []const u8 {
 
 test "findBrokenLinks reports dangling symlink only" {
     var scratch: [8]BrokenLink = undefined;
-    const n = findBrokenLinks(&scratch, &path_store);
+    var dropped: usize = 0;
+    const n = findBrokenLinks(&scratch, &path_store, &dropped);
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("gone-app", scratch[0].name);
     try std.testing.expectEqualStrings("/home/user/.local/bin/gone-app", scratch[0].path);

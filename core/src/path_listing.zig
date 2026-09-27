@@ -255,6 +255,11 @@ pub fn isSystemLeftoverName(name: []const u8) bool {
 
 /// Parse `ls -1` / `ls -1A` of a leftover root. Skip `.` and `..`,
 /// Linux/snap system names, and names in `keep` (newline list).
+///
+/// `dropped` counts the rows the path store could not hold. A name that is a
+/// leftover but has nowhere to put its joined path is still a leftover, so it
+/// belongs in the note: `addTruncatedRows` covers the `out` array running
+/// full, and a full store shortened the list in exactly the same silent way.
 pub fn parseListing(
     listing: []const u8,
     keep: []const u8,
@@ -262,9 +267,11 @@ pub fn parseListing(
     out: []Orphan,
     path_store: []u8,
     allow: []const u8,
+    dropped: *usize,
 ) usize {
     var n: usize = 0;
     var used: usize = 0;
+    dropped.* = 0;
     var lines = std.mem.splitScalar(u8, listing, '\n');
     while (lines.next()) |raw| {
         if (n == out.len) break;
@@ -282,7 +289,10 @@ pub fn parseListing(
         // is already absolute is accepted only when it says exactly that; a
         // listing that spells out anything else (`/root/../../etc`) is dropped
         // rather than turned into an `rm -rf` target.
-        const joined = pstore.joinPath(root, name, path_store, &used) orelse continue;
+        const joined = pstore.joinPath(root, name, path_store, &used) orelse {
+            dropped.* += 1;
+            continue;
+        };
         if (line[0] == '/' and !std.mem.eql(u8, line, joined)) continue;
         out[n] = .{ .name = name, .path = joined };
         n += 1;
@@ -368,8 +378,10 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     }
     var hits: [256]Orphan = undefined;
     var paths: [32768]u8 = undefined;
-    var n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths, spec.allow);
+    var store_dropped: usize = 0;
+    var n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths, spec.allow, &store_dropped);
     note.addTruncatedRows(n, hits.len);
+    note.addDroppedRows(store_dropped);
     const n_parsed = n;
     while (true) {
         if (render(spec, hits[0..n])) {
@@ -399,6 +411,7 @@ pub fn bind(comptime spec: Spec) void {
 test "parseListing orphans names not in keep" {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
+    var dropped: usize = 0;
     const n = parseListing(
         "dconf\ngone-app\nhtop\n",
         "dconf\nhtop\n",
@@ -406,6 +419,7 @@ test "parseListing orphans names not in keep" {
         &hits,
         &paths,
         "",
+        &dropped,
     );
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("gone-app", hits[0].name);
@@ -415,6 +429,7 @@ test "parseListing orphans names not in keep" {
 test "parseListing keeps home-dot leftovers and skips only . and .." {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
+    var dropped: usize = 0;
     const n = parseListing(
         ".mozilla\n.wine\n.\n..\ndconf\n",
         "dconf\n",
@@ -422,6 +437,7 @@ test "parseListing keeps home-dot leftovers and skips only . and .." {
         &hits,
         &paths,
         "",
+        &dropped,
     );
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqualStrings(".mozilla", hits[0].name);
@@ -433,6 +449,7 @@ test "parseListing keeps home-dot leftovers and skips only . and .." {
 test "parseListing accepts full paths, skips . and .., keeps other dots" {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
+    var dropped: usize = 0;
     const n = parseListing(
         "/home/user/.cache/gone-app\n.cache-secret\n.\n..\n\n",
         "",
@@ -440,6 +457,7 @@ test "parseListing accepts full paths, skips . and .., keeps other dots" {
         &hits,
         &paths,
         "",
+        &dropped,
     );
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqualStrings("gone-app", hits[0].name);
@@ -451,6 +469,7 @@ test "parseListing accepts full paths, skips . and .., keeps other dots" {
 test "parseListing drops an absolute line that is not root joined with the name" {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
+    var dropped: usize = 0;
     // The basename validates, so only the path spelling can keep
     // `/home/user/.cache/../../etc` from becoming an `rm -rf` argument.
     const n = parseListing(
@@ -460,6 +479,7 @@ test "parseListing drops an absolute line that is not root joined with the name"
         &hits,
         &paths,
         "",
+        &dropped,
     );
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("/home/user/.cache/gone-app", hits[0].path);
@@ -468,12 +488,14 @@ test "parseListing drops an absolute line that is not root joined with the name"
 test "parseListing empty listing" {
     var hits: [2]Orphan = undefined;
     var paths: [64]u8 = undefined;
-    try std.testing.expectEqual(@as(usize, 0), parseListing("", "dconf", "/home/user/.config", &hits, &paths, ""));
+    var dropped: usize = 0;
+    try std.testing.expectEqual(@as(usize, 0), parseListing("", "dconf", "/home/user/.config", &hits, &paths, "", &dropped));
 }
 
 test "parseListing keeps utf8 leftover names" {
     var hits: [4]Orphan = undefined;
     var paths: [512]u8 = undefined;
+    var dropped: usize = 0;
     const n = parseListing(
         "café\ngone-app\n",
         "",
@@ -481,6 +503,7 @@ test "parseListing keeps utf8 leftover names" {
         &hits,
         &paths,
         "",
+        &dropped,
     );
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqualStrings("café", hits[0].name);
@@ -544,6 +567,7 @@ test "render keeps a large leftover list" {
 test "parseListing skips system names even without keep" {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
+    var dropped: usize = 0;
     const n = parseListing(
         "gtk-3.0\n.git\n.ssh\n.aws\n.docker\ngnome-42\ncore22\ngone-app\n",
         "",
@@ -551,6 +575,7 @@ test "parseListing skips system names even without keep" {
         &hits,
         &paths,
         "",
+        &dropped,
     );
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("gone-app", hits[0].name);
@@ -577,6 +602,7 @@ test "parseListing skips system names even without keep" {
 test "parseListing home-dot allowlist skips .config and shell rc" {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
+    var dropped: usize = 0;
     const n = parseListing(
         ".mozilla\n.config\n.bashrc\n.local\n.cache\n.wine\n.profile\n",
         "dconf\n",
@@ -584,6 +610,7 @@ test "parseListing home-dot allowlist skips .config and shell rc" {
         &hits,
         &paths,
         ".mozilla\n.wine\n",
+        &dropped,
     );
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqualStrings(".mozilla", hits[0].name);
@@ -660,10 +687,11 @@ fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
     var raw: [4096]u8 = undefined;
     const text = raw[0..smith.slice(&raw)];
 
+    var dropped: usize = 0;
     for (spec_table) |spec| {
         var hits: [16]Orphan = undefined;
         var paths: [2048]u8 = undefined;
-        const n = parseListing(text, spec.keep, spec.root, &hits, &paths, spec.allow);
+        const n = parseListing(text, spec.keep, spec.root, &hits, &paths, spec.allow, &dropped);
         try std.testing.expect(n <= hits.len);
         for (hits[0..n]) |hit| {
             // The name is a slice of the listing, never a copy the parser built.
@@ -692,7 +720,7 @@ fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
         // instead of writing past it.
         var one: [1]Orphan = undefined;
         var one_path: [16]u8 = undefined;
-        const n1 = parseListing(text, spec.keep, spec.root, &one, &one_path, spec.allow);
+        const n1 = parseListing(text, spec.keep, spec.root, &one, &one_path, spec.allow, &dropped);
         try std.testing.expect(n1 <= 1);
         if (n1 == 1) {
             try std.testing.expect(sliceInside(&one_path, one[0].path) or sliceInside(text, one[0].path));
@@ -737,12 +765,44 @@ test "a full finding array reaches the result JSON as a note" {
     var hits: [256]Orphan = undefined;
     var paths: [32768]u8 = undefined;
     const spec = specById("path-xdg-data");
-    const n = parseListing(listing[0..used], spec.keep, spec.root, &hits, &paths, spec.allow);
+    var dropped: usize = 0;
+    const n = parseListing(listing[0..used], spec.keep, spec.root, &hits, &paths, spec.allow, &dropped);
     try std.testing.expectEqual(hits.len, n);
 
     var log = querynote.Log{};
     log.addTruncatedRows(n, hits.len);
     var buf: [256]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    log.write(&w);
+    try std.testing.expectEqualStrings(
+        ",\"note\":\"1 list hit the row limit: more rows exist than were shown\"",
+        w.slice().?,
+    );
+}
+
+test "a path store that fills is a dropped row, not a short scan" {
+    // The store is smaller than the joined paths of the listing, so the
+    // parser runs out of room with leftovers still to account for. `out` is
+    // nowhere near full, so `addTruncatedRows` sees nothing: without the
+    // store's own count this list reads as the whole root.
+    var hits: [16]Orphan = undefined;
+    var paths: [64]u8 = undefined;
+    var dropped: usize = 0;
+    const n = parseListing(
+        "gone-app-one\ngone-app-two\ngone-app-three\n",
+        "",
+        "/home/user/.local/share",
+        &hits,
+        &paths,
+        "",
+        &dropped,
+    );
+    try std.testing.expect(n < 3);
+    try std.testing.expectEqual(@as(usize, 3 - n), dropped);
+
+    var log = querynote.Log{};
+    log.addDroppedRows(dropped);
+    var buf: [128]u8 = undefined;
     var w = jsonbuf.W{ .buf = &buf };
     log.write(&w);
     try std.testing.expectEqualStrings(

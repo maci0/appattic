@@ -260,6 +260,7 @@ fn query_impl(present: i32) i32 {
     const nls = host_exec.run(snap_home_cmd, &snap_home_exec_buf);
     note.add(snap_home_cmd, nls);
     if (nls >= 0) {
+        var store_dropped: usize = 0;
         n_orphans = listing.parseListing(
             snap_home_exec_buf[0..@intCast(nls)],
             keep,
@@ -267,8 +268,10 @@ fn query_impl(present: i32) i32 {
             &orphans,
             &paths,
             "",
+            &store_dropped,
         );
         note.addTruncatedRows(n_orphans, orphans.len);
+        note.addDroppedRows(store_dropped);
     }
 
     return note.renderShrinkingPair(renderSnapd, &disabled, &n_disabled, &orphans, &n_orphans);

@@ -23,11 +23,13 @@ pub const Log = struct {
     /// count is a clean-looking count.
     dropped: usize = 0,
     /// Rows a parser had to drop because the plugin's fixed finding array was
-    /// full. A full array means the answer was longer than the table, so the
+    /// full, or because its path store had no room for a joined path. A full
+    /// array means the answer was longer than the table, so the
     /// finding list is short of the machine for the same reason a command
     /// that did not answer leaves it short: without this the run reads as
     /// "these are all of them", and an all-of-them list is what the user
-    /// confirms a deletion from.
+    /// confirms a deletion from. Counted in lists, not rows, to match the
+    /// `note` that names them.
     dropped_rows: usize = 0,
 
     pub fn add(self: *Log, cmd: []const u8, rc: i32) void {
@@ -47,13 +49,19 @@ pub const Log = struct {
         if (kept >= cap) self.dropped_rows += 1;
     }
 
-    /// Record one row a render gave up to make the result fit its buffer. The
-    /// plugins shed rows from the end until the render succeeds, so a machine
-    /// with more findings than `result_buf` holds is reported as the shorter
-    /// list. The user confirms a deletion from that list, so the rows that
-    /// went missing have to be visible the same way a missing command is.
+    /// Record one list that a render gave up rows to make the result fit its
+    /// buffer. The plugins shed rows from the end until the render succeeds,
+    /// so a machine with more findings than `result_buf` holds is reported as
+    /// the shorter list. The user confirms a deletion from that list, so the
+    /// rows that went missing have to be visible the same way a missing
+    /// command is.
+    ///
+    /// `dropped` is a row count and the note words this as a list, so one call
+    /// is one list however many rows it lost: `200 lists hit the row limit`
+    /// for a single root is not a fact about the machine.
     pub fn addDroppedRows(self: *Log, dropped: usize) void {
-        self.dropped_rows += dropped;
+        if (dropped == 0) return;
+        self.dropped_rows += 1;
     }
 
     /// Trim rows off the end of a parsed list until `render` fits it in the
@@ -229,4 +237,25 @@ test "truncated lists and failed commands share one note" {
     const note = w.slice().?;
     try std.testing.expect(std.mem.indexOf(u8, note, "apt list --upgradable did not answer") != null);
     try std.testing.expect(std.mem.indexOf(u8, note, "2 lists hit the row limit") != null);
+}
+
+test "rows shed from one list are one list, not one list each" {
+    var buf: [256]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    var log = Log{};
+    log.addDroppedRows(200);
+    log.write(&w);
+    try std.testing.expectEqualStrings(
+        ",\"note\":\"1 list hit the row limit: more rows exist than were shown\"",
+        w.slice().?,
+    );
+}
+
+test "a list that lost no rows adds no note" {
+    var buf: [64]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    var log = Log{};
+    log.addDroppedRows(0);
+    log.write(&w);
+    try std.testing.expect(w.slice().?.len == 0);
 }

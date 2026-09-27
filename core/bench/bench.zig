@@ -50,7 +50,8 @@ fn aptLine(i: usize, tmp: []u8) []u8 {
 fn fListing() usize {
     var hits: [8192]listing.Orphan = undefined;
     var paths: [262144]u8 = undefined;
-    return listing.parseListing(list_text, "dconf\nhtop\n", "/home/user/.config", &hits, &paths, "");
+    var dropped: usize = 0;
+    return listing.parseListing(list_text, "dconf\nhtop\n", "/home/user/.config", &hits, &paths, "", &dropped);
 }
 fn fSysName() usize {
     return if (listing.isSystemLeftoverName("leftover-app-0042-data")) 1 else 0;
