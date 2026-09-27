@@ -26,7 +26,7 @@ pub const BrewOutdated = struct {
 };
 
 fn isSafeBrewName(s: []const u8) bool {
-    if (s.len == 0 or s.len > 214) return false;
+    if (s.len == 0 or s.len > jsonbuf.max_pkg_name_len) return false;
     var at: usize = 0;
     for (s) |c| {
         const ok = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
@@ -319,7 +319,7 @@ fn fuzzBrewOutdated(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(h.current.len == 0 or sliceInside(text, h.current));
         try std.testing.expect(h.latest.len == 0 or sliceInside(text, h.latest));
         try std.testing.expect(h.name.len > 0);
-        try std.testing.expect(h.name.len <= 214);
+        try std.testing.expect(h.name.len <= jsonbuf.max_pkg_name_len);
         try std.testing.expect(isSafeBrewName(h.name));
     }
 }

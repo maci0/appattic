@@ -212,9 +212,14 @@ pub fn writeOutdated(
     w.raw("}");
 }
 
+/// Longest package name a name check accepts. Every registry plugin (npm,
+/// Packagist, Homebrew) shares one bound so a name the core validates for one
+/// manager is not rejected for another.
+pub const max_pkg_name_len = 214;
+
 /// Unscoped ident, or one npm-style `@scope/name`. No `..`, no extra `/`.
 pub fn isSafePkgName(s: []const u8) bool {
-    if (s.len == 0 or s.len > 214) return false;
+    if (s.len == 0 or s.len > max_pkg_name_len) return false;
     if (s[0] != '@') return s[0] != '.' and isSafeIdent(s);
     var slash: ?usize = null;
     for (s, 0..) |c, i| {
@@ -231,7 +236,7 @@ pub fn isSafePkgName(s: []const u8) bool {
 
 /// Packagist `vendor/package`. One slash. No `@`, no `..`.
 pub fn isSafeComposerName(s: []const u8) bool {
-    if (s.len == 0 or s.len > 214) return false;
+    if (s.len == 0 or s.len > max_pkg_name_len) return false;
     if (s[0] == '@') return false;
     var slash: ?usize = null;
     var i: usize = 0;
