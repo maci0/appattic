@@ -164,9 +164,9 @@ elif [ -f /opt/wasmtime-c-api/include/wasmtime.h ]; then
 elif [ -f "$root/../.deps/wasmtime-c-api/include/wasmtime.h" ]; then
     wasmtime_from_prefix "$root/../.deps/wasmtime-c-api"
 elif command -v pkg-config >/dev/null 2>&1 && pkg-config --exists wasmtime; then
-    # shellcheck disable=SC2206,SC2207
+    # shellcheck disable=SC2206,SC2207  # pkg-config output is a flag list to word-split
     wasmtime_cflags=($(pkg-config --cflags wasmtime))
-    # shellcheck disable=SC2206,SC2207
+    # shellcheck disable=SC2206,SC2207  # pkg-config output is a flag list to word-split
     wasmtime_libs=($(pkg-config --libs wasmtime))
 else
     echo "wasmtime C API missing. macOS: brew install wasmtime. Linux: scripts/linux-deps.sh --install-wasmtime" >&2

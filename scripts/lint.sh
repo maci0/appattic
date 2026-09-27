@@ -61,13 +61,21 @@ if ! command -v cc >/dev/null 2>&1; then
 fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-cc -O2 -Wall -Wextra -Werror -Wformat=2 -Wformat-security \
-    -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference \
-    -I "$ROOT/core/host" \
-    -c "$ROOT/core/host/stub.c" \
-    -o "$tmp/stub.o"
-cc -O2 -Wall -Wextra -Werror -Wformat=2 -Wformat-security \
-    -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference \
+cflags=(-O2 -Wall -Wextra -Werror -Wformat=2 -Wformat-security
+    -Wshadow -Wstrict-prototypes -Wconversion -Wpedantic -Wnull-dereference)
+# Every C file under core/host is compiled here, so a new one cannot join the
+# tree without also joining the gate. embed.c is the exception: it needs the
+# Wasmtime C API headers, which the lint job does not install. CMake compiles it
+# for the Qt app with -Wall -Wextra.
+skip_c="embed.c"
+for src in "$ROOT"/core/host/*.c "$ROOT"/core/host/tests/*.c; do
+    base="$(basename "$src")"
+    case " $skip_c " in
+        *" $base "*) continue ;;
+    esac
+    cc "${cflags[@]}" -I "$ROOT/core/host" -c "$src" -o "$tmp/${base%.c}.o"
+done
+cc "${cflags[@]}" \
     -I "$ROOT/core/host" \
     "$ROOT/core/host/hostexec.c" \
     "$ROOT/core/host/tests/hostexec_test.c" \

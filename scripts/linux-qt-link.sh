@@ -274,7 +274,7 @@ run_ui_check() {
     local name="$1" proof="$2" extra="${3:-}" dump rc
     echo "check: QT_QPA_PLATFORM=offscreen $bin --dev-check $name $extra"
     set +e
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086  # $extra is a caller-supplied flag list to word-split
     dump="$(QT_QPA_PLATFORM=offscreen APPATTIC_CORE_OUT="$CORE_OUT" "$bin" --dev-check $name $extra 2>&1)"
     rc=$?
     set -e
