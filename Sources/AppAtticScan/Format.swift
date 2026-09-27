@@ -54,19 +54,56 @@ public func humanSize(_ bytes: Int) -> String {
 }
 
 /// Whole-day age, with the unit chosen by magnitude: hours below 1 day (at
-/// least 1h, so a future or fractional value never prints `0h`), days below
-/// 14, weeks below 60 days, months below 1.5 years, then years. The output unit
+/// least 1h, so a future or fractional value never prints a zero count), days
+/// below 14, weeks below 60 days, months below 1.5 years, then years. The unit
 /// changes silently with the input, so a caller comparing formatted strings
 /// across a threshold gets a different unit, not a different number.
+///
+/// The count and the unit word are the locale's: Polish has four plural forms
+/// for a week, Arabic six for a day, and neither can come out of a `"\(n)d"`
+/// built from an `if`. Years are whole, because a plural-aware formatter takes
+/// an integer count.
 public func humanDays(_ days: Double) -> String {
     if days < 1 {
-        return "\(max(Int(days * 24), 1))h"
+        return duration(.hour, max(Int(days * 24), 1))
     }
     if days < 60 {
-        return days >= 14 ? "\(Int(days / 7))w" : "\(Int(days))d"
+        return days >= 14 ? duration(.week, Int(days / 7)) : duration(.day, Int(days))
     }
     if days < 365 * 1.5 {
-        return "\(Int(days / 30))mo"
+        return duration(.month, Int(days / 30))
     }
-    return oneDecimal(days / 365) + "y"
+    return duration(.year, Int((days / 365).rounded()))
+}
+
+/// One formatter per unit, built once and never mutated, so parallel calls are
+/// safe. `DateComponents` carries the count, so a month stays a month instead
+/// of being reconciled against a fixed number of days.
+private let durationFormatters: [Calendar.Component: DateComponentsFormatter] = {
+    var formatters: [Calendar.Component: DateComponentsFormatter] = [:]
+    for unit in [Calendar.Component.hour, .day, .week, .month, .year] {
+        let f = DateComponentsFormatter()
+        var allowed: DateComponentsFormatter.Units = []
+        allowed.insert(unit)
+        f.allowedUnits = allowed
+        f.unitsStyle = .abbreviated
+        formatters[unit] = f
+    }
+    return formatters
+}()
+
+/// Abbreviations for a locale that has no data for the unit, so a missing CLDR
+/// entry costs the reader the localized word and not the whole label.
+private let asciiDurationUnits: [Calendar.Component: String] = [
+    .hour: "h", .day: "d", .week: "w", .month: "mo", .year: "y",
+]
+
+private func duration(_ unit: Calendar.Component, _ count: Int) -> String {
+    var components = DateComponents()
+    components.setValue(count, for: unit)
+    if let text = durationFormatters[unit]?.string(from: components) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty { return trimmed }
+    }
+    return "\(count) \(asciiDurationUnits[unit] ?? "")"
 }

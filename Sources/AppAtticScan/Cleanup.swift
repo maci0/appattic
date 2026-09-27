@@ -431,15 +431,20 @@ func scriptStamp(_ date: Date) -> String {
     return f.string(from: date)
 }
 
-/// Largest first, path breaking size ties.
+/// Largest first, collated path breaking size ties.
 ///
 /// Size alone is not a total order, and this order decides which entries
 /// survive `--top N` and where they land in the generated script, so an
 /// untied order would print a different report for the same scan on the next
-/// process.
+/// process. The tie-break collates rather than comparing bytes, so an equal-size
+/// pair reads in the reader's order: byte order puts "Über" after "Zurich" and
+/// every CJK folder after all Latin ones. A collated tie falls back to the byte
+/// order, which keeps the two names distinct.
 public func orphanedBySize(_ result: ScanResult) -> [DataItem] {
     result.orphanedItems.sorted { a, b in
-        a.sizeBytes == b.sizeBytes ? a.path < b.path : a.sizeBytes > b.sizeBytes
+        a.sizeBytes == b.sizeBytes
+            ? collatedBefore(a.path, b.path, tieBreak: a.path, b.path)
+            : a.sizeBytes > b.sizeBytes
     }
 }
 

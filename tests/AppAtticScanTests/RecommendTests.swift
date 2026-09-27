@@ -321,7 +321,7 @@ final class RecommendTests: XCTestCase {
         )
         let v = evaluate(sw, now: now)
         XCTAssertEqual(v.tier, "remove")
-        XCTAssertEqual(v.reason, "Not used for 6mo. Easy to reinstall with Flatpak.")
+        XCTAssertEqual(v.reason, "Not used for \(humanDays(200)). Easy to reinstall with Flatpak.")
     }
 
     func testDesktopCommentBecomesSummary() {
@@ -378,7 +378,7 @@ final class RecommendTests: XCTestCase {
         )
         let v = evaluate(sw, now: now)
         XCTAssertEqual(v.tier, "remove")
-        XCTAssertEqual(v.reason, "Not used for 6mo. Easy to reinstall with brew.")
+        XCTAssertEqual(v.reason, "Not used for \(humanDays(200)). Easy to reinstall with brew.")
     }
 
     func testLongIdleCaskWithSignificantDataIsReview() {
@@ -426,7 +426,7 @@ final class RecommendTests: XCTestCase {
         )
         let v = evaluate(sw, now: now)
         XCTAssertEqual(v.tier, "review")
-        XCTAssertEqual(v.reason, "Not used for 6mo. Manual reinstall if you still want it.")
+        XCTAssertEqual(v.reason, "Not used for \(humanDays(200)). Manual reinstall if you still want it.")
     }
 
     func testMatchDataItemsAttachesOwnedLeftoverByDisplayName() {

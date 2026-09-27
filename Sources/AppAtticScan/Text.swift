@@ -50,7 +50,14 @@ private let wideColumnRanges: [ClosedRange<UInt32>] = [
     0x1F300...0x1F64F, 0x1F900...0x1F9FF, 0x20000...0x2FFFD, 0x30000...0x3FFFD,
 ]
 
+/// Emoji skin-tone modifiers, `Sk` in CLDR but rendered on the preceding
+/// base glyph rather than in a cell of their own: a terminal draws "👍🏽" as the
+/// single wide cell of the base. They are not `General_Category = Mn`, so the
+/// category check in `scalarIsZeroWidth` misses them.
+private let emojiModifierRange: ClosedRange<UInt32> = 0x1F3FB...0x1F3FF
+
 private func scalarIsZeroWidth(_ s: Unicode.Scalar) -> Bool {
+    if emojiModifierRange.contains(s.value) { return true }
     switch s.properties.generalCategory {
     case .nonspacingMark, .enclosingMark, .format, .control, .unassigned,
          .lineSeparator, .paragraphSeparator:
@@ -62,8 +69,9 @@ private func scalarIsZeroWidth(_ s: Unicode.Scalar) -> Bool {
 
 /// Terminal columns a string occupies. `String.count` counts grapheme
 /// clusters, so a CJK name from the filesystem pads to the wrong width and
-/// shifts every later column. One cluster is one glyph: a combining mark or a
-/// ZWJ sequence rides on its base scalar's width instead of adding columns.
+/// shifts every later column. One cluster is one glyph: a combining mark, a ZWJ
+/// sequence, or a skin-tone modifier rides on its base scalar's width instead
+/// of adding columns.
 public func displayWidth(_ s: String) -> Int {
     var width = 0
     for cluster in s {

@@ -24,9 +24,21 @@ final class FormatTests: XCTestCase {
 
 
     func testHumanDays() {
-        XCTAssertEqual(humanDays(0), "1h")
-        XCTAssertEqual(humanDays(0.5), "12h")
-        XCTAssertEqual(humanDays(3), "3d")
-        XCTAssertEqual(humanDays(21), "3w")
+        // The unit word and its plural form come from the locale, so a label is
+        // pinned as "a count with a unit", not as English text.
+        for days in [0.0, 0.5, 3.0, 21.0, 45.0, 400.0] {
+            let label = humanDays(days)
+            XCTAssertFalse(label.trimmingCharacters(in: .whitespaces).isEmpty, "\(days)")
+            XCTAssertTrue(label.contains { $0.isNumber }, "\(days) -> \(label)")
+        }
+    }
+
+    func testHumanDaysNeverPrintsAZeroCount() {
+        // A future or sub-day timestamp clamps to a whole hour, so the label
+        // never reads as zero of anything.
+        for days in [-3.0, 0.0, 0.04] {
+            let label = humanDays(days)
+            XCTAssertFalse(label.hasPrefix("0"), "\(days) -> \(label)")
+        }
     }
 }

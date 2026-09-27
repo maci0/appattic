@@ -40,6 +40,9 @@ final class TextTests: XCTestCase {
         XCTAssertEqual(displayWidth("日本語"), 6)
         XCTAssertEqual(displayWidth("한국어"), 6)
         XCTAssertEqual(displayWidth("👩‍👩‍👧"), 2)
+        // A skin-tone modifier rides on the base glyph instead of taking a
+        // cell of its own, so the pair is the width of the base alone.
+        XCTAssertEqual(displayWidth("👍🏽"), 2)
     }
 
 
