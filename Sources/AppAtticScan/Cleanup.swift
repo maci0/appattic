@@ -136,7 +136,10 @@ public func commandFailureMessage(
     if trimmed.isEmpty {
         return "Command failed (exit \(status))."
     }
-    let detail = trimmed.count > 400 ? String(trimmed.prefix(400)) : trimmed
+    // The last characters, not the first: a failing command prints the reason
+    // where it stops, and a long run's stderr is capped at its tail
+    // (`readCommandOutputTail`), so the head of what arrived is not the error.
+    let detail = trimmed.count > 400 ? String(trimmed.suffix(400)) : trimmed
     return "Command failed (exit \(status)). \(detail)"
 }
 

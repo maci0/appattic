@@ -97,4 +97,46 @@ final class ProcessTests: XCTestCase {
             XCTAssertEqual(results[i], "item-\(i)")
         }
     }
+
+
+    private func writeTemp(_ name: String, _ text: String) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-tail-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(name)
+        try Data(text.utf8).write(to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return url
+    }
+
+
+    func testReadCommandOutputTailReturnsShortFileWhole() throws {
+        let url = try writeTemp("short.err", "line one\nline two\n")
+        XCTAssertEqual(readCommandOutputTail(from: url), "line one\nline two\n")
+    }
+
+
+    /// The point of the cap: a transaction that printed more than the report
+    /// shows must cost the report's bytes, not the run's.
+    func testReadCommandOutputTailKeepsOnlyTheLastBytes() throws {
+        let url = try writeTemp("big.err", String(repeating: "x", count: 10_000) + "THE END")
+        let tail = readCommandOutputTail(from: url, maxBytes: 64)
+        XCTAssertEqual(tail, String(repeating: "x", count: 64 - "THE END".count) + "THE END")
+    }
+
+
+    /// A tail that starts mid-character must not open with a replacement.
+    /// Five bytes back lands on the second byte of the first `é`.
+    func testReadCommandOutputTailDropsPartialLeadingCharacter() throws {
+        let url = try writeTemp("utf8.err", "ok" + "\u{00e9}\u{00e9}\u{00e9}")
+        let tail = readCommandOutputTail(from: url, maxBytes: 5)
+        XCTAssertEqual(tail, "\u{00e9}\u{00e9}")
+    }
+
+
+    func testReadCommandOutputTailOfMissingFileIsEmpty() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-tail-absent-\(UUID().uuidString).err")
+        XCTAssertEqual(readCommandOutputTail(from: missing), "")
+    }
 }

@@ -473,7 +473,7 @@ func runShellScript(_ script: String) -> (status: Int32, stderr: String) {
         process.waitUntilExit()
         try? errHandle.synchronize()
         let status = process.terminationStatus
-        let errText = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
+        let errText = readCommandOutputTail(from: errURL)
         return (status, errText)
     } catch {
         fputs("error: \(redactHomePaths(error.localizedDescription))\n", stderr)

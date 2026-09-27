@@ -101,6 +101,10 @@ static qint64 addBytes(qint64 a, qint64 b) {
     return a + b;
 }
 
+/// Bytes of script output kept for the failure report. The report itself shows
+/// the last 400, so this only has to cover them with room for a whole line.
+static const int kScriptOutputCap = 64 * 1024;
+
 static bool isDarkPalette(const QPalette &p) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     const Qt::ColorScheme scheme = QGuiApplication::styleHints()->colorScheme();
@@ -2874,6 +2878,25 @@ private:
         return out;
     }
 
+    /// Keep the tail of what the script printed, capped. A package transaction
+    /// runs for as long as the package manager takes and says so on every file
+    /// it touches, so an unbounded buffer grows with the run in a window that
+    /// stays open afterwards. The error report shows the last lines, which is
+    /// where the failure is, so dropping the front costs the report nothing.
+    void appendScriptOutput(const QByteArray &chunk) {
+        m_scriptOutput += chunk;
+        if (m_scriptOutput.size() <= kScriptOutputCap) return;
+        m_scriptOutput = m_scriptOutput.right(kScriptOutputCap);
+        // The cut can land mid-character; the partial one at the front would
+        // decode to a replacement character in the report.
+        int start = 0;
+        while (start < m_scriptOutput.size()
+               && (static_cast<unsigned char>(m_scriptOutput.at(start)) & 0xC0) == 0x80) {
+            ++start;
+        }
+        m_scriptOutput.remove(0, start);
+    }
+
     void runScript(const QString &script, const QString &progress) {
         if (m_scanning) return;
         QTemporaryFile tmp(QDir::temp().filePath(QStringLiteral("appattic-XXXXXX.sh")));
@@ -2914,7 +2937,7 @@ private:
         proc->setProcessEnvironment(env);
         m_scriptOutput.clear();
         connect(proc, &QProcess::readyRead, this, [this, proc] {
-            m_scriptOutput += proc->readAll();
+            appendScriptOutput(proc->readAll());
         });
         connect(proc, &QProcess::finished, this, [this, proc, path = tmp.fileName()](int code) {
             if (m_scriptProc == proc) m_scriptProc = nullptr;
@@ -2924,7 +2947,7 @@ private:
             m_rescan->setEnabled(true);
             if (m_scanBar) m_scanBar->hide();
             if (code != 0) {
-                m_scriptOutput += proc->readAll();
+                appendScriptOutput(proc->readAll());
                 QString err = redactHomePaths(QString::fromUtf8(m_scriptOutput).trimmed());
                 if (err.size() > 400) err = err.right(400);
                 if (err.isEmpty()) {

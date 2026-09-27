@@ -254,7 +254,7 @@ Client-side enforcement: the ignore list and confirm toggle are local files, not
 
 ## Response readiness (note only)
 
-- Scripts run with stdout discarded (UI) and stderr kept only until the process exits; the temp file is deleted. There is no durable “what we deleted” log in-tree.
+- Scripts run with stdout discarded (UI) and stderr kept only until the process exits; the temp file is deleted. Only the last 64 KiB of it is read back, so a long transaction cannot grow the running UI. There is no durable “what we deleted” log in-tree.
 - No disclosure contact, supported-version list, or “report → fix shipped” path is published. See `SECURITY.md`.
 
 ## How to re-verify this file

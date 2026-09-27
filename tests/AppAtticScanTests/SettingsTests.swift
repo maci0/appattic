@@ -289,6 +289,15 @@ final class SettingsTests: XCTestCase {
         )
     }
 
+    func testCommandFailureMessageReportsTheEndOfALongStderr() {
+        // A capped read keeps the tail, and a package manager prints the reason
+        // where it stopped, so the report has to quote from the end.
+        let stderr = String(repeating: "installing\n", count: 200) + "E: Subprocess exited with error\n"
+        let message = commandFailureMessage(status: 1, stderr: stderr)
+        XCTAssertTrue(message.hasSuffix("E: Subprocess exited with error"), message)
+        XCTAssertLessThanOrEqual(message.count, 460)
+    }
+
     func testCommandFailureMessageRedactsHomePath() {
         XCTAssertEqual(
             commandFailureMessage(

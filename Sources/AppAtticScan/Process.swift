@@ -125,6 +125,42 @@ public let commandPipeDrainGrace: TimeInterval = 2
 /// opens once the process has exited.
 private let commandPipePollSliceMs: Int = 100
 
+/// How much of a redirected command's output a report keeps. A package
+/// transaction writes a line per file it touches and can run for minutes, and
+/// the report shows a few hundred characters of the end, so the rest is read
+/// only to be thrown away.
+public let commandOutputTailBytes: Int = 64 * 1024
+
+/// The last `maxBytes` of the file at `url`, or `""` when it cannot be read.
+///
+/// Reads the tail rather than the whole file: the caller runs the script first
+/// and reads the result after, so a transaction that printed megabytes would
+/// otherwise cost that much memory in the UI that is still running.
+public func readCommandOutputTail(
+    from url: URL,
+    maxBytes: Int = commandOutputTailBytes
+) -> String {
+    guard maxBytes > 0, let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+    defer { try? handle.close() }
+    guard let size = try? handle.seekToEnd(), size > 0 else { return "" }
+    let start = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
+    do {
+        try handle.seek(toOffset: start)
+        guard let data = try handle.read(upToCount: maxBytes), !data.isEmpty else { return "" }
+        return String(decoding: trimPartialLeadingUTF8(Array(data)), as: UTF8.self)
+    } catch {
+        return ""
+    }
+}
+
+/// Drops the leading bytes of a cut UTF-8 sequence, so a tail that starts
+/// mid-character does not decode to a replacement character at the front.
+private func trimPartialLeadingUTF8(_ bytes: [UInt8]) -> [UInt8] {
+    var start = 0
+    while start < bytes.count, bytes[start] & 0xC0 == 0x80 { start += 1 }
+    return start == 0 ? bytes : Array(bytes[start...])
+}
+
 /// Runs `cmd` without a shell and returns (status, stdout, stderr). Status 127
 /// with empty stdout means the command never ran: empty argv, executable not
 /// found, or a timeout that killed the process. A timeout discards the real

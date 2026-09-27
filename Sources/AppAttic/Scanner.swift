@@ -523,7 +523,7 @@ final class ScannerViewModel {
                 try errHandle.close()
                 openHandle = nil
                 let status = process.terminationStatus
-                let errText = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
+                let errText = readCommandOutputTail(from: errURL)
                 DispatchQueue.main.async {
                     vm.isScanning = false
                     if status != 0 {
