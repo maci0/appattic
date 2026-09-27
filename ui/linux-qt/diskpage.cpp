@@ -144,6 +144,8 @@ public:
     QComboBox *sizeMode = nullptr;
     QCheckBox *oneFs = nullptr;
     QLineEdit *search = nullptr;
+    QPushButton *devicesBtn = nullptr;
+    QPushButton *backBtn = nullptr;
     QThread *thread = nullptr;
     DiskScanWorker *worker = nullptr;
     DiskNode *root = nullptr;
@@ -154,6 +156,9 @@ public:
     int scanToken = 0;
     int streamedRows = 0;
     bool streamedBeforeFinish = false;
+    /// -1 while the tree is unfiltered, else the number of search matches. Drives
+    /// the "no folders match" status so a blank tree always has an explanation.
+    int filterMatches = -1;
     /// The ring chart paints from a DiskNode tree, and the real one only exists
     /// when the walk ends, so the page keeps its own from the folders that have
     /// finished. Freed with `delete`, which takes the children.
@@ -202,6 +207,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     auto *folderBtn = new QPushButton(QStringLiteral("Scan Folder"));
     auto *fsBtn = new QPushButton(QStringLiteral("Scan File System"));
     auto *remoteBtn = new QPushButton(QStringLiteral("Scan Remote"));
+    d->backBtn = new QPushButton(QStringLiteral("Back"));
+    d->backBtn->setToolTip(QStringLiteral("Return to the disk scan in progress"));
     homeBtn->setToolTip(QStringLiteral("Scan your home folder"));
     folderBtn->setToolTip(QStringLiteral("Scan a local folder, including FUSE or network mounts"));
     fsBtn->setToolTip(QStringLiteral("Scan the root file system without crossing into other devices"));
@@ -210,6 +217,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     scanBar->addWidget(folderBtn);
     scanBar->addWidget(fsBtn);
     scanBar->addWidget(remoteBtn);
+    scanBar->addWidget(d->backBtn);
     lv->addWidget(scanBar);
     d->volumes = new QTreeWidget;
     d->volumes->setColumnCount(6);
@@ -256,15 +264,21 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->crumb = new QLabel;
     d->crumb->setTextInteractionFlags(Qt::TextSelectableByMouse);
     d->crumb->setContentsMargins(8, 0, 8, 0);
+    d->devicesBtn = new QPushButton(QStringLiteral("Devices"));
+    d->devicesBtn->setToolTip(QStringLiteral("Back to the device and folder list"));
     d->stopBtn = new QPushButton(QStringLiteral("Stop"));
     d->rescanBtn = new QPushButton(QStringLiteral("Rescan"));
     d->upBtn = new QPushButton(QStringLiteral("Up"));
     d->openBtn = new QPushButton(QStringLiteral("Open"));
     d->trashBtn = new QPushButton(QStringLiteral("Move to Trash"));
     d->chartMode = new QComboBox;
+    d->chartMode->setToolTip(QStringLiteral("How the size chart draws the folders"));
     d->chartMode->addItem(QStringLiteral("Rings"), int(DiskChart::Mode::Rings));
     d->chartMode->addItem(QStringLiteral("Treemap"), int(DiskChart::Mode::Treemap));
     d->sizeMode = new QComboBox;
+    d->sizeMode->setToolTip(
+        QStringLiteral("Allocated counts blocks on disk; apparent counts file lengths")
+    );
     d->sizeMode->addItem(QStringLiteral("Allocated"), 1);
     d->sizeMode->addItem(QStringLiteral("Apparent"), 0);
     d->oneFs = new QCheckBox(QStringLiteral("This file system only"));
@@ -273,6 +287,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->search->setPlaceholderText(QStringLiteral("Search"));
     d->search->setClearButtonEnabled(true);
     d->search->setFixedWidth(180);
+    tools->addWidget(d->devicesBtn);
     tools->addWidget(d->crumb);
     auto *diskSpacer = new QWidget;
     diskSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -348,6 +363,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     connect(folderBtn, &QPushButton::clicked, this, &DiskPage::scanFolder);
     connect(fsBtn, &QPushButton::clicked, this, &DiskPage::scanFilesystem);
     connect(remoteBtn, &QPushButton::clicked, this, &DiskPage::scanRemote);
+    connect(d->backBtn, &QPushButton::clicked, this, [this] { showScan(); });
+    connect(d->devicesBtn, &QPushButton::clicked, this, [this] { showLocations(); });
     connect(d->volumes, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *it, int) {
         if (!it) return;
         startScan(it->data(1, Qt::UserRole).toString());
@@ -526,7 +543,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         if (d->stack->currentWidget() == d->locations && !m_scanning) refreshVolumes();
     });
     volTimer->start();
-    refreshVolumes();
+    // Sets the Back button's first state too: hidden until a scan exists.
+    showLocations();
     updateChrome();
 }
 
@@ -645,12 +663,23 @@ void DiskPage::rescan() {
     startScan(d->scanPath);
 }
 
+void DiskPage::showEvent(QShowEvent *event) {
+    QWidget::showEvent(event);
+    d->backBtn->setVisible(!d->scanPath.isEmpty() && d->stack->currentWidget() == d->locations);
+}
+
 void DiskPage::showLocations() {
     d->stack->setCurrentWidget(d->locations);
+    // Only offer the way back once there is a scan to return to, so the button
+    // never sits there as a dead control on a first visit.
+    d->backBtn->setVisible(!d->scanPath.isEmpty());
     refreshVolumes();
 }
 
-void DiskPage::showScan() { d->stack->setCurrentWidget(d->scanPage); }
+void DiskPage::showScan() {
+    d->stack->setCurrentWidget(d->scanPage);
+    d->backBtn->setVisible(true);
+}
 
 /// The same row the finished tree draws, from values alone: the streaming path
 /// cannot touch the DiskNode, which the scanning thread owns.
@@ -717,6 +746,7 @@ static void appendChildren(QTreeWidgetItem *parent, DiskNode *node, int depth) {
 
 void DiskPage::fillTree() {
     d->tree->clear();
+    d->filterMatches = -1;
     if (!d->root) return;
     if (!d->filter.trimmed().isEmpty()) {
         fillTreeFiltered();
@@ -739,13 +769,17 @@ void DiskPage::fillTreeFiltered() {
         fillTree();
         return;
     }
+    int matches = 0;
     const auto walk = [&](auto &&self, DiskNode *n) -> void {
         if (n->name.contains(q, Qt::CaseInsensitive) || n->path.contains(q, Qt::CaseInsensitive)) {
             d->tree->addTopLevelItem(makeItem(n));
+            matches += 1;
         }
         for (DiskNode *ch : n->children) self(self, ch);
     };
     walk(walk, d->root);
+    d->filterMatches = matches;
+    updateChrome();
 }
 
 void DiskPage::selectNode(DiskNode *node) {
@@ -804,12 +838,24 @@ void DiskPage::updateChrome() {
     d->trashBtn->setEnabled(!scanning && d->selected && d->selected != d->root);
     d->crumb->setText(view ? view->path : (d->scanPath.isEmpty() ? QStringLiteral("Devices") : d->scanPath));
     if (d->root && !scanning) {
-        d->status->setText(
-            humanSize(d->root->metric(d->allocated))
-            + QStringLiteral(" · ")
-            + diskContentsLabel(d->root->items, true)
-            + (d->root->unreadable ? QStringLiteral(" · some folders could not be read") : QString())
-        );
+        if (d->filterMatches >= 0) {
+            // A filtered tree must not read as the whole scan, and an empty
+            // result must not read as a broken one.
+            d->status->setText(
+                d->filterMatches == 0
+                    ? QStringLiteral("No folders match “%1”.").arg(d->filter.trimmed())
+                    : QStringLiteral("%1 folders match “%2”.")
+                          .arg(d->filterMatches)
+                          .arg(d->filter.trimmed())
+            );
+        } else {
+            d->status->setText(
+                humanSize(d->root->metric(d->allocated))
+                + QStringLiteral(" · ")
+                + diskContentsLabel(d->root->items, true)
+                + (d->root->unreadable ? QStringLiteral(" · some folders could not be read") : QString())
+            );
+        }
     } else if (scanning) {
         if (d->status->text().isEmpty() || d->status->text() == QLatin1String("Scanning")) {
             d->status->setText(

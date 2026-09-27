@@ -5,6 +5,7 @@
 
 struct DiskNode;
 class QLineEdit;
+class QShowEvent;
 
 class DiskPage : public QWidget {
     Q_OBJECT
@@ -29,6 +30,11 @@ public:
 
 signals:
     void statusMessage(const QString &text);
+
+protected:
+    /// Showing the page resets a pre-show setVisible(false) on the Back button,
+    /// so the first show has to re-sync it with the current scan state.
+    void showEvent(QShowEvent *event) override;
 
 private:
     void refreshVolumes();

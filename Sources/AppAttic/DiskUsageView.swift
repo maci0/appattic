@@ -38,6 +38,10 @@ struct DiskUsageView: View {
                 Spacer()
             } else if let root {
                 HStack {
+                    Button("Devices") {
+                        self.root = nil
+                        self.selected = nil
+                    }
                     Text(root.path)
                         .font(.system(size: 13))
                     Spacer()
