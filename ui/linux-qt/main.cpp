@@ -13,6 +13,7 @@
 #include <QByteArray>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QCollator>
 #include <QColor>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -523,7 +524,7 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow() {
-        setWindowTitle(QStringLiteral("AppAttic"));
+        // The title follows the page (fillCurrent), so it is not set here.
         resize(1180, 720);
         setMinimumSize(800, 520);
 
@@ -1463,12 +1464,30 @@ private:
         delCol.second->addWidget(delHint);
 
         auto ignCol = section(QStringLiteral("Ignored leftovers"));
-        m_ignoredList = new QLabel;
-        m_ignoredList->setWordWrap(true);
         QFont small = smallFont();
+        auto *ignListHost = new QWidget;
+        auto *ilv = new QVBoxLayout(ignListHost);
+        ilv->setContentsMargins(0, 0, 0, 0);
+        ilv->setSpacing(4);
+        m_ignoredEmpty = hintLabel(
+            QStringLiteral("None. Ignore a leftover from its inspector to hide it on later scans.")
+        );
+        // Every hidden path is listed, not the first twelve: the list is where a
+        // hidden leftover comes back, and a path the reader cannot see is one
+        // they cannot restore.
+        m_ignoredList = new QListWidget;
         m_ignoredList->setFont(small);
+        m_ignoredList->setToolTip(
+            QStringLiteral("Double-click a path to show that leftover in the list again")
+        );
+        m_ignoredList->setMaximumHeight(rowPx(m_ignoredList) * 6 + 8);
+        m_ignoredList->setMinimumWidth(220);
+        aaApplySourceList(m_ignoredList);
+        ilv->addWidget(m_ignoredEmpty);
+        ilv->addWidget(m_ignoredList, 1);
         m_clearIgnored = new QPushButton(QStringLiteral("Clear ignored leftovers"));
-        ignCol.second->addWidget(m_ignoredList);
+        m_clearIgnored->setToolTip(QStringLiteral("Show every ignored leftover in the list again"));
+        ignCol.second->addWidget(ignListHost, 1);
         ignCol.second->addWidget(m_clearIgnored);
 
         row->addWidget(scanCol.first, 1);
@@ -1486,9 +1505,23 @@ private:
             persistSettings();
         });
         connect(m_clearIgnored, &QPushButton::clicked, this, [this] {
+            const int n = m_ignored.size();
             m_ignored.clear();
             persistSettings();
             fillCurrent();
+            statusBar()->showMessage(
+                QStringLiteral("Shown in the list again: %1.").arg(localeCount(n))
+            );
+        });
+        connect(m_ignoredList, &QListWidget::itemActivated, this, [this](QListWidgetItem *it) {
+            if (!it) return;
+            const QString key = it->data(Qt::UserRole).toString();
+            if (key.isEmpty() || !m_ignored.remove(key)) return;
+            persistSettings();
+            fillCurrent();
+            statusBar()->showMessage(
+                QStringLiteral("Shown in the list again: %1.").arg(it->text())
+            );
         });
         return w;
     }
@@ -1546,6 +1579,9 @@ private:
     void fillCurrent(bool viewOnly = false) {
         const Page page = currentPage();
         if (m_pageTitle) m_pageTitle->setText(pageTitle(page));
+        // The title bar and the task switcher entry name the page too, so the
+        // window a screenshot or an alt-tab shows says where the user is.
+        setWindowTitle(pageTitle(page) + QStringLiteral(" · AppAttic"));
         refreshSidebarCounts();
         const bool settings = page == Page::Settings;
         const bool overview = page == Page::Overview;
@@ -1565,7 +1601,7 @@ private:
         vis(m_scanBarAct, m_scanBar, scanLive);
         if (overview) fillOverview();
         else if (list) fillTable(page, viewOnly);
-        else if (settings) refreshIgnoredLabel();
+        else if (settings) refreshIgnoredList();
         refreshActionBar();
     }
 
@@ -1829,9 +1865,15 @@ private:
         }
         const QVariant size = f.bytes >= 0 ? QVariant(humanSize(f.bytes))
                                            : QVariant(QStringLiteral("unknown"));
+        /* The name column carries the full text as a tooltip, so a cell the
+           width elides is still readable there. Every other column did not,
+           and a long path, manager or version has nowhere else to read. The
+           display text is the tooltip for the same reason: one string, no
+           second wording to fall out of step with the cell. */
+        const bool text = role == Qt::DisplayRole || role == Qt::ToolTipRole;
         switch (page) {
         case Page::Leftovers:
-            if (role == Qt::DisplayRole) {
+            if (text) {
                 if (column == 2) return locationLabel(f);
                 if (column == 3) return modifiedLabel(f);
                 if (column == 4) return size;
@@ -1842,7 +1884,7 @@ private:
             }
             break;
         case Page::Stale:
-            if (role == Qt::DisplayRole) {
+            if (text) {
                 if (column == 2) return statusLabel(f);
                 if (column == 3) return modifiedLabel(f);
                 if (column == 4) return size;
@@ -1853,7 +1895,7 @@ private:
             }
             break;
         case Page::Outdated:
-            if (role == Qt::DisplayRole) {
+            if (text) {
                 if (column == 2) return managerLabel(f);
                 if (column == 3) return outdatedVersionLabel(f);
             }
@@ -1863,7 +1905,7 @@ private:
             }
             break;
         case Page::Packages:
-            if (role == Qt::DisplayRole) {
+            if (text) {
                 if (column == 2) return managerLabel(f);
                 if (column == 3) return humanKind(f.kind);
                 if (column == 4) return size;
@@ -2609,7 +2651,13 @@ private:
         if (!f->currentVersion.isEmpty()) addFact(QStringLiteral("Current"), f->currentVersion, t.text, true);
         if (!f->latestVersion.isEmpty()) addFact(QStringLiteral("Latest"), f->latestVersion, t.amber, true);
         addFact(QStringLiteral("Size"), f->bytes >= 0 ? humanSize(f->bytes) : QStringLiteral("unknown"), t.text, true);
-        addFact(QStringLiteral("Modified"), modifiedLabel(*f), t.text);
+        // The Stale list calls this column "Last used", so the inspector does
+        // too: one value, one name, whichever side of the window it is read on.
+        addFact(
+            page == Page::Stale ? QStringLiteral("Last used") : QStringLiteral("Modified"),
+            modifiedLabel(*f),
+            t.text
+        );
         if (page == Page::Leftovers) {
             addFact(QStringLiteral("Location"), locationLabel(*f), isShadowFinding(*f) ? t.amber : t.text);
         }
@@ -3063,7 +3111,7 @@ private:
             const QSignalBlocker b1(m_confirmBox);
             m_confirmBox->setChecked(m_confirmDelete);
         }
-        refreshIgnoredLabel();
+        refreshIgnoredList();
     }
 
     void loadSettings() {
@@ -3127,32 +3175,45 @@ private:
         m_settingsError = false;
         m_errorBar->hide();
         m_error->clear();
-        refreshIgnoredLabel();
+        refreshIgnoredList();
     }
 
-    void refreshIgnoredLabel() {
+    void refreshIgnoredList() {
         if (!m_ignoredList) return;
+        m_ignoredList->clear();
+        m_ignoredEmpty->setVisible(m_ignored.isEmpty());
+        m_ignoredList->setVisible(!m_ignored.isEmpty());
         if (m_ignored.isEmpty()) {
-            m_ignoredList->setText(
-                QStringLiteral("None. Ignore a leftover from its inspector to hide it on later scans.")
-            );
             m_clearIgnored->setEnabled(false);
             return;
         }
-        QStringList names;
-        for (const QString &p : m_ignored) names << ignoredPathLabel(p);
         // Collation, not code points: `QStringList::sort()` puts "Zebra" before
         // "apple" and "Ä" after "Z", so a German or Swedish reader sees an
         // unordered list. The C locale has no collation rules and keeps the
         // code-point order.
-        if (QLocale().name() == QLatin1String("C")) {
-            names.sort();
+        QList<QPair<QString, QString>> entries; // label, hidden key
+        for (const QString &p : m_ignored) entries.append({ignoredPathLabel(p), p});
+        const QLocale locale;
+        if (locale.name() == QLatin1String("C")) {
+            std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b) {
+                return a.first < b.first;
+            });
         } else {
-            std::sort(names.begin(), names.end(), QLocale());
+            // QCollator, not QLocale: only the collator is callable, and it
+            // holds the locale's collation rules.
+            const QCollator collator(locale);
+            std::sort(entries.begin(), entries.end(), [&collator](const auto &a, const auto &b) {
+                return collator.compare(a.first, b.first) < 0;
+            });
         }
-        m_ignoredList->setText(
-            localeCount(m_ignored.size()) + QStringLiteral(" leftover paths hidden from the list.\n")
-            + names.mid(0, 12).join(QLatin1Char('\n'))
+        for (const auto &e : entries) {
+            auto *it = new QListWidgetItem(e.first, m_ignoredList);
+            it->setData(Qt::UserRole, e.second);
+            it->setToolTip(e.second);
+        }
+        m_ignoredList->setToolTip(
+            localeCount(m_ignored.size())
+            + QStringLiteral(" hidden. Double-click a path to show that leftover in the list again.")
         );
         m_clearIgnored->setEnabled(true);
     }
@@ -3199,7 +3260,8 @@ private:
     QPushButton *m_updateBtn = nullptr;
     QPushButton *m_markManualBtn = nullptr;
     QCheckBox *m_confirmBox = nullptr;
-    QLabel *m_ignoredList = nullptr;
+    QListWidget *m_ignoredList = nullptr;
+    QLabel *m_ignoredEmpty = nullptr;
     QPushButton *m_clearIgnored = nullptr;
     QLabel *m_statInstalled = nullptr;
     QLabel *m_statLeftovers = nullptr;

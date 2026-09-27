@@ -302,6 +302,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->search->setPlaceholderText(QStringLiteral("Search"));
     d->search->setClearButtonEnabled(true);
     d->search->setFixedWidth(180);
+    d->search->setToolTip(QStringLiteral("Filter the scanned folders by name or path"));
     tools->addWidget(d->devicesBtn);
     tools->addWidget(d->crumb);
     auto *diskSpacer = new QWidget;
@@ -418,10 +419,15 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     });
     connect(d->tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *it, int) {
         DiskNode *n = d->nodeFromItem(it);
-        if (n && n->isDir) {
-            d->chart->setView(n);
-            updateChrome();
-        }
+        if (!n || !n->isDir) return;
+        // The crumb, the chart and the tree have to name the same folder: the
+        // single click already moved the view, so without the refill the tree
+        // kept listing the parent while the breadcrumb read as the child, and
+        // "Up" then jumped the tree to a view it had never shown.
+        d->chart->setView(n);
+        d->selected = n;
+        fillTree();
+        updateChrome();
     });
     connect(d->tree, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
         QTreeWidgetItem *it = d->tree->itemAt(pos);
@@ -857,7 +863,12 @@ void DiskPage::trashSelected() {
         );
         return;
     }
+    // Without this the window only says it is scanning again, and a user who
+    // answered the alert has no confirmation the folder was trashed. It goes
+    // out after the rescan, whose own "Scanning" message would replace it.
+    const QString trashed = d->selected->name;
     rescan();
+    emit statusMessage(QStringLiteral("Moved %1 to Trash. Scanning again…").arg(trashed));
 }
 
 void DiskPage::goUp() {
