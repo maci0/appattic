@@ -57,13 +57,14 @@ static bool legacyBool(const QSettings &qs, const QString &key, bool fallback, Q
     return v;
 }
 
-AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable) {
+AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable, QString *legacyPath) {
     QSettings qs(QStringLiteral("AppAttic"), QStringLiteral("AppAttic"));
     const bool present = qs.contains(QStringLiteral("confirmDelete"))
         || qs.contains(QStringLiteral("includeSystem"))
         || qs.contains(QStringLiteral("ignoredLeftovers"));
     if (hadValues) *hadValues = present;
     if (unreadable) unreadable->clear();
+    if (legacyPath) *legacyPath = qs.fileName();
     AppSettings s;
     if (!present) return s;
     s.confirmDelete = legacyBool(qs, QStringLiteral("confirmDelete"), true, unreadable);

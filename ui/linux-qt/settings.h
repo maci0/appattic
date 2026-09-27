@@ -27,8 +27,10 @@ bool removeScanCacheFile(const QString &path);
 bool legacyBoolValue(const QVariant &value, bool fallback, bool *readable);
 
 /// `hadValues` is set when legacy keys were present. `unreadable` collects the
-/// keys whose stored value was not a boolean.
-AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable);
+/// keys whose stored value could not be carried over. `legacyPath` is the file
+/// those values came from, which the caller has to name: a blocked migration is
+/// only fixable by editing that file, and saving settings does not clear it.
+AppSettings migrateLegacyQSettings(bool *hadValues, QStringList *unreadable, QString *legacyPath);
 bool parseSettingsJson(const QByteArray &raw, AppSettings *out, QString *err);
 QByteArray encodeSettingsJson(const AppSettings &s);
 

@@ -265,11 +265,12 @@ static QString settingsInvalidMessage(const QString &path, const QString &err) {
     ).arg(path, err));
 }
 
-static QString settingsLegacyMessage(const QStringList &keys) {
+static QString settingsLegacyMessage(const QStringList &keys, const QString &path) {
     return redactHomePaths(QStringLiteral(
-        "Old settings for %1 are neither true nor false, so they were not carried over. "
-        "Set them to true or false, then save settings."
-    ).arg(keys.join(QStringLiteral(", "))));
+        "Old settings for %1 in %2 cannot be carried over, so the window opens with none. "
+        "Edit that file so they read true or false (ignoredLeftovers entries must be full "
+        "paths), then start the window again. Nothing is written to settings.json until then."
+    ).arg(keys.join(QStringLiteral(", ")), path));
 }
 
 static QString settingsUnwritableMessage(const QString &path) {
@@ -3032,12 +3033,15 @@ private:
         if (!f.exists()) {
             bool hadLegacy = false;
             QStringList unreadable;
-            const AppSettings s = migrateLegacyQSettings(&hadLegacy, &unreadable);
+            QString legacyPath;
+            const AppSettings s = migrateLegacyQSettings(&hadLegacy, &unreadable, &legacyPath);
             if (!unreadable.isEmpty()) {
                 // Migrating would write the defaults over a value the user
-                // wrote, so stop here and name the key instead.
+                // wrote, so stop here and name the key instead. Only editing
+                // the legacy file clears this: persistSettings returns while
+                // the error is held, so saving settings is not the way out.
                 m_settingsError = true;
-                showError(settingsLegacyMessage(unreadable));
+                showError(settingsLegacyMessage(unreadable, legacyPath));
                 return;
             }
             applyLoadedSettings(s);
@@ -3307,10 +3311,13 @@ static int smokeUiCopy() {
         std::fprintf(stderr, "ui-copy: settings invalid still uses developer phrasing\n");
         return 1;
     }
-    const QString legacyMsg = settingsLegacyMessage({QStringLiteral("includeSystem")});
+    const QString legacyMsg = settingsLegacyMessage(
+        {QStringLiteral("includeSystem")}, QStringLiteral("/tmp/AppAttic.conf")
+    );
     if (!legacyMsg.contains(QLatin1String("includeSystem"))
-        || !legacyMsg.contains(QLatin1String("true nor false"))) {
-        std::fprintf(stderr, "ui-copy: settings legacy message does not name the key\n");
+        || !legacyMsg.contains(QLatin1String("true nor false"))
+        || !legacyMsg.contains(QLatin1String("/tmp/AppAttic.conf"))) {
+        std::fprintf(stderr, "ui-copy: settings legacy message does not name the key and the old file\n");
         return 1;
     }
     if (ignoredPathLabel(QStringLiteral("/tmp/Caches/Foo")) != QLatin1String("Caches/Foo")) {

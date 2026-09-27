@@ -68,7 +68,14 @@ know.
 .SH FILES
 .TP
 .I ~/.local/share/appattic/settings.json
-Confirm-before-running and ignored leftover paths. Include-system-apps is a macOS-only setting; the Linux window does not scan installed system apps.
+Confirm-before-running and ignored leftover paths. Include-system-apps is a macOS-only setting; the Linux window does not scan installed system apps. A missing file uses the defaults. A file that is malformed, or whose
+.I ignoredLeftoverPaths
+entry is not the full path a report prints, is named in an error and left unoverwritten, and the window opens with no settings until it is corrected.
+.TP
+.I $XDG_CONFIG_HOME/AppAttic/AppAttic.conf
+Settings the window used before
+.I settings.json
+existed. They are copied over the first time the window starts without one. A value there that is neither true nor false is not copied: the window names the key and this file, and opens with no settings until you correct it. Delete it to start from the defaults.
 .TP
 .I ../share/appattic/licenses
 License text for the third-party files compiled into the binary, such as the
