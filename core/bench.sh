@@ -12,7 +12,6 @@ if [[ "$(uname -s)" != Linux ]]; then
     exit 2
 fi
 root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-ROOT="$root"
 # shellcheck source=../scripts/find-zig.sh
 . "$root/../scripts/find-zig.sh"
 if ! appattic_find_zig; then

@@ -33,7 +33,6 @@ if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
     export SOURCE_DATE_EPOCH
 fi
 root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-ROOT="$root"
 out="$root/out"
 mkdir -p "$out"
 

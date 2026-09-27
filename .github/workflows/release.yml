@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 # One release at a time per ref: a re-dispatch or a re-run must not race the
 # in-flight build into the same tag's release.
@@ -19,6 +19,10 @@ jobs:
   linux-appimage:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # The only job that writes: everything else stays at the workflow's
+    # contents: read.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -31,16 +35,34 @@ jobs:
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: |
+            .build
+            .swiftpm
             .zig-cache
             .zig-cache-local
             dist/.appimage-tools
-          # No restore-keys fallback: a prefix that ignores the hash also
-          # ignores .zig-version, so it can hand back a cache a different Zig
-          # wrote.
+          # The toolchain version files and every source the caches are derived
+          # from belong in the key: a restore of a .build or .zig-cache written
+          # by another Swift, another Zig, or another source revision is a
+          # build against a tree this tag does not name. No restore-keys
+          # fallback for the same reason: a prefix that ignores the hash also
+          # ignores the toolchain and the sources, so it would hand back exactly
+          # the cache the key exists to keep out.
           key: >-
             ${{ runner.os }}-appimage-${{
             hashFiles('scripts/dep-checksums.sha256', 'scripts/deps.sh',
-            '.zig-version', 'core/src/**/*.zig') }}
+            'Package.resolved', 'Package.swift', '.swift-version',
+            '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
+            'core/src/**/*.zig') }}
+      - name: Install Swift
+        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "5.10.1"
+      # linux.yml runs this on the tag push too, but nothing makes the release
+      # wait for it: without a gate here, a failing test still ships the
+      # AppImage, because the two workflows build in parallel. It runs before
+      # the Qt install so a red suite stops the job before it spends the time.
+      - name: Test scan library
+        run: swift test --filter AppAtticScanTests --disable-automatic-resolution
       - name: Install Qt 6 and build tools
         run: sudo bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API

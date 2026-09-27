@@ -48,7 +48,10 @@ jobs:
           # history, or the check only ever sees the tip.
           fetch-depth: 0
       - name: Install shellcheck
-        run: sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends shellcheck
+        # scripts/linux-deps.sh, not a hand-written apt line: it is the install
+        # path CONTRIBUTING.md documents and the one the other distro families
+        # go through, so the lint job cannot drift from local setup.
+        run: sudo bash scripts/linux-deps.sh --install-shellcheck
       - name: Install yamllint
         # Pinned: an unpinned linter makes a green run mean "whatever
         # yamllint shipped that morning", not "this tree passes". The pin is
