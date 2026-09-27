@@ -210,7 +210,8 @@ mkdir -p "$WASM_DEST"
 while IFS= read -r f; do
     [[ -f "$f" ]] || continue
     cp -f "$f" "$WASM_DEST/"
-done < <(printf '%s\n' "$CORE_OUT"/*.wasm "$CORE_OUT"/*.cwasm | LC_ALL=C sort)
+done < <(printf '%s\n' "$CORE_OUT"/*.wasm "$CORE_OUT"/*.cwasm "$CORE_OUT"/*.cwasm.stamp \
+    | LC_ALL=C sort)
 
 DESKTOP="$ROOT/packaging/org.appattic.AppAttic.desktop"
 ICON="$ROOT/packaging/appattic.svg"

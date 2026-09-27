@@ -198,6 +198,89 @@ static int cache_put(const char *path, const struct stat *st, wasmtime_module_t 
     return 0;
 }
 
+/* Which wasm a precompiled image was built from, recorded beside it as
+   `<module>.wasm.cwasm.stamp` as "size mtime_s mtime_ns" of the source at
+   compile time.
+
+   The image itself carries no reference back to its source, so mtime is all a
+   reader had to go on, and mtime is not an identity: the packaging scripts copy
+   the wasm and the image with `cp -f` and stamp each with its own copy time, so
+   an image left over from an earlier build reads as newer than the source it is
+   compared against. That deserializes, and the scan then runs the old plugin.
+   The stamp is written after the image is in place, so a build that dies
+   between the two leaves an image with no stamp, which no reader accepts. */
+
+#define STAMP_SUFFIX ".stamp"
+#define STAMP_FORMAT "%ld %ld %ld\n"
+#define STAMP_SCAN "%ld %ld %ld"
+
+/* `path` is a wasm path; the image and its stamp are siblings of it. */
+static int image_path_for(const char *wasm_path, char *out, size_t outlen) {
+    int n = snprintf(out, outlen, "%s.cwasm", wasm_path);
+    return n > 0 && n < (int)outlen;
+}
+
+static int stamp_path_for(const char *image_path, char *out, size_t outlen) {
+    int n = snprintf(out, outlen, "%s" STAMP_SUFFIX, image_path);
+    return n > 0 && n < (int)outlen;
+}
+
+/* 1 when the stamp names exactly the wasm `st` describes. A missing, short,
+   unparsable or differing stamp is a miss, so an image from any other build
+   costs a compile instead of serving another build's code. */
+static int stamp_matches_wasm(const char *image_path, const struct stat *st) {
+    char spath[4096];
+    if (!stamp_path_for(image_path, spath, sizeof spath)) return 0;
+    FILE *f = fopen(spath, "rb");
+    if (!f) return 0;
+    char line[128];
+    size_t got = fread(line, 1, sizeof line - 1, f);
+    fclose(f);
+    line[got] = '\0';
+    long size = 0, mtime_s = 0, mtime_ns = 0;
+    if (sscanf(line, STAMP_SCAN, &size, &mtime_s, &mtime_ns) != 3) return 0;
+    return size == (long)st->st_size && mtime_s == (long)st->st_mtim.tv_sec
+        && mtime_ns == (long)st->st_mtim.tv_nsec;
+}
+
+/* Write the stamp for `wasm_path`'s image. 0 on success. The image is renamed
+   into place first, so this never leaves a stamp claiming an image that is not
+   there; a failure here leaves the image unusable, and the caller reports it
+   rather than shipping an image no reader will accept. */
+static int write_stamp(const char *wasm_path, const struct stat *st, char *err, size_t errlen) {
+    Err e = {err, errlen, 0};
+    char ipath[4096], spath[4096], tmp[4096];
+    if (!image_path_for(wasm_path, ipath, sizeof ipath)
+        || !stamp_path_for(ipath, spath, sizeof spath)) {
+        fail_msg(&e, "precompiled module path too long");
+        return 1;
+    }
+    if (snprintf(tmp, sizeof tmp, "%s.tmp", spath) >= (int)sizeof tmp) {
+        fail_msg(&e, "precompiled module path too long");
+        return 1;
+    }
+    FILE *f = fopen(tmp, "wb");
+    if (!f) {
+        fail_msg(&e, "cannot write precompiled module stamp");
+        return 1;
+    }
+    const int n = fprintf(f, STAMP_FORMAT, (long)st->st_size, (long)st->st_mtim.tv_sec,
+                          (long)st->st_mtim.tv_nsec);
+    const int ok = n > 0 && fflush(f) == 0 && fsync(fileno(f)) == 0;
+    fclose(f);
+    if (!ok) {
+        unlink(tmp);
+        fail_msg(&e, "cannot write precompiled module stamp");
+        return 1;
+    }
+    if (rename(tmp, spath) != 0) {
+        unlink(tmp);
+        fail_msg(&e, "cannot replace precompiled module stamp");
+        return 1;
+    }
+    return 0;
+}
+
 /* Compiled module for `path`, from the cache or freshly compiled. NULL on
    error, with `e` set. The caller borrows it; the cache owns it. */
 static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *path, Err *e) {
@@ -221,12 +304,15 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
     pthread_mutex_unlock(&g_mod_lock);
 
     /* Precompiled sibling written by `core/build.sh` (host --precompile):
-       deserializing is far cheaper than compiling. A stale or mismatched image
-       fails here, and we fall through to compiling the wasm. */
+       deserializing is far cheaper than compiling. Its stamp has to name this
+       wasm: an image built from other bytes is not a faster compile, it is the
+       wrong module running the scan. An unstamped or mismatched image falls
+       through to compiling the wasm, which is what shipped trees without one
+       did anyway. */
     char cwasm[4096];
-    if (snprintf(cwasm, sizeof cwasm, "%s.cwasm", path) < (int)sizeof cwasm) {
+    if (image_path_for(path, cwasm, sizeof cwasm)) {
         struct stat cs;
-        if (stat(cwasm, &cs) == 0 && cs.st_mtime >= st.st_mtime) {
+        if (stat(cwasm, &cs) == 0 && stamp_matches_wasm(cwasm, &st)) {
             wasmtime_module_t *pre = NULL;
             wasmtime_error_t *perr = wasmtime_module_deserialize_file(engine, cwasm, &pre);
             if (!perr && pre) {
@@ -643,11 +729,11 @@ static int precompile_locked(
         return 1;
     }
     const size_t n = image.size;
-    /* `module_for_path` deserializes any `<module>.cwasm` whose mtime is not
-       older than the wasm, so writing the image in place would let a reader, or
-       a crash, see a truncated module. Write a sibling temp and rename: rename
-       is atomic within the directory, so a reader sees the old image or the new
-       one and never a partial one. */
+    /* `module_for_path` deserializes `<module>.cwasm` whenever its stamp names
+       this wasm, so writing the image in place would let a reader, or a crash,
+       see a truncated module under a stamp that still matches. Write a sibling
+       temp and rename: rename is atomic within the directory, so a reader sees
+       the old image or the new one and never a partial one. */
     char tmp_path[4096];
     if (snprintf(tmp_path, sizeof tmp_path, "%s.tmp", out_path) >= (int)sizeof tmp_path) {
         fail_msg(&e, "precompiled module path too long");
@@ -672,6 +758,17 @@ static int precompile_locked(
     if (rename(tmp_path, out_path) != 0) {
         unlink(tmp_path);
         fail_msg(&e, "cannot replace precompiled module");
+        return 1;
+    }
+    /* The image is in place; stamp it with the wasm it came from. Without this
+       the image is dead weight: no reader accepts an unstamped one. */
+    struct stat src;
+    if (stat(wasm_path, &src) != 0) {
+        fail_msg(&e, "cannot stat precompiled module source");
+        return 1;
+    }
+    if (write_stamp(wasm_path, &src, err, errlen) != 0) {
+        unlink(out_path);
         return 1;
     }
     return 0;

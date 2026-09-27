@@ -175,7 +175,7 @@ zig fmt --check "$root/src" "$root/bench"
 # (AppImage) or by pattern (cmake install). Without this, the output of a
 # removed or renamed plugin survives in the tree and ships in the artifact.
 # Only the full build clears it; test and test-core leave the artifacts alone.
-rm -f "$out"/*.wasm "$out"/*.cwasm "$out"/*.cwasm.tmp
+rm -f "$out"/*.wasm "$out"/*.cwasm "$out"/*.cwasm.tmp "$out"/*.cwasm.stamp
 
 # One artifact name for every consumer of it: the emit below, the built list
 # and the host's try line. core.zig is the one source whose artifact is not

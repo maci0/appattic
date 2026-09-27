@@ -11,7 +11,7 @@ static void print_json(const char *json, size_t len, void *user) {
 
 static void print_usage(FILE *fp, const char *argv0) {
     fprintf(fp, "usage: %s <core.wasm> <plugin.wasm[=tag]>...\n", argv0);
-    fprintf(fp, "       %s --precompile <module.wasm>...   (writes <module>.wasm.cwasm)\n", argv0);
+    fprintf(fp, "       %s --precompile <module.wasm>...   (writes <module>.wasm.cwasm and its .stamp)\n", argv0);
     fprintf(fp, "tag 0 = missing coeffect; default 1. container-runtime: 1 docker, 2 podman.\n");
     fprintf(fp, "not loaded: chocolatey nuget appstore steam (backlog)\n");
     fprintf(fp, "host.exec allow: snap pacman/paru/yay/pikaur -Q* apt -s autoremove apt list --upgradable dpkg -l\n");
