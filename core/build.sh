@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# WASM core + plugins + host. Usage: ./core/build.sh [test <name.zig>]
+# WASM core + plugins + host.
+# Usage: ./core/build.sh [test <name.zig> | test-core]
 set -euo pipefail
 export LC_ALL=C
 export LANG=C
 export TZ=UTC
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: $0 [test <name.zig>]"
+    echo "Usage: $0 [test <name.zig> | test-core]"
     echo "  (no args)          WASM + all zig tests + host (needs wasmtime C API)"
     echo "  test brew.zig      one plugin (fast edit loop)"
+    echo "  test-core          zig fmt --check + every zig test (no wasmtime, no Qt)"
     exit 0
 fi
 
@@ -19,9 +21,9 @@ if [ "${1:-}" = "test" ] && [ -z "${2:-}" ]; then
     exit 2
 fi
 
-if [ -n "${1:-}" ] && [ "${1:-}" != "test" ]; then
+if [ -n "${1:-}" ] && [ "${1:-}" != "test" ] && [ "${1:-}" != "test-core" ]; then
     echo "error: unknown argument: $1" >&2
-    echo "Usage: $0 [test <name.zig>]" >&2
+    echo "Usage: $0 [test <name.zig> | test-core]" >&2
     echo "       $0 --help" >&2
     exit 2
 fi
@@ -31,6 +33,7 @@ if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
     export SOURCE_DATE_EPOCH
 fi
 root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ROOT="$root"
 out="$root/out"
 mkdir -p "$out"
 
@@ -38,17 +41,10 @@ export ZIG_GLOBAL_CACHE_DIR="${ZIG_GLOBAL_CACHE_DIR:-$root/../.zig-cache}"
 export ZIG_LOCAL_CACHE_DIR="${ZIG_LOCAL_CACHE_DIR:-$root/../.zig-cache-local}"
 mkdir -p "$ZIG_GLOBAL_CACHE_DIR" "$ZIG_LOCAL_CACHE_DIR"
 
-if ! command -v zig >/dev/null 2>&1; then
-    if [ -x /opt/zig/zig ]; then
-        export PATH="/opt/zig:$PATH"
-    elif [ -x /usr/local/bin/zig ]; then
-        export PATH="/usr/local/bin:$PATH"
-    elif [ -x "$root/../.deps/zig/zig" ]; then
-        export PATH="$root/../.deps/zig:$PATH"
-    fi
-fi
-if ! command -v zig >/dev/null 2>&1; then
-    echo "zig missing. macOS: brew install zig. Linux: scripts/linux-deps.sh --install" >&2
+# shellcheck source=../scripts/find-zig.sh
+. "$root/../scripts/find-zig.sh"
+if ! appattic_find_zig; then
+    echo "zig missing. macOS: brew install zig. Linux: scripts/linux-deps.sh --install-zig" >&2
     echo "Then re-run $0" >&2
     exit 1
 fi
@@ -79,6 +75,41 @@ if [ "${1:-}" = "test" ]; then
     exit 0
 fi
 
+# One source per WASM artifact. core.zig is renamed appattic_core.wasm for the host.
+wasm_sources=(
+    core.zig
+    container_runtime.zig snapd.zig
+    path_xdg_config.zig path_xdg_data.zig path_xdg_cache.zig path_xdg_state.zig
+    path_xdg_lib.zig path_var_app.zig path_user_bin.zig path_home_dot.zig path_shadow.zig
+    pacman.zig aur.zig apt.zig dnf.zig zypper.zig flatpak.zig
+    npm.zig pnpm.zig bun.zig pipx.zig uv.zig brew.zig gem.zig composer.zig pip.zig deno.zig
+)
+
+test_modules=(
+    host_exec.zig jsonbuf.zig jsonscan.zig path_listing.zig
+)
+# Every WASM artifact is unit-tested too, derived from wasm_sources so adding a
+# plugin cannot silently skip its tests.
+for src in "${wasm_sources[@]}"; do
+    if [ "$src" != "core.zig" ]; then test_modules+=("$src"); fi
+done
+
+zig_test() {
+    zig test "$root/src/$1"
+}
+
+# zig fmt plus every zig test, with no WASM or host build: the gate a
+# contributor runs when editing core/src, and what scripts/check.sh calls.
+if [ "${1:-}" = "test-core" ]; then
+    zig fmt --check "$root/src" "$root/bench"
+    for m in "${test_modules[@]}"; do
+        echo "-- $m"
+        zig_test "$m"
+    done
+    echo "zig: ${#test_modules[@]} modules ok"
+    exit 0
+fi
+
 zig fmt --check "$root/src"
 
 zig_wasm() {
@@ -92,32 +123,12 @@ zig_wasm() {
         "$root/src/$1"
 }
 
-# One source per WASM artifact. core.zig is renamed appattic_core.wasm for the host.
-wasm_sources=(
-    core.zig
-    container_runtime.zig snapd.zig
-    path_xdg_config.zig path_xdg_data.zig path_xdg_cache.zig path_xdg_state.zig
-    path_xdg_lib.zig path_var_app.zig path_user_bin.zig path_home_dot.zig path_shadow.zig
-    pacman.zig aur.zig apt.zig dnf.zig zypper.zig flatpak.zig
-    npm.zig pnpm.zig bun.zig pipx.zig uv.zig brew.zig gem.zig composer.zig pip.zig deno.zig
-)
 for src in "${wasm_sources[@]}"; do
     dst="${src%.zig}.wasm"
     if [ "$dst" = "core.wasm" ]; then dst="appattic_core.wasm"; fi
     zig_wasm "$src" "$dst"
 done
 
-zig_test() {
-    zig test "$root/src/$1"
-}
-test_modules=(
-    host_exec.zig jsonbuf.zig jsonscan.zig path_listing.zig
-)
-# Every WASM artifact is unit-tested too, derived from wasm_sources so adding a
-# plugin cannot silently skip its tests.
-for src in "${wasm_sources[@]}"; do
-    if [ "$src" != "core.zig" ]; then test_modules+=("$src"); fi
-done
 for m in "${test_modules[@]}"; do
     zig_test "$m"
 done

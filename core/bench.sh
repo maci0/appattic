@@ -12,8 +12,13 @@ if [[ "$(uname -s)" != Linux ]]; then
     exit 2
 fi
 root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-if ! command -v zig >/dev/null 2>&1; then
-    if [ -x /opt/zig/zig ]; then export PATH="/opt/zig:$PATH"; fi
+ROOT="$root"
+# shellcheck source=../scripts/find-zig.sh
+. "$root/../scripts/find-zig.sh"
+if ! appattic_find_zig; then
+    echo "error: zig missing (need the .zig-version toolchain)" >&2
+    echo "macOS: brew install zig. Linux: bash scripts/linux-deps.sh --install-zig" >&2
+    exit 1
 fi
 export ZIG_GLOBAL_CACHE_DIR="${ZIG_GLOBAL_CACHE_DIR:-$root/../.zig-cache}"
 export ZIG_LOCAL_CACHE_DIR="${ZIG_LOCAL_CACHE_DIR:-$root/../.zig-cache-local}"

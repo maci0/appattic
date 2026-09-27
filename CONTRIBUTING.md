@@ -4,10 +4,11 @@ Setup, tests, and layout: [README.md](README.md).
 
 ```bash
 ./build.sh --help
-bash scripts/check.sh          # fast: lint + AppAtticScanTests + CLI
+bash scripts/check.sh          # fast: lint + Zig core + AppAtticScanTests + CLI
 bash scripts/check.sh --qt     # full Linux CI parity, including Qt/WASM proof
 swift test --filter DiskSizeTests --disable-automatic-resolution
 ./core/build.sh test brew.zig
+./core/build.sh test-core
 ```
 
 PRs run `.github/workflows/linux.yml` (lint, Ubuntu tests, jammy, archlinux Qt link). Match those flags locally: `--disable-automatic-resolution` on `swift test` / `swift build`, and `APPATTIC_NO_MAC_UI=1` on macOS (`scripts/check.sh` sets it for you). The lint job checks out full history so `scripts/lint.sh` can reject AI tool credits in commit messages; a shallow clone sees fewer commits and says how many.

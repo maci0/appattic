@@ -117,18 +117,11 @@ command -v clang++ >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || fail_dep
     "C++ compiler missing" \
     "Debian/Ubuntu: apt install clang. Fedora: dnf install clang. Arch: pacman -S clang."
 
-if ! command -v zig >/dev/null 2>&1; then
-    if [[ -x /opt/zig/zig ]]; then
-        export PATH="/opt/zig:${PATH:-}"
-    elif [[ -x /usr/local/bin/zig ]]; then
-        export PATH="/usr/local/bin:${PATH:-}"
-    elif [[ -x "$ROOT/.deps/zig/zig" ]]; then
-        export PATH="$ROOT/.deps/zig:${PATH:-}"
-    fi
-fi
-command -v zig >/dev/null 2>&1 || fail_dep \
+# shellcheck source=find-zig.sh
+. "$ROOT/scripts/find-zig.sh"
+appattic_find_zig || fail_dep \
     "zig missing" \
-    "Install zig: bash scripts/linux-deps.sh --install"
+    "Install zig: bash scripts/linux-deps.sh --install-zig"
 
 if [[ -z "${WASMTIME_DIR:-}" ]]; then
     if [[ -f /opt/wasmtime-c-api/include/wasmtime.h ]]; then

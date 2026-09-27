@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fast local checks (lint + scan tests + CLI).
+# Fast local checks (lint + Zig core tests + scan tests + CLI).
 # Full Linux CI parity: bash scripts/check.sh --qt
 # Usage: bash scripts/check.sh [--qt]
 set -euo pipefail
@@ -18,7 +18,7 @@ for arg in "$@"; do
             cat <<'EOF'
 Usage: bash scripts/check.sh [--qt]
 
-  (default)  lint + AppAtticScanTests + CLI debug build
+  (default)  lint + Zig core tests + AppAtticScanTests + CLI debug build
   --qt       full Linux CI parity, including bash scripts/linux-qt-link.sh
              and the scripts/verify-qt-link.sh proof checks
 EOF
@@ -46,6 +46,16 @@ fi
 
 echo "== lint =="
 bash "$ROOT/scripts/lint.sh"
+
+# The Zig core has its own suite, and CI reaches it through the Qt link. Run it
+# here too, so a contributor editing core/src/ has a gate without Qt 6 or
+# Wasmtime installed.
+echo "== Zig core =="
+# shellcheck source=find-zig.sh
+. "$ROOT/scripts/find-zig.sh"
+if appattic_require_zig; then
+    bash "$ROOT/core/build.sh" test-core
+fi
 
 echo "== AppAtticScanTests =="
 swift test --filter AppAtticScanTests --disable-automatic-resolution

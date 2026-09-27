@@ -131,7 +131,7 @@ Tests (same flags as `.github/workflows/linux.yml`):
 
 ```bash
 bash scripts/check.sh
-# fast: lint + AppAtticScanTests + CLI debug build
+# fast: lint + Zig core tests + AppAtticScanTests + CLI debug build
 bash scripts/check.sh --qt
 # full Linux CI parity, including Qt/WASM proof
 
@@ -139,12 +139,13 @@ swift build --target AppAtticScan -c debug --disable-automatic-resolution
 swift test --filter AppAtticScanTests --disable-automatic-resolution
 swift test --filter DiskSizeTests --disable-automatic-resolution   # one class
 ./core/build.sh test brew.zig                                  # one Zig plugin
+./core/build.sh test-core                                      # whole Zig core, no wasmtime/Qt
 bash scripts/lint.sh
 ```
 
 `swift test` and `swift build` need unrestricted permissions in sandboxed environments.
 
-`scripts/lint.sh` runs shellcheck on the build scripts, yamllint on the workflow and Flatpak YAML, checks that the three version declarations agree, compiles `hostexec` with warnings as errors, runs `zig fmt --check` when `zig` is on PATH, and rejects any commit message that credits an AI tool (`Co-authored-by: Cursor` and friends): commit messages carry no tool attribution, and that check is what keeps it that way. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the fast lint + test + CLI loop; `scripts/check.sh --qt` reproduces the full Linux CI verification.
+`scripts/lint.sh` runs shellcheck on the build scripts, yamllint on the workflow and Flatpak YAML, checks that the three version declarations agree, compiles `hostexec` with warnings as errors, runs `zig fmt --check` when `zig` is on PATH, and rejects any commit message that credits an AI tool (`Co-authored-by: Cursor` and friends): commit messages carry no tool attribution, and that check is what keeps it that way. Linux CI runs that script as a blocking job. `core/build.sh` also fails if Zig sources are unformatted or `hostexec_test` warns. `scripts/check.sh` is the fast lint + Zig core + test + CLI loop; `scripts/check.sh --qt` reproduces the full Linux CI verification. The Zig step needs only `zig` at `.zig-version`; without it `scripts/check.sh` says so and skips, and CI installs the toolchain first so the skip cannot pass there.
 
 ## Native UI
 

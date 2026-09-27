@@ -97,23 +97,10 @@ check_commit_messages() {
 }
 check_commit_messages
 
-if ! command -v zig >/dev/null 2>&1; then
-    if [[ -x /opt/zig/zig ]]; then
-        export PATH="/opt/zig:${PATH:-}"
-    elif [[ -x /usr/local/bin/zig ]]; then
-        export PATH="/usr/local/bin:${PATH:-}"
-    elif [[ -x "$ROOT/.deps/zig/zig" ]]; then
-        export PATH="$ROOT/.deps/zig:${PATH:-}"
-    fi
-fi
-if command -v zig >/dev/null 2>&1; then
+# A local checkout without zig skips the check, but CI must never pass on the
+# skip: the lint job installs the pinned toolchain first.
+# shellcheck source=find-zig.sh
+. "$ROOT/scripts/find-zig.sh"
+if appattic_require_zig; then
     zig fmt --check "$ROOT/core/src" "$ROOT/core/bench"
-else
-    # A local checkout without zig skips the check, but CI must never pass on
-    # the skip: the lint job installs the pinned toolchain first.
-    if [[ "${CI:-}" == "true" ]]; then
-        echo "error: zig missing in CI; run: bash scripts/linux-deps.sh --install-zig" >&2
-        exit 1
-    fi
-    echo "note: zig not on PATH, skip zig fmt --check" >&2
 fi

@@ -108,14 +108,9 @@ command -v cmake >/dev/null 2>&1 || fail_dep "cmake missing" "bash scripts/linux
 command -v patchelf >/dev/null 2>&1 || fail_dep "patchelf missing" "bash scripts/linux-deps.sh --install"
 command -v curl >/dev/null 2>&1 || fail_dep "curl missing" "install curl"
 
-if ! command -v zig >/dev/null 2>&1; then
-    if [[ -x /opt/zig/zig ]]; then
-        export PATH="/opt/zig:${PATH:-}"
-    elif [[ -x "$ROOT/.deps/zig/zig" ]]; then
-        export PATH="$ROOT/.deps/zig:${PATH:-}"
-    fi
-fi
-command -v zig >/dev/null 2>&1 || fail_dep "zig missing" "bash scripts/linux-deps.sh --install"
+# shellcheck source=find-zig.sh
+. "$ROOT/scripts/find-zig.sh"
+appattic_find_zig || fail_dep "zig missing" "bash scripts/linux-deps.sh --install-zig"
 
 wasmtime_libdir() {
     if [[ -d "${WASMTIME_DIR}/lib" ]]; then
