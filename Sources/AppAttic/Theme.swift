@@ -30,13 +30,24 @@ extension Color {
     )
     static let appBlue = Color.system(.blue)
     static let appOnAccent = Color.white
-    static let appRed = Color.system(.red)
-    // System yellow is unreadable on a light pane. Darker amber in light mode.
-    static let appYellow = Color.adaptive(
-        light: Color(red: 0.62, green: 0.40, blue: 0.0),
-        dark: Color.system(.yellow)
+    // Remove, review, and keep are the same three values in the Qt window
+    // (`toneFrom` in ui/linux-qt/main.cpp) and in the CLI (`CliTone` in
+    // Sources/AppAtticScan/CLIParse.swift). The system reds and greens are not
+    // those values: on a light pane system green reads 1.9:1 against white,
+    // so the light pair is spelled out. Both are Apple's dark system values,
+    // which the shared dark pair already matches.
+    static let appRed = Color.adaptive(
+        light: Color(red: 0.753, green: 0.110, blue: 0.157),
+        dark: Color(red: 1.0, green: 0.271, blue: 0.227)
     )
-    static let appGreen = Color.system(.green)
+    static let appYellow = Color.adaptive(
+        light: Color(red: 0.620, green: 0.400, blue: 0.0),
+        dark: Color(red: 1.0, green: 0.839, blue: 0.039)
+    )
+    static let appGreen = Color.adaptive(
+        light: Color(red: 0.141, green: 0.541, blue: 0.239),
+        dark: Color(red: 0.188, green: 0.820, blue: 0.345)
+    )
 }
 
 /// Type roles, the same ones the `aa*Font` functions in `uistyle.h` give the

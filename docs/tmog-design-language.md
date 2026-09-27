@@ -145,7 +145,7 @@ Keep: native toolkit, summary-then-depth, tree verbs, size-sorted installed list
 | Missing meter stays | Empty copy when a manager is absent. Sidebar item stays |
 | pacman vs apt | Per-family queries, same scan |
 | System light/dark | System appearance only |
-| One status palette across all three surfaces | Remove, review, and keep are the same three colors in the AppKit window, the Qt window, and the CLI. The CLI reads `COLORFGBG` and falls back to the light set, because the dark set's amber is 1.4:1 on white |
+| One status palette across all three surfaces | Remove, review, and keep are the same three colors in the AppKit window, the Qt window, and the CLI. Both pairs are spelled out as literal values in all three, never as the platform's system red, yellow, or green: on a light pane the system colors are not the shared values and system green reads 1.9:1 against white. The CLI reads `COLORFGBG` and falls back to the light set, because the dark set's amber is 1.4:1 on white |
 | VFD / bloom / phosphor | Not used. Finder / Activity Monitor / GNOME Settings density |
 
 AppAttic cleanup still requires confirm and a reviewed `sh` script. TMOG can "uninstall pretty trivially." AppAttic's product language is leftovers, stale, outdated, packages. Brand is those words, not a phosphor wordmark.
