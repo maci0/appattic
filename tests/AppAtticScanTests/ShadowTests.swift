@@ -216,8 +216,29 @@ final class ShadowTests: XCTestCase {
             shadows: "/usr/bin/python3"
         )
         let cmd = leftoverRemoveCommand(for: item)
-        XCTAssertTrue(cmd.contains("/home/u/.local/bin/python3"), cmd)
-        XCTAssertFalse(cmd.contains("/usr/bin/python3"), cmd)
+        // Exact, not a substring: a command that only mentions the overlay
+        // path, a comment, or a `rm` without `-rf` removes nothing and would
+        // still pass a `contains` check.
+        XCTAssertEqual(cmd, "rm -rf " + shellQuote("/home/u/.local/bin/python3"))
+    }
+
+    /// The packaged file is protected wherever it appears, including in the
+    /// extra paths the scan collected beside the shadow itself.
+    func testShadowCleanupDropsThePackagedFileFromExtraPaths() {
+        let item = LeftoverItem(
+            name: "python3",
+            path: "/home/u/.local/bin/python3",
+            root: ".local/bin",
+            kind: "file",
+            status: "shadow",
+            shadows: "/usr/bin/python3",
+            extra_paths: ["/home/u/.local/share/python3", "/usr/bin/python3"]
+        )
+        XCTAssertEqual(
+            leftoverRemoveCommand(for: item),
+            "rm -rf " + shellQuote("/home/u/.local/bin/python3")
+                + " " + shellQuote("/home/u/.local/share/python3")
+        )
     }
 
     func testVisibleLeftoversIncludeShadowsAndRespectIgnore() {

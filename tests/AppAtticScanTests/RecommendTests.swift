@@ -690,4 +690,45 @@ final class RecommendTests: XCTestCase {
         XCTAssertEqual(v.tier, "review", v.reason)
         XCTAssertFalse(v.reason.contains("too new"), v.reason)
     }
+
+    /// `evaluateAll` is the entry point the scan uses, and its one job beyond
+    /// mapping is handing every row the same `now`. A verdict that read the
+    /// clock itself would rank a scan that took a few minutes differently
+    /// depending on which row it was, and the day counts in the reason text
+    /// are where that shows: they are measured against `now`, not against the
+    /// wall clock at the moment the row is judged.
+    func testEvaluateAllMeasuresEveryRowAgainstTheSameNow() {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let idle = Software(
+            name: "Sketch",
+            kind: "app",
+            path: "/Applications/Sketch.app",
+            source: "brew-cask",
+            lastUsed: now.addingTimeInterval(-200 * 86400)
+        )
+        let active = Software(
+            name: "iTerm",
+            kind: "app",
+            path: "/Applications/iTerm.app",
+            source: "brew-cask",
+            lastUsed: now.addingTimeInterval(-5 * 86400)
+        )
+        let verdicts = evaluateAll([idle, active], now: now)
+        XCTAssertEqual(verdicts.map(\.tier), ["remove", "keep"])
+        XCTAssertEqual(verdicts[0].reason, "Not used for \(humanDays(200)). Easy to reinstall with brew.")
+        XCTAssertEqual(verdicts[1].reason, "Used \(humanDays(5)) ago: actively in use")
+    }
+
+    /// The same list judged without a `now` is the default-argument path, and
+    /// it has to keep the order it was given: the report prints rows in this
+    /// order and a reordering would shuffle the page between runs.
+    func testEvaluateAllKeepsTheInputOrder() {
+        let now = Date(timeIntervalSince1970: 1_787_011_200)
+        let names = ["a", "b", "c", "d"]
+        let software = names.map {
+            Software(name: $0, kind: "app", path: "/Applications/\($0).app", source: "pkg/other",
+                     lastUsed: now.addingTimeInterval(-5 * 86400))
+        }
+        XCTAssertEqual(evaluateAll(software, now: now).map(\.software.name), names)
+    }
 }

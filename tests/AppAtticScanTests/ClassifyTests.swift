@@ -1529,8 +1529,10 @@ final class ClassifyTests: XCTestCase {
         let orphan = DataItem(path: "/tmp/Foo", name: "Foo", rootLabel: "Application Support", kind: "dir", status: "orphaned")
         let system = DataItem(path: "/tmp/Apple", name: "Apple", rootLabel: "Caches", kind: "dir", status: "system")
         applyOrphanReasons([orphan, system])
-        XCTAssertNotNil(orphan.reason)
-        XCTAssertNotNil(orphan.summary)
+        // Exact text, not just non-nil: a reason that filled every field with
+        // the same placeholder string would pass a nil check.
+        XCTAssertEqual(orphan.reason, orphanReason(rootLabel: "Application Support", kind: "dir"))
+        XCTAssertEqual(orphan.summary, leftoverSummary(rootLabel: "Application Support", kind: "dir", name: "Foo"))
         XCTAssertNil(system.reason)
         XCTAssertNil(system.summary)
     }
@@ -1810,6 +1812,42 @@ final class ClassifyTests: XCTestCase {
         for line in ppa.split(separator: "\n") {
             XCTAssertTrue(line.hasPrefix("#"), "injected line: \(line)")
         }
+    }
+
+    /// The names `leftoverAppBlurb` tries against the blurb tables, in the
+    /// order it tries them. A duplicate or a skipped label is wasted work and
+    /// a wrong first entry is the wrong blurb on the row, so both are pinned
+    /// here rather than only through the three blurb cases above.
+    func testLeftoverLookupTokensAreFoldedDedupedAndSkipped() {
+        let tokens = leftoverLookupTokens(name: "com.example.Foo")
+        XCTAssertFalse(tokens.isEmpty)
+        XCTAssertEqual(tokens.first, "foo", "the display name is looked up first")
+        XCTAssertEqual(Set(tokens).count, tokens.count, "duplicates in \(tokens)")
+        for token in tokens {
+            XCTAssertEqual(token, token.lowercased(), token)
+            XCTAssertGreaterThanOrEqual(token.count, 2, token)
+            XCTAssertFalse(leftoverLookupSkip.contains(token), token)
+        }
+        // "com" is in the skip set; a generic DNS label must never reach a
+        // lookup table where it would match the first entry indexed under it.
+        XCTAssertFalse(tokens.contains("com"), "\(tokens)")
+    }
+
+    /// A display name with a space also goes out in its dashed spelling, the
+    /// form Homebrew uses for taps and casks.
+    func testLeftoverLookupTokensAddTheDashedSpelling() {
+        let tokens = leftoverLookupTokens(name: "Better Display")
+        XCTAssertTrue(tokens.contains("better display"), "\(tokens)")
+        XCTAssertTrue(tokens.contains("better-display"), "\(tokens)")
+    }
+
+    /// The same list, whatever the input folds to, so the report and the
+    /// lookup agree on a row's identity.
+    func testLeftoverLookupTokensAreStableAcrossCaseAndSuffix() {
+        let plain = leftoverLookupTokens(name: "Foo")
+        let suffixed = leftoverLookupTokens(name: "Foo.savedstate")
+        XCTAssertEqual(plain, suffixed)
+        XCTAssertEqual(plain, leftoverLookupTokens(name: "FOO"))
     }
 
     func testPpaSourcesPathRejectsParentTraversal() {

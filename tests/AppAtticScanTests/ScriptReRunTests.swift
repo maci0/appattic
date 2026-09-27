@@ -11,6 +11,8 @@ final class ScriptReRunTests: XCTestCase {
     /// Long enough for a `cxbottle` invocation, short enough that a child
     /// waiting on a tty fails the test instead of wedging the suite.
     private static let childTimeout: TimeInterval = 20
+    /// How long a terminated child is given to go away before it is killed.
+    private static let terminateGrace: TimeInterval = 5
 
     private final class Output {
         var text = ""
@@ -41,9 +43,33 @@ final class ScriptReRunTests: XCTestCase {
             process.terminate()
             XCTFail("child did not exit within \(Self.childTimeout)s: \(script)")
             _ = drained.wait(timeout: .now() + 5)
+            // `waitUntilExit` has no deadline, so a child that ignores
+            // SIGTERM would wedge the whole suite instead of failing this
+            // test. Escalate, then give up on the reaped status: the
+            // assertion above already failed.
+            stopChild(process)
+        } else {
+            process.waitUntilExit()
         }
-        process.waitUntilExit()
         return (process.terminationStatus, output.text)
+    }
+
+    /// Bounded reap: SIGTERM, then SIGKILL, then move on.
+    private func stopChild(_ process: Process) {
+        let deadline = Date().addingTimeInterval(Self.terminateGrace)
+        while process.isRunning && Date() < deadline {
+            usleep(50_000)
+        }
+        guard process.isRunning else { return }
+        let killer = Process()
+        killer.executableURL = URL(fileURLWithPath: "/bin/kill")
+        killer.arguments = ["-9", String(process.processIdentifier)]
+        try? killer.run()
+        killer.waitUntilExit()
+        let hard = Date().addingTimeInterval(Self.terminateGrace)
+        while process.isRunning && Date() < hard {
+            usleep(50_000)
+        }
     }
 
     private func parses(_ script: String, file: StaticString = #filePath, line: UInt = #line) throws {
@@ -152,8 +178,9 @@ final class ScriptReRunTests: XCTestCase {
     /// The CrossOver bottle delete ran against a bottle that a previous run
     /// removed. `cxbottle --delete` exits nonzero on a bottle that is not
     /// there, and under `set -e` that ends the script before the lines after
-    /// it. No `cxbottle` is needed to prove the guard: the bottle directory is
-    /// already gone, so both runs must skip the delete and reach the end.
+    /// it. The stub below fails every invocation the way the real tool does on
+    /// a missing bottle, so a delete that is not skipped strands the script
+    /// instead of quietly passing.
     func testCrossOverBottleDeleteOverAnAlreadyRemovedBottleIsANoOp() throws {
         // Create the bottle and delete it, so "already removed" is a state this
         // test established rather than a path nothing ever touched.
@@ -165,16 +192,38 @@ final class ScriptReRunTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
 
-        let cmd = crossoverDeleteCommand(bottleName: "Gone", bottlePath: missing.path)
-        let script = "set -e\n\(cmd)\nprintf done"
+        // A stub on PATH, so the test does not depend on whether CrossOver is
+        // installed here. `whichCommand` caches its search list for the
+        // process, so a real `cxbottle` found first by an earlier test still
+        // wins; the guard assertions below hold either way, and the stub only
+        // makes the "delete never ran" half unconditional.
+        let bin = root.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let stub = bin.appendingPathComponent("cxbottle")
+        try "#!/bin/sh\nprintf 'cxbottle %s\\n' \"$*\" >&2\nexit 1\n".write(to: stub, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+        let savedPath = ProcessInfo.processInfo.environment["PATH"]
+        addTeardownBlock {
+            if let savedPath { setenv("PATH", savedPath, 1) } else { unsetenv("PATH") }
+        }
+        setenv("PATH", "\(bin.path):\(savedPath ?? "")", 1)
 
+        let cmd = crossoverDeleteCommand(bottleName: "Gone", bottlePath: missing.path)
+        let lines = cmd.split(separator: "\n").map(String.init)
+        let delete = try XCTUnwrap(lines.last, "the delete must be the last line")
+        let guardLine = try XCTUnwrap(parseGuardedRemove(delete), "untrapped delete: \(delete)")
+        XCTAssertEqual(guardLine.present, "test -d \(shellQuote(missing.path))", delete)
+        XCTAssertTrue(guardLine.action.contains("--delete"), delete)
+
+        let script = "set -e\n\(cmd)\nprintf done"
         for attempt in 1...2 {
-            // `cxbottle` may or may not be installed here, and its own
-            // complaint is the `|| true` line's business. What matters is that
-            // the script reaches its last line both times.
+            // The uninstall line is `|| true`, so the stub's complaint is that
+            // line's business. The delete line is not: it has to be skipped, or
+            // `set -e` stops the script before `printf done`.
             let (status, text) = try run(script)
             XCTAssertEqual(status, 0, "run \(attempt): \(text)")
             XCTAssertTrue(text.hasSuffix("done"), "run \(attempt): \(text)")
+            XCTAssertFalse(text.contains("--delete"), "delete ran on a removed bottle, run \(attempt): \(text)")
         }
     }
 }

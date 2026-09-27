@@ -68,11 +68,32 @@ final class ProcessTests: XCTestCase {
         func liveThreads() throws -> Int {
             try FileManager.default.contentsOfDirectory(atPath: "/proc/self/task").count
         }
+        // Each backgrounded sleep records its pid, so the orphans this test
+        // creates are reaped in the teardown instead of living out their 8
+        // seconds on a developer machine or a shared CI container.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-orphans-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let pids = dir.appendingPathComponent("pids")
+        addTeardownBlock {
+            if let text = try? String(contentsOf: pids, encoding: .utf8) {
+                for line in text.split(separator: "\n") {
+                    guard let pid = Int32(line.trimmingCharacters(in: .whitespaces)), pid > 0 else { continue }
+                    let killer = Process()
+                    killer.executableURL = URL(fileURLWithPath: "/bin/kill")
+                    killer.arguments = ["-9", String(pid)]
+                    try? killer.run()
+                    killer.waitUntilExit()
+                }
+            }
+            try? FileManager.default.removeItem(at: dir)
+        }
+        let record = "sleep 8 & echo $! >> \(shellQuote(pids.path)); exit 0"
         func batch() {
             for _ in 0..<8 {
                 // The orphan only has to outlive the call's own bound, not half
-                // a minute: 24 backgrounded sleeps are left on the host here.
-                _ = runCommand(["/bin/sh", "-c", "sleep 8 & exit 0"], timeout: 5)
+                // a minute: 24 backgrounded sleeps are created here.
+                _ = runCommand(["/bin/sh", "-c", record], timeout: 5)
             }
         }
         // /proc/self/task counts every thread in the process, so compare a

@@ -93,15 +93,21 @@ final class PackagingTests: XCTestCase {
             newest.1.contains("<description>"),
             "the \(declared) release has no <description>: a release with no note is a silent release"
         )
-        // Every tagged release has a note, not just the newest: the ones below
-        // are the notes a reader upgrading across majors reads.
-        for entry in entries {
+        // Every tagged release has a note of its own, not just the newest: the
+        // ones below are the notes a reader upgrading across majors reads.
+        // A split on `<release ` leaves each chunk running to the end of the
+        // file, so a note belonging to a *later* release would satisfy the
+        // check. The chunks are cut at the next `<release ` first.
+        let starts = metainfo.indices.filter { metainfo[$0...].hasPrefix("<release ") }
+        XCTAssertFalse(starts.isEmpty, "no <release> entries in the metainfo")
+        for (i, start) in starts.enumerated() {
+            let end = i + 1 < starts.count ? starts[i + 1] : metainfo.endIndex
+            let own = String(metainfo[start..<end])
+            XCTAssertTrue(own.contains(#"version=""#), "a <release> has no version: \(own.prefix(60))")
+            let version = capture(#"version="([^"]+)""#, in: own)
             XCTAssertTrue(
-                entry.contains(#"version=""#), "a <release> has no version: \(entry.prefix(60))"
-            )
-            XCTAssertTrue(
-                entry.contains("<description>"),
-                "the \(capture(#"version="([^"]+)""#, in: entry)) release has no <description>"
+                own.contains("<description>"),
+                "the \(version) release has no <description> of its own"
             )
         }
 
@@ -323,14 +329,37 @@ final class PackagingTests: XCTestCase {
         let sumsURL = root.appendingPathComponent("scripts/dep-checksums.sha256")
         XCTAssertTrue(FileManager.default.fileExists(atPath: sumsURL.path), sumsURL.path)
         let sums = try String(contentsOf: sumsURL, encoding: .utf8)
+        // GNU sha256sum format: 64 hex digits, two spaces, the file name. A
+        // name with no digest, or a truncated one, is not a pin: the download
+        // would verify against nothing.
+        var pinned: [String: String] = [:]
+        for line in sums.split(separator: "\n") {
+            let parts = line.split(separator: " ", omittingEmptySubsequences: false)
+            guard !parts.isEmpty, !line.hasPrefix("#") else { continue }
+            guard parts.count >= 2 else {
+                XCTFail("no digest on line: \(line)")
+                continue
+            }
+            let digest = String(parts[0])
+            XCTAssertEqual(digest.count, 64, "line: \(line)")
+            XCTAssertTrue(digest.allSatisfy { $0.isHexDigit && ($0.isNumber || $0.isLowercase) }, "line: \(line)")
+            let name = parts.dropFirst(2).joined(separator: " ")
+            XCTAssertFalse(name.isEmpty, "line: \(line)")
+            pinned[name] = digest
+        }
+        XCTAssertFalse(pinned.isEmpty, sums)
         let zigNeed = try String(contentsOf: root.appendingPathComponent(".zig-version"), encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        XCTAssertTrue(sums.contains("zig-x86_64-linux-\(zigNeed).tar.xz"), sums)
-        XCTAssertTrue(sums.contains("wasmtime-v28.0.0-x86_64-linux-c-api.tar.xz"), sums)
-        XCTAssertTrue(sums.contains("swift-5.10.1-RELEASE-ubuntu22.04.tar.gz"), sums)
-        XCTAssertTrue(sums.contains("linuxdeploy-x86_64.AppImage"), sums)
-        XCTAssertTrue(sums.contains("linuxdeploy-plugin-qt-x86_64.AppImage"), sums)
-        XCTAssertTrue(sums.contains("appimagetool-x86_64.AppImage"), sums)
+        for artifact in [
+            "zig-x86_64-linux-\(zigNeed).tar.xz",
+            "wasmtime-v28.0.0-x86_64-linux-c-api.tar.xz",
+            "swift-5.10.1-RELEASE-ubuntu22.04.tar.gz",
+            "linuxdeploy-x86_64.AppImage",
+            "linuxdeploy-plugin-qt-x86_64.AppImage",
+            "appimagetool-x86_64.AppImage",
+        ] {
+            XCTAssertNotNil(pinned[artifact], "\(artifact) is not pinned in \(sumsURL.lastPathComponent)")
+        }
 
         let deps = try String(contentsOf: root.appendingPathComponent("scripts/linux-deps.sh"), encoding: .utf8)
         XCTAssertTrue(deps.contains("verify-sha256.sh"), deps)

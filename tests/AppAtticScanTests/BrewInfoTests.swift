@@ -135,18 +135,30 @@ final class BrewInfoTests: XCTestCase {
         XCTAssertEqual(scanCheckFailures(), ["brew-cask-list", "brew-formula-list"])
     }
 
+    /// A successful outdated answer has to reach the snapshot, or the report
+    /// prints "nothing is outdated" for a machine with an outdated formula.
+    /// The summary comes from the same `brew info` call the software list uses,
+    /// so an empty outdated list would hide that path too.
     func testCollectBrewOutdatedSuccessIsComplete() {
         let snap = collectBrew(which: { $0 == "brew" ? "/opt/homebrew/bin/brew" : nil }) { cmd, _ in
-            if cmd.contains("outdated") { return (0, #"{"formulae":[],"casks":[]}"#, "") }
-            if cmd.contains("list") && cmd.contains("--formula") { return (0, "", "") }
+            if cmd.contains("outdated") {
+                return (0, #"{"formulae":[{"name":"wget","installed_versions":["1.20.3"],"current_version":"1.24.5"}],"casks":[]}"#, "")
+            }
+            if cmd.contains("list") && cmd.contains("--formula") { return (0, "wget\n", "") }
             if cmd.contains("list") && cmd.contains("--cask") { return (0, "", "") }
             if cmd.contains("leaves") { return (0, "", "") }
-            if cmd.contains("info") { return (0, #"{"formulae":[],"casks":[]}"#, "") }
+            if cmd.contains("info") {
+                return (0, #"{"formulae":[{"name":"wget","desc":"Internet file retriever"}],"casks":[]}"#, "")
+            }
             if cmd.contains("services") { return (0, "Name State\n", "") }
             return (0, "", "")
         }
         XCTAssertFalse(snap.outdatedFailed)
-        XCTAssertTrue(snap.outdated.isEmpty)
+        XCTAssertEqual(snap.outdated.map(\.name), ["wget"])
+        XCTAssertEqual(snap.outdated.map(\.manager), ["brew-formula"])
+        XCTAssertEqual(snap.outdated.map(\.currentVersion), ["1.20.3"])
+        XCTAssertEqual(snap.outdated.map(\.latestVersion), ["1.24.5"])
+        XCTAssertEqual(snap.outdated.map(\.summary), ["Internet file retriever"])
     }
 
     func testCollectBrewDoesNotListEachFormula() {
