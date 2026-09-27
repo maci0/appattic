@@ -961,7 +961,7 @@ func itunesRequest(
     req.setValue("AppAttic/1.0", forHTTPHeaderField: "User-Agent")
     let box = LockBox<ItunesLookup>(ItunesLookup(rows: [:], failure: nil))
     let sem = DispatchSemaphore(value: 0)
-    session.dataTask(with: req) { data, response, error in
+    let task = session.dataTask(with: req) { data, response, error in
         defer {
             box.mutate { $0.answered = true }
             sem.signal()
@@ -983,10 +983,15 @@ func itunesRequest(
             return
         }
         box.mutate { $0.rows = indexItunesResults(obj) }
-    }.resume()
+    }
+    task.resume()
     var result = box.value
     if !result.answered {
         if sem.wait(timeout: .now() + itunesLookupTimeout) == .timedOut {
+            // The caller is moving on with an unknown. Leaving the transfer
+            // running would keep a connection and its buffers for the rest of
+            // the request timeout, once per lookup the scan gives up on.
+            task.cancel()
             result.failure = "no answer within \(Int(itunesLookupTimeout))s"
         } else {
             result = box.value
@@ -1080,7 +1085,13 @@ public func collectAppstore(
     }
     var cat = catalog
     if cat == nil {
-        cat = masCatalog(masApps, onFailure: { progress?("  · App Store lookup failed (\($0)): updates may be missing") })
+        cat = masCatalog(masApps, onFailure: { reason in
+            progress?("  · App Store lookup failed (\(reason)): updates may be missing")
+            // A lookup that did not answer is not "no App Store updates". The
+            // empty list it leaves behind is what the scan records, so it is
+            // recorded as a failed check and the scan stays out of the cache.
+            noteScanCheckFailed("app-store")
+        })
     }
     let resolved = cat ?? [:]
     var out: [OutdatedPkg] = []

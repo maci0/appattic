@@ -110,6 +110,31 @@ final class BrewInfoTests: XCTestCase {
         XCTAssertTrue(snap.outdated.isEmpty)
     }
 
+    /// A success status carrying a payload that is not JSON is a broken answer,
+    /// not the answer "nothing is outdated". The empty list it would leave
+    /// behind is what the report prints and the scan cache keeps for a day.
+    func testBrewOutdatedUnparsablePayloadIsAFailedCheck() {
+        let result = queryBrewStatus("/opt/homebrew/bin/brew", run: { _, _ in (0, "Error: unknown option", "") })
+        XCTAssertTrue(result.pkgs.isEmpty)
+        XCTAssertTrue(result.failed)
+    }
+
+    /// The same rule for the installed list. A `brew list` that failed leaves
+    /// the whole Homebrew category reading as empty software, so it is a
+    /// recorded check failure and the scan stays out of the cache.
+    func testCollectBrewRecordsAFailedInstalledListing() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let snap = collectBrew(which: { $0 == "brew" ? "/opt/homebrew/bin/brew" : nil }) { cmd, _ in
+            if cmd.contains("outdated") { return (0, #"{"formulae":[],"casks":[]}"#, "") }
+            if cmd.contains("list") { return (1, "", "Error: broken install") }
+            return (0, "", "")
+        }
+        XCTAssertTrue(snap.formulas.isEmpty)
+        XCTAssertTrue(snap.casks.isEmpty)
+        XCTAssertEqual(scanCheckFailures(), ["brew-cask-list", "brew-formula-list"])
+    }
+
     func testCollectBrewOutdatedSuccessIsComplete() {
         let snap = collectBrew(which: { $0 == "brew" ? "/opt/homebrew/bin/brew" : nil }) { cmd, _ in
             if cmd.contains("outdated") { return (0, #"{"formulae":[],"casks":[]}"#, "") }

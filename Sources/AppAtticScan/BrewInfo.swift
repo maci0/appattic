@@ -162,11 +162,22 @@ public func fetchInfoJSON(
     var casks: [Any] = []
     let (rcF, outF, _) = run([brew, "info", "--json=v2", "--formula", "--installed"], 180)
     if rcF == 0, !outF.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        formulae = parseInfoJSON(outF)["formulae"] as? [Any] ?? []
+        // A success status carrying a payload that is not JSON is a broken
+        // answer, not an empty installed list. The report would show every
+        // formula without a version, and the scan would cache that for a day.
+        if jsonListingIsUsable(outF) {
+            formulae = parseInfoJSON(outF)["formulae"] as? [Any] ?? []
+        } else {
+            noteScanCheckFailed("brew-info")
+        }
     }
     let (rcC, outC, _) = run([brew, "info", "--json=v2", "--cask", "--installed"], 180)
     if rcC == 0, !outC.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        casks = parseInfoJSON(outC)["casks"] as? [Any] ?? []
+        if jsonListingIsUsable(outC) {
+            casks = parseInfoJSON(outC)["casks"] as? [Any] ?? []
+        } else {
+            noteScanCheckFailed("brew-info")
+        }
     }
     return ["formulae": formulae, "casks": casks]
 }
@@ -278,10 +289,17 @@ public func collectBrew(
     let (rcF, outF, _) = tracking([brew, "list", "--formula"], 60)
     if rcF == 0 {
         info.formulas = outF.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.map { Formula(name: $0) }
+    } else {
+        // No formulae listed is the report's "no Homebrew software", and the
+        // scan would keep it for a day. A listing that ran and failed is an
+        // unknown, so it is recorded like any other failed check.
+        noteScanCheckFailed("brew-formula-list")
     }
     let (rcC, outC, _) = tracking([brew, "list", "--cask"], 60)
     if rcC == 0 {
         info.casks = outC.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.map { Cask(name: $0) }
+    } else {
+        noteScanCheckFailed("brew-cask-list")
     }
 
     let (rcL, outL, _) = tracking([brew, "leaves"], 60)
@@ -448,6 +466,11 @@ func queryBrewStatus(
     let (rc, out, _) = run([brew, "outdated", "--json=v2"], 90)
     if rc != 0 { return ([], true) }
     if out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return ([], false) }
+    // A success status with a payload that is not JSON is a broken answer, not
+    // the answer "nothing is outdated": the parser would answer an empty list
+    // and the scan would write that empty list to the cache and serve it for a
+    // day. `outdatedFailed` is the same unknown a nonzero status produces.
+    guard jsonListingIsUsable(out) else { return ([], true) }
     return (parseBrewOutdatedJSON(out), false)
 }
 

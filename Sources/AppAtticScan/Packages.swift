@@ -537,15 +537,32 @@ public func parseUvToolList(_ text: String) -> [PackageEntry] {
 }
 
 /// One package-manager query. `failed` tells "the manager is not installed"
-/// apart from "every candidate binary answered with a failure status": the
-/// first is a real empty answer, the second is an unknown, and an unknown
-/// written to the scan cache is served as "no orphans" for `scanCacheMaxAge`.
-/// Recording the unknown is the caller's job, under the label it wants the
-/// user to see, because a query that is one step of a chain has not failed
-/// until every step has.
+/// apart from "every candidate binary answered with a failure status or an
+/// unreadable payload": the first is a real empty answer, the second is an
+/// unknown, and an unknown written to the scan cache is served as "no orphans"
+/// for `scanCacheMaxAge`. Recording the unknown is the caller's job, under the
+/// label it wants the user to see, because a query that is one step of a chain
+/// has not failed until every step has.
 struct PackageQueryResult {
     var output: String?
     var failed: Bool
+}
+
+/// A JSON document, or not. Every JSON parser here answers an unreadable
+/// payload with an empty list, and an empty list is what the report prints and
+/// the scan cache stores, so the query layer asks this before accepting a
+/// `rc == 0` answer whose shape it declared as JSON.
+func jsonListingIsUsable(_ text: String) -> Bool {
+    (try? JSONSerialization.jsonObject(with: Data(text.utf8))) != nil
+}
+
+/// One argument spelling for a query, and whether it answers with JSON.
+/// Whether the answer is JSON belongs to the spelling, not to the manager:
+/// `pipx list --json` and `pipx list` are both pipx, and only the first one
+/// can be held to a JSON document.
+struct PackageQueryStep {
+    var args: [String]
+    var json: Bool = false
 }
 
 func runPackageQuery(
@@ -554,14 +571,24 @@ func runPackageQuery(
     names: [String],
     args: [String],
     timeout: TimeInterval = 60,
-    ok: (Int32) -> Bool = { $0 == 0 }
+    ok: (Int32) -> Bool = { $0 == 0 },
+    json: Bool = false
 ) -> PackageQueryResult {
     var attempted = false
     for name in names {
         guard let path = which(name) else { continue }
         attempted = true
         let (rc, out, _) = run([path] + args, timeout)
-        if ok(rc) { return PackageQueryResult(output: out, failed: false) }
+        if ok(rc) {
+            // A success status carrying a payload that is not JSON is a broken
+            // answer, not the empty listing the parser would return from it. It
+            // is not recorded here: a chain has further spellings to try, and
+            // records the manager only when none of them answers.
+            if json && !jsonListingIsUsable(out) {
+                return PackageQueryResult(output: nil, failed: true)
+            }
+            return PackageQueryResult(output: out, failed: false)
+        }
     }
     return PackageQueryResult(output: nil, failed: attempted)
 }
@@ -571,7 +598,7 @@ func runPackageQuery(
 /// `pipx list --json` failing on an old pipx leaves the check alone when
 /// `pipx list` answered. Returns the parsed rows, empty when nothing answered.
 func runPackageQueryChain(
-    _ steps: [[String]],
+    _ steps: [PackageQueryStep],
     which: WhichFn,
     run: CommandRun,
     names: [String],
@@ -581,8 +608,11 @@ func runPackageQueryChain(
     parse: (String) -> [PackageEntry]
 ) -> [PackageEntry] {
     var failed = false
-    for args in steps {
-        let result = runPackageQuery(which: which, run: run, names: names, args: args, timeout: timeout, ok: ok)
+    for step in steps {
+        let result = runPackageQuery(
+            which: which, run: run, names: names, args: step.args,
+            timeout: timeout, ok: ok, json: step.json
+        )
         failed = failed || result.failed
         if let out = result.output { return parse(out) }
     }
@@ -607,7 +637,7 @@ public func collectPackages(
         case .pacman:
             queries.append {
                 return runPackageQueryChain(
-                    [["-Qdt"]],
+                    [PackageQueryStep(args: ["-Qdt"])],
                     which: which, run: run, names: ["pacman"], label: "pacman",
                     ok: { $0 == 0 || $0 == 1 }, parse: parsePacmanOrphans
                 )
@@ -636,7 +666,7 @@ public func collectPackages(
         case .dnf:
             queries.append {
                 return runPackageQueryChain(
-                    [["repoquery", "--unneeded", "--qf", "%{name}"]],
+                    [PackageQueryStep(args: ["repoquery", "--unneeded", "--qf", "%{name}"])],
                     which: which, run: run, names: ["dnf5", "dnf", "yum"],
                     label: "dnf", parse: parseDnfUnneeded
                 )
@@ -644,7 +674,7 @@ public func collectPackages(
         case .some(DistroPackageManager.zypperPkg):
             queries.append {
                 return runPackageQueryChain(
-                    [["--non-interactive", "packages", "--unneeded"]],
+                    [PackageQueryStep(args: ["--non-interactive", "packages", "--unneeded"])],
                     which: which, run: run, names: ["zypper"],
                     label: "zypper", parse: parseZypperUnneeded
                 )
@@ -654,35 +684,35 @@ public func collectPackages(
     }
     queries.append {
         return runPackageQueryChain(
-            [["ls", "-g", "--depth=0", "--json"]],
+            [PackageQueryStep(args: ["ls", "-g", "--depth=0", "--json"], json: true)],
             which: which, run: run, names: ["npm"], label: "npm",
             parse: parseNpmGlobalList
         )
     }
     queries.append {
         return runPackageQueryChain(
-            [["ls", "-g", "--depth=0", "--json"]],
+            [PackageQueryStep(args: ["ls", "-g", "--depth=0", "--json"], json: true)],
             which: which, run: run, names: ["pnpm"], label: "pnpm",
             parse: parsePnpmGlobalList
         )
     }
     queries.append {
         return runPackageQueryChain(
-            [["pm", "ls", "-g"]],
+            [PackageQueryStep(args: ["pm", "ls", "-g"])],
             which: which, run: run, names: ["bun"], label: "bun",
             parse: parseBunGlobalList
         )
     }
     queries.append {
         return runPackageQueryChain(
-            [["list", "--json"], ["list"]],
+            [PackageQueryStep(args: ["list", "--json"], json: true), PackageQueryStep(args: ["list"])],
             which: which, run: run, names: ["pipx"], label: "pipx",
             parse: parsePipxList
         )
     }
     queries.append {
         return runPackageQueryChain(
-            [["tool", "list"]],
+            [PackageQueryStep(args: ["tool", "list"])],
             which: which, run: run, names: ["uv"], label: "uv",
             parse: parseUvToolList
         )
@@ -690,8 +720,8 @@ public func collectPackages(
     queries.append {
         return runPackageQueryChain(
             [
-                ["list", "--user", "--not-required", "--format=json"],
-                ["list", "--user", "--format=json"],
+                PackageQueryStep(args: ["list", "--user", "--not-required", "--format=json"], json: true),
+                PackageQueryStep(args: ["list", "--user", "--format=json"], json: true),
             ],
             which: which, run: run, names: ["pip", "pip3"], label: "pip",
             parse: parsePipUserList

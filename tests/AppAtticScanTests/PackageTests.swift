@@ -585,6 +585,36 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(scanCheckFailures(), ["pipx"])
     }
 
+    /// A success status carrying a payload that is not JSON is a broken answer,
+    /// not the empty listing the parser returns from it. Left unrecorded the
+    /// empty list is cached and served for a day as "no global packages".
+    func testUnparsableJSONListingIsRecordedNotAnEmptyAnswer() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let pkgs = collectPackages(
+            which: { name in name == "npm" ? "/usr/bin/npm" : nil },
+            run: { _, _ in (0, "npm error: something went wrong", "") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertTrue(pkgs.isEmpty)
+        XCTAssertEqual(scanCheckFailures(), ["npm"])
+    }
+
+    /// The same rule across a chain: an unreadable `--json` answer is a spelling
+    /// that did not answer, so the plain listing is still the answer and the
+    /// manager stays out of the failure set.
+    func testUnparsableJSONListingFallsThroughToTheNextSpelling() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let pkgs = collectPackages(
+            which: { name in name == "pipx" ? "/usr/bin/pipx" : nil },
+            run: { cmd, _ in cmd.contains("--json") ? (0, "not json", "") : (0, "venvs []", "") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertTrue(pkgs.isEmpty)
+        XCTAssertTrue(scanCheckFailures().isEmpty, "\(scanCheckFailures())")
+    }
+
     /// The failure has to survive into the scan the cache sees, or the empty
     /// list is still written and still served for a day. Every manager reads
     /// as installed and every command fails, so the check is attempted on any
