@@ -113,4 +113,27 @@ final class ScriptReRunTests: XCTestCase {
         XCTAssertEqual(second.0, 0, second.1)
         XCTAssertEqual(second.1, "done", second.1)
     }
+
+    /// The CrossOver bottle delete ran against a bottle that a previous run
+    /// removed. `cxbottle --delete` exits nonzero on a bottle that is not
+    /// there, and under `set -e` that ends the script before the lines after
+    /// it. No `cxbottle` is needed to prove the guard: the bottle directory is
+    /// already gone, so both runs must skip the delete and reach the end.
+    func testCrossOverBottleDeleteOverAnAlreadyRemovedBottleIsANoOp() throws {
+        let missing = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("appattic-rerun-\(UUID().uuidString)/Bottles/Gone")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
+
+        let cmd = crossoverDeleteCommand(bottleName: "Gone", bottlePath: missing.path)
+        let script = "set -e\n\(cmd)\nprintf done"
+
+        for attempt in 1...2 {
+            // `cxbottle` may or may not be installed here, and its own
+            // complaint is the `|| true` line's business. What matters is that
+            // the script reaches its last line both times.
+            let (status, text) = try run(script)
+            XCTAssertEqual(status, 0, "run \(attempt): \(text)")
+            XCTAssertTrue(text.hasSuffix("done"), "run \(attempt): \(text)")
+        }
+    }
 }

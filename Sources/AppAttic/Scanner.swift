@@ -466,12 +466,22 @@ final class ScannerViewModel {
         case markManual
     }
 
+    /// One script at a time. It uninstalls packages and deletes files, so a
+    /// second copy running beside the first is two package managers contending
+    /// for the same dpkg or rpm lock, and neither finishes its transaction. The
+    /// buttons are disabled while `isScanning`, but a confirm can land twice
+    /// before SwiftUI re-renders. The Qt shell keeps the same guard in
+    /// `runScript`.
     private func runTempScript(
         _ script: String,
         message: String,
         clear: ScriptClear,
         then completion: @escaping (Bool) -> Void
     ) {
+        guard !isScanning else {
+            completion(false)
+            return
+        }
         isScanning = true
         if !holdsSettingsError {
             errorMessage = nil

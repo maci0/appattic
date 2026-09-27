@@ -79,7 +79,8 @@ final class CrossOverTests: XCTestCase {
     }
 
     func testCrossoverDeleteContinuesIfUninstallFails() {
-        let cmd = crossoverDeleteCommand(bottleName: "Steam")
+        let bottlePath = "/Users/x/Library/Application Support/CrossOver/Bottles/Steam"
+        let cmd = crossoverDeleteCommand(bottleName: "Steam", bottlePath: bottlePath)
         XCTAssertTrue(cmd.contains("--uninstall || true"), cmd)
         XCTAssertTrue(cmd.contains("--delete --force"), cmd)
         XCTAssertFalse(cmd.contains("rm -rf"), cmd)
@@ -95,6 +96,20 @@ final class CrossOverTests: XCTestCase {
         let script = cleanupScript(result)
         XCTAssertTrue(script.contains("--uninstall || true"), script)
         XCTAssertTrue(script.contains("--delete --force"), script)
+    }
+
+    /// The delete is the one line that fails on an already-removed bottle, and
+    /// `set -e` would end the script on it, stranding every line after the
+    /// bottle. It has to be guarded on the bottle directory the scan listed.
+    func testCrossoverDeleteIsGuardedOnTheBottleDirectory() throws {
+        let bottlePath = "/Users/x/Library/Application Support/CrossOver/Bottles/Steam"
+        let cmd = crossoverDeleteCommand(bottleName: "Steam", bottlePath: bottlePath)
+        let lines = cmd.split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines.count, 2, cmd)
+        XCTAssertTrue(lines[0].hasSuffix("--uninstall || true"), cmd)
+        let guarded = try XCTUnwrap(parseGuardedRemove(lines[1]), cmd)
+        XCTAssertEqual(guarded.present, "test -d \(shellQuote(bottlePath))")
+        XCTAssertTrue(guarded.action.hasSuffix("--delete --force"), guarded.action)
     }
 
     func testCleanupDoesNotRmHelper() {

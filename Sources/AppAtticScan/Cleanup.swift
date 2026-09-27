@@ -110,7 +110,7 @@ public func uninstallCommand(
         return steamUninstallCommand(appId: id)
     }
     if source == "crossover" {
-        return crossoverDeleteCommand(bottleName: name)
+        return crossoverDeleteCommand(bottleName: name, bottlePath: path)
     }
     if isCrossOverPath(path) {
         return "# \(shellComment(name)): uninstall from CrossOver. Do not delete \(shellComment(path))"

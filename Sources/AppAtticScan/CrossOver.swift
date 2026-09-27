@@ -95,8 +95,21 @@ func crossoverBottleBinary() -> String {
     return whichCommand("cxbottle") ?? "cxbottle"
 }
 
-func crossoverDeleteCommand(bottleName: String) -> String {
+/// `cxbottle` is the only thing that may delete a bottle, so the removal is two
+/// commands: drop the app data, then the bottle itself.
+///
+/// Only the first tolerates a bottle that is not there. `cxbottle --delete` on a
+/// bottle a previous run already removed exits nonzero, and the generated
+/// script runs under `set -e`, so that one line strands every line below it.
+/// The delete is guarded on the same bottle directory the scan listed, which
+/// is what a re-run finds missing.
+func crossoverDeleteCommand(bottleName: String, bottlePath: String) -> String {
     let bin = shellQuote(crossoverBottleBinary())
     let name = shellQuote(bottleName)
-    return "\(bin) --bottle \(name) --uninstall || true\n\(bin) --bottle \(name) --delete --force"
+    let uninstall = "\(bin) --bottle \(name) --uninstall || true"
+    let delete = guardedRemoveCommand(
+        present: "test -d \(shellQuote(bottlePath))",
+        remove: "\(bin) --bottle \(name) --delete --force"
+    )
+    return "\(uninstall)\n\(delete)"
 }
