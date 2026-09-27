@@ -142,6 +142,18 @@ for copied in "$DESKTOP" "$METAINFO" "packaging/appattic.svg"; do
         || fail "scripts/linux-appimage.sh no longer copies $copied into the AppImage"
 done
 
+# The zsync transport makes AppImageUpdate download the URL in the update
+# information and read a zsync header from it, so that URL has to name the
+# .zsync the release workflow publishes beside the image. Pointed at the image
+# itself, every update check parses a squashfs as a zsync header and fails,
+# and the image still builds, so nothing else in this tree notices. The URL is
+# a shell expansion, so the check is that it is built from the .zsync path.
+update_url="$(sed -n 's/^UPDATE_URL=//p' scripts/linux-appimage.sh | head -n 1)"
+[[ -n "$update_url" ]] || fail "scripts/linux-appimage.sh has no UPDATE_URL"
+# shellcheck disable=SC2016  # the literal source text, not an expansion
+[[ "$update_url" == *'${UPDATE_ZSYNC#'* ]] \
+    || fail "scripts/linux-appimage.sh builds UPDATE_URL from the image, not from UPDATE_ZSYNC"
+
 if command -v desktop-file-validate >/dev/null 2>&1; then
     if ! validate_out="$(desktop-file-validate "$DESKTOP" 2>&1)"; then
         printf '%s\n' "$validate_out" | sed 's/^/error: /' >&2
