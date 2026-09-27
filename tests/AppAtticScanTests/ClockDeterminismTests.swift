@@ -63,7 +63,17 @@ final class ClockDeterminismTests: XCTestCase {
     func testProbeActivityMtimeReadsTheInjectedClockNotUptime() throws {
         let root = try makeTree("probe-fixed", files: 2, bytes: 16)
         defer { try? FileManager.default.removeItem(at: root) }
-        // A clock stuck at 0 never expires, however slow the host is.
-        XCTAssertNotNil(probeActivityMtime(root.path, timeout: 0.001, clock: { 0 }))
+        // A clock stuck at 0 never expires, however slow the host is, so the
+        // result says nothing on its own: walking two files takes well under
+        // 0.001 s of real uptime, so an implementation reading the host clock
+        // would pass too. What distinguishes the two is whether the budget is
+        // ever read from the injected clock at all.
+        var reads = 0
+        let found = probeActivityMtime(root.path, timeout: 0.001, clock: {
+            reads += 1
+            return 0
+        })
+        XCTAssertGreaterThan(reads, 0, "the probe must read the injected clock, not the host's uptime")
+        XCTAssertNotNil(found)
     }
 }

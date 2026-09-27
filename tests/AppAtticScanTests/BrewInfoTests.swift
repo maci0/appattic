@@ -108,21 +108,25 @@ final class BrewInfoTests: XCTestCase {
     /// A cask can ship several artifacts under one dict. The name has to be the
     /// same on every run: Dictionary order is hash-seeded per process.
     func testCaskArtifactDictNameIsDeterministic() {
-        let artifacts: [Any] = [[
-            "args": ["--no-quarantine"],
-            "target": "ZeroTier.app",
-            "zap": true,
-        ]]
-        for _ in 0..<32 {
-            XCTAssertEqual(caskArtifactAppNames(artifacts), ["ZeroTier.app"])
-        }
-        // Sorted key order picks "Bin" over "Doc", and only every run, not once.
+        // Sorted key order picks "Bin" over "Doc". This is the whole
+        // determinism rule, and one call pins it: repeating the same call in the
+        // same process cannot observe a per-process hash seed, so a loop here
+        // would only re-run one assertion. Across processes the seed changes,
+        // which is why the order is sorted rather than taken as it comes.
         XCTAssertEqual(
             caskArtifactAppNames([["Bin": ["target": "Tool.app"], "Doc": ["target": "Guide.app"]]]),
             ["Tool.app"]
         )
+        // Keys that are not artifact names are skipped, not mistaken for one.
+        XCTAssertEqual(
+            caskArtifactAppNames([[
+                "args": ["--no-quarantine"],
+                "target": "ZeroTier.app",
+                "zap": true,
+            ]]),
+            ["ZeroTier.app"]
+        )
     }
-
     func testRefusedCasksParseTap() {
         let err = "Error: Refusing to load cask dail8859/notepadnext/notepadnext from untrusted tap dail8859/notepadnext.\n"
         let hits = refusedCasks(from: err)
@@ -288,5 +292,38 @@ final class BrewInfoTests: XCTestCase {
         )
         XCTAssertEqual(snap.untrustedCasks.map(\.name), ["notepadnext"])
         XCTAssertEqual(Set(snap.casks.map(\.name)), Set(["iterm2", "notepadnext"]))
+    }
+
+    /// The two lines a refused cask shows. The tap name is the point of them,
+    /// so the branch without a tap has to read as a sentence rather than leak
+    /// an empty or "nil" tap into the row the user reads.
+    func testUntrustedCaskSummaryAndReasonNameTheTapOnlyWhenThereIsOne() {
+        let withTap = UntrustedCask(name: "notepadnext", tap: "dail8859/notepadnext")
+        XCTAssertEqual(
+            untrustedCaskSummary(withTap),
+            "Installed from untrusted Homebrew tap dail8859/notepadnext"
+        )
+        XCTAssertEqual(
+            untrustedCaskReason(withTap),
+            "Homebrew refuses to load this cask from untrusted tap dail8859/notepadnext. It is still installed. AppAttic will not trust the tap for you."
+        )
+
+        let noTap = UntrustedCask(name: "notepadnext")
+        XCTAssertEqual(untrustedCaskSummary(noTap), "Installed from an untrusted Homebrew tap")
+        XCTAssertEqual(
+            untrustedCaskReason(noTap),
+            "Homebrew refuses to load this cask from an untrusted tap. It is still installed. AppAttic will not trust the tap for you."
+        )
+        for text in [untrustedCaskSummary(noTap), untrustedCaskReason(noTap)] {
+            XCTAssertFalse(text.contains("nil"), text)
+            XCTAssertFalse(text.contains("  "), text)
+            XCTAssertFalse(text.contains(" tap ."), text)
+        }
+
+        // An empty tap is no tap: it must not print as a name with nothing
+        // after it, which is what `if let tap` alone would do.
+        let emptyTap = UntrustedCask(name: "notepadnext", tap: "")
+        XCTAssertEqual(untrustedCaskSummary(emptyTap), "Installed from an untrusted Homebrew tap")
+        XCTAssertEqual(untrustedCaskReason(emptyTap), untrustedCaskReason(noTap))
     }
 }

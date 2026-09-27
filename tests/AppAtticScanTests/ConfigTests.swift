@@ -112,10 +112,16 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.dataHome, "/xdg/data")
         XCTAssertEqual(config.configHome, "/xdg/config")
         // A relative XDG path is ignored, so the report shows what the scan uses:
-        // the `.cache` fallback under the real home, spelled out rather than
-        // re-derived through `xdgCacheHome`.
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        XCTAssertEqual(config.cacheHome, (home as NSString).appendingPathComponent(".cache"))
+        // the `.cache` fallback under the home directory. That home is the
+        // account's, not an injected one, so the assertion is about the shape
+        // of the result; pinning it to `homeDirectoryForCurrentUser` would be
+        // an assertion about the machine running the suite, and would fail
+        // wherever $HOME and the passwd entry disagree.
+        XCTAssertEqual(
+            config.cacheHome,
+            (FileManager.default.homeDirectoryForCurrentUser.path as NSString).appendingPathComponent(".cache")
+        )
+        XCTAssertTrue(config.cacheHome.hasSuffix("/.cache"), config.cacheHome)
         XCTAssertFalse(config.cacheHome.hasPrefix("relative"))
         XCTAssertEqual(config.stateHome, "/xdg/state")
         XCTAssertEqual(config.dataDirs, "/usr/share")

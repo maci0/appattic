@@ -292,4 +292,32 @@ final class ProcessTests: XCTestCase {
         resetWhichSearchDirectories()
         XCTAssertEqual(whichCommand(late), second.appendingPathComponent(late).path)
     }
+
+    /// Every spawned process, including the generated cleanup and update
+    /// scripts, runs with this PATH. The cleanup directories go first so a
+    /// stale user copy cannot shadow the one the script is about to remove,
+    /// and a directory already listed is not listed twice: a repeat still
+    /// resolves, but it makes the script's own comment about the first match
+    /// wrong.
+    func testAugmentedProcessEnvironmentPutsCleanupDirsFirstWithoutDuplicates() throws {
+        let home = "/home/tester"
+        let cleanup = cleanupPathDirectories(home: home)
+        let out = augmentedProcessEnvironment(env: [
+            "PATH": "/opt/tools:\(cleanup[0]):/opt/tools",
+            "APPATTIC_KEEP": "1",
+        ])
+        let path = try XCTUnwrap(out["PATH"]?.split(separator: ":", omittingEmptySubsequences: false).map(String.init))
+        XCTAssertEqual(Array(path.prefix(cleanup.count)), cleanup)
+        XCTAssertEqual(Set(path).count, path.count, "a directory listed twice: \(path)")
+        XCTAssertEqual(path.last, "/opt/tools", "the caller's own PATH entries are kept: \(path)")
+        XCTAssertEqual(out["APPATTIC_KEEP"], "1", "only PATH is rewritten")
+
+        // An empty or absent PATH still yields the cleanup directories, so a
+        // process launched from a stripped environment can still find a shell.
+        for env in [["PATH": ""], [:]] as [[String: String]] {
+            let stripped = augmentedProcessEnvironment(env: env)
+            let dirs = try XCTUnwrap(stripped["PATH"]?.split(separator: ":", omittingEmptySubsequences: false).map(String.init))
+            XCTAssertEqual(dirs, cleanup, "env=\(env)")
+        }
+    }
 }

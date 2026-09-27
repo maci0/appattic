@@ -163,6 +163,45 @@ final class OutdatedTests: XCTestCase {
         XCTAssertEqual(scanCheckFailures(), ["snap-list"])
     }
 
+    /// `zypper list-updates` failing is not "no updates": it returns nothing,
+    /// which is the same shape an up-to-date host produces, so the failure has
+    /// to be recorded or the report claims the system is current. The command
+    /// line is pinned too, since a changed flag makes the check fail on every
+    /// SUSE host and the empty result would look like a clean bill of health.
+    func testFailedZypperCheckIsRecordedAndAsksForTheListNonInteractively() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        var calls: [[String]] = []
+        let callsLock = NSLock()
+        let ok = queryZypper(
+            which: { _ in "/usr/bin/zypper" },
+            run: { cmd, _ in
+                callsLock.lock()
+                calls.append(cmd)
+                callsLock.unlock()
+                return (0, "", "")
+            }
+        )
+        XCTAssertTrue(ok.isEmpty)
+        XCTAssertEqual(calls.map { $0.joined(separator: " ") }, ["/usr/bin/zypper --non-interactive list-updates"])
+        XCTAssertEqual(scanCheckFailures(), [])
+
+        resetScanCheckFailures()
+        let failed = queryZypper(
+            which: { _ in "/usr/bin/zypper" },
+            run: { _, _ in (1, "", "boom") }
+        )
+        XCTAssertTrue(failed.isEmpty)
+        XCTAssertEqual(scanCheckFailures(), ["zypper"])
+
+        // No zypper on the host is not a failed check: nothing to run means
+        // nothing to report.
+        resetScanCheckFailures()
+        let absent = queryZypper(which: { _ in nil }, run: { _, _ in (1, "", "must not run") })
+        XCTAssertTrue(absent.isEmpty)
+        XCTAssertEqual(scanCheckFailures(), [])
+    }
+
     func testParseSnapRefreshList() {
         let refresh = """
         Name     Version  Rev   Size   Publisher   Notes

@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import AppAtticScan
 
@@ -93,10 +94,17 @@ final class LeftoversTests: XCTestCase {
     }
 
     func testUnmeasuredLeftoverSaysWhyItHasNoSize() {
-        // A measured row prints its bytes.
+        // A measured row prints its bytes. The expected string is spelled out
+        // against a separator read from a formatter built here, not against
+        // `humanSize` itself, which is the call this is supposed to be checking.
+        let f = NumberFormatter()
+        f.locale = .current
+        f.numberStyle = .decimal
+        f.usesGroupingSeparator = false
+        let dot = f.decimalSeparator ?? "."
         XCTAssertEqual(
             leftoverSizeText(measured: true, sizeBytes: 2048, kind: "dir", root: "Caches"),
-            humanSize(2048)
+            "2\(dot)0 KB"
         )
         // A nested row's bytes are already in the parent total, so it says so.
         let nested: [(kind: String, root: String)] = [

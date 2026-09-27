@@ -65,11 +65,12 @@ final class DiskUsageTests: XCTestCase {
         ]
         root.sortChildren(allocatedSize: false)
         let names = root.children.map(\.name)
-        XCTAssertEqual(names.count, 3)
-        XCTAssertEqual(
-            names,
-            names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-        )
+        // Spelled out rather than re-sorted with `localizedStandardCompare`,
+        // which is the comparator the sort uses: comparing the output to the
+        // comparator only shows the two agree with each other. The literal
+        // order is what distinguishes collation from byte order, which would
+        // give Zebra, apple, Über (Z = 0x5A, a = 0x61, Ü = 0xC3).
+        XCTAssertEqual(names, ["apple", "Über", "Zebra"])
     }
 
     func testFormatDiskTreeListsLargestFirst() {

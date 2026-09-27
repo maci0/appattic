@@ -721,6 +721,60 @@ final class PackageTests: XCTestCase {
         XCTAssertFalse(try commitScanCache(includeSystem: false, data: result.toScanData(), before: "a", after: "a", to: url))
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
+
+    /// Every package row shows these two lines, and each has three branches:
+    /// a user-global tool, a dpkg remnant, and a distro orphan. A branch that
+    /// rendered the wrong sentence still reads as a package, so all three are
+    /// pinned with their literal text.
+    func testPackageWhatAndWhyTextCoverEveryBranch() {
+        XCTAssertEqual(
+            packageWhatText(manager: "npm", kind: "global"),
+            "User-global npm tool"
+        )
+        XCTAssertEqual(
+            packageWhyText(manager: "npm", kind: "global"),
+            "Language tool installed with npm for this user, not a project lockfile."
+        )
+        XCTAssertEqual(
+            packageWhatText(manager: "dpkg", kind: "orphan"),
+            "Removed package still has config files (dpkg)"
+        )
+        XCTAssertEqual(
+            packageWhyText(manager: "dpkg", kind: "orphan"),
+            "dpkg status rc: the package is gone, config remnants remain. Purge drops them."
+        )
+        XCTAssertEqual(
+            packageWhatText(manager: "pacman", kind: "orphan"),
+            "Distro package nothing still needs (pacman)"
+        )
+        XCTAssertEqual(
+            packageWhyText(manager: "pacman", kind: "orphan"),
+            "pacman reports this as an orphan: installed as a dependency, nothing installed still requires it."
+        )
+        // A hyphenated manager reads as words, not as the raw token, in both
+        // the label-bearing branches.
+        XCTAssertEqual(
+            packageWhatText(manager: "flatpak", kind: "orphan"),
+            "Distro package nothing still needs (flatpak)"
+        )
+        XCTAssertEqual(
+            packageWhatText(manager: "some-manager", kind: "orphan"),
+            "Distro package nothing still needs (some manager)"
+        )
+    }
+
+    /// The global branch wins over dpkg: a dpkg entry that is also flagged
+    /// global has to read as the user-global tool it is, not as a remnant.
+    func testPackageGlobalKindTakesPrecedenceOverDpkg() {
+        XCTAssertEqual(
+            packageWhatText(manager: "dpkg", kind: "global"),
+            "User-global dpkg tool"
+        )
+        XCTAssertEqual(
+            packageWhyText(manager: "dpkg", kind: "global"),
+            "Language tool installed with dpkg for this user, not a project lockfile."
+        )
+    }
 }
 
 private func entry(

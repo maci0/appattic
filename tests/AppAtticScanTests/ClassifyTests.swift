@@ -722,6 +722,10 @@ final class ClassifyTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(hit.sizeBytes, 10_100)
         XCTAssertEqual(Set(hit.extraPaths.map { URL(fileURLWithPath: $0).lastPathComponent }), ["crewai", "crewai.plist"])
         XCTAssertFalse(hit.reason?.localizedCaseInsensitiveContains("broken command") == true, hit.reason ?? "")
+        // The two extra names are ordinary data, not PATH entries, so the
+        // reason counts the places and never claims a broken command. Spelled
+        // out so a nil reason cannot pass the negative check above.
+        XCTAssertEqual(hit.reason, "Leftover data in 3 places.")
         XCTAssertTrue(hit.summary?.contains("2 more") == true, hit.summary ?? "")
         let cmd = leftoverRemoveCommand(path: hit.path, rootLabel: hit.rootLabel, extraPaths: hit.extraPaths)
         XCTAssertTrue(cmd.contains("crewai.plist"), cmd)
@@ -786,9 +790,13 @@ final class ClassifyTests: XCTestCase {
         ])
         applyOrphanReasons(grouped)
         XCTAssertFalse(grouped[0].reason?.localizedCaseInsensitiveContains("broken command") == true, grouped[0].reason ?? "")
+        // The directory row won, so the reason is the leftover text for the
+        // directory, with the two PATH names counted onto it. A symlink primary
+        // would print "Broken PATH command." instead.
+        XCTAssertEqual(grouped[0].reason, "Application Support leftover. Also 2 leftover names on PATH.")
     }
 
-    func testGroupOrphanedLeftoversMergesBundleIdChildren() {
+    func testGroupOrphanedLeftoversMergesBundleIdChildren() throws {
         let parent = DataItem(
             path: "/Users/x/Library/Caches/com.kagi.kagimacOS",
             name: "com.kagi.kagimacOS",
@@ -909,13 +917,17 @@ final class ClassifyTests: XCTestCase {
         )
         let grouped = groupOrphanedLeftovers([orion, kagi, share, other])
         XCTAssertEqual(grouped.count, 2)
-        let browser = grouped.first { leftoverGroupKey($0.name) == "kagi" }
-        XCTAssertEqual(browser?.name, "Orion")
-        XCTAssertEqual(Set(browser?.extraPaths ?? []), [kagi.path, share.path])
-        XCTAssertEqual(grouped.first { $0.name == "BetterDisplay" }?.extraPaths ?? [], [])
+        // Unwrapped, not `?.extraPaths ?? []`: a missing row compares equal to
+        // the empty expectation, so the merge would read as "nothing absorbed
+        // BetterDisplay" whether or not the row survived grouping.
+        let browser = try XCTUnwrap(grouped.first { leftoverGroupKey($0.name) == "kagi" })
+        XCTAssertEqual(browser.name, "Orion")
+        XCTAssertEqual(Set(browser.extraPaths), [kagi.path, share.path])
+        let standalone = try XCTUnwrap(grouped.first { $0.name == "BetterDisplay" })
+        XCTAssertTrue(standalone.extraPaths.isEmpty, standalone.extraPaths.joined(separator: " | "))
     }
 
-    func testGroupOrphanedLeftoversMergesMinimaxUpdaterCache() {
+    func testGroupOrphanedLeftoversMergesMinimaxUpdaterCache() throws {
         let updater = DataItem(
             path: "/Users/x/Library/Caches/@mmx-agentelectron-updater",
             name: "@mmx-agentelectron-updater",
@@ -958,13 +970,14 @@ final class ClassifyTests: XCTestCase {
         )
         let grouped = groupOrphanedLeftovers([updater, agent, ship, http, other])
         XCTAssertEqual(grouped.count, 2)
-        let mmx = grouped.first { leftoverGroupKey($0.name) == "minimax" }
-        XCTAssertEqual(mmx?.name, "@mmx-agentelectron-updater")
-        XCTAssertEqual(Set(mmx?.extraPaths ?? []), [agent.path, ship.path, http.path])
-        XCTAssertEqual(grouped.first { $0.name == "camoufox" }?.extraPaths ?? [], [])
+        let mmx = try XCTUnwrap(grouped.first { leftoverGroupKey($0.name) == "minimax" })
+        XCTAssertEqual(mmx.name, "@mmx-agentelectron-updater")
+        XCTAssertEqual(Set(mmx.extraPaths), [agent.path, ship.path, http.path])
+        let standalone = try XCTUnwrap(grouped.first { $0.name == "camoufox" })
+        XCTAssertTrue(standalone.extraPaths.isEmpty, standalone.extraPaths.joined(separator: " | "))
     }
 
-    func testGroupOrphanedLeftoversMergesHTTPStorageCookies() {
+    func testGroupOrphanedLeftoversMergesHTTPStorageCookies() throws {
         let orion = DataItem(
             path: "/Users/x/Library/Application Support/Orion",
             name: "Orion",
@@ -1038,10 +1051,14 @@ final class ClassifyTests: XCTestCase {
         )
         let grouped = groupOrphanedLeftovers([plist, helper, safari, other, agent])
         XCTAssertEqual(grouped.count, 3)
-        let sent = grouped.first { $0.rootLabel != "LaunchAgents" && entryLabel($0.name).lowercased().hasPrefix("com.sentinelone.") }
-        XCTAssertEqual(sent?.extraPaths.count, 2, sent?.name ?? "")
-        XCTAssertEqual(grouped.first { $0.name.contains("csiro") }?.extraPaths ?? [], [])
-        XCTAssertEqual(grouped.first { $0.rootLabel == "LaunchAgents" }?.extraPaths ?? [], [])
+        // Unwrapped so a row that vanished from the grouping fails here instead
+        // of comparing nil's empty path list against the empty expectation.
+        let sent = try XCTUnwrap(grouped.first { $0.rootLabel != "LaunchAgents" && entryLabel($0.name).lowercased().hasPrefix("com.sentinelone.") })
+        XCTAssertEqual(sent.extraPaths.count, 2, sent.name)
+        let safari = try XCTUnwrap(grouped.first { $0.name.contains("csiro") })
+        XCTAssertTrue(safari.extraPaths.isEmpty, safari.extraPaths.joined(separator: " | "))
+        let launchAgent = try XCTUnwrap(grouped.first { $0.rootLabel == "LaunchAgents" })
+        XCTAssertTrue(launchAgent.extraPaths.isEmpty, launchAgent.extraPaths.joined(separator: " | "))
     }
 
     func testLeftoverMatchesCategoryMatchesANFDNameAgainstAnNFCQuery() {
@@ -1350,7 +1367,9 @@ final class ClassifyTests: XCTestCase {
             "herald is no longer installed. Leftover Cache folder."
         )
         let flatpak = leftoverSummary(rootLabel: ".var/app", kind: "dir", name: "org.mozilla.firefox")
-        XCTAssertTrue(flatpak.contains("Firefox") || flatpak.contains("firefox"), flatpak)
+        // The exact sentence, not "contains Firefox or firefox": the
+        // disjunction is satisfied by the input name, so it can never fail.
+        XCTAssertEqual(flatpak, "Firefox is no longer installed. Leftover Flatpak data folder.")
         XCTAssertTrue(flatpak.contains("Flatpak"), flatpak)
         XCTAssertFalse(flatpak.contains("Application Support"), flatpak)
         XCTAssertTrue(orphanReason(rootLabel: ".cache", kind: "dir").contains("Cache"), orphanReason(rootLabel: ".cache", kind: "dir"))
@@ -1543,9 +1562,11 @@ final class ClassifyTests: XCTestCase {
         let system = DataItem(path: "/tmp/Apple", name: "Apple", rootLabel: "Caches", kind: "dir", status: "system")
         applyOrphanReasons([orphan, system])
         // Exact text, not just non-nil: a reason that filled every field with
-        // the same placeholder string would pass a nil check.
-        XCTAssertEqual(orphan.reason, orphanReason(rootLabel: "Application Support", kind: "dir"))
-        XCTAssertEqual(orphan.summary, leftoverSummary(rootLabel: "Application Support", kind: "dir", name: "Foo"))
+        // the same placeholder string would pass a nil check. Spelled out here
+        // rather than built from the same two helpers, which would move both
+        // sides of the comparison together.
+        XCTAssertEqual(orphan.reason, "Application Support leftover.")
+        XCTAssertEqual(orphan.summary, "Foo is no longer installed. Leftover Application Support folder.")
         XCTAssertNil(system.reason)
         XCTAssertNil(system.summary)
     }
