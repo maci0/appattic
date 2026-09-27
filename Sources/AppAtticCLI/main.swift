@@ -21,9 +21,7 @@ enum AppAtticCLI {
             return
         }
         if let err = opts.error {
-            fputs("error: \(err)\n", stderr)
-            fputs("\(cliUsageHint)\n", stderr)
-            Foundation.exit(2)
+            failUsage(err)
         }
         if opts.command == "disk" {
             runDiskCommand(opts)
@@ -94,9 +92,9 @@ enum AppAtticCLI {
                 print("Nothing to update. \(outdatedSkippedManagersNote)")
                 return
             }
-            if !confirmLiveUpdate(count: n) {
+            if !confirmUpdate(count: n, assumeYes: opts.yes) {
                 fputs("Update cancelled.\n", stderr)
-                return
+                Foundation.exit(1)
             }
             fputs("Updating \(n) package(s)…\n", stderr)
             let rc = runShellScript(script)
@@ -133,6 +131,11 @@ enum AppAtticCLI {
 
 func runDiskCommand(_ opts: CLIOptions) {
     let root = opts.diskPath ?? FileManager.default.homeDirectoryForCurrentUser.path
+    do {
+        try validateDiskRoot(root)
+    } catch {
+        failUsage(error.localizedDescription)
+    }
     fputs("scanning \(root)\n", stderr)
     fflush(stderr)
     let tree = scanDiskUsage(root: root, oneFileSystem: !opts.allFileSystems)
@@ -151,6 +154,12 @@ func runDiskCommand(_ opts: CLIOptions) {
             Foundation.exit(1)
         }
     }
+}
+
+func failUsage(_ message: String) -> Never {
+    fputs("error: \(message)\n", stderr)
+    fputs("\(cliUsageHint)\n", stderr)
+    Foundation.exit(2)
 }
 
 enum C {
@@ -383,8 +392,13 @@ func printPackages(_ result: ScanResult) {
     print(C.dim("  Remove and mark-manual are confirm + script only. Distro upgrades are never included."))
 }
 
-func confirmLiveUpdate(count: Int) -> Bool {
-    if isatty(STDIN_FILENO) == 0 { return true }
+func confirmUpdate(count: Int, assumeYes: Bool) -> Bool {
+    if assumeYes { return true }
+    if isatty(STDIN_FILENO) == 0 {
+        fputs("error: update needs confirmation and stdin is not a terminal\n", stderr)
+        fputs("       pass --yes to run it unattended, or --dry-run to print the script\n", stderr)
+        Foundation.exit(2)
+    }
     fputs("Update \(count) package(s)? [y/N] ", stderr)
     fflush(stderr)
     guard let line = readLine() else { return false }

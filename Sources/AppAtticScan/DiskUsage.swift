@@ -136,6 +136,34 @@ func direntName(_ ent: UnsafeMutablePointer<dirent>) -> String {
     }
 }
 
+public enum DiskRootError: Error, Equatable, CustomStringConvertible, LocalizedError, Sendable {
+    case missing(path: String)
+    case notADirectory(path: String)
+
+    public var description: String {
+        switch self {
+        case .missing(let path):
+            return "no such directory: \(path)"
+        case .notADirectory(let path):
+            return "not a directory: \(path)"
+        }
+    }
+
+    public var errorDescription: String? { description }
+}
+
+/// `disk PATH` must name a directory. A typo would otherwise print a one-line
+/// "unreadable" tree and exit 0, which reads as an empty disk.
+public func validateDiskRoot(_ path: String) throws {
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+        throw DiskRootError.missing(path: path)
+    }
+    guard isDir.boolValue else {
+        throw DiskRootError.notADirectory(path: path)
+    }
+}
+
 public func scanDiskUsage(
     root: String,
     oneFileSystem: Bool = true,

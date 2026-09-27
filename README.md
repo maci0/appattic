@@ -8,7 +8,7 @@ macOS and Linux. Today: one Foundation scan library (`AppAtticScan`), a Gtk-free
 
 - **Leftovers.** User data whose owner app is gone (Application Support, caches, XDG dirs, and similar), plus user overlays (`~/.local/bin`, `~/bin`, `~/.cargo/bin`, `~/.local/share/applications`) that hide a same-named packaged file. Overlay rows use status `shadow`; cleanup removes the overlay only. Apple/system/toolchain dirs are not counted as reclaimable.
 - **Stale.** Installed apps and brew formulas with weak or old usage. Last-used comes from Spotlight (macOS, including the inner executable), running processes, prefs mtime, data-dir mtime, Linux `recently-used.xbel`, and shell history for CLI tools. Unused is not the same as outdated.
-- **Outdated.** Newer version available from Homebrew, Flatpak, Snap, apt, pacman, AUR (paru/yay/pikaur), dnf/yum, zypper, or the App Store. Named upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf/yum, zypper) run from the Outdated page after you confirm, or with `appattic update` (`--dry-run` prints the script first). Not a full distro upgrade (`apt upgrade`, `pacman -Syu`). App Store and Snap stay report-only. Untrusted Homebrew casks are listed and are not updated. Debian/Ubuntu also lists `dpkg` config remnants (`rc`) and PPA source files.
+- **Outdated.** Newer version available from Homebrew, Flatpak, Snap, apt, pacman, AUR (paru/yay/pikaur), dnf/yum, zypper, or the App Store. Named upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf/yum, zypper) run from the Outdated page after you confirm, or with `appattic update` (`--dry-run` prints the script first, `--yes` skips the prompt when there is no terminal). Not a full distro upgrade (`apt upgrade`, `pacman -Syu`). App Store and Snap stay report-only. Untrusted Homebrew casks are listed and are not updated. Debian/Ubuntu also lists `dpkg` config remnants (`rc`) and PPA source files.
 - **Packages.** Distro orphans (nothing still needs them) and user-global language tools (`npm`/`pnpm`/`bun -g`, pipx, `uv tool`). Remove and mark-as-manual are confirm + script only. Distro upgrades are never included.
 - **Disk usage.** Folder and device sizes with a tree, allocated vs apparent size, ring and treemap charts (Linux Qt), scan home / folder / file system, open in the file manager, and move to Trash after confirm. Other file systems are not descended into unless you ask. Directory symlinks are not followed. `appattic disk [PATH]` prints the tree.
 
@@ -38,7 +38,14 @@ Equivalent without `run.sh` after a build:
 .build/release/appattic --version
 ```
 
-Useful flags: `--json FILE`, `--include-system`, `--fresh` (ignore the last-scan cache), `--dry-run` (print the script for this command), `--top N` (largest leftovers), `--category CAT`, `--leftovers-only`, `--stale-only`, `--all-file-systems` and `--allocated` (on `disk`), `--no-color`, `--version` (`-v`), `--help` (`-h`). Progress and status (including JSON written to FILE) go to stderr so reports and `--dry-run` scripts stay pipeable.
+Useful flags: `--json FILE`, `--include-system`, `--fresh` (ignore the last-scan cache), `--dry-run` (print the script for this command), `--top N` (largest leftovers, or largest entries per folder on `disk`), `--category CAT` (repeatable), `--leftovers-only`, `--stale-only`, `--all-file-systems` and `--allocated` (on `disk`), `--no-color`, `--yes` (`update` only), `--version` (`-v`), `--help` (`-h`). Progress and status (including JSON written to FILE) go to stderr so reports and `--dry-run` scripts stay pipeable. Exit 0 on success, 1 when the run failed or an update was cancelled, 2 on a usage error.
+
+`appattic update` asks for confirmation on a terminal. With stdin redirected (cron, CI, a pipeline) it stops with exit 2 unless you pass `--yes`, so an unattended upgrade is always something you asked for:
+
+```bash
+appattic update --dry-run   # print the script, run nothing
+appattic update --yes       # unattended, from a script or timer
+```
 
 Settings live in `settings.json` next to the scan cache (same file for CLI, macOS UI, and Linux Qt):
 

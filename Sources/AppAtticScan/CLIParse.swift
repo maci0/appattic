@@ -8,6 +8,7 @@ public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStr
     case unknownCommand(String)
     case unexpectedArgument(String)
     case conflictingFilters
+    case yesNeedsUpdateCommand
 
     public var description: String {
         switch self {
@@ -20,11 +21,16 @@ public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStr
         case .unknownOption(let option):
             return "unknown option: \(option)"
         case .unknownCommand(let command):
-            return "unknown command: \(command)"
+            if let guess = nearestCLICommand(command) {
+                return "unknown command: \(command) (did you mean '\(guess)'?)"
+            }
+            return "unknown command: \(command); try one of: \(cliCommandList())"
         case .unexpectedArgument(let argument):
             return "unexpected argument: \(argument)"
         case .conflictingFilters:
             return "--leftovers-only and --stale-only cannot be combined"
+        case .yesNeedsUpdateCommand:
+            return "--yes only applies to the update command"
         }
     }
 
@@ -47,6 +53,7 @@ public struct CLIOptions {
     public var diskPath: String?
     public var allFileSystems: Bool
     public var allocated: Bool
+    public var yes: Bool
     public var parseError: CLIParseError?
     public var error: String? { parseError?.description }
 
@@ -66,6 +73,7 @@ public struct CLIOptions {
         diskPath: String? = nil,
         allFileSystems: Bool = false,
         allocated: Bool = false,
+        yes: Bool = false,
         parseError: CLIParseError? = nil
     ) {
         self.command = command
@@ -83,11 +91,46 @@ public struct CLIOptions {
         self.diskPath = diskPath
         self.allFileSystems = allFileSystems
         self.allocated = allocated
+        self.yes = yes
         self.parseError = parseError
     }
 }
 
 let cliCommands: Set<String> = ["report", "leftovers", "stale", "outdated", "packages", "update", "disk"]
+
+func cliCommandList() -> String {
+    cliCommands.sorted().joined(separator: ", ")
+}
+
+/// Closest command within `cliSuggestionDistance` edits, for a typo like `updat`.
+func nearestCLICommand(_ typed: String) -> String? {
+    let cliSuggestionDistance = 2
+    let input = Array(typed.lowercased())
+    var best: (command: String, distance: Int)?
+    for command in cliCommands.sorted() {
+        let distance = cliEditDistance(input, Array(command))
+        if let best, distance >= best.distance { continue }
+        best = (command, distance)
+    }
+    guard let best, best.distance <= cliSuggestionDistance else { return nil }
+    return best.command
+}
+
+func cliEditDistance(_ a: [Character], _ b: [Character]) -> Int {
+    if a.isEmpty { return b.count }
+    if b.isEmpty { return a.count }
+    var previous = Array(0...b.count)
+    var current = [Int](repeating: 0, count: b.count + 1)
+    for i in 1...a.count {
+        current[0] = i
+        for j in 1...b.count {
+            let cost = a[i - 1] == b[j - 1] ? 0 : 1
+            current[j] = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+        }
+        swap(&previous, &current)
+    }
+    return previous[b.count]
+}
 
 public let cliHelpText = """
 usage: appattic [--version] [--help] [command] [options]
@@ -95,30 +138,44 @@ usage: appattic [--version] [--help] [command] [options]
 Find leftover data from uninstalled apps, unused installed software, unused distro/language packages, outdated packages, and disk usage.
 
 commands:
-  report      full report: leftovers + stale + outdated + packages (default)
-  leftovers   only orphaned data and PATH overlays from uninstalled apps
-  stale       unused installed software (review and remove)
-  outdated    installed packages with a newer version available
-  packages    distro orphans and language globals
-  disk        folder sizes (like Disk Usage Analyzer). Optional PATH, default home
-  update      named package upgrades (prompts on a TTY; --dry-run prints the script). Not a full distro upgrade
+  report        full report: leftovers + stale + outdated + packages (default)
+  leftovers     only orphaned data and PATH overlays from uninstalled apps
+  stale         unused installed software (review and remove)
+  outdated      installed packages with a newer version available
+  packages      distro orphans and language globals
+  disk [PATH]   folder sizes (like Disk Usage Analyzer). Optional PATH, default home
+  update        named package upgrades (prompts on a TTY; --dry-run prints the script). Not a full distro upgrade
 
 options:
   --json FILE         also write full results as JSON to FILE
   --include-system    include OS system apps in the stale list
   --fresh             ignore the last-scan cache and scan now
   --dry-run           print a shell script for this command without running it
-  --top N             show only the N largest leftovers
-  --category CAT      filter leftovers by category (substring match)
+  --top N             leftovers: only the N largest. disk: N largest entries per folder
+  --category CAT      filter leftovers by category (substring match, repeatable)
   --leftovers-only    on report, skip stale, outdated, and packages
   --stale-only        on report, skip leftovers, outdated, and packages
   --no-color          disable ANSI color (also NO_COLOR or TERM=dumb)
   --all-file-systems  on disk, descend into other mounted devices
   --allocated         on disk, print allocated blocks instead of apparent size
+  --yes, -y           on update, skip the prompt (required without a TTY)
   --version, -v       print version and exit
   --help, -h          print this help and exit
 
 Progress and status go to stderr. Reports and --dry-run scripts go to stdout.
+
+exit codes:
+  0  success
+  1  the run failed, or an update was cancelled
+  2  usage error (bad command, option, or value)
+
+examples:
+  appattic leftovers --top 10
+  appattic report --json /tmp/appattic.json
+  appattic disk /var --top 5 --allocated
+  appattic leftovers --category caches --category browser
+  appattic update --dry-run
+  appattic update --yes
 
 settings.json (includeSystem, confirmDelete, ignored leftover paths):
   Linux: $XDG_DATA_HOME/appattic/settings.json
@@ -188,6 +245,11 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
             i += 1
             continue
         }
+        if a == "--yes" || a == "-y" {
+            opts.yes = true
+            i += 1
+            continue
+        }
         if a == "--leftovers-only" {
             opts.leftoversOnly = true
             i += 1
@@ -239,16 +301,12 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         }
         if a == "--category" {
             i += 1
-            var cats: [String] = []
-            while i < args.count, !args[i].hasPrefix("-") {
-                cats.append(args[i])
-                i += 1
-            }
-            if cats.isEmpty {
+            guard i < args.count, !args[i].hasPrefix("-") else {
                 opts.parseError = .categoryRequiresValue
                 return opts
             }
-            opts.category.append(contentsOf: cats)
+            opts.category.append(args[i])
+            i += 1
             continue
         }
         if a.hasPrefix("--category=") {
@@ -285,6 +343,9 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     }
     if opts.leftoversOnly && opts.staleOnly && opts.parseError == nil {
         opts.parseError = .conflictingFilters
+    }
+    if opts.yes && opts.command != "update" && opts.parseError == nil {
+        opts.parseError = .yesNeedsUpdateCommand
     }
     return opts
 }

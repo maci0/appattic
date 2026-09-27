@@ -100,6 +100,25 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertEqual(got["apparent"] as? Int, Int.max, "Int.max must survive the digit buffer")
     }
 
+    func testValidateDiskRootRejectsMissingPathAndFile() throws {
+        let td = FileManager.default.temporaryDirectory.appendingPathComponent("root-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: td, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: td) }
+        let file = td.appendingPathComponent("a.txt")
+        try Data("hi\n".utf8).write(to: file)
+
+        XCTAssertNoThrow(try validateDiskRoot(td.path))
+        let missing = td.appendingPathComponent("nope").path
+        XCTAssertThrowsError(try validateDiskRoot(missing)) { error in
+            XCTAssertEqual(error as? DiskRootError, .missing(path: missing))
+            XCTAssertEqual(error.localizedDescription, "no such directory: \(missing)")
+        }
+        XCTAssertThrowsError(try validateDiskRoot(file.path)) { error in
+            XCTAssertEqual(error as? DiskRootError, .notADirectory(path: file.path))
+            XCTAssertEqual(error.localizedDescription, "not a directory: \(file.path)")
+        }
+    }
+
     #if os(Linux)
     // `mountsText` is the /proc/mounts reader's injection point; the macOS
     // branch lists mounted volumes through FileManager and ignores it.

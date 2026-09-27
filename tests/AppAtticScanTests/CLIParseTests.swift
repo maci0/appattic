@@ -28,10 +28,27 @@ final class CLIFlagTests: XCTestCase {
     }
 
     func testUnknownCommand() {
-        XCTAssertEqual(parseCLIArguments(["serve"]).error, "unknown command: serve")
-        XCTAssertEqual(parseCLIArguments(["serve"]).parseError, .unknownCommand("serve"))
-        XCTAssertEqual(parseCLIArguments(["brew-leaves"]).error, "unknown command: brew-leaves")
-        XCTAssertEqual(parseCLIArguments(["brew-leaves"]).parseError, .unknownCommand("brew-leaves"))
+        let serve = parseCLIArguments(["serve"])
+        XCTAssertEqual(serve.parseError, .unknownCommand("serve"))
+        XCTAssertEqual(
+            serve.error,
+            "unknown command: serve; try one of: disk, leftovers, outdated, packages, report, stale, update"
+        )
+        let leaves = parseCLIArguments(["brew-leaves"])
+        XCTAssertEqual(leaves.parseError, .unknownCommand("brew-leaves"))
+        XCTAssertTrue(leaves.error?.hasPrefix("unknown command: brew-leaves") == true, leaves.error ?? "")
+    }
+
+    func testMisspelledCommandSuggestsTheNearestOne() {
+        XCTAssertEqual(
+            parseCLIArguments(["updat"]).error,
+            "unknown command: updat (did you mean 'update'?)"
+        )
+        XCTAssertEqual(
+            parseCLIArguments(["dusk"]).error,
+            "unknown command: dusk (did you mean 'disk'?)"
+        )
+        XCTAssertNil(nearestCLICommand("serve"))
     }
 
     func testUpdateCommand() {
@@ -40,6 +57,25 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertTrue(cliHelpText.contains("prompts on a TTY"), cliHelpText)
         XCTAssertTrue(cliHelpText.contains("--dry-run"), cliHelpText)
         XCTAssertTrue(cliHelpText.contains("--help"), cliHelpText)
+    }
+
+    func testYesSkipsTheUpdatePrompt() {
+        XCTAssertTrue(parseCLIArguments(["update", "--yes"]).yes)
+        XCTAssertTrue(parseCLIArguments(["update", "-y"]).yes)
+        XCTAssertNil(parseCLIArguments(["update", "--yes"]).error)
+        XCTAssertFalse(parseCLIArguments(["update"]).yes)
+        XCTAssertTrue(cliHelpText.contains("--yes, -y"), cliHelpText)
+    }
+
+    func testYesIsRejectedOnEveryOtherCommand() {
+        for args in [["--yes"], ["report", "--yes"], ["leftovers", "-y"], ["disk", "/var", "--yes"]] {
+            XCTAssertEqual(parseCLIArguments(args).parseError, .yesNeedsUpdateCommand, args.joined(separator: " "))
+            XCTAssertEqual(
+                parseCLIArguments(args).error,
+                "--yes only applies to the update command",
+                args.joined(separator: " ")
+            )
+        }
     }
 
     func testDiskCommand() {
@@ -132,10 +168,30 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertEqual(parseCLIArguments(["leftovers", "--category="]).error, "--category requires a value")
     }
 
+    func testCategoryTakesOneValueAndRepeats() {
+        let opts = parseCLIArguments(["leftovers", "--category", "caches", "--category", "browser"])
+        XCTAssertEqual(opts.category, ["caches", "browser"])
+        XCTAssertNil(opts.error)
+        // A command after the value is the command, not another category.
+        let trailing = parseCLIArguments(["--category", "caches", "stale"])
+        XCTAssertEqual(trailing.command, "stale")
+        XCTAssertEqual(trailing.category, ["caches"])
+        XCTAssertNil(trailing.error)
+        XCTAssertEqual(parseCLIArguments(["--category", "-x"]).parseError, .categoryRequiresValue)
+    }
+
     func testJsonEqualsForm() {
         let opts = parseCLIArguments(["report", "--json=/tmp/out.json"])
         XCTAssertEqual(opts.json, "/tmp/out.json")
         XCTAssertNil(opts.error)
         XCTAssertEqual(parseCLIArguments(["report", "--json="]).error, "--json requires a file path")
+    }
+
+    func testHelpDocumentsExitCodesExamplesAndDiskPath() {
+        XCTAssertTrue(cliHelpText.contains("exit codes:"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("usage error"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("examples:"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("appattic update --yes"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("disk [PATH]"), cliHelpText)
     }
 }
