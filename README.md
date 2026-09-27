@@ -246,5 +246,5 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 - Homebrew `outdated` is called without `--greedy`, so auto-updating casks are not flagged just because the bottle is older than the running app.
 - An untrusted Homebrew cask is still listed on Outdated. Other formula and cask descriptions still load. AppAttic will not trust the tap.
 - Named outdated upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf/yum, zypper) run from the Outdated page (confirm first) or `./run.sh update` (runs now; pass `--dry-run` to print the script). App Store and Snap stay report-only.
-- Missing package managers are skipped. A failed update check (network, dead remote, broken `brew outdated`) does not fail the scan, but the scan is marked incomplete and the last-scan cache is not written, so a failed check is never served later as "up to date".
+- Missing package managers are skipped. A failed package check (network, dead remote, broken `brew outdated`, a package manager that answers with a failure status) does not fail the scan, but the scan is marked incomplete and the last-scan cache is not written, so a failed check is never served later as "up to date" or "no orphans".
 - Review every path in a generated script before running it.

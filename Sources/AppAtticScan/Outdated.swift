@@ -3,33 +3,35 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Update checks that could not run in the scan now in flight, by manager name.
-/// A check that failed is not the answer "nothing is outdated", it is an
-/// unknown, and the two collapse into the same empty list. The scan cache
-/// keeps a scan for `scanCacheMaxAge`, so an unknown written to it is served as
-/// a verified "up to date" for a day. `performScan` reads the set and marks the
-/// scan incomplete, which is the flag `commitScanCache` already refuses to keep
-/// and `isScanCacheStale` already refuses to serve. Reset per scan, so a long
-/// lived process (the UI) cannot carry one scan's failure into the next.
-private let outdatedFailureLock = NSLock()
-nonisolated(unsafe) private var outdatedFailures: Set<String> = []
+/// Package checks that could not run in the scan now in flight, by manager or
+/// tool name: the update queries below and the orphan/global listings in
+/// `Packages.swift` both report here. A check that failed is not the answer
+/// "nothing to report", it is an unknown, and the two collapse into the same
+/// empty list. The scan cache keeps a scan for `scanCacheMaxAge`, so an unknown
+/// written to it is served as a verified "up to date" for a day. `performScan`
+/// reads the set and marks the scan incomplete, which is the flag
+/// `commitScanCache` already refuses to keep and `isScanCacheStale` already
+/// refuses to serve. Reset per scan, so a long lived process (the UI) cannot
+/// carry one scan's failure into the next.
+private let failedCheckLock = NSLock()
+nonisolated(unsafe) private var failedChecks: Set<String> = []
 
-func noteOutdatedCheckFailed(_ source: String) {
-    outdatedFailureLock.lock()
-    outdatedFailures.insert(source)
-    outdatedFailureLock.unlock()
+func noteScanCheckFailed(_ source: String) {
+    failedCheckLock.lock()
+    failedChecks.insert(source)
+    failedCheckLock.unlock()
 }
 
-func outdatedCheckFailures() -> [String] {
-    outdatedFailureLock.lock()
-    defer { outdatedFailureLock.unlock() }
-    return outdatedFailures.sorted()
+func scanCheckFailures() -> [String] {
+    failedCheckLock.lock()
+    defer { failedCheckLock.unlock() }
+    return failedChecks.sorted()
 }
 
-func resetOutdatedCheckFailures() {
-    outdatedFailureLock.lock()
-    outdatedFailures.removeAll()
-    outdatedFailureLock.unlock()
+func resetScanCheckFailures() {
+    failedCheckLock.lock()
+    failedChecks.removeAll()
+    failedCheckLock.unlock()
 }
 
 // Per-line hot loops below use manual index walks instead of NSRegularExpression
@@ -1214,7 +1216,7 @@ public func queryFlatpak(
     if rc != 0, parseFlatpakUpdates(updates).isEmpty, installed.isEmpty {
         (rc, updates, installed) = pair(withMeta: false)
         if rc != 0, parseFlatpakUpdates(updates).isEmpty {
-            noteOutdatedCheckFailed("flatpak")
+            noteScanCheckFailed("flatpak")
             return []
         }
     }
@@ -1240,7 +1242,7 @@ public func querySnap(
     }
     let (rc, refresh) = r1.value
     if rc != 0 {
-        noteOutdatedCheckFailed("snap")
+        noteScanCheckFailed("snap")
         return []
     }
     let (rc2, listed) = r2.value
@@ -1256,7 +1258,7 @@ public func queryApt(
     progress?("  · checking apt upgradable packages…")
     let (rc, out, _) = run([path, "list", "--upgradable"], 60)
     if rc != 0 {
-        noteOutdatedCheckFailed("apt")
+        noteScanCheckFailed("apt")
         return []
     }
     return parseAptUpgradable(out)
@@ -1272,7 +1274,7 @@ public func queryAur(
         progress?("  · checking AUR updates…")
         let (rc, out, _) = run([path, "-Qua"], 60)
         if rc != 0 && rc != 1 {
-            noteOutdatedCheckFailed("aur")
+            noteScanCheckFailed("aur")
             continue
         }
         return parsePacmanQu(out).map { pkg in
@@ -1296,7 +1298,7 @@ public func queryPacman(
     progress?("  · checking pacman updates…")
     let (rc, out, _) = run([path, "-Qu"], 60)
     if rc != 0 && rc != 1 {
-        noteOutdatedCheckFailed("pacman")
+        noteScanCheckFailed("pacman")
         return []
     }
     return parsePacmanQu(out)
@@ -1321,7 +1323,7 @@ public func queryDnf(
     }
     let (rc, out, _) = run([path, "check-update"], 60)
     if let pkgs = parsed(rc, out) { return pkgs }
-    noteOutdatedCheckFailed(manager)
+    noteScanCheckFailed(manager)
     return []
 }
 
@@ -1334,7 +1336,7 @@ public func queryZypper(
     progress?("  · checking zypper updates…")
     let (rc, out, _) = run([path, "--non-interactive", "list-updates"], 60)
     if rc != 0 {
-        noteOutdatedCheckFailed("zypper")
+        noteScanCheckFailed("zypper")
         return []
     }
     return parseZypperListUpdates(out)

@@ -65,7 +65,7 @@ enum AppAtticCLI {
             fputs("warning: scan not cached: \(redactHomePaths(cacheFailure)); the next run rescans\n", stderr)
         }
         if resolved.data.incomplete == true {
-            fputs("warning: an update check failed; the outdated list is incomplete and the scan is not cached\n", stderr)
+            fputs("warning: a package check failed; the outdated and package lists are incomplete and the scan is not cached\n", stderr)
         }
         let ignored = Set(settings.ignoredLeftoverPaths)
         let result = scanResult(from: resolved.data, ignoringLeftovers: ignored, now: now)
@@ -410,7 +410,11 @@ func printPackages(_ result: ScanResult) {
     print()
     print(C.bold("PACKAGES: distro orphans and language globals (\(pkgs.count))"))
     if pkgs.isEmpty {
-        print(C.green("  Nothing found. Distro tools reported no orphans, or language globals are absent."))
+        if result.incomplete {
+            print(C.yellow("  Nothing found, but a package check failed: this list is incomplete."))
+        } else {
+            print(C.green("  Nothing found. Distro tools reported no orphans, or language globals are absent."))
+        }
         return
     }
     var rows: [[String]] = []

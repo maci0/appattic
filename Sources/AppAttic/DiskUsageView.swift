@@ -189,6 +189,12 @@ struct DiskUsageView: View {
                 guard !ticket.isCancelled else { return }
                 root = tree
                 selected = tree
+                // The device list is read once when the view state is created,
+                // so a scan that freed or filled a volume would leave it
+                // showing the sizes it had then. `listDiskVolumes` is a
+                // /proc/mounts read plus one statvfs per mount, cheap enough to
+                // redo whenever the tree is re-measured.
+                volumes = listDiskVolumes()
                 scanning = false
                 status = "\(humanSize(tree.metric(allocatedSize: allocated))) · \(tree.items) items"
             }

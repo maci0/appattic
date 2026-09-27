@@ -12,11 +12,12 @@ public final class ScanResult {
     public var outdated: [OutdatedPkg]
     public var packages: [PackageEntry]
     public var appsInstalled: Int
-    /// An update check that could not run: the Homebrew query, or any manager
-    /// or store query below. The rest of the scan ran, so this is not "the scan
-    /// was cut short": it gates scan-cache reuse and writes, so a cached scan
-    /// is retried instead of serving an outdated list that is missing every
-    /// package the failed check would have reported.
+    /// A package check that could not run: the Homebrew query, any manager or
+    /// store query below, or a package-manager listing that returned a failure
+    /// status. The rest of the scan ran, so this is not "the scan was cut
+    /// short": it gates scan-cache reuse and writes, so a cached scan is retried
+    /// instead of serving an outdated or package list that is missing every
+    /// entry the failed check would have reported.
     public var incomplete: Bool
 
     public init(
@@ -170,7 +171,7 @@ public func performScan(
 ) -> ScanResult {
     let t0 = clock()
     let result = ScanResult(scannedAt: now)
-    resetOutdatedCheckFailures()
+    resetScanCheckFailures()
 
     progress("Scanning installed applications…")
     var found = apps ?? findApps(progress: progress)
@@ -192,15 +193,6 @@ public func performScan(
     let linuxPkgs = linuxOutdated ?? collectLinux(progress: progress, which: which, run: run)
     let masPkgs = appStoreOutdated ?? queryAppstore(result.apps, progress: progress, which: which, run: run)
     result.outdated = applyUntrustedCasks(brewInfo.outdated + linuxPkgs + masPkgs, refused: brewInfo.untrustedCasks)
-    // A check that could not run is an unknown, not an empty list. It reaches
-    // the scan cache through `incomplete`, so the next run retries instead of
-    // serving "up to date" for a day. Only the ones that were actually
-    // attempted count: a manager that is not installed never failed.
-    let failed = outdatedCheckFailures()
-    if !failed.isEmpty {
-        progress("  · update check unavailable: \(failed.joined(separator: ", "))")
-    }
-    result.incomplete = brewInfo.outdatedFailed || !failed.isEmpty
 
     progress("Scanning for leftover data…")
     if let leftoverItems {
@@ -244,6 +236,16 @@ public func performScan(
     result.verdicts = evaluateAll(result.software, now: now)
     progress("Listing unused distro packages and language globals…")
     result.packages = packages ?? collectPackages(progress: progress, which: which, run: run)
+    // A check that could not run is an unknown, not an empty list. It reaches
+    // the scan cache through `incomplete`, so the next run retries instead of
+    // serving "up to date" or "no orphans" for a day. Read after the package
+    // collector, which reports its own failures here. Only the ones that were
+    // actually attempted count: a manager that is not installed never failed.
+    let failed = scanCheckFailures()
+    if !failed.isEmpty {
+        progress("  · check unavailable: \(failed.joined(separator: ", "))")
+    }
+    result.incomplete = brewInfo.outdatedFailed || !failed.isEmpty
     result.durationS = max(0, clock() - t0)
     return result
 }

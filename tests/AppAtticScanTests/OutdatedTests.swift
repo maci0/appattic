@@ -581,16 +581,16 @@ final class OutdatedTests: XCTestCase {
     }
 
     func testFailedUpdateCheckIsRecordedNotAnEmptyAnswer() {
-        resetOutdatedCheckFailures()
-        defer { resetOutdatedCheckFailures() }
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
         let pkgs = queryApt(which: { $0 == "apt" ? "/usr/bin/apt" : nil }, run: { _, _ in (1, "", "") })
         XCTAssertTrue(pkgs.isEmpty)
-        XCTAssertEqual(outdatedCheckFailures(), ["apt"])
+        XCTAssertEqual(scanCheckFailures(), ["apt"])
         // A check that answers is not a failure: same empty list, no record.
-        resetOutdatedCheckFailures()
+        resetScanCheckFailures()
         let clean = queryApt(which: { $0 == "apt" ? "/usr/bin/apt" : nil }, run: { _, _ in (0, "", "") })
         XCTAssertTrue(clean.isEmpty)
-        XCTAssertTrue(outdatedCheckFailures().isEmpty)
+        XCTAssertTrue(scanCheckFailures().isEmpty)
     }
 
     func testFailedUpdateCheckKeepsTheScanOutOfTheCache() throws {
@@ -610,7 +610,7 @@ final class OutdatedTests: XCTestCase {
             skipLiveUsage: true
         )
         XCTAssertTrue(result.incomplete)
-        XCTAssertFalse(outdatedCheckFailures().isEmpty)
+        XCTAssertFalse(scanCheckFailures().isEmpty)
         let data = result.toScanData()
         XCTAssertEqual(data.incomplete, true)
         let url = FileManager.default.temporaryDirectory

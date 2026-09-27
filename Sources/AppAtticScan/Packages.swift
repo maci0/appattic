@@ -536,6 +536,15 @@ public func parseUvToolList(_ text: String) -> [PackageEntry] {
     return out
 }
 
+/// One package-manager query. `failed` tells "the manager is not installed"
+/// apart from "every candidate binary answered with a failure status": the
+/// first is a real empty answer, the second is an unknown, and an unknown
+/// written to the scan cache is served as "no orphans" for `scanCacheMaxAge`.
+struct PackageQueryResult {
+    var output: String?
+    var failed: Bool
+}
+
 func runPackageQuery(
     which: WhichFn,
     run: CommandRun,
@@ -543,13 +552,39 @@ func runPackageQuery(
     args: [String],
     timeout: TimeInterval = 60,
     ok: (Int32) -> Bool = { $0 == 0 }
-) -> String? {
+) -> PackageQueryResult {
+    var attempted = false
     for name in names {
         guard let path = which(name) else { continue }
+        attempted = true
         let (rc, out, _) = run([path] + args, timeout)
-        if ok(rc) { return out }
+        if ok(rc) { return PackageQueryResult(output: out, failed: false) }
     }
-    return nil
+    return PackageQueryResult(output: nil, failed: attempted)
+}
+
+/// One manager, one or more argument spellings tried in order, the first
+/// answer parsed. A failure is recorded only when every spelling failed, so
+/// `pipx list --json` failing on an old pipx leaves the check alone when
+/// `pipx list` answered. Returns the parsed rows, empty when nothing answered.
+func runPackageQueryChain(
+    _ steps: [[String]],
+    which: WhichFn,
+    run: CommandRun,
+    names: [String],
+    label: String,
+    timeout: TimeInterval = 60,
+    ok: (Int32) -> Bool = { $0 == 0 },
+    parse: (String) -> [PackageEntry]
+) -> [PackageEntry] {
+    var failed = false
+    for args in steps {
+        let result = runPackageQuery(which: which, run: run, names: names, args: args, timeout: timeout, ok: ok)
+        failed = failed || result.failed
+        if let out = result.output { return parse(out) }
+    }
+    if failed { noteScanCheckFailed(label) }
+    return []
 }
 
 public func collectPackages(
@@ -568,105 +603,96 @@ public func collectPackages(
     switch distro {
         case .pacman:
             queries.append {
-                guard let text = runPackageQuery(
-                    which: which, run: run, names: ["pacman"], args: ["-Qdt"],
-                    ok: { $0 == 0 || $0 == 1 }
-                ) else { return [] }
-                return parsePacmanOrphans(text)
+                return runPackageQueryChain(
+                    [["-Qdt"]],
+                    which: which, run: run, names: ["pacman"], label: "pacman",
+                    ok: { $0 == 0 || $0 == 1 }, parse: parsePacmanOrphans
+                )
             }
         case .apt, .dpkg:
             queries.append {
                 var result: [PackageEntry] = []
-                if let text = runPackageQuery(
+                let autoremove = runPackageQuery(
                     which: which, run: run, names: ["apt-get", "apt"],
                     args: ["-s", "autoremove"]
-                ) {
+                )
+                if autoremove.failed { noteScanCheckFailed("apt") }
+                if let text = autoremove.output {
                     result.append(contentsOf: parseAptAutoremove(text))
                 }
-                if let text = runPackageQuery(
+                let dpkg = runPackageQuery(
                     which: which, run: run, names: ["dpkg"],
                     args: ["-l"]
-                ) {
+                )
+                if dpkg.failed { noteScanCheckFailed("dpkg") }
+                if let text = dpkg.output {
                     result.append(contentsOf: parseDpkgRc(text))
                 }
                 return result
             }
         case .dnf:
             queries.append {
-                guard let text = runPackageQuery(
+                return runPackageQueryChain(
+                    [["repoquery", "--unneeded", "--qf", "%{name}"]],
                     which: which, run: run, names: ["dnf5", "dnf", "yum"],
-                    args: ["repoquery", "--unneeded", "--qf", "%{name}"]
-                ) else { return [] }
-                return parseDnfUnneeded(text)
+                    label: "dnf", parse: parseDnfUnneeded
+                )
             }
         case .some(DistroPackageManager.zypperPkg):
             queries.append {
-                guard let text = runPackageQuery(
+                return runPackageQueryChain(
+                    [["--non-interactive", "packages", "--unneeded"]],
                     which: which, run: run, names: ["zypper"],
-                    args: ["--non-interactive", "packages", "--unneeded"]
-                ) else { return [] }
-                return parseZypperUnneeded(text)
+                    label: "zypper", parse: parseZypperUnneeded
+                )
             }
         case nil:
             break
     }
     queries.append {
-        guard let text = runPackageQuery(
-            which: which, run: run, names: ["npm"],
-            args: ["ls", "-g", "--depth=0", "--json"]
-        ) else { return [] }
-        return parseNpmGlobalList(text)
+        return runPackageQueryChain(
+            [["ls", "-g", "--depth=0", "--json"]],
+            which: which, run: run, names: ["npm"], label: "npm",
+            parse: parseNpmGlobalList
+        )
     }
     queries.append {
-        guard let text = runPackageQuery(
-            which: which, run: run, names: ["pnpm"],
-            args: ["ls", "-g", "--depth=0", "--json"]
-        ) else { return [] }
-        return parsePnpmGlobalList(text)
+        return runPackageQueryChain(
+            [["ls", "-g", "--depth=0", "--json"]],
+            which: which, run: run, names: ["pnpm"], label: "pnpm",
+            parse: parsePnpmGlobalList
+        )
     }
     queries.append {
-        guard let text = runPackageQuery(
-            which: which, run: run, names: ["bun"],
-            args: ["pm", "ls", "-g"]
-        ) else { return [] }
-        return parseBunGlobalList(text)
+        return runPackageQueryChain(
+            [["pm", "ls", "-g"]],
+            which: which, run: run, names: ["bun"], label: "bun",
+            parse: parseBunGlobalList
+        )
     }
     queries.append {
-        if let json = runPackageQuery(
-            which: which, run: run, names: ["pipx"],
-            args: ["list", "--json"]
-        ) {
-            return parsePipxList(json)
-        }
-        if let text = runPackageQuery(
-            which: which, run: run, names: ["pipx"],
-            args: ["list"]
-        ) {
-            return parsePipxList(text)
-        }
-        return []
+        return runPackageQueryChain(
+            [["list", "--json"], ["list"]],
+            which: which, run: run, names: ["pipx"], label: "pipx",
+            parse: parsePipxList
+        )
     }
     queries.append {
-        guard let text = runPackageQuery(
-            which: which, run: run, names: ["uv"],
-            args: ["tool", "list"]
-        ) else { return [] }
-        return parseUvToolList(text)
+        return runPackageQueryChain(
+            [["tool", "list"]],
+            which: which, run: run, names: ["uv"], label: "uv",
+            parse: parseUvToolList
+        )
     }
     queries.append {
-        if let text = runPackageQuery(
-            which: which, run: run, names: ["pip", "pip3"],
-            args: ["list", "--user", "--not-required", "--format=json"]
-        ) {
-            return parsePipUserList(text)
-        }
-        if let text = runPackageQuery(
-            which: which, run: run, names: ["pip", "pip3"],
-            args: ["list", "--user", "--format=json"]
-        ) {
-            return parsePipUserList(text)
-        }
-        return []
+        return runPackageQueryChain(
+            [
+                ["list", "--user", "--not-required", "--format=json"],
+                ["list", "--user", "--format=json"],
+            ],
+            which: which, run: run, names: ["pip", "pip3"], label: "pip",
+            parse: parsePipUserList
+        )
     }
     var out = pmap(queries, workers: 4) { $0() }.flatMap { $0 }
     out.append(contentsOf: listDenoGlobals())

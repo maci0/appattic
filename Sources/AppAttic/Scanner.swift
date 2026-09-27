@@ -256,10 +256,10 @@ final class ScannerViewModel {
                 vm.isScanning = false
                 vm.statusText = "scanned \(formatDate(result.scanned_at)) · \(formatSeconds(result.duration_s))s"
                 if result.incomplete == true {
-                    // No cache is written for this scan, and the outdated list
-                    // is missing whatever the failed checks would have found.
-                    // Saying so beats a list that looks complete.
-                    vm.statusText += " · update check failed, not cached"
+                    // No cache is written for this scan, and the outdated and
+                    // package lists are missing whatever the failed checks would
+                    // have found. Saying so beats a list that looks complete.
+                    vm.statusText += " · package check failed, not cached"
                 }
                 if let cacheWriteFailure {
                     vm.statusText += " · not cached: \(redactHomePaths(cacheWriteFailure))"

@@ -511,6 +511,85 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(result.toScanData().incomplete, true)
         XCTAssertTrue(scanResult(from: result.toScanData()).incomplete)
     }
+
+    /// A manager that answers with a failure status produced an unknown, not
+    /// an empty list. Without a record of it the scan cache keeps the empty
+    /// list for `scanCacheMaxAge` and serves it as "no orphans".
+    func testFailedPackageQueryIsRecordedNotAnEmptyAnswer() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let pkgs = collectPackages(
+            which: { name in ["pacman", "npm"].contains(name) ? "/usr/bin/\(name)" : nil },
+            run: { _, _ in (1, "", "boom") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertTrue(pkgs.isEmpty)
+        XCTAssertEqual(scanCheckFailures(), ["npm", "pacman"])
+    }
+
+    /// The other half of the same rule: a manager that is not installed has
+    /// nothing to report, which is a real empty answer and not a failure.
+    func testMissingManagerIsNotRecordedAsAFailure() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let pkgs = collectPackages(
+            which: { _ in nil },
+            run: { _, _ in (1, "", "") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertTrue(pkgs.isEmpty)
+        XCTAssertTrue(scanCheckFailures().isEmpty)
+    }
+
+    /// `pipx list --json` failing on an old pipx leaves the check alone when
+    /// the plain listing answered.
+    func testPackageQueryChainRecordsOnlyWhenEverySpellingFails() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        _ = collectPackages(
+            which: { name in name == "pipx" ? "/usr/bin/pipx" : nil },
+            run: { cmd, _ in cmd.contains("--json") ? (1, "", "no such option") : (0, "venvs []", "") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertTrue(scanCheckFailures().isEmpty)
+        resetScanCheckFailures()
+        _ = collectPackages(
+            which: { name in name == "pipx" ? "/usr/bin/pipx" : nil },
+            run: { _, _ in (1, "", "boom") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertEqual(scanCheckFailures(), ["pipx"])
+    }
+
+    /// The failure has to survive into the scan the cache sees, or the empty
+    /// list is still written and still served for a day. Every manager reads
+    /// as installed and every command fails, so the check is attempted on any
+    /// distro: `performScan` takes no os-release.
+    func testFailedPackageQueryKeepsTheScanOutOfTheCache() throws {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        let result = performScan(
+            includeSystem: false,
+            apps: [],
+            brew: BrewSnapshot(available: false),
+            leftoverItems: [],
+            leftoverAgents: [],
+            linuxOutdated: [],
+            appStoreOutdated: [],
+            history: HistoryIndex(),
+            which: { _ in "/usr/bin/appattic-missing" },
+            run: { _, _ in (1, "", "boom") },
+            skipLiveUsage: true
+        )
+        XCTAssertTrue(result.packages.isEmpty)
+        XCTAssertTrue(result.incomplete)
+        XCTAssertEqual(result.toScanData().incomplete, true)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-failed-package-check-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertFalse(try commitScanCache(includeSystem: false, data: result.toScanData(), before: "a", after: "a", to: url))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
 }
 
 private func entry(
