@@ -50,7 +50,8 @@ jobs:
       - name: Install shellcheck
         run: sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends shellcheck
       - name: Install yamllint
-        run: uv tool install yamllint
+        # Pinned here and in scripts/deps.sh, which fails if the two disagree.
+        run: uv tool install "yamllint==1.38.0"
       - name: Install zig
         run: sudo bash scripts/linux-deps.sh --install-zig
       - name: Put zig on PATH
@@ -182,7 +183,9 @@ jobs:
     container: archlinux:base-devel
     steps:
       - name: Install Qt 6 and build tools
-        run: pacman -Syu --noconfirm --needed git qt6-base cmake ninja pkgconf gcc clang binutils curl tar xz libxml2 ncurses python zig libglvnd xorg-server-xvfb
+        # No zig here: linux-deps.sh --install below puts the checksummed
+        # .zig-version tarball on PATH instead of the pacman package.
+        run: pacman -Syu --noconfirm --needed git qt6-base cmake ninja pkgconf gcc clang binutils curl tar xz libxml2 ncurses python libglvnd xorg-server-xvfb
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false

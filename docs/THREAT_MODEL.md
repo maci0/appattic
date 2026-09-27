@@ -109,7 +109,7 @@ The residual risk is the parent, not the file: `FileManager.default.temporaryDir
 
 ### 7. Build → runtime
 
-Pinned SHA-256 for Zig, Wasmtime C API, Swift Linux tarball, linuxdeploy, and appimagetool (`scripts/dep-checksums.sha256`, `verify-sha256.sh`). `scripts/deps.sh check` keeps those pins, the download URLs in the scripts, and the `sha256:` fields in `packaging/flatpak/` in agreement. `scripts/deps.sh sbom` writes a CycloneDX 1.5 inventory of those artifacts and of the `Package.resolved` pins next to each release artifact. macOS app is ad-hoc codesigned (`build.sh` `codesign --force --sign -`). AppImage is not signed in-tree. Docker base images are version tags, not digests.
+Pinned SHA-256 for Zig, Wasmtime C API, Swift Linux tarball, linuxdeploy, and appimagetool (`scripts/dep-checksums.sha256`, `verify-sha256.sh`). `scripts/deps.sh check` keeps those pins, the download URLs in the scripts, and the `sha256:` fields in `packaging/flatpak/` in agreement, and fails when a script, a manifest or a workflow spells a Zig or Wasmtime version other than the pinned one, or when CI installs a `uv tool` without the exact version `scripts/deps.sh` declares. Zig is installed from the checksummed tarball on every distro, so no unpinned package manager can supply the compiler. `scripts/deps.sh sbom` writes a CycloneDX 1.5 inventory of those artifacts and of the `Package.resolved` pins next to each release artifact. macOS app is ad-hoc codesigned (`build.sh` `codesign --force --sign -`). AppImage is not signed in-tree. Docker base images are version tags, not digests.
 
 ## Assets and impact
 

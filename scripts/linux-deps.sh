@@ -97,18 +97,21 @@ elif [[ "$tokens" == *" debian "* || "$tokens" == *" ubuntu "* || "$tokens" == *
 fi
 
 # Dev headers + tools for cmake link; runtime QPA/OpenGL/xcb for headless --smoke (no Gtk).
+# Zig is deliberately absent from every list: the tarball installed below is
+# checksummed and carries the .zig-version pin, so a distro package of another
+# version never takes its place.
 debian_qt_pkgs=(
     ca-certificates curl xz-utils
     qt6-base-dev cmake ninja-build pkg-config patchelf clang libgl1-mesa-dev
     qt6-qpa-plugins libgl1 libxkbcommon0 libxcb1 libxcb-cursor0 libxcb-xinerama0 xvfb
 )
-arch_qt_pkgs=(qt6-base cmake ninja pkgconf patchelf clang curl xz zig libglvnd xorg-server-xvfb)
+arch_qt_pkgs=(qt6-base cmake ninja pkgconf patchelf clang curl xz libglvnd xorg-server-xvfb)
 fedora_qt_pkgs=(
-    qt6-qtbase-devel cmake ninja-build pkgconf-pkg-config patchelf clang curl xz zig
+    qt6-qtbase-devel cmake ninja-build pkgconf-pkg-config patchelf clang curl xz
     qt6-qtbase qt6-qtbase-gui mesa-libGL xorg-x11-server-Xvfb
 )
 suse_qt_pkgs=(
-    qt6-base-devel cmake ninja pkgconf-pkg-config patchelf clang curl xz zig
+    qt6-base-devel cmake ninja pkgconf-pkg-config patchelf clang curl xz
     libQt6Widgets6 libQt6Gui6 libqt6-qpa-plugins libGL1 libxkbcommon0 libxcb1 xorg-xserver
 )
 
@@ -245,7 +248,7 @@ else
     echo "openSUSE:      zypper install qt6-base-devel cmake ninja pkgconf-pkg-config clang"
 fi
 
-echo "Zig ${ZIG_VER}: official tarball on Debian/Ubuntu (no apt zig on jammy/noble); distro pkg elsewhere if >= ${ZIG_VER}"
+echo "Zig ${ZIG_VER}: checksummed tarball on every distro, never a distro package"
 echo "shellcheck: needed by scripts/lint.sh. bash $0 --install-shellcheck"
 echo "Wasmtime C API ${WASMTIME_VER}: bash $0 --install-wasmtime"
 echo "Swift 5.10: needed to compile the CLI and tests. Not shipped as a universal Linux binary."

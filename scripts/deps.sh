@@ -20,6 +20,9 @@ export TZ=UTC
 CHECKSUMS="scripts/dep-checksums.sha256"
 APP_NAME="appattic"
 APP_PURL="pkg:github/appattic/appattic"
+# yamllint is not a fetched artifact (no tarball, no checksum), but CI installs
+# it from PyPI at run time, so its version is a pin like any other.
+YAMLLINT_VERSION="1.38.0"
 
 usage() {
     cat <<'EOF'
@@ -79,6 +82,22 @@ table_row() {
         return 0
     done <<<"$ARTIFACTS"
     return 1
+}
+
+# The single version a name glob pins, or nonzero when the table names
+# different versions under one glob.
+table_version_for() {
+    local want="$1" name version purl upstream url anchor found=""
+    while IFS='|' read -r name version purl upstream url anchor; do
+        # shellcheck disable=SC2053  # the glob is meant to match the name
+        [[ "$name" == $want ]] || continue
+        if [[ -n "$found" && "$found" != "$version" ]]; then
+            return 1
+        fi
+        found="$version"
+    done <<<"$ARTIFACTS"
+    [[ -n "$found" ]] || return 1
+    printf '%s\n' "$found"
 }
 
 # shellcheck source=verify-sha256.sh
@@ -196,6 +215,61 @@ check_version_anchors() {
     done <<<"$ARTIFACTS"
 }
 
+# No file in the tree may spell a Zig or Wasmtime artifact version that differs
+# from the table above: the flatpak script and manifest repeat those names, and
+# a stale repeat would fetch something the checksum file does not cover.
+check_artifact_versions_in_tree() {
+    local manifest zig wasmtime
+    zig="$(tr -d '[:space:]' <"$ROOT/.zig-version")"
+    wasmtime="$(table_version_for 'wasmtime-*')" || {
+        fail "the table pins no Wasmtime version to compare the tree against"
+        return
+    }
+    for manifest in "$ROOT"/.github/workflows/*.yml "$ROOT"/scripts/*.sh \
+        "$ROOT"/packaging/flatpak/*.yml "$ROOT"/Dockerfile "$ROOT"/Dockerfile.arch; do
+        [[ -f "$manifest" ]] || continue
+        # This file is the table the check compares against; it would only
+        # report each pin against itself.
+        [[ "$manifest" == "$_script_dir/deps.sh" ]] && continue
+        local found name_version
+        while IFS= read -r found; do
+            [[ -n "$found" ]] || continue
+            case "$found" in
+                zig-*-linux-*.tar.xz)
+                    name_version="${found#*-linux-}"
+                    name_version="${name_version%.tar.xz}"
+                    [[ "$name_version" == "$zig" ]] \
+                        || fail "${manifest#"$ROOT"/}: $found, .zig-version says $zig"
+                    ;;
+                wasmtime-v*.tar.xz)
+                    name_version="${found#wasmtime-v}"
+                    name_version="${name_version%%-*}"
+                    [[ "$name_version" == "$wasmtime" ]] \
+                        || fail "${manifest#"$ROOT"/}: $found, the table pins $wasmtime"
+                    ;;
+            esac
+        done < <(grep -rhoE '(zig|wasmtime)[a-zA-Z0-9._-]*\.tar\.xz' "$manifest" || true)
+    done
+}
+
+# Every uv-installed tool is pinned to the version declared here, so a lint run
+# cannot pick up a different release than the one the config was written for.
+check_tool_pins() {
+    local workflow line spec
+    for workflow in "$ROOT"/.github/workflows/*.yml; do
+        [[ -f "$workflow" ]] || continue
+        while IFS= read -r line; do
+            [[ "$line" == *"uv tool install"* ]] || continue
+            spec="$(printf '%s' "$line" | sed -n 's/.*uv tool install "\([^"]*\)".*/\1/p')"
+            if [[ -z "$spec" ]]; then
+                spec="$(printf '%s' "$line" | sed -n 's/.*uv tool install \(.*\)/\1/p')"
+            fi
+            [[ "$spec" == "yamllint==${YAMLLINT_VERSION}" ]] || fail \
+                "${workflow#"$ROOT"/}: installs '$spec', deps.sh pins yamllint==${YAMLLINT_VERSION}"
+        done < <(grep -n 'uv tool install' "$workflow" || true)
+    done
+}
+
 # SwiftPM pins the whole tree by commit revision, so an unpinned pin means a
 # build that resolves a different source than the one reviewed.
 check_swiftpm_pins() {
@@ -245,6 +319,8 @@ run_check() {
     check_flatpak_hashes
     check_urls
     check_version_anchors
+    check_artifact_versions_in_tree
+    check_tool_pins
     check_swiftpm_pins
     if [[ "$FAILURES" -ne 0 ]]; then
         echo "deps: $FAILURES problem(s) with third-party pins" >&2
