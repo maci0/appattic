@@ -53,6 +53,22 @@ jobs:
             'Package.resolved', 'Package.swift', '.swift-version',
             '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
             'core/src/**/*.zig') }}
+      # The tag check and the release notes need nothing but the checkout
+      # above, so they run before the toolchain and the test suite. A mistagged
+      # push is the common failure and it is caught in seconds instead of
+      # after a full Swift build.
+      - name: Check the tag matches the declared version, and is not already released
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash scripts/check-version.sh --tag "$GITHUB_REF_NAME"
+      # The AppStream <description> is the release note. The GitHub release
+      # page is where a user reads before downloading, so it gets the same
+      # text rather than the generated commit list action-gh-release builds by
+      # default: that list is a second changelog, and it says nothing about
+      # what a caller has to change. The script exits 1 on an empty note, so a
+      # release cannot be published with a blank body.
+      - name: Take the release notes from the AppStream metainfo
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
       - name: Install Swift
         uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
@@ -71,18 +87,6 @@ jobs:
         run: |
           echo /opt/zig >> "$GITHUB_PATH"
           echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
-      - name: Check the tag matches the declared version, and is not already released
-        if: startsWith(github.ref, 'refs/tags/')
-        run: bash scripts/check-version.sh --tag "$GITHUB_REF_NAME"
-      # The AppStream <description> is the release note. The GitHub release
-      # page is where a user reads before downloading, so it gets the same
-      # text rather than the generated commit list action-gh-release builds by
-      # default: that list is a second changelog, and it says nothing about
-      # what a caller has to change. The script exits 1 on an empty note, so a
-      # release cannot be published with a blank body.
-      - name: Take the release notes from the AppStream metainfo
-        if: startsWith(github.ref, 'refs/tags/')
-        run: bash scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
       - name: Build AppImage
         env:
           VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
@@ -104,6 +108,11 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 60
     continue-on-error: true
+    # Same as linux-appimage: this job publishes through action-gh-release, and
+    # the workflow default is contents: read. Without the override the publish
+    # step fails on a permission error the moment the job is re-enabled.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
