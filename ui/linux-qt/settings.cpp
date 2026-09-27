@@ -120,16 +120,15 @@ QByteArray encodeSettingsJson(const AppSettings &s) {
     QJsonObject o;
     o.insert(QStringLiteral("confirmDelete"), s.confirmDelete);
     QJsonArray ign;
-    QStringList paths;
     QSet<QString> seen;
+    // Same order the CLI and the macOS UI write: normalized and deduplicated,
+    // otherwise as given. Sorting here would churn the file on every save.
     for (const QString &raw : s.ignoredLeftoverPaths) {
         const QString p = raw.normalized(QString::NormalizationForm_C);
         if (p.isEmpty() || seen.contains(p)) continue;
         seen.insert(p);
-        paths.append(p);
+        ign.append(p);
     }
-    paths.sort();
-    for (const QString &p : paths) ign.append(p);
     o.insert(QStringLiteral("ignoredLeftoverPaths"), ign);
     o.insert(QStringLiteral("includeSystem"), s.includeSystem);
     return QJsonDocument(o).toJson(QJsonDocument::Indented);

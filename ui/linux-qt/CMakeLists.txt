@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(appattic-qt LANGUAGES C CXX)
 
-set(APPATTIC_VERSION "1.3.4")
-
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
@@ -26,6 +24,19 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 find_package(Threads REQUIRED)
 
 get_filename_component(APPATTIC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+
+# The version lives in one place: appAtticVersion in AppAtticScan/Util.swift,
+# which the CLI and the macOS UI print. Read it here instead of copying it, so
+# the Qt shell cannot ship a different number.
+file(READ "${APPATTIC_ROOT}/Sources/AppAtticScan/Util.swift" _appattic_version_source)
+string(REGEX MATCH "public let appAtticVersion = \"([0-9]+\\.[0-9]+\\.[0-9]+)\""
+       _appattic_version_match "${_appattic_version_source}")
+if(NOT _appattic_version_match)
+    message(FATAL_ERROR
+        "appAtticVersion not found in Sources/AppAtticScan/Util.swift. The Qt build "
+        "reads the version from there; keep the declaration intact.")
+endif()
+set(APPATTIC_VERSION "${CMAKE_MATCH_1}")
 
 if(DEFINED ENV{WASMTIME_DIR} AND NOT WASMTIME_ROOT)
     set(WASMTIME_ROOT "$ENV{WASMTIME_DIR}")
@@ -108,8 +119,7 @@ target_include_directories(appattic-qt PRIVATE
 # Do not bake the configure-time source path into the binary. Runtime uses
 # APPATTIC_CORE_OUT, then paths relative to the executable (see coreOutDir).
 target_link_libraries(appattic-qt PRIVATE Qt6::Widgets wasmtime Threads::Threads)
-# The Qt shell's copy of the version. The CLI and the macOS UI read
-# `appAtticVersion` in AppAtticScan; this is the C++ side of the same value.
+# The same value the CLI and the macOS UI print, read from Util.swift above.
 target_compile_definitions(appattic-qt PRIVATE APPATTIC_VERSION="${APPATTIC_VERSION}")
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(appattic-qt PRIVATE

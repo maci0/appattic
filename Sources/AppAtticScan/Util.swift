@@ -231,6 +231,17 @@ public func xdgStateHome(
     xdgUserDir("XDG_STATE_HOME", fallback: ".local/state", home: home, env: env)
 }
 
+/// XDG Base Directory: an unset or empty `XDG_DATA_DIRS` uses the spec default.
+/// An empty variable is not the same as a variable listing no system dirs.
+private let defaultXDGDataDirs = "/usr/local/share:/usr/share"
+
+public func xdgSystemDirs(
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    let raw = env["XDG_DATA_DIRS"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return raw.isEmpty ? defaultXDGDataDirs : raw
+}
+
 /// Identity token for leftover/app matching. NFC and NFD spellings of the same
 /// word collapse (macOS filenames are NFD, plist names are usually NFC).
 /// Fold one scalar the way the slow path does: NFD -> case+diacritic fold -> keep

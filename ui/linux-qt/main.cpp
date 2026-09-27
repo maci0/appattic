@@ -29,6 +29,7 @@
 #include <QFontMetrics>
 #include <QFrame>
 #include <QGuiApplication>
+#include <QHash>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
@@ -955,7 +956,9 @@ private slots:
             m_scanOk = false;
             m_hasScanned = true;
             m_scanAt.clear();
-            showError(QStringLiteral("Scan engine is missing. Rebuild the app, then click Rescan."));
+            showError(QStringLiteral(
+                "Scan engine is missing: no appattic_core.wasm in %1. Rebuild the app, "
+                "or set APPATTIC_CORE_OUT to the directory that holds it.").arg(out));
             fillCurrent();
             return;
         }
@@ -1222,16 +1225,41 @@ private:
     }
 
     void applyInitialPage() {
-        const QByteArray env = qgetenv("APPATTIC_PAGE");
-        const QString v = QString::fromUtf8(env);
+        selectPage(initialPage());
+    }
+
+    /// Page name to sidebar page. False for anything not in the table.
+    static bool initialPageFromName(const QString &name, Page *out) {
+        static const QHash<QString, Page> pages = {
+            {QStringLiteral("overview"), Page::Overview},
+            {QStringLiteral("leftovers"), Page::Leftovers},
+            {QStringLiteral("stale"), Page::Stale},
+            {QStringLiteral("outdated"), Page::Outdated},
+            {QStringLiteral("packages"), Page::Packages},
+            {QStringLiteral("disk"), Page::DiskUsage},
+            {QStringLiteral("settings"), Page::Settings},
+        };
+        const auto it = pages.constFind(name);
+        if (it == pages.constEnd()) return false;
+        *out = it.value();
+        return true;
+    }
+
+    /// Sidebar to open, from APPATTIC_PAGE. An empty or unset value opens the
+    /// overview. An unknown name is a misconfiguration, not a silent fallback,
+    /// so it is reported on stderr and the overview opens.
+    static Page initialPage() {
+        const QString v = QString::fromUtf8(qgetenv("APPATTIC_PAGE")).trimmed();
+        if (v.isEmpty()) return Page::Overview;
         Page page = Page::Overview;
-        if (v == QLatin1String("leftovers")) page = Page::Leftovers;
-        else if (v == QLatin1String("stale")) page = Page::Stale;
-        else if (v == QLatin1String("outdated")) page = Page::Outdated;
-        else if (v == QLatin1String("packages")) page = Page::Packages;
-        else if (v == QLatin1String("disk")) page = Page::DiskUsage;
-        else if (v == QLatin1String("settings")) page = Page::Settings;
-        selectPage(page);
+        if (initialPageFromName(v, &page)) return page;
+        std::fprintf(
+            stderr,
+            "appattic: APPATTIC_PAGE=\"%s\" is not a page name; opening overview. "
+            "Valid values: overview, leftovers, stale, outdated, packages, disk, settings.\n",
+            v.toUtf8().constData()
+        );
+        return Page::Overview;
     }
 
     void showError(const QString &msg) {

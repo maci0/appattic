@@ -162,6 +162,13 @@ final class UtilTests: XCTestCase {
         )
     }
 
+    func testXdgSystemDirsTreatEmptyAsUnset() {
+        XCTAssertEqual(xdgSystemDirs(env: [:]), "/usr/local/share:/usr/share")
+        XCTAssertEqual(xdgSystemDirs(env: ["XDG_DATA_DIRS": ""]), "/usr/local/share:/usr/share")
+        XCTAssertEqual(xdgSystemDirs(env: ["XDG_DATA_DIRS": "   "]), "/usr/local/share:/usr/share")
+        XCTAssertEqual(xdgSystemDirs(env: ["XDG_DATA_DIRS": "/opt/share"]), "/opt/share")
+    }
+
     func testHumanDays() {
         XCTAssertEqual(humanDays(0), "1h")
         XCTAssertEqual(humanDays(0.5), "12h")
