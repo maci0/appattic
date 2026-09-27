@@ -3,6 +3,7 @@
 // shipped Qt app (scripts/linux-qt-link.sh runs both).
 #include "diskusage.h"
 #include "finding.h"
+#include "scanworker.h"
 #include "settings.h"
 
 #include <QAtomicInt>
@@ -24,10 +25,12 @@
 #include <QTimeZone>
 #include <QVector>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <thread>
 
 static int verifyHelpers() {
     // Sizes and counts print the locale's separators and digits, so the
@@ -1422,6 +1425,49 @@ static int checkDiskUsage() {
     return 0;
 }
 
+/// The scan token is read by the window thread and by the leftover-size pool
+/// while the scan thread writes it, so it has to be atomic: a plain int there
+/// is a data race, and a cancel that lands mid-scan can compare against a
+/// stale token and miss the run it meant to stop. Nothing here compiles or
+/// walks anything, `run` with no plugins is rejected by the host before it
+/// builds an engine, so this is a threading test, not a scan.
+static int checkScanWorkerToken() {
+    ScanWorker worker;
+    /* A run that took the wanted token is not cancelled, and the window's
+       token changes are what tell an older run to stop. The writer side: the
+       run stores the token it was given, the window thread moves the wanted
+       one, and the pool polls the pair. */
+    worker.setWanted(1);
+    worker.run(QStringLiteral("/nonexistent/appattic_core.wasm"), QStringList(), 1);
+    if (worker.isCancelled()) {
+        std::fprintf(stderr, "scan worker: a run of the wanted token reads as cancelled\n");
+        return 1;
+    }
+    std::atomic<bool> done{false};
+    std::thread window([&worker, &done] {
+        for (int i = 1; i <= 20000 && !done.load(std::memory_order_relaxed); ++i) {
+            if (i % 3 == 0) {
+                worker.requestCancel();
+            } else {
+                worker.setWanted(i | 1);
+            }
+        }
+        done.store(true, std::memory_order_relaxed);
+    });
+    for (int i = 0; i < 300; ++i) {
+        worker.setWanted(1);
+        worker.run(QStringLiteral("/nonexistent/appattic_core.wasm"), QStringList(), 1);
+    }
+    window.join();
+    worker.requestCancel();
+    if (!worker.isCancelled()) {
+        std::fprintf(stderr, "scan worker: requestCancel did not cancel\n");
+        return 1;
+    }
+    std::fprintf(stdout, "scan worker: ok\n");
+    return 0;
+}
+
 static int checkScanCache() {
     /* The path has to be the one the CLI and the macOS UI write, or dropping
        it here leaves their snapshot in place. */
@@ -1523,7 +1569,7 @@ static int checkSettings() {
 int main() {
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
-        checkDiskUsage(), checkScanCache(), checkSettings(),
+        checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
         checkLocaleGrouping(),
         checkLegacySettingsMigration(),
     };

@@ -203,7 +203,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # warnings nobody fails on.
     set(_appattic_werror_cxx
         main.cpp corehost.cpp finding.cpp settings.cpp smoke.cpp
-        diskusage.cpp diskchart.cpp diskpage.cpp)
+        diskusage.cpp diskchart.cpp diskpage.cpp scriptproc.cpp)
     foreach(_src IN LISTS _appattic_werror_cxx)
         set_property(SOURCE "${_src}" APPEND PROPERTY COMPILE_OPTIONS -Werror)
     endforeach()
@@ -257,22 +257,37 @@ foreach(_font_license IN LISTS _appattic_font_licenses)
     install(FILES "${_font_license}" DESTINATION share/appattic/licenses)
 endforeach()
 
-# Helper coverage for finding.cpp, diskusage.cpp, and settings.cpp. It needs no
-# scan and no wasm host, so it lives in its own binary instead of the shipped
-# app. settings.cpp is here, not only on the app target: checkSettings() calls
-# parseSettingsJson and legacyBoolValue, so the test binary does not link
-# without it.
+# Helper coverage for finding.cpp, diskusage.cpp, settings.cpp, and the scan
+# worker's cancel token. It runs no scan: the worker test drives ScanWorker
+# directly with an empty plugin list, which appattic_wasm_run rejects before it
+# builds an engine, so nothing is compiled or walked. The wasm host is linked
+# anyway (corehost.cpp, embed.c, hostexec.c) because ScanWorker calls into it
+# for the cancel flag. settings.cpp is here, not only on the app target:
+# checkSettings() calls parseSettingsJson and legacyBoolValue, so the test
+# binary does not link without it.
 add_executable(appattic-qt-helper-tests
     tests/helper_tests.cpp
     $<TARGET_OBJECTS:appattic-qt-core>
     settings.cpp
+    scanworker.h
+    corehost.cpp
+    "${APPATTIC_ROOT}/core/host/embed.c"
+    "${APPATTIC_ROOT}/core/host/hostexec.c"
     appattic.qrc
 )
 target_include_directories(appattic-qt-helper-tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${APPATTIC_ROOT}/core/host"
+    "${WASMTIME_INCLUDE_DIR}"
 )
-target_link_libraries(appattic-qt-helper-tests PRIVATE Qt6::Widgets Threads::Threads)
+target_link_libraries(appattic-qt-helper-tests PRIVATE
+    Qt6::Widgets Threads::Threads wasmtime
+)
+if(UNIX AND NOT APPLE)
+    set_target_properties(appattic-qt-helper-tests PROPERTIES
+        BUILD_RPATH "${_wasmtime_libdir}"
+    )
+endif()
 target_compile_definitions(appattic-qt-helper-tests PRIVATE APPATTIC_VERSION="${APPATTIC_VERSION}")
 # Same flags as the app, so the tests cannot compile under a looser policy.
 get_target_property(_appattic_compile_options appattic-qt COMPILE_OPTIONS)

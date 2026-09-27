@@ -28,10 +28,10 @@ public:
         m_wanted.storeRelease(0);
         requestCoreWasmCancel();
     }
-    bool isCancelled() const { return m_wanted.loadAcquire() != m_token; }
+    bool isCancelled() const { return m_wanted.loadAcquire() != m_token.loadAcquire(); }
 public slots:
     void run(const QString &core, const QStringList &pluginSpecs, int token) {
-        m_token = token;
+        m_token.storeRelease(token);
         /* One reference instant for the whole scan. Read per row instead, a
            scan that runs across local midnight dates the rows before it and
            the rows after it against two different days, and the same scan
@@ -114,7 +114,13 @@ private:
     }
 
     QAtomicInteger<int> m_wanted{0};
-    int m_token = 0;
+    /// Written by the scan thread at the start of a run and read by the window
+    /// thread through isCancelled, and by the leftover-size threads that poll
+    /// the same callback. The token it is compared to, so it is atomic too: a
+    /// plain int read there is a data race, and a cancel that lands mid-scan
+    /// can compare against a half-updated value and miss the run it meant to
+    /// stop. Same shape as DiskScanWorker::m_token.
+    QAtomicInteger<int> m_token{0};
     QDateTime m_scanNow;
     QVector<Finding> m_partial;
 };
