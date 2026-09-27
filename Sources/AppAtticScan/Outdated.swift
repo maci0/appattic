@@ -544,39 +544,52 @@ func parseAptUpgradableLine(_ s: Substring) -> (name: String, current: String, l
         while i < le, u[i] != 0x2F /* / */, !bWS(u[i]) { i += 1 }
         guard i < le, u[i] == 0x2F else { return nil }
         let nameB = (ls, i)
+        // The rest of that token is the suite, which is not a field either
+        // reader keeps.
         i += 1
-        guard let latestB = tokBounds(u, le, &i), latestB.0 < latestB.1,
-              let archB = tokBounds(u, le, &i), archB.0 < archB.1
-        else { return nil }
-        _ = archB
-        while i < le, bWS(u[i]) { i += 1 }
-        guard i < le, u[i] == 0x5B /* [ */ else { return nil }
-        i += 1
-        var close = i
-        while close < le, u[close] != 0x5D /* ] */ { close += 1 }
-        guard close < le else { return nil }
-        var bs = i
-        var be = close
-        while bs < be, bWS(u[bs]) { bs += 1 }
-        while be > bs, bWS(u[be - 1]) { be -= 1 }
-        // `upgradable from:` marker, case-insensitive.
-        let marker: [UInt8] = [0x75, 0x70, 0x67, 0x72, 0x61, 0x64, 0x61, 0x62, 0x6C, 0x65, 0x20, 0x66, 0x72, 0x6F, 0x6D, 0x3A]
-        guard be - bs > marker.count else { return nil }
-        for k in 0..<marker.count {
-            var c = u[bs + k]
-            if c >= 0x41, c <= 0x5A { c &+= 32 }
-            guard c == marker[k] else { return nil }
-        }
-        var cs = bs + marker.count
-        var ce = be
-        while cs < ce, bWS(u[cs]) { cs += 1 }
+        while i < le, !bWS(u[i]) { i += 1 }
+        guard let latestB = tokBounds(u, le, &i), latestB.0 < latestB.1 else { return nil }
+        // `[upgradable from: cur]`, case-insensitive and anywhere on the line,
+        // the way the Zig core finds it. The closing bracket is optional; what
+        // is left after the marker, minus it, is the current version.
+        let marker: [UInt8] = [0x5B, 0x75, 0x70, 0x67, 0x72, 0x61, 0x64, 0x61, 0x62, 0x6C, 0x65, 0x20, 0x66, 0x72, 0x6F, 0x6D, 0x3A]
+        guard let m = asciiCaseInsensitiveIndex(u, ls, le, marker) else { return nil }
+        var cs = m + marker.count
+        var ce = le
         while ce > cs, bWS(u[ce - 1]) { ce -= 1 }
+        if ce > cs, u[ce - 1] == 0x5D /* ] */ {
+            ce -= 1
+            while ce > cs, bWS(u[ce - 1]) { ce -= 1 }
+        }
+        while cs < ce, bWS(u[cs]) { cs += 1 }
         guard cs < ce else { return nil }
-        var k = cs
-        while k < ce, !bWS(u[k]) { k += 1 }
-        guard k == ce else { return nil }
         return (String(tokSub(s, u, nameB)), String(tokSub(s, u, (cs, ce))), String(tokSub(s, u, latestB)))
     } ?? nil
+}
+
+/// Index of `marker` in `u[from..<le]`, ASCII case-insensitive, or nil when it
+/// is not there. `marker` has to be lowercased.
+@inline(__always)
+func asciiCaseInsensitiveIndex(
+    _ u: UnsafeBufferPointer<UInt8>,
+    _ from: Int,
+    _ le: Int,
+    _ marker: [UInt8]
+) -> Int? {
+    guard !marker.isEmpty, le - from >= marker.count else { return nil }
+    var m = from
+    while m + marker.count <= le {
+        var k = 0
+        while k < marker.count {
+            var c = u[m + k]
+            if c >= 0x41, c <= 0x5A { c &+= 32 }
+            if c != marker[k] { break }
+            k += 1
+        }
+        if k == marker.count { return m }
+        m += 1
+    }
+    return nil
 }
 
 public func parseAptUpgradable(_ text: String) -> [OutdatedPkg] {
