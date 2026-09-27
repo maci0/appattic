@@ -3454,8 +3454,12 @@ static int smokeUiCopy() {
     const QString legacyMsg = settingsLegacyMessage(
         {QStringLiteral("includeSystem")}, QStringLiteral("/tmp/AppAttic.conf")
     );
+    // The phrase checked here is the message's own wording. It read "true nor
+    // false" until the message was rewritten to "so they read true or false",
+    // which left the check unsatisfiable and made every --smoke run fail after
+    // the scan it had already passed.
     if (!legacyMsg.contains(QLatin1String("includeSystem"))
-        || !legacyMsg.contains(QLatin1String("true nor false"))
+        || !legacyMsg.contains(QLatin1String("read true or false"))
         || !legacyMsg.contains(QLatin1String("/tmp/AppAttic.conf"))) {
         std::fprintf(stderr, "ui-copy: settings legacy message does not name the key and the old file\n");
         return 1;
