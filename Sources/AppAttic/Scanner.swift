@@ -540,9 +540,24 @@ final class ScannerViewModel {
                 }
                 DispatchQueue.main.async {
                     vm.isScanning = false
+                    // Both failure paths below drop the snapshot: `set -e` halts
+                    // the line after the failure, so the lines before it
+                    // already ran, and a cache kept across the run describes
+                    // software that is gone.
+                    if !finished {
+                        // The selection stays: what the script did before the
+                        // stop is unknown, and re-running the same list is the
+                        // operator's call.
+                        vm.errorMessage = scriptStoppedMessage() + " Selection kept."
+                            + (errText.isEmpty ? "" : "\n" + commandFailureMessage(status: status, stderr: errText))
+                        clearScanCache()
+                        completion(false)
+                        return
+                    }
                     if status != 0 {
                         vm.errorMessage = commandFailureMessage(status: status, stderr: errText)
                             + " Selection kept."
+                        clearScanCache()
                         completion(false)
                         return
                     }

@@ -288,6 +288,50 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
     return (process.terminationStatus, out, err)
 }
 
+/// How long a generated cleanup, update, or mark-manual script may run before
+/// it is stopped. A package transaction legitimately runs for minutes, so the
+/// bound is far above a real one; it is here because `waitUntilExit` has none
+/// and a script blocked on a stale package-manager lock, a dead network
+/// mirror, or a root prompt leaves the caller waiting on a process that never
+/// ends. The scripts are not rolled back, so a stop mid-run is reported as
+/// partial work, never as a clean failure.
+public let cleanupScriptTimeout: TimeInterval = 30 * 60
+
+/// The status a stopped script reports, 124 being the shell's own "timed out".
+public let scriptStoppedStatus: Int32 = 124
+
+/// What a stopped script means for the operator. A generated script removes
+/// files and uninstalls packages, so there is no rollback: the wording says
+/// the run was cut short instead of letting a partial removal read as a clean
+/// one.
+public func scriptStoppedMessage(timeout: TimeInterval = cleanupScriptTimeout) -> String {
+    "the script was stopped after \(Int(timeout / 60)) minutes without finishing; "
+        + "commands before the stop may have already run."
+}
+
+/// Runs `process` and waits up to `timeout` for it to exit. On the deadline the
+/// process is terminated, then killed if it ignored the signal, and false is
+/// returned so the caller can report the stop instead of the status the kill
+/// left behind. Replaces the caller's own `terminationHandler`: both script
+/// runners only wait, none of them observes the exit themselves.
+@discardableResult
+public func runWithTimeout(_ process: Process, timeout: TimeInterval) throws -> Bool {
+    let exited = DispatchSemaphore(value: 0)
+    process.terminationHandler = { _ in exited.signal() }
+    try process.run()
+    if exited.wait(timeout: .now() + timeout) != .timedOut {
+        process.waitUntilExit()
+        return true
+    }
+    process.terminate()
+    if exited.wait(timeout: .now() + 1) == .timedOut {
+        kill(process.processIdentifier, SIGKILL)
+        _ = exited.wait(timeout: .now() + 1)
+    }
+    process.waitUntilExit()
+    return false
+}
+
 private final class CommandPipes: @unchecked Sendable {
     private let lock = NSLock()
     private var _out = Data()
