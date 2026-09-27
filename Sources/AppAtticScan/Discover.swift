@@ -545,7 +545,9 @@ public func parseDesktopFile(_ path: String, sourceDir: String = "") -> AppRecor
     let identity = wmclass.isEmpty
         ? (exeBase.isEmpty || linuxWrapperNames.contains(posixLowercased(exeBase)) ? desktopId : exeBase)
         : wmclass
-    var bundleId = posixLowercased(identity)
+    // `StartupWMClass` is a `.desktop` key, so it is attacker-controlled the
+    // same way `Name=` is, and this is the value `findLinuxApps` dedupes on.
+    var bundleId = stripBidiControls(posixLowercased(identity))
     let linuxSource = linuxDesktopSource(sourceDir: sourceDir, exec: execLine)
     let appPath = linuxDesktopAppPath(source: linuxSource, desktopPath: path, exec: execLine, firstExe: exe)
     let isSystem = linuxSource == nil && sourceDir.hasPrefix("/usr/")

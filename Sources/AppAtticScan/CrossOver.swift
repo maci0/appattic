@@ -40,10 +40,17 @@ func listCrossOverBottleDirs(bottlesDir: String? = nil) -> [String] {
 func findCrossOverBottles(bottlesDir: String? = nil) -> [AppRecord] {
     listCrossOverBottleDirs(bottlesDir: bottlesDir).map { dir in
         let name = URL(fileURLWithPath: dir).lastPathComponent
+        // `norm` keeps only ASCII letters and digits, so a bottle named in
+        // another script (`日本語`, `Тест`) folds to "". The empty tail gave
+        // every such bottle the same `bundleId`, and `appByBid` keeps one
+        // display name per id, so two bottles reported as one app. Fall back
+        // to the NFC form of the directory name, which is unique per bottle
+        // and reads the same on an NFD and an NFC filesystem.
+        let key = normKey(name) ?? posixLowercased(pathIdentityKey(name))
         var app = AppRecord(
             path: dir,
             displayName: name,
-            bundleId: "crossover.\(norm(name))",
+            bundleId: "crossover.\(key)",
             sourceDir: "crossover",
             sizeBytes: 0,
             sizeMeasured: false

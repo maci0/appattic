@@ -332,7 +332,7 @@ public func scanLeftovers(
     for (label, root, kind) in allRoots {
         if kind == "leaf" {
             if !includeScanEntry(root, kind: kind) { continue }
-            var name = URL(fileURLWithPath: root).lastPathComponent
+            var name = stripBidiControls(URL(fileURLWithPath: root).lastPathComponent)
             if name.hasPrefix(".") { name = String(name.dropFirst()) }
             let (status, owner) = ident.classify(name, kind: "dir")
             items.append(DataItem(path: root, name: name, rootLabel: label, kind: kind, status: status, owner: owner))
@@ -342,7 +342,7 @@ public func scanLeftovers(
         guard FileManager.default.fileExists(atPath: root, isDirectory: &isDir), isDir.boolValue else { continue }
         for path in listEntries(root) {
             if !includeScanEntry(path, kind: kind) { continue }
-            let name = URL(fileURLWithPath: path).lastPathComponent
+            let name = stripBidiControls(URL(fileURLWithPath: path).lastPathComponent)
             if kind == "plist", !name.hasSuffix(".plist") { continue }
             let (status, owner) = ident.classify(name, kind: kind)
             items.append(DataItem(path: path, name: name, rootLabel: label, kind: kind, status: status, owner: owner))
@@ -421,7 +421,7 @@ public func scanLaunchAgents(
         for path in listEntries(root) where path.hasSuffix(".plist") {
             let info = loadPlist(path)
             if info.isEmpty { continue }
-            let label = (info["Label"] as? String) ?? URL(fileURLWithPath: path).lastPathComponent
+            let label = stripBidiControls((info["Label"] as? String) ?? URL(fileURLWithPath: path).lastPathComponent)
             var program: String?
             if let args = info["ProgramArguments"] as? [Any], let first = args.first {
                 program = "\(first)"

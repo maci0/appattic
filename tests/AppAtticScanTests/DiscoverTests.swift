@@ -25,6 +25,27 @@ final class DiscoverTests: XCTestCase {
         XCTAssertEqual(app?.isSystem, true)
     }
 
+    func testParseDesktopFileStripsBidiControlsFromBundleId() throws {
+        // `Name=` was already filtered, `StartupWMClass` was not, and the
+        // bundle id is the value `findLinuxApps` dedupes on. A right-to-left
+        // override there renders the id in the report as a different word than
+        // the bytes the key holds.
+        let body = """
+        [Desktop Entry]
+        Type=Application
+        Name=Backup
+        Exec=/usr/bin/backup %u
+        StartupWMClass=Evil\u{202E}fexe
+        """
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("backup.desktop").path
+        try body.write(toFile: path, atomically: true, encoding: .utf8)
+        let app = parseDesktopFile(path, sourceDir: "/usr/share/applications")
+        XCTAssertEqual(app?.bundleId, "evalfexe")
+    }
+
     func testParseDesktopFileStripsUTF8BOM() throws {
         let body = """
         [Desktop Entry]

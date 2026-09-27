@@ -202,14 +202,19 @@ func steamAppRecord(library: String, manifest: SteamAppManifest) -> AppRecord? {
         return nil
     }
     let bundle = steamGameBundle(in: install, prefer: [manifest.name, manifest.installDir])
+    // The manifest name comes from an `appmanifest_*.acf` on disk, so it is as
+    // attacker-controlled as a bundle name, and it lands in the generated
+    // script's `#` comment. `makeApp` filters bidi and zero-width scalars from
+    // every other name source; the overwrite below was undoing that filter.
+    let name = stripBidiControls(manifest.name)
     var app: AppRecord
     if let bundle, let made = makeApp(from: bundle) {
         app = made
-        app.displayName = manifest.name
+        app.displayName = name
     } else {
         app = AppRecord(
             path: install,
-            displayName: manifest.name,
+            displayName: name,
             bundleId: "steam.\(manifest.appId)",
             sourceDir: "steam"
         )

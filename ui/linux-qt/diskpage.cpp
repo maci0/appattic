@@ -817,14 +817,19 @@ void DiskPage::fillTree() {
 void DiskPage::fillTreeFiltered() {
     d->tree->clear();
     if (!d->root) return;
-    const QString q = d->filter.trimmed();
+    const QString q = searchFold(d->filter.trimmed());
     if (q.isEmpty()) {
         fillTree();
         return;
     }
     int matches = 0;
     const auto walk = [&](auto &&self, DiskNode *n) -> void {
-        if (n->name.contains(q, Qt::CaseInsensitive) || n->path.contains(q, Qt::CaseInsensitive)) {
+        // `searchFold` on both sides, like the findings tables: a name off an
+        // exFAT/NTFS/SMB mount arrives decomposed ("cafe" + U+0301) while the
+        // search box gives the precomposed keystroke, and a raw
+        // `contains(..., CaseInsensitive)` compares code units, so the row the
+        // user typed a word for disappears.
+        if (searchFold(n->name).contains(q) || searchFold(n->path).contains(q)) {
             d->tree->addTopLevelItem(makeItem(n));
             matches += 1;
         }

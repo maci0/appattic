@@ -350,8 +350,15 @@ public final class Identity {
         brewKeyHyphenSet = Set(brewKeys.filter { $0.contains("-") }.map { Substring($0) })
     }
 
+    /// `posixFolded`, not `posixLowercased`: a stem is matched against a
+    /// leftover name with `==` and `hasPrefix`, and the two arrive in
+    /// whatever form their sources wrote them. `/Applications/Café.app` is
+    /// NFC on Linux and NFD on macOS, so a fold without the canonical step
+    /// keys the same app under two stems, and `s.count >= 5` then admits one
+    /// spelling and drops the other ("café" is 4 clusters composed, 5
+    /// decomposed) so which one lands is decided by the filesystem.
     func addStem(_ raw: String) {
-        var s = raw.trimmingCharacters(in: .whitespaces).posixLowercased()
+        var s = posixFolded(raw.trimmingCharacters(in: .whitespaces))
         if s.isEmpty { return }
         s = URL(fileURLWithPath: s).deletingPathExtension().lastPathComponent
         if s.hasSuffix(".app") { s = String(s.dropLast(4)) }
@@ -372,7 +379,8 @@ public final class Identity {
     }
 
     func ownedByStem(_ entry: String) -> Bool {
-        let e = stripLeftoverNameSuffix(entry).posixLowercased()
+        // Same form `addStem` stores, so the two sides of `==` agree.
+        let e = posixFolded(stripLeftoverNameSuffix(entry))
         guard let f = e.utf8.first, let bucket = stemIndex[f] else { return false }
         for t in bucket {
             if e == t.stem { return true }

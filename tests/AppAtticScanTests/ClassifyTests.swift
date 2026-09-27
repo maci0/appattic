@@ -7,6 +7,23 @@ private func ident(_ apps: [AppRecord] = [], formulas: [Formula] = [], casks: [C
 }
 
 final class ClassifyTests: XCTestCase {
+    func testStemMatchingIgnoresDecompositionForm() {
+        // macOS reports the app directory in NFD ("e" + U+0301), Linux in NFC.
+        // `stems` and `ownedByStem` compared raw code units, so a stem table
+        // built from one form never answered for the other, and the `>= 5`
+        // cluster gate admitted one spelling while dropping the other.
+        let nfdApp = AppRecord(
+            path: "/Applications/Cafe\u{301} Editor.app",
+            displayName: "Cafe\u{301} Editor",
+            bundleId: "com.example.cafeditor"
+        )
+        let id = ident([nfdApp])
+        XCTAssertTrue(id.stems.contains("café editor"))
+        XCTAssertTrue(id.ownedByStem("Cafe\u{301} Editor"))
+        XCTAssertTrue(id.ownedByStem("Caf\u{00E9} Editor"))
+        XCTAssertFalse(id.ownedByStem("Cafeteria"))
+    }
+
     func testKagiAppOwnsOrionSupportFolder() {
         let kagi = AppRecord(path: "/Applications/Kagi.app", displayName: "Kagi", bundleId: "com.kagi.kagimacOS")
         XCTAssertEqual(ident([kagi]).classify("Orion", kind: "dir").0, "owned")

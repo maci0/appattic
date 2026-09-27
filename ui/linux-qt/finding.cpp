@@ -58,11 +58,15 @@ QString searchFold(const QString &s) {
 }
 
 QString redactHomePaths(const QString &text, const QString &home) {
-    const QString homePath = QDir::cleanPath(home.isEmpty() ? QDir::homePath() : home);
+    const QString homePath = pathIdentityKey(QDir::cleanPath(home.isEmpty() ? QDir::homePath() : home));
     if (homePath.size() <= 1) return text;
+    // The haystack is normalized too, not just the pattern: `$HOME` arrives
+    // composed while a path off a decomposed mount spells the same directory
+    // with combining marks, and the two never match as literal text, so the
+    // account name rides out in the status bar instead of being replaced.
     const QRegularExpression re(
         QRegularExpression::escape(homePath) + QStringLiteral("(?=/|$|[\\s:\"',;])"));
-    QString out = text;
+    QString out = pathIdentityKey(text);
     out.replace(re, QStringLiteral("~"));
     return out;
 }

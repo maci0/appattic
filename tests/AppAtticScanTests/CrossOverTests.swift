@@ -196,6 +196,22 @@ final class CrossOverTests: XCTestCase {
         XCTAssertEqual(softwareDisplaySummary(restored.software[0]), "CrossOver bottle")
     }
 
+    func testNonLatinBottleNamesGetDistinctBundleIds() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cx-uni-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try writeBottle(root, "日本語")
+        try writeBottle(root, "Тест")
+
+        let bottles = findCrossOverBottles(bottlesDir: root.path)
+        XCTAssertEqual(bottles.count, 2)
+        // `norm` keeps only ASCII letters and digits, so both of these used to
+        // fold to "" and share the id "crossover.". The report then carried the
+        // same bundle_id twice and `appByBid` kept one name for the pair.
+        let ids = bottles.compactMap(\.bundleId)
+        XCTAssertEqual(Set(ids).count, 2)
+        XCTAssertTrue(ids.allSatisfy { $0.hasPrefix("crossover.") && $0 != "crossover." })
+    }
+
     private func writeBottle(_ root: URL, _ name: String) throws {
         let dir = root.appendingPathComponent(name)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
