@@ -128,15 +128,6 @@ fn renderPipx(hits: []const PipxTool) bool {
     return true;
 }
 
-fn runQuery() i32 {
-    for (query_cmds) |cmd| {
-        const n = host_exec.run(cmd, &exec_buf);
-        note.add(cmd, n);
-        if (n >= 0) return n;
-    }
-    return host_exec.fail;
-}
-
 fn query_impl(present: i32) i32 {
     note = .{};
     if (present == 0) {
@@ -144,7 +135,8 @@ fn query_impl(present: i32) i32 {
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
-    const nexec = runQuery();
+    var used: []const u8 = query_cmds[0];
+    const nexec = host_exec.runFirst(&exec_buf, &query_cmds, &used, &note);
     if (nexec < 0) {
         if (!renderPipx(&.{})) return 1;
         return 0;

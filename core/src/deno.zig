@@ -7,7 +7,7 @@ const host_exec = @import("host_exec.zig");
 const path_store = @import("path_store.zig");
 
 const plugin_id = "deno";
-const query_cmd = "ls -1 /home/user/.deno/bin";
+const query_cmd = "ls -1 " ++ path_store.home_sentinel ++ "/.deno/bin";
 
 var result_buf: [8192]u8 = undefined;
 var note: querynote.Log = .{};

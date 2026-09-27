@@ -114,7 +114,6 @@ if [[ -z "$meta_version" ]]; then
 fi
 plist_short="$(plist_string "Info.plist" CFBundleShortVersionString "$PLIST")"
 plist_build="$(plist_string "Info.plist" CFBundleVersion "$PLIST")"
-plist_version="$plist_short"
 man_version="$(extract "man page" "$MANPAGE" 's/^\.TH [^ ]* 1 "[^"]*" "[^ ]* \([^"]*\)" .*/\1/p')"
 
 # CMakeLists.txt has no version of its own: it reads appAtticVersion out of
@@ -166,22 +165,16 @@ if [[ -n "$release_defects" ]]; then
     echo "       it is the only release note the package ships" >&2
     exit 1
 fi
-if [[ "$plist_version" != "$swift_version" ]]; then
-    echo "error: version mismatch: CFBundleShortVersionString is $plist_version, appAtticVersion is $swift_version" >&2
+# build.sh copies this plist into AppAttic.app unchanged, so its short version
+# is what Finder and macOS read, not appAtticVersion.
+if [[ "$plist_short" != "$swift_version" ]]; then
+    echo "error: version mismatch: CFBundleShortVersionString is $plist_short, appAtticVersion is $swift_version" >&2
     echo "error: bump both in the same commit: $VERSION_SRC, $PLIST" >&2
     exit 1
 fi
 if [[ "$man_version" != "$swift_version" ]]; then
     echo "error: version mismatch: appattic-qt.1 header is $man_version, appAtticVersion is $swift_version" >&2
     echo "error: bump both in the same commit: $VERSION_SRC, $MANPAGE" >&2
-    exit 1
-fi
-
-# build.sh copies this plist into AppAttic.app unchanged, so its short version
-# is what Finder and macOS read, not appAtticVersion.
-if [[ "$plist_short" != "$swift_version" ]]; then
-    echo "error: version mismatch: $PLIST CFBundleShortVersionString is $plist_short, appAtticVersion is $swift_version" >&2
-    echo "error: bump all three in the same commit: $VERSION_SRC, $METAINFO, $PLIST" >&2
     exit 1
 fi
 

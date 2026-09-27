@@ -65,17 +65,11 @@ pub fn parseDnfUpgrades(text: []const u8, out: []DnfOutdated) usize {
 }
 
 fn skipDnfNoise(line: []const u8) bool {
-    const low_len = @min(line.len, 32);
-    var tmp: [32]u8 = undefined;
-    for (line[0..low_len], 0..) |c, i| {
-        tmp[i] = std.ascii.toLower(c);
-    }
-    const low = tmp[0..low_len];
-    if (std.mem.startsWith(u8, low, "last metadata")) return true;
-    if (std.mem.startsWith(u8, low, "packages")) return true;
-    if (std.mem.startsWith(u8, low, "finding")) return true;
-    if (std.mem.startsWith(u8, low, "available upgrade")) return true;
-    if (std.mem.startsWith(u8, low, "obsoleting")) return true;
+    if (std.ascii.startsWithIgnoreCase(line, "last metadata")) return true;
+    if (std.ascii.startsWithIgnoreCase(line, "packages")) return true;
+    if (std.ascii.startsWithIgnoreCase(line, "finding")) return true;
+    if (std.ascii.startsWithIgnoreCase(line, "available upgrade")) return true;
+    if (std.ascii.startsWithIgnoreCase(line, "obsoleting")) return true;
     return false;
 }
 
@@ -89,7 +83,7 @@ fn stripDnfArch(name: []const u8) []const u8 {
 
 fn hasDigit(s: []const u8) bool {
     for (s) |c| {
-        if (c >= '0' and c <= '9') return true;
+        if (std.ascii.isDigit(c)) return true;
     }
     return false;
 }

@@ -306,8 +306,7 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
 /// mark: `"untrusted"` wins over the manager, so a cask this build would not
 /// trust is report-only even though Homebrew is not.
 public func outdatedIsUpdatable(manager: String, kind: String?) -> Bool {
-    if kind == "untrusted" { return false }
-    return UpgradableManager(rawValue: manager) != nil
+    outdatedUpgradableManager(manager: manager, kind: kind) != nil
 }
 
 /// The manager behind an outdated row's upgrade path, or nil when there is

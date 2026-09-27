@@ -1022,7 +1022,6 @@ static int run_live(char **argv, char *out, size_t cap) {
                 off = 4;
             } else {
                 spawn_argv[2] = "--";
-                off = 3;
             }
             if (off == 4) spawn_argv[3] = "--";
             for (; argv[i] != NULL && i < MAX_TOK; i++) {

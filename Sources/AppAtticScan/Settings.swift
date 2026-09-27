@@ -141,7 +141,8 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         self.settingsFileExists = FileManager.default.fileExists(atPath: settingsURL.path)
         self.includeSystemFile = settings.includeSystem
         self.includeSystemFlag = includeSystemFlag
-        self.includeSystem = includeSystemFlag || settings.includeSystem
+        self.includeSystem = effectiveIncludeSystem(
+            cliFlag: includeSystemFlag, settings: settings)
         self.confirmDelete = settings.confirmDelete
         self.ignoredLeftoverPaths = settings.ignoredLeftoverPaths
         self.scanCachePath = defaultScanCacheURL().path
