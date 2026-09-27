@@ -373,10 +373,27 @@ final class FuzzOsReleaseTests: XCTestCase {
     /// The bytes the reader trims from both ends of a key or a value.
     private static let edgeTrim = CharacterSet(charactersIn: " \t")
 
+    /// The number of lines the reader can emit a field for: one per run of LF or
+    /// CR bytes whose line holds something other than the padding it trims.
+    ///
+    /// Counted over the bytes, not with `split` on the characters: "\r\n" is a
+    /// single Character in Swift, so a split on "\n" or "\r" never sees it and a
+    /// CRLF document reads as one line where the byte scan reads every one of
+    /// them.
     private func candidateLineCount(_ text: String) -> Int {
-        text.split(whereSeparator: { $0 == "\n" || $0 == "\r" })
-            .filter { !$0.trimmingCharacters(in: FuzzOsReleaseTests.edgeTrim).isEmpty }
-            .count
+        var lines = 0
+        var inLine = false
+        for byte in text.utf8 {
+            if byte == 0x0A || byte == 0x0D {
+                if inLine {
+                    lines += 1
+                    inLine = false
+                }
+            } else if byte != 0x20, byte != 0x09 {
+                inLine = true
+            }
+        }
+        return inLine ? lines + 1 : lines
     }
 
     func testMutatedOsReleaseYieldsFieldsCutFromTheText() {
