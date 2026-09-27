@@ -86,8 +86,8 @@ static unsigned char *read_file(const char *path, size_t *len, Err *e) {
    scans, on top of wasmtime's on-disk compilation cache. Compiling is the
    single biggest cost of a scan: re-JITting the core and all 27 plugins costs
    ~60 ms, and every scan in every process paid it (the CLI pays it once per
-   invocation, the UI on launch and again on each scan). Slots are bounded and
-   never freed: a scan may still be running when the next one starts. */
+   invocation, the UI on launch and again on each scan). Slots are bounded, and
+   are emptied between runs rather than while one may still hold them. */
 #define MOD_CACHE_MAX 64
 typedef struct {
     char *path;
@@ -113,8 +113,31 @@ static int g_runs_active;
 /* How long the teardown waits for those runs before giving up on the cache. */
 #define SHUTDOWN_DRAIN_TIMEOUT_S 5
 
+/* Free every cached module. Only legal when no run is active, since a running
+   scan may still hold one. Both locks are held by the caller, in that order,
+   which is the order the teardown takes them in. */
+static void cache_clear_locked(void) {
+    for (int i = 0; i < g_mod_count; i++) {
+        wasmtime_module_delete(g_mods[i].module);
+        free(g_mods[i].path);
+        g_mods[i].module = NULL;
+        g_mods[i].path = NULL;
+    }
+    g_mod_count = 0;
+}
+
 static void run_enter(void) {
     pthread_mutex_lock(&g_life_lock);
+    /* An entry is keyed by (path, size, mtime), so rebuilding a plugin leaves
+       the old one behind forever and the cache only ever filled. It is emptied
+       here instead, between runs, where nothing can still be executing: a
+       full cache otherwise turns every later compile into a module nobody
+       owns. */
+    if (g_runs_active == 0) {
+        pthread_mutex_lock(&g_mod_lock);
+        if (g_mod_count >= MOD_CACHE_MAX) cache_clear_locked();
+        pthread_mutex_unlock(&g_mod_lock);
+    }
     g_runs_active++;
     pthread_mutex_unlock(&g_life_lock);
 }
@@ -147,11 +170,17 @@ static wasm_engine_t *shared_engine(void) {
     return engine;
 }
 
-/* Remember a compiled module for `path`. The cache owns it; slots are bounded
-   and never freed (a scan may still be running when the next one starts). */
-static void cache_put(const char *path, const struct stat *st, wasmtime_module_t *module) {
+/* Remember a compiled module for `path`, and take ownership of it: the cache
+   is the only thing that frees a module, so one it cannot store is deleted
+   here. Returns 1 when the cache owns it, 0 when it does not and the caller
+   must report the miss. Slots are not freed while a run may still hold one;
+   a full cache is emptied between runs instead (run_enter). */
+static int cache_put(const char *path, const struct stat *st, wasmtime_module_t *module) {
     char *copy = strdup(path);
-    if (!copy) return;
+    if (!copy) {
+        wasmtime_module_delete(module);
+        return 0;
+    }
     pthread_mutex_lock(&g_mod_lock);
     if (g_mod_count < MOD_CACHE_MAX) {
         ModSlot *s = &g_mods[g_mod_count++];
@@ -160,10 +189,13 @@ static void cache_put(const char *path, const struct stat *st, wasmtime_module_t
         s->mtime_s = (long)st->st_mtim.tv_sec;
         s->mtime_ns = (long)st->st_mtim.tv_nsec;
         s->module = module;
-    } else {
-        free(copy);
+        pthread_mutex_unlock(&g_mod_lock);
+        return 1;
     }
     pthread_mutex_unlock(&g_mod_lock);
+    free(copy);
+    wasmtime_module_delete(module);
+    return 0;
 }
 
 /* Compiled module for `path`, from the cache or freshly compiled. NULL on
@@ -198,7 +230,10 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
             wasmtime_module_t *pre = NULL;
             wasmtime_error_t *perr = wasmtime_module_deserialize_file(engine, cwasm, &pre);
             if (!perr && pre) {
-                cache_put(path, &st, pre);
+                if (!cache_put(path, &st, pre)) {
+                    fail_msg(e, "module cache is full");
+                    return NULL;
+                }
                 return pre;
             }
             if (perr) wasmtime_error_delete(perr);
@@ -215,7 +250,10 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
         fail_error(e, path, err);
         return NULL;
     }
-    cache_put(path, &st, module);
+    if (!cache_put(path, &st, module)) {
+        fail_msg(e, "module cache is full");
+        return NULL;
+    }
     return module;
 }
 
@@ -561,16 +599,11 @@ void appattic_wasm_shutdown(void) {
     /* g_life_lock stays held across the teardown, and run_enter takes it
        first: a run that starts after the drain would otherwise take the engine
        and a cached module from under the delete below. g_life_lock is the
-       outer lock everywhere (run_enter/run_leave touch no other lock), so
-       taking g_mod_lock under it cannot invert against another path. */
+       outer lock everywhere, including the empty-between-runs path in
+       run_enter, so taking g_mod_lock under it cannot invert against another
+       path. */
     pthread_mutex_lock(&g_mod_lock);
-    for (int i = 0; i < g_mod_count; i++) {
-        wasmtime_module_delete(g_mods[i].module);
-        free(g_mods[i].path);
-        g_mods[i].module = NULL;
-        g_mods[i].path = NULL;
-    }
-    g_mod_count = 0;
+    cache_clear_locked();
     if (g_engine) {
         wasm_engine_delete(g_engine);
         g_engine = NULL;

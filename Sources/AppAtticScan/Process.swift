@@ -311,6 +311,77 @@ public func scriptStoppedMessage(timeout: TimeInterval = scriptRunTimeout) -> St
         + "commands before the stop may have already run."
 }
 
+/// The same stop, as a line appended to the script's own stderr, where it
+/// lands next to whatever `set -e` reported.
+public func scriptStoppedNote(timeout: TimeInterval = scriptRunTimeout) -> String {
+    "timed out after \(Int(timeout))s; commands before the timeout may have already run"
+}
+
+/// What a generated script run left behind: the exit status, the tail of its
+/// stderr, and whether it finished before the deadline.
+public struct ScriptRun: Sendable {
+    public let status: Int32
+    public let stderr: String
+    public let finished: Bool
+}
+
+/// Runs a generated cleanup, update, or mark-manual script under `/bin/sh` and
+/// waits up to `timeout` for it.
+///
+/// The script and its stderr go to temp files rather than pipes: under `set -e`
+/// the first failing line is the only thing that says what went wrong, and it
+/// has to arrive after the run, not interleaved with a UI that is still
+/// scanning. A script that outruns `timeout` is stopped and reported as
+/// `scriptStoppedStatus` with the reason appended to stderr, so the caller
+/// never sees a killed process as an ordinary nonzero exit. `discardStdout`
+/// sends the script's own output to the void, which is what a UI run wants:
+/// the operator reads the progress already on screen, not a shell's
+/// scrollback.
+public func runGeneratedScript(
+    _ script: String,
+    discardStdout: Bool = false,
+    timeout: TimeInterval = scriptRunTimeout
+) throws -> ScriptRun {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("appattic-script-\(UUID().uuidString).sh")
+    let errURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("appattic-script-\(UUID().uuidString).err")
+    try writeOwnerOnlyFile(Data(script.utf8), to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    try writeOwnerOnlyFile(Data(), to: errURL)
+    defer { try? FileManager.default.removeItem(at: errURL) }
+    let errHandle = try FileHandle(forWritingTo: errURL)
+    // Closed before the file is read back, and the defer is the exit-path
+    // close: closing a FileHandle twice is an exception Foundation does not
+    // raise as a Swift error.
+    var openErrHandle: FileHandle? = errHandle
+    defer { try? openErrHandle?.close() }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = [url.path]
+    process.environment = augmentedProcessEnvironment()
+    if discardStdout {
+        process.standardOutput = FileHandle.nullDevice
+    }
+    process.standardError = errHandle
+    process.standardInput = FileHandle.nullDevice
+    let finished = try runAndWait(process, timeout: timeout)
+    try? errHandle.synchronize()
+    try? errHandle.close()
+    openErrHandle = nil
+    var status = process.terminationStatus
+    var stderr = readCommandOutputTail(from: errURL)
+    if !finished {
+        // A script blocked on a stale package lock, an unreachable mirror, or
+        // a prompt nothing can answer would otherwise wait forever. What it
+        // already did is not undone, so the message says so.
+        if status == 0 { status = scriptStoppedStatus }
+        let note = scriptStoppedNote(timeout: timeout)
+        stderr = stderr.isEmpty ? note : stderr + "\n" + note
+    }
+    return ScriptRun(status: status, stderr: stderr, finished: finished)
+}
+
 private final class CommandPipes: @unchecked Sendable {
     private let lock = NSLock()
     private var _out = Data()

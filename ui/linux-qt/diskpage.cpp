@@ -68,6 +68,10 @@ public:
         m_root = nullptr;
         return r;
     }
+    /* A scan that finished after the page stopped listening for it (the page
+       was destroyed, so the queued `finished` never ran) leaves its tree here,
+       and the page's own delete never sees it. */
+    ~DiskScanWorker() override { delete m_root; }
 
 public slots:
     void run(const QString &path, bool oneFs, int token) {
