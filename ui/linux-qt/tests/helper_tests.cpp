@@ -108,6 +108,23 @@ static int verifyHelpers() {
         std::fprintf(stderr, "commandIsShellSafe accepted an empty command\n");
         return 1;
     }
+    // A guarded removal is the app's own structure; both halves still have to
+    // pass the byte check, or a second run would abort the script.
+    if (!commandIsShellSafe(QStringLiteral(
+            "if apt-get --version >/dev/null 2>&1; then apt-get purge -y wget; fi"))) {
+        std::fprintf(stderr, "commandIsShellSafe rejected a guarded removal\n");
+        return 1;
+    }
+    if (commandIsShellSafe(QStringLiteral(
+            "if test -e /tmp/x >/dev/null 2>&1; then rm -rf /tmp/x; reboot; fi"))) {
+        std::fprintf(stderr, "commandIsShellSafe accepted an injected action in a guard\n");
+        return 1;
+    }
+    if (commandIsShellSafe(QStringLiteral(
+            "if test -e /tmp/x; reboot >/dev/null 2>&1; then rm -rf /tmp/x; fi"))) {
+        std::fprintf(stderr, "commandIsShellSafe accepted an injected query in a guard\n");
+        return 1;
+    }
     if (!QFile::exists(QStringLiteral(":/icons/appattic.png"))) {
         std::fprintf(stderr, "icon: embedded :/icons/appattic.png missing\n");
         return 1;
@@ -280,10 +297,15 @@ static int verifyHelpers() {
         std::fprintf(stderr, "commandNeedsRoot: distro/AUR/snap yes, user leftover/pip no\n");
         return 1;
     }
-    // A guarded removal is judged on its action, not on the leading `if`.
-    if (!commandNeedsRoot(QStringLiteral("if snap list hello >/dev/null 2>&1; then snap remove hello; fi"))
-        || !withRootCmd(QStringLiteral("if snap list hello >/dev/null 2>&1; then snap remove hello; fi"))
-               .startsWith(QLatin1String("rootcmd "))
+    // A guarded removal is judged on its action, not on the leading `if`, and
+    // the escalation goes inside the guard: `rootcmd if ...; then ...; fi`
+    // stops parsing.
+    const QString snapGuarded =
+        QStringLiteral("if snap list hello >/dev/null 2>&1; then snap remove hello; fi");
+    if (!commandNeedsRoot(snapGuarded)
+        || withRootCmd(snapGuarded)
+               != QStringLiteral("if snap list hello >/dev/null 2>&1; then rootcmd snap remove hello; fi")
+        || commandNeedsRoot(withRootCmd(snapGuarded))
         || commandNeedsRoot(QStringLiteral("if flatpak info org.mozilla.Firefox >/dev/null 2>&1; then flatpak uninstall -y org.mozilla.Firefox; fi"))) {
         std::fprintf(stderr, "commandNeedsRoot: guarded removal judged on its action\n");
         return 1;

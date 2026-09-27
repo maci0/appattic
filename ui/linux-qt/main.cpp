@@ -2688,7 +2688,10 @@ private:
     static QString finishScript(QStringList header, const QStringList &body) {
         bool needRoot = false;
         for (const QString &line : body) {
-            if (line.startsWith(QLatin1String("rootcmd "))) needRoot = true;
+            // A guarded removal escalates its action, so the call is not
+            // always at the front of the line.
+            if (line.startsWith(QLatin1String("rootcmd ")) || line.contains(QLatin1String("; then rootcmd ")))
+                needRoot = true;
         }
         if (needRoot) header << scriptRootHelper();
         return (header + body).join(QLatin1Char('\n')) + QLatin1Char('\n');

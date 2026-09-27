@@ -289,9 +289,7 @@ public func commandNeedsRoot(_ cmd: String) -> Bool {
     if t.hasPrefix("rootcmd ") { return false }
     // A guarded remove is `if <query>; then <action>; fi`. Judge the action, or
     // the wrapper's leading `if` hides an action that needs root.
-    if t.hasPrefix("if "), let then = t.range(of: "; then "), let fi = t.range(of: "; fi", options: .backwards) {
-        t = String(t[then.upperBound..<fi.lowerBound]).trimmingCharacters(in: .whitespaces)
-    }
+    if let guarded = parseGuardedRemove(t) { t = guarded.action }
     let first = t.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
     let base = first.split(separator: "/").last.map(String.init) ?? first
     switch base {
@@ -303,7 +301,14 @@ public func commandNeedsRoot(_ cmd: String) -> Bool {
 }
 
 public func withRootCmd(_ cmd: String) -> String {
-    commandNeedsRoot(cmd) ? "rootcmd \(cmd)" : cmd
+    guard commandNeedsRoot(cmd) else { return cmd }
+    // Escalating the whole line hands `rootcmd` the words `if` and `<query>` as
+    // arguments and leaves a bare `then` behind, so the line stops parsing and
+    // `set -e` ends the script there. Escalate the action inside the guard.
+    if let guarded = parseGuardedRemove(cmd) {
+        return "if \(guarded.present); then rootcmd \(guarded.action); fi"
+    }
+    return "rootcmd \(cmd)"
 }
 
 public let scriptRootHelper = """

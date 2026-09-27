@@ -437,6 +437,17 @@ static bool commandRemovesProtectedPath(const QString &cmd) {
 /// `isSafeShellByte`, plus the space and the single quote a quoted value needs.
 bool commandIsShellSafe(const QString &cmd) {
     if (cmd.isEmpty()) return false;
+    // A guarded removal is app-written structure around a plugin command:
+    // `if <query> >/dev/null 2>&1; then <action>; fi`. The redirect is the only
+    // shell syntax here that the app itself adds, and it is what makes a second
+    // run a no-op instead of a `set -e` abort. Judge the query and the action
+    // by the same byte rule, or the guard would refuse every removal.
+    if (const GuardedRemove guarded = parseGuardedRemove(cmd)) {
+        static const QString kRedirect = QStringLiteral(" >/dev/null 2>&1");
+        QString query = guarded.present;
+        if (query.endsWith(kRedirect)) query.chop(kRedirect.size());
+        return !query.isEmpty() && commandIsShellSafe(query) && commandIsShellSafe(guarded.action);
+    }
     bool in_quote = false;
     for (int i = 0; i < cmd.size(); ++i) {
         const QChar c = cmd.at(i);
@@ -550,10 +561,22 @@ static bool isSafePackageName(const QString &n) {
 
 QString packageChildCommand(const Finding &f, const QString &child) {
     if (!isSafePackageName(child) || f.command.trimmed().isEmpty()) return {};
+    // The child replaces the last word of the command. On a guarded removal
+    // that word is `fi`, and the splice would leave an unparseable line.
+    if (parseGuardedRemove(f.command)) return {};
     const QString cmd = f.command.trimmed();
     const int sp = cmd.lastIndexOf(QLatin1Char(' '));
     if (sp <= 0) return {};
     return cmd.left(sp + 1) + shellQuote(child);
+}
+
+std::optional<GuardedRemove> parseGuardedRemove(const QString &cmd) {
+    const QString t = cmd.trimmed();
+    if (!t.startsWith(QLatin1String("if "))) return std::nullopt;
+    const int then = t.indexOf(QLatin1String("; then "));
+    const int fi = t.lastIndexOf(QLatin1String("; fi"));
+    if (then < 0 || fi <= then + 7) return std::nullopt;
+    return GuardedRemove{t.mid(3, then - 3), t.mid(then + 7, fi - then - 7).trimmed()};
 }
 
 bool commandNeedsRoot(const QString &cmd) {
@@ -561,11 +584,7 @@ bool commandNeedsRoot(const QString &cmd) {
     if (t.startsWith(QLatin1String("rootcmd "))) return false;
     // A guarded removal is `if <query>; then <action>; fi`. Judge the action,
     // or the leading `if` hides an action that needs root.
-    if (t.startsWith(QLatin1String("if "))) {
-        const int then = t.indexOf(QLatin1String("; then "));
-        const int fi = t.lastIndexOf(QLatin1String("; fi"));
-        if (then > 0 && fi > then) t = t.mid(then + 7, fi - then - 7).trimmed();
-    }
+    if (const GuardedRemove guarded = parseGuardedRemove(t)) t = guarded.action;
     QString first = t.section(QLatin1Char(' '), 0, 0);
     if (first.contains(QLatin1Char('/'))) first = first.section(QLatin1Char('/'), -1);
     return first == QLatin1String("apt-get")
@@ -586,6 +605,13 @@ bool commandNeedsRoot(const QString &cmd) {
 
 QString withRootCmd(const QString &cmd) {
     if (cmd.isEmpty() || !commandNeedsRoot(cmd)) return cmd;
+    // Escalating the whole line hands `rootcmd` the words `if` and `<query>` as
+    // arguments and leaves a bare `then` behind, so the line stops parsing and
+    // `set -e` ends the script there. Escalate the action inside the guard.
+    if (const GuardedRemove guarded = parseGuardedRemove(cmd)) {
+        return QStringLiteral("if ") + guarded.present
+            + QStringLiteral("; then rootcmd ") + guarded.action + QStringLiteral("; fi");
+    }
     return QStringLiteral("rootcmd ") + cmd;
 }
 

@@ -590,17 +590,37 @@ final class ScriptPreviewTests: XCTestCase {
     }
 
     /// The guard is invisible to the privilege wrapper: a `pacman` removal still
-    /// has to reach the user through `rootcmd`.
+    /// has to reach the user through `rootcmd`, and the wrapper goes inside the
+    /// guard, because `rootcmd if ...; then ...; fi` hands `rootcmd` the words
+    /// `if` and `<query>` and leaves a bare `then` for the shell to choke on.
     func testGuardedRemovalStillEscalatesForPackageManagers() {
         XCTAssertFalse(commandNeedsRoot(uninstallCommand(source: "flatpak", name: "Firefox", path: "/x/f.desktop", caskName: nil, steamAppId: nil)))
         XCTAssertTrue(commandNeedsRoot(
             packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan"))
         ))
         let pacman = withRootCmd(packageRemoveCommand(PackageEntry(name: "jq", manager: "pacman", kind: "orphan")))
-        XCTAssertTrue(pacman.hasPrefix("rootcmd "), pacman)
         XCTAssertEqual(
             pacman,
-            "rootcmd if pacman -Qq jq >/dev/null 2>&1; then pacman -Rns jq; fi"
+            "if pacman -Qq jq >/dev/null 2>&1; then rootcmd pacman -Rns jq; fi"
         )
+        XCTAssertTrue(callsRootHelper(pacman), pacman)
+        // Wrapping again must not escalate twice.
+        XCTAssertEqual(withRootCmd(pacman), pacman)
+        XCTAssertFalse(commandNeedsRoot(pacman), pacman)
+        // An unguarded root command keeps the plain prefix.
+        XCTAssertEqual(withRootCmd("apt-mark manual libfoo"), "rootcmd apt-mark manual libfoo")
+        XCTAssertTrue(callsRootHelper("rootcmd apt-mark manual libfoo"))
+        XCTAssertFalse(callsRootHelper("rm -rf /tmp/x"))
+    }
+
+    /// `parseGuardedRemove` round-trips the guard `guardedRemoveCommand` writes.
+    func testParseGuardedRemoveSplitsQueryFromAction() {
+        let cmd = guardedRemoveCommand(present: "brew list --formula jq", remove: "brew uninstall jq")
+        let parsed = parseGuardedRemove(cmd)
+        XCTAssertEqual(parsed?.present, "brew list --formula jq >/dev/null 2>&1")
+        XCTAssertEqual(parsed?.action, "brew uninstall jq")
+        XCTAssertNil(parseGuardedRemove("rm -rf /tmp/x"))
+        XCTAssertNil(parseGuardedRemove("if true; then"))
+        XCTAssertNil(parseGuardedRemove(""))
     }
 }

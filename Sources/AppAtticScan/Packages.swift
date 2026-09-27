@@ -96,33 +96,61 @@ public func filterPackages(
     }
 }
 
+/// Every removal is guarded: a generated script runs under `set -e`, so a
+/// second run over an already-removed package has to skip the line instead of
+/// exiting nonzero and abandoning the packages after it. Each `present`
+/// query is the same listing the collector reads, so the two agree on what
+/// "installed" means.
 public func packageRemoveCommand(_ entry: PackageEntry) -> String {
     let q = shellQuote(entry.name)
+    /// `grep -F --` on the manager's own listing, whose row format the
+    /// parsers above already pin.
+    func listed(_ cmd: String, row: String) -> String {
+        "\(cmd) | grep -qF -- \(shellQuote(row))"
+    }
     switch entry.manager {
     case "pacman", "aur":
         return guardedRemoveCommand(present: "pacman -Qq \(q)", remove: "pacman -Rns \(q)")
     case "apt", "dpkg":
-        return "apt-get purge -y \(q)"
+        return guardedRemoveCommand(present: "dpkg -s \(q)", remove: "apt-get purge -y \(q)")
     case "dnf":
-        return "dnf remove -y \(q)"
+        return guardedRemoveCommand(present: "rpm -q \(q)", remove: "dnf remove -y \(q)")
     case "yum":
-        return "yum remove -y \(q)"
+        return guardedRemoveCommand(present: "rpm -q \(q)", remove: "yum remove -y \(q)")
     case "zypper":
-        return "zypper --non-interactive rm \(q)"
+        return guardedRemoveCommand(present: "rpm -q \(q)", remove: "zypper --non-interactive rm \(q)")
     case "npm":
-        return "npm -g uninstall \(q)"
+        return guardedRemoveCommand(
+            present: listed("npm ls -g --depth=0", row: "\(entry.name)@"),
+            remove: "npm -g uninstall \(q)"
+        )
     case "pnpm":
-        return "pnpm remove -g \(q)"
+        return guardedRemoveCommand(
+            present: listed("pnpm ls -g --depth=0", row: "\(entry.name)@"),
+            remove: "pnpm remove -g \(q)"
+        )
     case "bun":
-        return "bun remove -g \(q)"
+        return guardedRemoveCommand(
+            present: listed("bun pm ls -g", row: "\(entry.name)@"),
+            remove: "bun remove -g \(q)"
+        )
     case "pipx":
-        return "pipx uninstall \(q)"
+        return guardedRemoveCommand(
+            present: listed("pipx list", row: "package \(entry.name) "),
+            remove: "pipx uninstall \(q)"
+        )
     case "uv":
-        return "uv tool uninstall \(q)"
+        return guardedRemoveCommand(
+            present: listed("uv tool list", row: "\(entry.name) v"),
+            remove: "uv tool uninstall \(q)"
+        )
     case "pip":
-        return "pip uninstall -y --user \(q)"
+        return guardedRemoveCommand(present: "pip show \(q)", remove: "pip uninstall -y --user \(q)")
     case "deno":
-        return "deno uninstall --global \(q)"
+        return guardedRemoveCommand(
+            present: "test -e ~/.deno/bin/\(q)",
+            remove: "deno uninstall --global \(q)"
+        )
     default:
         return "# \(shellComment(entry.manager)) \(q)"
     }
@@ -170,7 +198,7 @@ public func packageActionScript(remove: [PackageEntry], markManual: [PackageEntr
             }
         }
     }
-    if body.contains(where: { $0.hasPrefix("rootcmd ") }) {
+    if body.contains(where: callsRootHelper) {
         lines.append(scriptRootHelper)
     }
     lines.append(contentsOf: body)

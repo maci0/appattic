@@ -9,6 +9,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <optional>
 
 enum class Page : int {
     Overview = 0,
@@ -81,6 +82,16 @@ bool isProtectedPackagedPath(const QString &path);
 bool isShadowFinding(const Finding &f);
 QString leftoverCleanupCommand(const Finding &f);
 QString packageChildCommand(const Finding &f, const QString &child);
+/// The two halves of a guarded removal, `if <present>; then <action>; fi`, so
+/// the root wrapper and the privilege check read one shape. Mirrors Swift
+/// `GuardedRemove` in `Sources/AppAtticScan/ShellScript.swift`.
+struct GuardedRemove {
+    QString present;
+    QString action;
+};
+
+/// Split a single-line guarded removal. Null for anything else.
+std::optional<GuardedRemove> parseGuardedRemove(const QString &cmd);
 bool commandNeedsRoot(const QString &cmd);
 /// A plugin command may only reach a script when every byte is inert to
 /// `/bin/sh`. Anything else is an unquoted name or path.

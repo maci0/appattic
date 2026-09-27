@@ -35,6 +35,39 @@ public func guardedRemoveCommand(present: String, remove: String) -> String {
     "if \(present) >/dev/null 2>&1; then \(remove); fi"
 }
 
+/// The two halves of a `guardedRemoveCommand` line, so the root wrapper and
+/// the privilege check read the same shape instead of re-splitting the text.
+public struct GuardedRemove: Equatable, Sendable {
+    public var present: String
+    public var action: String
+
+    public init(present: String, action: String) {
+        self.present = present
+        self.action = action
+    }
+}
+
+/// Split `if <present>; then <action>; fi`. Nil for anything else, including a
+/// multi-line leftover removal, which is not a guard.
+public func parseGuardedRemove(_ cmd: String) -> GuardedRemove? {
+    let t = cmd.trimmingCharacters(in: .whitespaces)
+    guard t.hasPrefix("if "),
+          let then = t.range(of: "; then "),
+          let fi = t.range(of: "; fi", options: .backwards),
+          then.upperBound < fi.lowerBound
+    else { return nil }
+    let present = String(t[t.index(t.startIndex, offsetBy: 3)..<then.upperBound])
+    let action = String(t[then.upperBound..<fi.lowerBound]).trimmingCharacters(in: .whitespaces)
+    return GuardedRemove(present: present, action: action)
+}
+
+/// Whether a wrapped line calls the `rootcmd` helper, so the script header
+/// has to define it. A guarded removal escalates its action, not the line, so
+/// the call is not always at the front.
+public func callsRootHelper(_ cmd: String) -> Bool {
+    cmd.hasPrefix("rootcmd ") || cmd.contains("; then rootcmd ")
+}
+
 /// Untrusted text (app names, paths, manager labels) for a `#` comment line in
 /// a generated script. A newline ends the comment, and everything after it is a
 /// command the script runs, so a folder named `Game\nrm -rf ~` would otherwise

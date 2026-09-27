@@ -237,7 +237,7 @@ public func updateScript(_ pkgs: [OutdatedPkg]) -> String {
         return lines.joined(separator: "\n") + "\n"
     }
     let wrapped = cmds.map(withRootCmd)
-    if wrapped.contains(where: { $0.hasPrefix("rootcmd ") }) {
+    if wrapped.contains(where: callsRootHelper) {
         lines.append(scriptRootHelper)
     }
     lines.append("# Named package upgrades. Not a full distro upgrade.")
