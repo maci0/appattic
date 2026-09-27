@@ -47,8 +47,16 @@ final class ScanConcurrencyTests: XCTestCase {
         for i in 0..<12 {
             let dir = root.appendingPathComponent("DeadApp\(i)")
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try Data(repeating: 0x41, count: 2048)
-                .write(to: dir.appendingPathComponent("cache.bin"))
+            let cache = dir.appendingPathComponent("cache.bin")
+            try Data(repeating: 0x41, count: 2048).write(to: cache)
+            // The newest mtime under a directory is what `probeActivityMtime`
+            // reads, so the file inside has to be as old as the directory:
+            // a cache.bin written now makes the folder read as recently used,
+            // the scan marks it active, and nothing here is a leftover on any
+            // platform. The fixture is the thing that was wrong, not the rule.
+            try FileManager.default.setAttributes(
+                [.modificationDate: old], ofItemAtPath: cache.path
+            )
             try FileManager.default.setAttributes(
                 [.modificationDate: old], ofItemAtPath: dir.path
             )
