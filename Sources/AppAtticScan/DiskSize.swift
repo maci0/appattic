@@ -129,6 +129,25 @@ public func duSizes(
     return out
 }
 
+/// Sizes for many paths in one pass. `du` is a per-path hook (tests inject
+/// one) and is called in the old order; without it every path is measured
+/// through `duSizes`, so a list of directories costs a handful of `du -sk`
+/// spawns instead of one per path.
+public func pathSizes(
+    _ paths: [String],
+    timeout: TimeInterval = 8,
+    du: ((String) -> (Int, Bool))? = nil,
+    run: CommandRun = runCommand
+) -> [String: (Int, Bool)] {
+    if let du {
+        var out: [String: (Int, Bool)] = [:]
+        out.reserveCapacity(paths.count)
+        for path in paths { out[path] = du(path) }
+        return out
+    }
+    return duSizes(paths, timeout: timeout, run: run)
+}
+
 /// Logical file bytes for a directory tree: sum of regular-file `st_size`,
 /// symlinks not followed.
 ///

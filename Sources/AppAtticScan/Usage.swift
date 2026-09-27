@@ -193,9 +193,10 @@ public func parseFlatpakVarAppMtimes(_ root: String, now: Date = Date()) -> [Str
     guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return hits }
     for name in names {
         let path = (root as NSString).appendingPathComponent(name)
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { continue }
+        // One `attributesOfItem` answers existence, kind and mtime: the
+        // `fileExists` + `attributesOfItem` pair stat'ed every app twice.
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              (attrs[.type] as? FileAttributeType) == .typeDirectory,
               let dt = attrs[.modificationDate] as? Date,
               isPlausibleLaunchDate(dt, now: now)
         else { continue }
@@ -832,8 +833,7 @@ public func fillAppUsage(
         let hits = linuxLaunchHits(xbelPath: xbelPath, gnomePath: gnomeStatePath, varApp: flatpakVarApp, now: now)
         progress("  · checking recently-used.xbel (\(hits.count) apps)…")
         for i in apps.indices {
-            if FileManager.default.fileExists(atPath: apps[i].path),
-               let attrs = try? FileManager.default.attributesOfItem(atPath: apps[i].path) {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: apps[i].path) {
                 let birth = (attrs[.creationDate] as? Date) ?? (attrs[.modificationDate] as? Date)
                 apps[i].installedAt = birth
             }
@@ -862,8 +862,7 @@ public func fillAppUsage(
         }
         if let installedAt {
             apps[i].installedAt = installedAt
-        } else if FileManager.default.fileExists(atPath: apps[i].path),
-                  let attrs = try? FileManager.default.attributesOfItem(atPath: apps[i].path) {
+        } else if let attrs = try? FileManager.default.attributesOfItem(atPath: apps[i].path) {
             apps[i].installedAt = attrs[.creationDate] as? Date
         }
         if let description, !description.isEmpty, apps[i].extra["comment"] == nil {

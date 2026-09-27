@@ -332,24 +332,26 @@ public func buildSoftware(
         // `apps.contains(where:)` scan answered in O(entries x apps) and
         // re-trimmed the entry per app. Inverted: index the strict ancestor
         // directories of every app once, then probe.
-        let appAncestorDirs = strictAncestorDirs(of: apps.map(\.path))        let measure = du ?? { p in
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: p, isDirectory: &isDir), isDir.boolValue {
-                return duSize(p)
-            }
-            return (fileSize(p), true)
-        }
+        let appAncestorDirs = strictAncestorDirs(of: apps.map(\.path))
+        var candidates: [(name: String, key: String, path: String)] = []
         for path in paths {
             if appAncestorDirs.contains(trimmedSlashes(path)) { continue }
             let name = URL(fileURLWithPath: path).lastPathComponent
             let key = name.posixLowercased()
             if formulaNames.contains(key) { continue }
-            let (size, measured) = measure(path)
-            let caskName = caskNames[key]
+            candidates.append((name, key, path))
+        }
+        // One `du -sk` per chunk, not one spawn per entry: the old per-path
+        // `measure` cost ~50 ms a spawn, and /Applications holds hundreds of
+        // entries.
+        let sizes = pathSizes(candidates.map(\.path), du: du)
+        for c in candidates {
+            let (size, measured) = sizes[c.path] ?? (0, false)
+            let caskName = caskNames[c.key]
             software.append(Software(
-                name: name,
+                name: c.name,
                 kind: "other",
-                path: path,
+                path: c.path,
                 source: caskName != nil ? "brew-cask" : "pkg/other",
                 sizeBytes: size,
                 sizeMeasured: measured,
@@ -360,33 +362,40 @@ public func buildSoftware(
     }
 
     var seenCasks = Set(software.compactMap { $0.caskName?.posixLowercased() })
+    let caskroom = URL(fileURLWithPath: brew.prefix ?? "/opt/homebrew")
+        .appendingPathComponent("Caskroom")
+    var pendingCasks: [(cask: Cask, path: String, exists: Bool)] = []
     for c in brew.casks {
         let key = c.name.posixLowercased()
         if seenCasks.contains(key) { continue }
         seenCasks.insert(key)
-        let path = URL(fileURLWithPath: brew.prefix ?? "/opt/homebrew")
-            .appendingPathComponent("Caskroom")
-            .appendingPathComponent(c.name)
-            .path
+        let path = caskroom.appendingPathComponent(c.name).path
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+        pendingCasks.append((c, path, exists))
+    }
+    // One `du -sk` per chunk, not one spawn per cask: a full caskroom is
+    // hundreds of casks, so the per-cask `du` was hundreds of spawns.
+    let caskSizes = pathSizes(pendingCasks.filter { $0.exists }.map(\.path), du: du)
+    for entry in pendingCasks {
         var size = 0
         var measured = true
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: path, isDirectory: &isDir) {
-            let pair = du?(path) ?? (isDir.boolValue ? duSize(path) : (fileSize(path), true))
+        if entry.exists {
+            let pair = caskSizes[entry.path] ?? (0, false)
             size = pair.0
             measured = pair.1
         }
-        let title = (c.titles.first ?? "").trimmingCharacters(in: .whitespaces)
-        let hasApp = !c.appNames.isEmpty || !c.appPaths.isEmpty
+        let title = (entry.cask.titles.first ?? "").trimmingCharacters(in: .whitespaces)
+        let hasApp = !entry.cask.appNames.isEmpty || !entry.cask.appPaths.isEmpty
         software.append(Software(
-            name: title.isEmpty ? c.name : title,
+            name: title.isEmpty ? entry.cask.name : title,
             kind: hasApp ? "app" : "other",
-            path: path,
+            path: entry.path,
             source: "brew-cask",
             sizeBytes: size,
             sizeMeasured: measured,
-            caskName: c.name,
-            summary: shortDesc(c.desc)
+            caskName: entry.cask.name,
+            summary: shortDesc(entry.cask.desc)
         ))
     }
     return software

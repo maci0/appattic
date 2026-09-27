@@ -236,4 +236,34 @@ final class DiskSizeTests: XCTestCase {
         XCTAssertEqual(spawns, 0)
         XCTAssertEqual(sizes[url.path]?.0, 512)
     }
+
+    func testPathSizesBatchesWithoutAHookAndHonoursOne() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("path-sizes-\(UUID().uuidString)")
+        let dirA = root.appendingPathComponent("a")
+        let dirB = root.appendingPathComponent("b")
+        try FileManager.default.createDirectory(at: dirA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dirB, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var spawns = 0
+        let run: CommandRun = { _, _ in
+            spawns += 1
+            return (0, "8\t\(dirA.path)\n16\t\(dirB.path)\n", "")
+        }
+        let batched = pathSizes([dirA.path, dirB.path], run: run)
+        XCTAssertEqual(spawns, 1, "one spawn per chunk, not one per path")
+        XCTAssertEqual(batched[dirA.path]?.0, 8 * 1024)
+        XCTAssertEqual(batched[dirB.path]?.0, 16 * 1024)
+        XCTAssertEqual(batched[dirA.path]?.1, true)
+
+        var hookCalls: [String] = []
+        let hooked = pathSizes([dirA.path, dirB.path], du: { path in
+            hookCalls.append(path)
+            return (7, false)
+        }, run: run)
+        XCTAssertEqual(hookCalls, [dirA.path, dirB.path], "the hook is called once per path, in order")
+        XCTAssertEqual(spawns, 1, "the hook replaces the spawn")
+        XCTAssertEqual(hooked[dirA.path]?.0, 7)
+        XCTAssertEqual(hooked[dirB.path]?.1, false)
+    }
 }

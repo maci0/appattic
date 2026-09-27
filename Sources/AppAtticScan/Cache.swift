@@ -303,8 +303,9 @@ func inventoryEntryStamp(dir: String, name: String) -> String {
 }
 
 func pathMtimeStamp(_ label: String, _ path: String) -> String {
-    guard FileManager.default.fileExists(atPath: path),
-          let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+    // One `attributesOfItem` for the existence check and the mtime: a
+    // `fileExists` first stat'ed every stamped path twice.
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
           let mtime = attrs[.modificationDate] as? Date
     else { return "" }
     // bitPattern, like inventoryEntryStamp: the stamp is the fingerprint, so it

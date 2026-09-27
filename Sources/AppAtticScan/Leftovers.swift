@@ -879,7 +879,9 @@ public func groupOrphanedLeftovers(_ items: [DataItem]) -> [DataItem] {
     let mergeKeys = Set(buckets.compactMap { $0.value.count > 1 ? $0.key : nil })
     // Owner index: the old per-item `leftoverBucketKey` re-derived the group
     // key and fell back to an O(buckets × size) identity scan, O(n²) after
-    // collapses moved members. One pass here instead.
+    // collapses moved members. One pass here instead. The index is built from
+    // the collapsed buckets, so an item it does not list is in no bucket at
+    // all: that scan could only ever return the item's own key.
     var ownerOf: [ObjectIdentifier: String] = [:]
     ownerOf.reserveCapacity(items.count)
     for (key, group) in buckets {
@@ -891,7 +893,7 @@ public func groupOrphanedLeftovers(_ items: [DataItem]) -> [DataItem] {
     for item in items {
         let id = ObjectIdentifier(item)
         if consumed.contains(id) { continue }
-        let key = ownerOf[id] ?? leftoverBucketKey(item, buckets: buckets)
+        let key = ownerOf[id] ?? leftoverGroupKey(item.name)
         if item.leftoverStatus == .orphaned, item.rootLabel != "LaunchAgents", mergeKeys.contains(key),
            let group = buckets[key]
         {
@@ -1053,15 +1055,6 @@ func leftoverGroupKey(_ name: String) -> String {
         if leftoverProductAliases.values.contains(p) { return p }
     }
     return n
-}
-
-func leftoverBucketKey(_ item: DataItem, buckets: [String: [DataItem]]) -> String {
-    let own = leftoverGroupKey(item.name)
-    if buckets[own] != nil { return own }
-    for (key, group) in buckets where group.contains(where: { $0 === item }) {
-        return key
-    }
-    return own
 }
 
 func collapseBundleIdChildBuckets(_ buckets: inout [String: [DataItem]]) {
