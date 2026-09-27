@@ -195,6 +195,17 @@ QString localeDateTimeLabel(const QDateTime &dt) {
     return loc.toString(dt, QLocale::ShortFormat);
 }
 
+/// A whole number in the user's own grouping. `QString::number` stays in the C
+/// locale, so a count of 1234567 reads as "1234567" in German and French
+/// instead of "1.234.567", and the same count renders two different ways
+/// depending on which column it came from. The C locale has no grouping rules,
+/// so it keeps the plain digits that tools in that locale expect.
+QString localeCount(qlonglong n) {
+    const QLocale loc;
+    if (loc.name() == QLatin1String("C")) return QString::number(n);
+    return loc.toString(n);
+}
+
 QString humanSize(qint64 bytes) {
     if (bytes < 0) return QStringLiteral("unknown");
     double n = double(bytes);
@@ -211,7 +222,7 @@ QString humanSize(qint64 bytes) {
                 unit += 1;
                 continue;
             }
-            if (unit == 0) return QString::number(bytes) + QStringLiteral(" B");
+            if (unit == 0) return localeCount(bytes) + QStringLiteral(" B");
             return fixed1(n) + QLatin1Char(' ') + QLatin1String(units[unit]);
         }
         n /= 1024.0;
@@ -368,7 +379,7 @@ static QString relativeDayLabel(qint64 days) {
     if (days == 0) return QStringLiteral("Today");
     if (days == 1) return QStringLiteral("Yesterday");
     if (days < 2 || days >= 45) return {};
-    return QString::number(days) + QStringLiteral(" days ago");
+    return localeCount(days) + QStringLiteral(" days ago");
 }
 
 QString modifiedLabel(const Finding &f, const QDateTime &now) {
@@ -386,7 +397,7 @@ QString modifiedLabel(const Finding &f, const QDateTime &now) {
     if (f.idleDays >= 0) {
         const QString rel = relativeDayLabel(f.idleDays);
         if (!rel.isEmpty()) return rel;
-        return QString::number(f.idleDays) + QStringLiteral(" days ago");
+        return localeCount(f.idleDays) + QStringLiteral(" days ago");
     }
     // "unknown" for a value that exists but could not be read, "-" for nothing
     // to show: the same words the size and version columns use.

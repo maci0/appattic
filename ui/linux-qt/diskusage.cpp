@@ -694,7 +694,7 @@ QString diskContentsLabel(qint64 items, bool isDir) {
     if (items <= 1) return QStringLiteral("Empty");
     const qint64 n = items - 1;
     if (n == 1) return QStringLiteral("1 item");
-    return QString::number(n) + QStringLiteral(" items");
+    return localeCount(n) + QStringLiteral(" items");
 }
 
 QString diskModifiedLabel(qint64 mtime) {

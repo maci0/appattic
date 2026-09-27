@@ -245,7 +245,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->volumes->setTextElideMode(Qt::ElideRight);
     if (QTreeWidgetItem *head = d->volumes->headerItem()) {
         for (int c = 3; c <= 5; ++c) {
-            head->setTextAlignment(c, Qt::AlignRight | Qt::AlignVCenter);
+            head->setTextAlignment(c, Qt::AlignTrailing | Qt::AlignVCenter);
         }
     }
     lv->addWidget(d->volumes, 1);
@@ -337,8 +337,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->tree->setTextElideMode(Qt::ElideRight);
     d->tree->setContextMenuPolicy(Qt::CustomContextMenu);
     if (QTreeWidgetItem *head = d->tree->headerItem()) {
-        head->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
-        head->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+        head->setTextAlignment(1, Qt::AlignTrailing | Qt::AlignVCenter);
+        head->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
     }
     d->chart = new DiskChart;
     split->addWidget(d->tree);
@@ -427,7 +427,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         updateChrome();
     });
     connect(d->worker, &DiskScanWorker::progress, this, [this](qint64 dirs, const QString &path) {
-        const QString label = QString::number(dirs)
+        const QString label = localeCount(dirs)
             + QStringLiteral(" folders · ")
             + path;
         d->progressLabel->setText(label);
@@ -456,8 +456,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 );
                 item->setFont(1, aaNumericFont());
                 item->setFont(2, aaNumericFont());
-                item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
-                item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+                item->setTextAlignment(1, Qt::AlignTrailing | Qt::AlignVCenter);
+                item->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
                 item->setData(1, Qt::UserRole, apparent);
                 item->setData(2, Qt::UserRole, allocated);
                 // Inserted where the finished tree will put it: by size.
@@ -619,9 +619,9 @@ void DiskPage::refreshVolumes() {
         it->setFont(3, nums);
         it->setFont(4, nums);
         it->setFont(5, nums);
-        it->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
-        it->setTextAlignment(4, Qt::AlignRight | Qt::AlignVCenter);
-        it->setTextAlignment(5, Qt::AlignRight | Qt::AlignVCenter);
+        it->setTextAlignment(3, Qt::AlignTrailing | Qt::AlignVCenter);
+        it->setTextAlignment(4, Qt::AlignTrailing | Qt::AlignVCenter);
+        it->setTextAlignment(5, Qt::AlignTrailing | Qt::AlignVCenter);
     }
     for (int i = 0; i < 6; ++i) d->volumes->resizeColumnToContents(i);
 }
@@ -716,8 +716,8 @@ static QTreeWidgetItem *makeValueItem(
     const QFont nums = aaNumericFont();
     it->setFont(1, nums);
     it->setFont(2, nums);
-    it->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
-    it->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+    it->setTextAlignment(1, Qt::AlignTrailing | Qt::AlignVCenter);
+    it->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
     const QColor dim = QApplication::palette().color(QPalette::PlaceholderText);
     it->setForeground(3, dim);
     it->setForeground(4, dim);

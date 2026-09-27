@@ -39,6 +39,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QLocale>
 #include <QMainWindow>
 #include <QMenu>
 #include <QMenuBar>
@@ -193,7 +194,7 @@ static QString pageEmptyDetail(
             body += QLatin1Char(' ')
                 + (ignoredCount == 1
                     ? QStringLiteral("1 leftover path hidden from the list.")
-                    : QString::number(ignoredCount) + QStringLiteral(" leftover paths hidden from the list."));
+                    : localeCount(ignoredCount) + QStringLiteral(" leftover paths hidden from the list."));
         }
         return body;
     }
@@ -421,7 +422,7 @@ public:
         int cw = 0;
         QString countText;
         if (count > 0) {
-            countText = QString::number(count);
+            countText = localeCount(count);
             cw = QFontMetrics(smallFont()).horizontalAdvance(countText) + 12;
             o.rect.setWidth(qMax(0, o.rect.width() - cw));
         }
@@ -434,9 +435,13 @@ public:
         p->save();
         p->setPen(dim);
         p->setFont(smallFont());
+        // The badge belongs on the trailing edge, which is the left one once
+        // the layout direction flips. `o.rect.right()` alone pins it to the
+        // physical right and pushes it off the row in Arabic or Hebrew.
+        const bool rtl = opt.direction == Qt::RightToLeft;
         p->drawText(
-            QRect(o.rect.right(), opt.rect.top(), cw - 8, opt.rect.height()),
-            Qt::AlignVCenter | Qt::AlignRight,
+            QRect(rtl ? o.rect.left() : o.rect.right(), opt.rect.top(), cw - 8, opt.rect.height()),
+            rtl ? (Qt::AlignVCenter | Qt::AlignLeft) : (Qt::AlignVCenter | Qt::AlignRight),
             countText
         );
         p->restore();
@@ -697,7 +702,7 @@ public:
         m_table->setTextElideMode(Qt::ElideRight);
         m_table->header()->setStretchLastSection(false);
         m_table->header()->setHighlightSections(false);
-        m_table->header()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        m_table->header()->setDefaultAlignment(Qt::AlignLeading | Qt::AlignVCenter);
         m_table->setFrameShape(QFrame::NoFrame);
         m_table->setItemDelegate(new TableRowDelegate(m_table));
         m_emptyPane = new QWidget;
@@ -1597,7 +1602,7 @@ private:
         auto statCount = [&](int n) {
             if (scanningEmpty) return pending;
             if (settingsBlocked) return blockedMark;
-            return QString::number(n);
+            return localeCount(n);
         };
         m_statLeftovers->setText(statCount(leftovers));
         {
@@ -1650,7 +1655,7 @@ private:
                 if (!f.path.isEmpty()) it->setToolTip(2, f.path);
                 if (page != Page::Outdated) {
                     it->setFont(2, numericFont());
-                    it->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+                    it->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
                 }
                 it->setForeground(1, t.dim);
                 it->setForeground(2, t.dim);
@@ -1659,8 +1664,8 @@ private:
                 // The header has to agree with the cells below it.
                 head->setTextAlignment(
                     2,
-                    page == Page::Outdated ? (Qt::AlignLeft | Qt::AlignVCenter)
-                                           : (Qt::AlignRight | Qt::AlignVCenter)
+                    page == Page::Outdated ? (Qt::AlignLeading | Qt::AlignVCenter)
+                                           : (Qt::AlignTrailing | Qt::AlignVCenter)
                 );
             }
             const QString text = settingsBlocked
@@ -1864,7 +1869,7 @@ private:
             break;
         }
         if (role == Qt::FontRole && column == 4) return ctx.nums;
-        if (role == Qt::TextAlignmentRole && column == 4) return int(Qt::AlignRight | Qt::AlignVCenter);
+        if (role == Qt::TextAlignmentRole && column == 4) return int(Qt::AlignTrailing | Qt::AlignVCenter);
         return {};
     }
 
@@ -2360,15 +2365,15 @@ private:
     QString countLabel(Page page, int n) const {
         switch (page) {
         case Page::Leftovers:
-            return n == 1 ? QStringLiteral("1 leftover") : QString::number(n) + QStringLiteral(" leftovers");
+            return n == 1 ? QStringLiteral("1 leftover") : localeCount(n) + QStringLiteral(" leftovers");
         case Page::Stale:
-            return n == 1 ? QStringLiteral("1 stale app") : QString::number(n) + QStringLiteral(" stale apps");
+            return n == 1 ? QStringLiteral("1 stale app") : localeCount(n) + QStringLiteral(" stale apps");
         case Page::Outdated:
-            return n == 1 ? QStringLiteral("1 outdated package") : QString::number(n) + QStringLiteral(" outdated packages");
+            return n == 1 ? QStringLiteral("1 outdated package") : localeCount(n) + QStringLiteral(" outdated packages");
         case Page::Packages:
-            return n == 1 ? QStringLiteral("1 package") : QString::number(n) + QStringLiteral(" packages");
+            return n == 1 ? QStringLiteral("1 package") : localeCount(n) + QStringLiteral(" packages");
         default:
-            return QString::number(n);
+            return localeCount(n);
         }
     }
 
@@ -2475,10 +2480,25 @@ private:
     }
 
     void clearInspector() {
+        m_factKeys.clear();
         while (QLayoutItem *item = m_inspectorLay->takeAt(0)) {
             if (item->widget()) item->widget()->deleteLater();
             delete item;
         }
+    }
+
+    /// One width for every fact key, from the widest label this inspector drew.
+    /// Measuring one hardcoded English word instead truncates every other label
+    /// the moment a translation is longer, and the uppercase pass widens them
+    /// further (German "ß" uppercases to "SS").
+    void sizeFactKeys() {
+        const QFontMetrics fm(labelFont());
+        int px = 0;
+        for (const QLabel *k : m_factKeys) {
+            px = qMax(px, fm.horizontalAdvance(k->text()));
+        }
+        if (px <= 0) return;
+        for (QLabel *k : m_factKeys) k->setFixedWidth(px + 12);
     }
 
     QLabel *inspectorLabel(const QString &text, int pt, bool bold, const QColor &color, bool mono = false) {
@@ -2504,8 +2524,8 @@ private:
         const Tone t = toneFrom(palette());
         auto *k = inspectorLabel(label.toUpper(), 11, false, t.dim);
         k->setFont(labelFont());
-        k->setFixedWidth(QFontMetrics(labelFont()).horizontalAdvance(QStringLiteral("MODIFIED")) + 12);
-        k->setAlignment(Qt::AlignRight | Qt::AlignTop);
+        k->setAlignment(Qt::AlignTrailing | Qt::AlignTop);
+        m_factKeys.append(k);
         auto *v = inspectorLabel(value, 13, false, color, mono);
         h->addWidget(k);
         h->addWidget(v, 1);
@@ -2593,6 +2613,7 @@ private:
         }
         if (!f->children.isEmpty()) addFact(QStringLiteral("Depends"), f->children.join(QLatin1Char('\n')), t.text, true);
 
+        sizeFactKeys();
         m_inspectorLay->addStretch();
 
         if (!m_selectedChild.isEmpty() && page == Page::Packages) {
@@ -3104,9 +3125,17 @@ private:
         }
         QStringList names;
         for (const QString &p : m_ignored) names << ignoredPathLabel(p);
-        names.sort();
+        // Collation, not code points: `QStringList::sort()` puts "Zebra" before
+        // "apple" and "Ä" after "Z", so a German or Swedish reader sees an
+        // unordered list. The C locale has no collation rules and keeps the
+        // code-point order.
+        if (QLocale().name() == QLatin1String("C")) {
+            names.sort();
+        } else {
+            std::sort(names.begin(), names.end(), QLocale());
+        }
         m_ignoredList->setText(
-            QString::number(m_ignored.size()) + QStringLiteral(" leftover paths hidden from the list.\n")
+            localeCount(m_ignored.size()) + QStringLiteral(" leftover paths hidden from the list.\n")
             + names.mid(0, 12).join(QLatin1Char('\n'))
         );
         m_clearIgnored->setEnabled(true);
@@ -3130,6 +3159,7 @@ private:
     QScrollArea *m_inspectorScroll = nullptr;
     QWidget *m_inspectorHost = nullptr;
     QVBoxLayout *m_inspectorLay = nullptr;
+    QVector<QLabel *> m_factKeys;
     QLabel *m_count = nullptr;
     QProgressBar *m_scanBar = nullptr;
     QAction *m_countAct = nullptr;

@@ -29,10 +29,11 @@
 #include <limits>
 
 static int verifyHelpers() {
-    // Sizes print the locale's decimal separator, so the expected string is
-    // built the same way instead of hardcoding ".".
+    // Sizes and counts print the locale's separators and digits, so the
+    // expected strings are built the same way instead of hardcoding "." and
+    // ASCII digits.
     const QString dot = QString(QLocale().decimalPoint());
-    if (humanSize(0) != QLatin1String("0 B")) {
+    if (humanSize(0) != localeCount(0) + QLatin1String(" B")) {
         std::fprintf(stderr, "humanSize(0) mismatch\n");
         return 1;
     }
@@ -51,6 +52,13 @@ static int verifyHelpers() {
     if (humanSize(std::numeric_limits<qint64>::max())
         != QStringLiteral("8") + dot + QLatin1String("0 EB")) {
         std::fprintf(stderr, "humanSize(qint64 max) should read as 8.0 EB, not 8192.0 PB\n");
+        return 1;
+    }
+    // Whole bytes keep the locale's grouping, so 1023 reads "1.023 B" in
+    // German rather than the C locale's "1023 B". 1023 is the largest count
+    // that stays in the byte unit, and the one a single-file leftover hits.
+    if (humanSize(1023) != localeCount(1023) + QLatin1String(" B")) {
+        std::fprintf(stderr, "humanSize(1023) lost the locale grouping\n");
         return 1;
     }
     QVector<Finding> largeSize;
@@ -587,7 +595,7 @@ static int checkTiming() {
 
     Finding idle;
     idle.idleDays = 120;
-    if (modifiedLabel(idle) != QLatin1String("120 days ago")) {
+    if (modifiedLabel(idle) != localeCount(120) + QLatin1String(" days ago")) {
         std::fprintf(stderr, "timing: idleDays label\n");
         return 1;
     }
@@ -998,7 +1006,7 @@ static int checkDiskUsage() {
         std::fprintf(stderr, "disk: empty contents label\n");
         return 1;
     }
-    if (diskContentsLabel(5, true) != QLatin1String("4 items")) {
+    if (diskContentsLabel(5, true) != localeCount(4) + QLatin1String(" items")) {
         std::fprintf(stderr, "disk: items label\n");
         return 1;
     }

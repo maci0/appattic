@@ -40,6 +40,44 @@ inline QFont aaBodyFont() {
     return QApplication::font();
 }
 
+/// Families the app names a script outside the Latin alphabet with, in the
+/// order Qt should try them. Michroma carries Latin only and the desktop fixed
+/// font is Latin on most distributions, so a single-family QFont has no glyph
+/// to draw for a CJK, Arabic, or Cyrillic character and Qt paints the tofu box
+/// instead. Each candidate is checked against the font database, so an
+/// uninstalled family costs nothing.
+inline QStringList aaScriptFallbackFamilies() {
+    static const QStringList candidates = {
+        QStringLiteral("Noto Sans CJK SC"),
+        QStringLiteral("Noto Sans CJK JP"),
+        QStringLiteral("Noto Sans"),
+        QStringLiteral("Noto Sans Arabic"),
+        QStringLiteral("Noto Sans Hebrew"),
+        QStringLiteral("Noto Sans Devanagari"),
+        QStringLiteral("DejaVu Sans"),
+    };
+    const QStringList installed = QFontDatabase::families();
+    QStringList out;
+    for (const QString &fam : candidates) {
+        if (installed.contains(fam, Qt::CaseInsensitive)) out << fam;
+    }
+    return out;
+}
+
+/// Keep the face, add the script fallbacks behind it. Qt picks per character,
+/// so a Latin title still draws in the display face and only the characters it
+/// lacks come from the next family.
+inline QFont aaWithScriptFallback(const QFont &f) {
+    QFont out = f;
+    QStringList fams;
+    fams << f.family();
+    for (const QString &fam : aaScriptFallbackFamilies()) {
+        if (fam.compare(f.family(), Qt::CaseInsensitive) != 0) fams << fam;
+    }
+    out.setFamilies(fams);
+    return out;
+}
+
 inline QFont aaSmallFont() {
     QFont f = QApplication::font();
     const int ps = f.pointSize();
@@ -61,7 +99,7 @@ inline QFont aaPageFont() {
     }
     f.setPointSize(14);
     f.setLetterSpacing(QFont::PercentageSpacing, 102);
-    return f;
+    return aaWithScriptFallback(f);
 }
 
 inline QFont aaSectionFont() {
@@ -99,7 +137,9 @@ inline QFont aaMonoFont() {
     const QFont body = QApplication::font();
     if (body.pointSize() > 0) f.setPointSize(body.pointSize());
     else if (body.pixelSize() > 0) f.setPixelSize(body.pixelSize());
-    return f;
+    // Paths are the widest user-supplied text in the app, and a CJK or
+    // accented path is the normal case, not the exception.
+    return aaWithScriptFallback(f);
 }
 
 inline int aaRowPx(const QWidget *w = nullptr) {

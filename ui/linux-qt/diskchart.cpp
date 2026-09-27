@@ -280,11 +280,11 @@ void DiskChart::paintTreemap(QPainter &p, const QRect &box) {
         if (r.width() > 48 && r.height() > 22) {
             p.setPen(onChartColor(col));
             p.setFont(aaTitleFont());
-            p.drawText(r.adjusted(4, 4, -4, -4), Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, kids[i]->name);
+            p.drawText(r.adjusted(4, 4, -4, -4), Qt::AlignTop | Qt::AlignLeading | Qt::TextWordWrap, kids[i]->name);
             p.setFont(aaNumericFont());
             p.drawText(
                 r.adjusted(4, 20, -4, -4),
-                Qt::AlignTop | Qt::AlignLeft,
+                Qt::AlignTop | Qt::AlignLeading,
                 humanSize(kids[i]->metric(m_allocated))
             );
         }

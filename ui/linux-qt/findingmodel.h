@@ -149,7 +149,7 @@ public:
             return section < m_headers.size() ? QVariant(m_headers.at(section)) : QVariant();
         }
         if (role == Qt::TextAlignmentRole && section == m_rightAligned) {
-            return int(Qt::AlignRight | Qt::AlignVCenter);
+            return int(Qt::AlignTrailing | Qt::AlignVCenter);
         }
         if (role == Qt::ToolTipRole && section == 0) return m_headerTip;
         return {};

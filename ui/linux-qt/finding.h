@@ -70,6 +70,7 @@ void restrictPrivateDataFile(const QString &path);
 QString shellQuote(const QString &s);
 bool scriptHasCommands(const QString &script);
 QString humanSize(qint64 bytes);
+QString localeCount(qlonglong n);
 QString localeDateLabel(const QDate &date);
 QString localeDateTimeLabel(const QDateTime &dt);
 QString humanKind(const QString &kind);
