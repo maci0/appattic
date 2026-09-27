@@ -201,6 +201,7 @@ func cliEditDistance(_ a: [Character], _ b: [Character]) -> Int {
 
 public let cliHelpText = """
 usage: appattic [--version] [--help] [command] [options]
+       appattic help [command]   same help; a command name after it is checked
 
 Find leftover data from uninstalled apps, unused installed software, unused distro/language packages, outdated packages, and disk usage.
 
@@ -245,7 +246,7 @@ Progress and status go to stderr. Reports and --dry-run scripts go to stdout.
 exit codes:
   0  success
   1  the run failed, or an update was cancelled
-  2  usage error (bad command, option, or value)
+  2  usage error (bad command, option, or value), or settings.json is malformed
 
 examples:
   appattic leftovers --top 10
@@ -255,6 +256,7 @@ examples:
   appattic update --dry-run
   appattic update --yes
   appattic config
+  appattic help
 
 settings.json (includeSystem, confirmDelete, ignored leftover paths):
   Linux: $XDG_DATA_HOME/appattic/settings.json
@@ -406,7 +408,18 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
         i += 1
     }
     if let first = positional.first {
-        if cliCommands.contains(first) {
+        if first == "help" {
+            // The word form of `--help`, the way git, docker, and kubectl
+            // take it. A command name after it is checked so a typo is still
+            // recorded; help itself wins over the error, as `--help` does.
+            opts.help = true
+            if positional.count > 1, !cliCommands.contains(positional[1]), opts.parseError == nil {
+                opts.parseError = .unknownCommand(positional[1])
+            }
+            if positional.count > 2, opts.parseError == nil {
+                opts.parseError = .unexpectedArgument(positional[2])
+            }
+        } else if cliCommands.contains(first) {
             opts.command = first
             if first == "disk" {
                 if positional.count >= 2 { opts.diskPath = positional[1] }

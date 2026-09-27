@@ -11,7 +11,7 @@ final class FuzzCLIArgumentsTests: XCTestCase {
     private static let validCommands = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk"]
 
     private static let validVectors: [[String]] = [
-        [], ["--version"], ["-v"], ["--help"], ["-h"], ["config"],
+        [], ["--version"], ["-v"], ["--help"], ["-h"], ["help"], ["help", "disk"], ["config"],
         ["report", "--include-system", "--fresh", "--no-color", "--dry-run"],
         ["leftovers", "--top", "10"],
         ["leftovers", "--category", "caches", "--category", "browser"],

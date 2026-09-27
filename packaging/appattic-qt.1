@@ -39,6 +39,14 @@ Run the headless smoke test and exit. Prints
 on success. Useful with
 .B QT_QPA_PLATFORM=offscreen
 on a host with no display server.
+.TP
+.BI --dev-check " check" " [dir]"
+Debug build only. Run one gate and exit:
+.BR table ", " stream ", " disk ", or " shot
+(the page renders go to
+.IR dir ).
+The gate is compiled out of a release build, which rejects the option with
+exit 2 rather than opening the window.
 .SH ENVIRONMENT
 .TP
 .B APPATTIC_CORE_OUT
@@ -53,6 +61,10 @@ The window closed normally, or the requested option completed.
 .TP
 .B 1
 The scan failed, or the smoke test failed.
+.TP
+.B 2
+Usage error: an option this build does not take, or a gate name it does not
+know.
 .SH FILES
 .TP
 .I ~/.local/share/appattic/settings.json

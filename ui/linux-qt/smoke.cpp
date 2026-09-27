@@ -253,8 +253,10 @@ int runVersion(int argc, char **argv) {
     std::fprintf(stdout, "Qt %s\n", qVersion());
     const QString out = coreOutDir();
     const QString core = out + QStringLiteral("/appattic_core.wasm");
+    /* stdout is the version, stderr the build state, the same split
+       runSmoke makes: a missing core is a build note, not part of --version. */
     if (!QFileInfo::exists(core)) {
-        std::fprintf(stdout, "wasm: core missing (%s)\n", core.toUtf8().constData());
+        std::fprintf(stderr, "wasm: core missing (%s)\n", core.toUtf8().constData());
     } else {
         std::fprintf(stdout, "wasm: core present\n");
     }

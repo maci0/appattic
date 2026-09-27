@@ -145,6 +145,24 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertNil(parseCLIArguments(["-h"]).error)
     }
 
+    /// `help` is the word form of `--help`, not one of the eight commands: it
+    /// prints the same text, and a command name after it is checked, so the
+    /// parse still records a typo. Help wins over that error, the way it wins
+    /// over one anywhere else on the line.
+    func testHelpWordForm() {
+        XCTAssertTrue(parseCLIArguments(["help"]).help)
+        XCTAssertNil(parseCLIArguments(["help"]).error)
+        XCTAssertTrue(parseCLIArguments(["help", "disk"]).help)
+        XCTAssertNil(parseCLIArguments(["help", "disk"]).error)
+        XCTAssertEqual(parseCLIArguments(["help", "serve"]).parseError, .unknownCommand("serve"))
+        XCTAssertEqual(
+            parseCLIArguments(["help", "updat"]).error,
+            "unknown command: updat (did you mean 'update'?)"
+        )
+        XCTAssertEqual(parseCLIArguments(["help", "disk", "/var"]).parseError, .unexpectedArgument("/var"))
+        XCTAssertTrue(cliHelpText.contains("appattic help [command]"), cliHelpText)
+    }
+
     func testMissingOptionValues() {
         XCTAssertEqual(parseCLIArguments(["--json"]).error, "--json requires a file path")
         XCTAssertEqual(parseCLIArguments(["--json"]).parseError, .jsonRequiresPath)

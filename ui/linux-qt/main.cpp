@@ -84,6 +84,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <utility>
 
 static void resetWidgetPalette(QWidget *w) {
@@ -3252,11 +3253,20 @@ static bool argvHas(int argc, char **argv, const char *flag) {
 }
 
 static int runHelp() {
-    std::fprintf(stdout, "usage: appattic-qt [--version] [--help] [--smoke]\n");
-    std::fprintf(stdout, "\n");
-    std::fprintf(stdout, "  --version   print version and exit\n");
-    std::fprintf(stdout, "  --help, -h  print this help and exit\n");
-    std::fprintf(stdout, "  --smoke     headless smoke test and exit\n");
+    /* The dev-only gates are listed only in a build that has them, so a
+       release user is not sent to a flag the binary compiled out. */
+    std::string usage = "usage: appattic-qt [--version] [--help] [--smoke]";
+    std::string options =
+        "  --version   print version and exit\n"
+        "  --help, -h  print this help and exit\n"
+        "  --smoke     headless smoke test and exit\n";
+#ifndef NDEBUG
+    usage += " [--dev-check <check>]";
+    options +=
+        "  --dev-check <table|stream|disk|shot> [dir]\n"
+        "              debug build only: run one check and exit\n";
+#endif
+    std::fprintf(stdout, "%s\n\n%s", usage.c_str(), options.c_str());
     return 0;
 }
 
@@ -3398,6 +3408,16 @@ int main(int argc, char **argv) {
             return app.exec();
         }
         std::fprintf(stderr, "usage: --dev-check <table|stream|disk|shot> [dir]\n");
+        return 2;
+    }
+#else
+    /* The dev gates are compiled out here, so the flag has to fail instead of
+       falling through to the window: `--dev-check table` on a release binary
+       would open the app and run no check, which reads as a hung command.
+       --smoke is the headless gate that ships. */
+    if (argvHas(argc, argv, "--dev-check")) {
+        std::fprintf(stderr, "error: --dev-check is a debug-build gate; this is a release build\n");
+        std::fprintf(stderr, "       --smoke is the headless check that ships\n");
         return 2;
     }
 #endif
