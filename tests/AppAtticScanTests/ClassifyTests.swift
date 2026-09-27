@@ -1492,15 +1492,18 @@ final class ClassifyTests: XCTestCase {
         XCTAssertNil(system.summary)
     }
 
-    func testScanJsonIncludesLeftoverReason() {
+    func testScanJsonIncludesLeftoverReason() throws {
         let item = DataItem(path: "/tmp/Slack", name: "Slack", rootLabel: "Application Support", kind: "dir", status: "orphaned")
         applyOrphanReasons([item])
         let result = ScanResult()
         result.dataItems = [item]
-        let row = result.toScanData().leftovers[0]
-        XCTAssertEqual(row.reason?.isEmpty, false)
-        XCTAssertTrue(row.summary?.contains("Slack") == true)
-        XCTAssertTrue(row.reason?.contains("Application Support") == true)
+        let leftovers = try XCTUnwrap(result.toScanData().leftovers.first)
+        XCTAssertEqual(leftovers.path, "/tmp/Slack")
+        let reason = try XCTUnwrap(leftovers.reason)
+        XCTAssertFalse(reason.isEmpty)
+        XCTAssertTrue(reason.contains("Application Support"), reason)
+        let summary = try XCTUnwrap(leftovers.summary)
+        XCTAssertTrue(summary.contains("Slack"), summary)
     }
 
     func testLinuxRootsAndSystemNames() {

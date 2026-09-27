@@ -94,8 +94,8 @@ final class UsageTests: XCTestCase {
         let path = try writeTemp(xml, suffix: ".xbel")
         defer { try? FileManager.default.removeItem(atPath: path) }
         let hits = parseRecentlyUsedXbel(path)
-        XCTAssertNotNil(hits["firefox"])
-        XCTAssertEqual(utcCalendar().component(.year, from: hits["firefox"]!), 2026)
+        let firefox = try XCTUnwrap(hits["firefox"], "xbel application name should key the hit")
+        XCTAssertEqual(utcCalendar().component(.year, from: firefox), 2026)
     }
 
     func testUsesBookmarkVisitedWhenApplicationHasNoDate() throws {
@@ -116,7 +116,8 @@ final class UsageTests: XCTestCase {
         let path = try writeTemp(xml, suffix: ".xbel")
         defer { try? FileManager.default.removeItem(atPath: path) }
         let hits = parseRecentlyUsedXbel(path)
-        XCTAssertEqual(utcCalendar().component(.month, from: hits["firefox"]!), 5)
+        let firefox = try XCTUnwrap(hits["firefox"], "no modified date should fall back to the bookmark visit")
+        XCTAssertEqual(utcCalendar().component(.month, from: firefox), 5)
     }
 
     func testMatchesBundleExecutable() {
@@ -178,15 +179,15 @@ final class UsageTests: XCTestCase {
         XCTAssertNil(used)
     }
 
-    func testInnerMdlsKeepsLastUsedWhenFarFromCreation() {
+    func testInnerMdlsKeepsLastUsedWhenFarFromCreation() throws {
         let out = """
         kMDItemLastUsedDate   = 2026-06-15 20:16:06 +0000
         kMDItemDateAdded      = (null)
         kMDItemFSCreationDate = 2026-06-02 20:16:06 +0000
         """
         let (used, _) = mdlsDates("/fake/iTerm2") { _, _ in (0, out, "") }
-        XCTAssertNotNil(used)
-        XCTAssertEqual(utcCalendar().component(.month, from: used!), 6)
+        let seen = try XCTUnwrap(used, "inner executable mdls should supply the last used date")
+        XCTAssertEqual(utcCalendar().component(.month, from: seen), 6)
     }
 
     func testFillAppUsageCopiesSpotlightDescriptionArray() {
@@ -264,7 +265,8 @@ final class UsageTests: XCTestCase {
             """, "")
         }, runningComms: [])
         XCTAssertEqual(apps[0].lastUsedSource, "spotlight")
-        XCTAssertEqual(utcCalendar().component(.month, from: apps[0].lastUsed!), 6)
+        let lastUsed = try XCTUnwrap(apps[0].lastUsed, "far-from-creation last used must be kept")
+        XCTAssertEqual(utcCalendar().component(.month, from: lastUsed), 6)
     }
 
     func testFillAppUsageMarksRunningAtInjectedNow() {
@@ -416,9 +418,9 @@ final class UsageTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: path) }
         var apps = [AppRecord(path: "/usr/bin/firefox", displayName: "Firefox Web Browser", bundleId: "firefox", extra: ["executable": "firefox"])]
         fillAppUsage(&apps, progress: { _ in }, runningComms: [], xbelPath: path, gnomeStatePath: "/nope", flatpakVarApp: "/nope")
-        XCTAssertNotNil(apps[0].lastUsed)
         XCTAssertEqual(apps[0].lastUsedSource, "recently-used")
-        XCTAssertEqual(utcCalendar().component(.month, from: apps[0].lastUsed!), 4)
+        let lastUsed = try XCTUnwrap(apps[0].lastUsed)
+        XCTAssertEqual(utcCalendar().component(.month, from: lastUsed), 4)
     }
 
     func testLinuxXbelNearInstallTimeIsNotLastUsed() throws {
@@ -461,8 +463,8 @@ final class UsageTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: path) }
         let hits = parseGnomeApplicationState(path)
         XCTAssertNotNil(hits["org.mozilla.firefox.desktop"])
-        XCTAssertNotNil(hits["org.mozilla.firefox"])
-        XCTAssertEqual(utcCalendar().component(.year, from: hits["org.mozilla.firefox"]!), 2024)
+        let firefox = try XCTUnwrap(hits["org.mozilla.firefox"], "the .desktop suffix must be stripped")
+        XCTAssertEqual(utcCalendar().component(.year, from: firefox), 2024)
     }
 
     func testGnomeApplicationStateLastSeenMicroseconds() throws {
@@ -475,9 +477,8 @@ final class UsageTests: XCTestCase {
         let path = try writeTemp(xml, suffix: ".xml")
         defer { try? FileManager.default.removeItem(atPath: path) }
         let hits = parseGnomeApplicationState(path)
-        let firefoxSeen = hits["org.mozilla.firefox"]
-        XCTAssertNotNil(firefoxSeen)
-        XCTAssertEqual(firefoxSeen!.timeIntervalSince1970, 1_717_200_000, accuracy: 0.5)
+        let firefoxSeen = try XCTUnwrap(hits["org.mozilla.firefox"], "microsecond last-seen must still parse")
+        XCTAssertEqual(firefoxSeen.timeIntervalSince1970, 1_717_200_000, accuracy: 0.5)
     }
 
     func testGnomeApplicationStateRejectsNonFiniteLastSeen() throws {
@@ -511,8 +512,8 @@ final class UsageTests: XCTestCase {
         let path = try writeTemp(xml, suffix: ".xbel")
         defer { try? FileManager.default.removeItem(atPath: path) }
         let hits = parseRecentlyUsedXbel(path)
-        XCTAssertNotNil(hits["firefox"])
-        XCTAssertEqual(utcCalendar().component(.month, from: hits["firefox"]!), 4)
+        let firefox = try XCTUnwrap(hits["firefox"], "fractional-seconds timestamps must still parse")
+        XCTAssertEqual(utcCalendar().component(.month, from: firefox), 4)
     }
 
     func testFlatpakVarAppMtime() throws {
@@ -627,7 +628,7 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(apps[0].lastUsedSource, "steam")
     }
 
-    func testSteamWithoutLastPlayedTakesSpotlight() {
+    func testSteamWithoutLastPlayedTakesSpotlight() throws {
         PlatformOverride.linux = false
         defer { PlatformOverride.linux = nil }
         var apps = [AppRecord(
@@ -647,7 +648,8 @@ final class UsageTests: XCTestCase {
             return (0, "", "")
         }, runningComms: [])
         XCTAssertEqual(apps[0].lastUsedSource, "spotlight")
-        XCTAssertEqual(utcCalendar().component(.month, from: apps[0].lastUsed!), 4)
+        let lastUsed = try XCTUnwrap(apps[0].lastUsed, "steam game should inherit the spotlight last used date")
+        XCTAssertEqual(utcCalendar().component(.month, from: lastUsed), 4)
     }
 
     func testPrefsMtimeNearInstallIsIgnored() {

@@ -96,6 +96,7 @@ final class DiscoverTests: XCTestCase {
 
     func testIosWrapperReadsInnerBundleId() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let outer = td.appendingPathComponent("Proton Authenticator.app")
         let inner = outer.appendingPathComponent("Wrapper/Authenticator.app")
         let contents = inner.appendingPathComponent("Contents")
@@ -114,11 +115,11 @@ final class DiscoverTests: XCTestCase {
         let app = makeApp(from: outer.path)
         XCTAssertEqual(app?.bundleId, "ch.proton.authenticator")
         XCTAssertEqual(app?.extra["executable"], "Authenticator")
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testIosWrapperReadsRootInfoPlist() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let outer = td.appendingPathComponent("Proton Authenticator.app")
         let inner = outer.appendingPathComponent("Wrapper/Authenticator.app")
         try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
@@ -136,7 +137,6 @@ final class DiscoverTests: XCTestCase {
         )
         let app = makeApp(from: outer.path)
         XCTAssertEqual(app?.bundleId, "ch.protonmail.ios.authenticator")
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testGetInfoStringBecomesComment() throws {
@@ -182,6 +182,7 @@ final class DiscoverTests: XCTestCase {
 
     func testInfoPlistStringsGetInfoBecomesComment() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let appPath = td.appendingPathComponent("Deskflow.app")
         let contents = appPath.appendingPathComponent("Contents")
         let lproj = contents.appendingPathComponent("Resources/en.lproj")
@@ -198,7 +199,6 @@ final class DiscoverTests: XCTestCase {
         ], format: .xml, options: 0).write(to: lproj.appendingPathComponent("InfoPlist.strings"))
         let app = makeApp(from: appPath.path)
         XCTAssertEqual(app?.extra["comment"], "Keyboard and mouse sharing utility")
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testSigningTeamGetInfoStringIsNotADescription() {
@@ -219,6 +219,7 @@ final class DiscoverTests: XCTestCase {
 
     func testMasReceiptAndVersionOnBundle() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         let appPath = td.appendingPathComponent("iMovie.app")
         let contents = appPath.appendingPathComponent("Contents")
         try FileManager.default.createDirectory(at: contents.appendingPathComponent("_MASReceipt"), withIntermediateDirectories: true)
@@ -234,7 +235,6 @@ final class DiscoverTests: XCTestCase {
         XCTAssertEqual(app?.extra["mas_receipt"], "1")
         XCTAssertEqual(app?.extra["version"], "10.4.3")
         XCTAssertTrue(hasMasReceipt(appPath.path))
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testWebkitDotAppIsNotAnInstalledApp() {
@@ -251,6 +251,7 @@ final class DiscoverTests: XCTestCase {
 
     func testUtilitiesFolderIsNotSoftware() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         try FileManager.default.createDirectory(at: td.appendingPathComponent("Utilities"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: td.appendingPathComponent("SomePkg"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: td.appendingPathComponent("Foo.app"), withIntermediateDirectories: true)
@@ -258,17 +259,16 @@ final class DiscoverTests: XCTestCase {
         XCTAssertFalse(names.contains("Utilities"))
         XCTAssertFalse(names.contains("Foo.app"))
         XCTAssertTrue(names.contains("SomePkg"))
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testWrapperFolderContainingAppIsNotSoftware() throws {
         let td = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: td) }
         try FileManager.default.createDirectory(at: td.appendingPathComponent("Adobe Acrobat DC/Adobe Acrobat.app"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: td.appendingPathComponent("SomePkg"), withIntermediateDirectories: true)
         let names = Set(nonAppEntriesIn(td.path).map { URL(fileURLWithPath: $0).lastPathComponent })
         XCTAssertFalse(names.contains("Adobe Acrobat DC"))
         XCTAssertTrue(names.contains("SomePkg"))
-        try? FileManager.default.removeItem(at: td)
     }
 
     func testXdgDataDirsAreSearchedForDesktops() {

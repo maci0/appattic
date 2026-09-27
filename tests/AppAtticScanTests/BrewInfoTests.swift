@@ -24,9 +24,10 @@ final class BrewInfoTests: XCTestCase {
         XCTAssertEqual((data["casks"] as? [[String: Any]])?[0]["token"] as? String, "iterm2")
         XCTAssertTrue(calls.contains { $0.contains("--formula") && $0.contains("--installed") })
         XCTAssertTrue(calls.contains { $0.contains("--cask") && $0.contains("--installed") })
-        for cmd in calls where cmd.contains("info") {
-            XCTAssertFalse(cmd.contains("notepadnext"))
-            XCTAssertFalse(cmd.contains("wget"))
+        // The whole point of `--installed`: names are never passed as arguments.
+        for cmd in calls {
+            XCTAssertFalse(cmd.contains("notepadnext"), cmd.joined(separator: " "))
+            XCTAssertFalse(cmd.contains("wget"), cmd.joined(separator: " "))
         }
     }
 

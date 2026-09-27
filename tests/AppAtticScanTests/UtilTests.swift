@@ -187,51 +187,46 @@ final class UtilTests: XCTestCase {
         XCTAssertEqual(humanDays(21), "3w")
     }
 
-    func testParseMdlsDate() {
+    func testParseMdlsDate() throws {
         XCTAssertNil(parseMdlsDate("(null)"))
         XCTAssertNil(parseMdlsDate(""))
-        let parsed = parseMdlsDate("2026-08-15 00:56:17 +0000")
-        XCTAssertNotNil(parsed)
+        let parsed = try XCTUnwrap(parseMdlsDate("2026-08-15 00:56:17 +0000"))
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(secondsFromGMT: 0)!
-        XCTAssertEqual(cal.component(.year, from: parsed!), 2026)
-        XCTAssertEqual(cal.component(.month, from: parsed!), 8)
-        XCTAssertEqual(cal.component(.day, from: parsed!), 15)
-        XCTAssertEqual(cal.component(.hour, from: parsed!), 0)
-        XCTAssertEqual(cal.component(.minute, from: parsed!), 56)
-        XCTAssertEqual(cal.component(.second, from: parsed!), 17)
+        cal.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        XCTAssertEqual(cal.component(.year, from: parsed), 2026)
+        XCTAssertEqual(cal.component(.month, from: parsed), 8)
+        XCTAssertEqual(cal.component(.day, from: parsed), 15)
+        XCTAssertEqual(cal.component(.hour, from: parsed), 0)
+        XCTAssertEqual(cal.component(.minute, from: parsed), 56)
+        XCTAssertEqual(cal.component(.second, from: parsed), 17)
     }
 
-    func testParseISODateAcceptsZAndOffset() {
-        let z = parseISODate("2026-08-17T12:30:00Z")
-        let offset = parseISODate("2026-08-17T12:30:00+00:00")
-        XCTAssertNotNil(z)
-        XCTAssertEqual(z!.timeIntervalSince1970, offset!.timeIntervalSince1970, accuracy: 0.5)
-        XCTAssertEqual(parseISODate(isoString(z))!.timeIntervalSince1970, z!.timeIntervalSince1970, accuracy: 0.5)
+    func testParseISODateAcceptsZAndOffset() throws {
+        let z = try XCTUnwrap(parseISODate("2026-08-17T12:30:00Z"))
+        let offset = try XCTUnwrap(parseISODate("2026-08-17T12:30:00+00:00"))
+        XCTAssertEqual(z.timeIntervalSince1970, offset.timeIntervalSince1970, accuracy: 0.5)
+        let round = try XCTUnwrap(parseISODate(isoString(z)))
+        XCTAssertEqual(round.timeIntervalSince1970, z.timeIntervalSince1970, accuracy: 0.5)
     }
 
-    func testParseISODateFractionalMicrosecondsFromXBEL() {
-        let micro = parseISODate("2026-04-01T15:00:00.123456Z")
-        let whole = parseISODate("2026-04-01T15:00:00Z")
-        XCTAssertNotNil(micro)
-        XCTAssertNotNil(whole)
-        XCTAssertEqual(micro!.timeIntervalSince(whole!), 0.123, accuracy: 0.001)
+    func testParseISODateFractionalMicrosecondsFromXBEL() throws {
+        let micro = try XCTUnwrap(parseISODate("2026-04-01T15:00:00.123456Z"))
+        let whole = try XCTUnwrap(parseISODate("2026-04-01T15:00:00Z"))
+        XCTAssertEqual(micro.timeIntervalSince(whole), 0.123, accuracy: 0.001)
         XCTAssertNotNil(parseISODate("2026-04-01T15:00:00.000000Z"))
         XCTAssertNotNil(parseISODate("2026-04-01T15:00:00.123456+00:00"))
     }
 
-    func testParseISODateTimezoneLessIsUTC() {
-        let naive = parseISODate("2026-04-01T15:00:00")
-        let z = parseISODate("2026-04-01T15:00:00Z")
-        XCTAssertNotNil(naive)
-        XCTAssertEqual(naive!.timeIntervalSince1970, z!.timeIntervalSince1970, accuracy: 0.5)
+    func testParseISODateTimezoneLessIsUTC() throws {
+        let naive = try XCTUnwrap(parseISODate("2026-04-01T15:00:00"))
+        let z = try XCTUnwrap(parseISODate("2026-04-01T15:00:00Z"))
+        XCTAssertEqual(naive.timeIntervalSince1970, z.timeIntervalSince1970, accuracy: 0.5)
     }
 
-    func testParseISODateOffsetIsInstantNotWallClock() {
-        let paris = parseISODate("2026-08-17T14:30:00+02:00")
-        let z = parseISODate("2026-08-17T12:30:00Z")
-        XCTAssertNotNil(paris)
-        XCTAssertEqual(paris!.timeIntervalSince1970, z!.timeIntervalSince1970, accuracy: 0.5)
+    func testParseISODateOffsetIsInstantNotWallClock() throws {
+        let paris = try XCTUnwrap(parseISODate("2026-08-17T14:30:00+02:00"))
+        let z = try XCTUnwrap(parseISODate("2026-08-17T12:30:00Z"))
+        XCTAssertEqual(paris.timeIntervalSince1970, z.timeIntervalSince1970, accuracy: 0.5)
     }
 
     func testParseISODateRejectsImpossibleCivilDate() {
