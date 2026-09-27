@@ -123,6 +123,30 @@ fn fileExistsExec(path: []const u8) bool {
     return host_exec.run(cmd, &out) == 0;
 }
 
+/// Package dirs are read once up front. fork+exec+wait measures 3.8 ms on this
+/// machine, so probing every overlay name against every package dir costs
+/// hundreds of them per scan; a name the listing does not carry could only have
+/// failed the `test -f` that follows, so the listing is a free exact prefilter.
+/// The `test -f` stays because `ls` lists directories too and only the test
+/// knows which it was.
+const max_package_dirs = 8;
+const pkg_listing_store_len = 131072;
+
+/// Module level, not a local: 128 KiB of guest stack is more than a plugin
+/// wants to carry into a linear-memory sandbox.
+var pkg_store: [pkg_listing_store_len]u8 = undefined;
+
+/// `ls -1` names are whole lines, so membership is a line compare and never a
+/// substring hit on a longer name.
+fn listingHasName(listing: []const u8, name: []const u8) bool {
+    if (name.len == 0) return false;
+    var lines = std.mem.splitScalar(u8, listing, '\n');
+    while (lines.next()) |raw| {
+        if (std.mem.eql(u8, std.mem.trim(u8, raw, " \t\r"), name)) return true;
+    }
+    return false;
+}
+
 fn findShadowsExec(
     overlayDirs: []const []const u8,
     packageDirs: []const []const u8,
@@ -138,6 +162,23 @@ fn findShadowsExec(
     var name_store: [8192]u8 = undefined;
     var names: [64][]const u8 = undefined;
     var name_used: usize = 0;
+
+    var pkg_used: usize = 0;
+    // The note keeps a slice of the command it names, so the scratch outlives
+    // the iteration that filled it.
+    var pkg_cmd_buf: [512]u8 = undefined;
+    var pkg_listings: [max_package_dirs]?[]const u8 = .{null} ** max_package_dirs;
+    const pkg_count = @min(packageDirs.len, max_package_dirs);
+    for (packageDirs[0..pkg_count], 0..) |pdir, i| {
+        const cmd = std.fmt.bufPrint(&pkg_cmd_buf, "ls -1 {s}", .{pdir}) catch continue;
+        const m = host_exec.run(cmd, pkg_store[pkg_used..]);
+        note.add(cmd, m);
+        // A dir that could not be listed keeps a null prefilter, so its names
+        // are probed the way they were before rather than dropped.
+        if (m < 0) continue;
+        pkg_listings[i] = pkg_store[pkg_used .. pkg_used + @as(usize, @intCast(m))];
+        pkg_used += @intCast(m);
+    }
 
     for (overlayDirs) |odir| {
         var cmd_buf: [512]u8 = undefined;
@@ -167,7 +208,10 @@ fn findShadowsExec(
 
             var packaged: ?[]const u8 = null;
             var same = false;
-            for (packageDirs) |pdir| {
+            for (packageDirs[0..pkg_count], 0..) |pdir, i| {
+                if (pkg_listings[i]) |listing| {
+                    if (!listingHasName(listing, name)) continue;
+                }
                 const pkg_path = pstore.joinPath(pdir, name, path_store, &probe) orelse continue;
                 if (!fileExistsExec(pkg_path)) continue;
                 const resolved_pkg = resolvePathExec(pkg_path, &pkg_buf) orelse continue;
@@ -268,6 +312,19 @@ fn query_impl(present: i32) i32 {
 
 comptime {
     plugin_abi.bind(plugin_id, query_impl, &result_buf, &result_nbytes);
+}
+
+test "listingHasName matches whole lines only" {
+    const listing = "python3\npip3\nnode\n";
+    try std.testing.expect(listingHasName(listing, "python3"));
+    try std.testing.expect(listingHasName(listing, "node"));
+    try std.testing.expect(!listingHasName(listing, "pyth"));
+    try std.testing.expect(!listingHasName(listing, "python"));
+    try std.testing.expect(!listingHasName(listing, "th"));
+    try std.testing.expect(!listingHasName(listing, ""));
+    try std.testing.expect(!listingHasName("", "python3"));
+    try std.testing.expect(listingHasName("  spaced  \r\n", "spaced"));
+    try std.testing.expect(!listingHasName("  spaced  \r\n", "spaced "));
 }
 
 test "findShadows reports different overlay file" {

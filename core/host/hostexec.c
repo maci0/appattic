@@ -25,7 +25,13 @@
 #define MAX_TOK 16
 #define HOST_EXEC_TIMEOUT_MS 60000
 #define HOST_EXEC_KILL_GRACE_MS 1000
-#define HOST_EXEC_POLL_MS 50
+/* Post-EOF wait backs off from 1 ms to this, so a child that closes stdout and
+   keeps working is not billed a flat tick per probe. Reaping a signalled child
+   polls at REAP_POLL_MS instead: that wait is bounded by the grace period, so
+   a coarse tick only adds latency to a result the caller already gave up on. */
+#define HOST_EXEC_POLL_MIN_MS 1
+#define HOST_EXEC_POLL_MAX_MS 50
+#define HOST_EXEC_REAP_POLL_MS 2
 #define HOST_EXEC_POLL_SLICE_MS 100
 
 static int eq(const char *a, const char *b) {
@@ -910,9 +916,9 @@ static void reap_child(pid_t pid) {
         if (waitpid(pid, &st, WNOHANG) == pid) return;
         struct timespec sl;
         sl.tv_sec = 0;
-        sl.tv_nsec = (long)HOST_EXEC_POLL_MS * 1000L * 1000L;
+        sl.tv_nsec = (long)HOST_EXEC_REAP_POLL_MS * 1000L * 1000L;
         (void)nanosleep(&sl, NULL);
-        waited += HOST_EXEC_POLL_MS;
+        waited += HOST_EXEC_REAP_POLL_MS;
     }
     if (kill(-pid, SIGKILL) != 0) {
         (void)kill(pid, SIGKILL);
@@ -1032,6 +1038,7 @@ static int run_live(char **argv, char *out, size_t cap) {
     int st = 0;
     int reaped = 0;
     int waited = 0;
+    int poll_ms = HOST_EXEC_POLL_MIN_MS;
     while (!reaped) {
         pid_t wr = waitpid(pid, &st, WNOHANG);
         if (wr == pid) {
@@ -1055,9 +1062,10 @@ static int run_live(char **argv, char *out, size_t cap) {
         }
         struct timespec sl;
         sl.tv_sec = 0;
-        sl.tv_nsec = (long)HOST_EXEC_POLL_MS * 1000L * 1000L;
+        sl.tv_nsec = (long)poll_ms * 1000L * 1000L;
         (void)nanosleep(&sl, NULL);
-        waited += HOST_EXEC_POLL_MS;
+        waited += poll_ms;
+        if (poll_ms < HOST_EXEC_POLL_MAX_MS) poll_ms *= 2;
     }
     if (WIFEXITED(st) && WEXITSTATUS(st) == 127) return APPATTIC_HOST_EXEC_FAIL;
     if (eq(base_of(argv[0]), "test") && WIFEXITED(st) && WEXITSTATUS(st) != 0) {
