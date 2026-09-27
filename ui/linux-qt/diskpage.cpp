@@ -563,6 +563,9 @@ DiskPage::~DiskPage() {
     d->chart->setRoot(nullptr);
     d->tree->clear();
     delete d->root;
+    // A scan stopped before it finished keeps its placeholder chart tree, and
+    // the next scan is the only other thing that drops it.
+    d->dropStreamRoot();
     delete d->worker;
     delete d;
 }

@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import AppAtticScan
 
@@ -51,6 +52,28 @@ final class ProcessTests: XCTestCase {
             "the pipe drain must be bounded, so a lingering grandchild cannot hang the scan"
         )
     }
+
+    /// Bounded output is not the same as a bounded reader: a reader that gives
+    /// up only on the caller's grace period outlives the call with its
+    /// descriptor open. A scan runs dozens of commands, so those accumulate
+    /// for the life of the UI process.
+    #if os(Linux)
+    func testRunCommandLeavesNoReaderThreadBehind() throws {
+        func liveThreads() throws -> Int {
+            try FileManager.default.contentsOfDirectory(atPath: "/proc/self/task").count
+        }
+        _ = runCommand(["/bin/sh", "-c", "sleep 30 & exit 0"], timeout: 5)
+        let after = try liveThreads()
+        for _ in 0..<8 {
+            _ = runCommand(["/bin/sh", "-c", "sleep 30 & exit 0"], timeout: 5)
+        }
+        XCTAssertLessThanOrEqual(
+            try liveThreads(),
+            after + 1,
+            "each command must release its pipe readers; eight more commands cannot add sixteen threads"
+        )
+    }
+    #endif
 
 
     func testPmapRunCommandKeepsStdoutWithWorker() {

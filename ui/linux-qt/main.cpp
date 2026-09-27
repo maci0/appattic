@@ -922,6 +922,14 @@ public:
             m_scriptProc->waitForFinished(3000);
             m_scriptProc = nullptr;
         }
+        // The script is written with autoRemove off, so the two terminal paths
+        // above own the delete. Quitting mid-script is the third exit, and
+        // without it every quit in that window leaves an executable full of rm
+        // lines in the temp directory.
+        if (!m_scriptPath.isEmpty()) {
+            QFile::remove(m_scriptPath);
+            m_scriptPath.clear();
+        }
         if (m_worker) {
             disconnect(m_worker, nullptr, this, nullptr);
             disconnect(this, nullptr, m_worker, nullptr);
@@ -2884,6 +2892,7 @@ private:
            rather than faked as restored. */
         auto *proc = new QProcess(this);
         m_scriptProc = proc;
+        m_scriptPath = tmp.fileName();
         proc->setProcessChannelMode(QProcess::MergedChannels);
         proc->setStandardInputFile(QProcess::nullDevice());
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
@@ -2896,6 +2905,7 @@ private:
         });
         connect(proc, &QProcess::finished, this, [this, proc, path = tmp.fileName()](int code) {
             if (m_scriptProc == proc) m_scriptProc = nullptr;
+            if (m_scriptPath == path) m_scriptPath.clear();
             QFile::remove(path);
             m_scanning = false;
             m_rescan->setEnabled(true);
@@ -2930,6 +2940,7 @@ private:
         connect(proc, &QProcess::errorOccurred, this, [this, proc, path = tmp.fileName()](QProcess::ProcessError err) {
             if (err != QProcess::FailedToStart) return;
             if (m_scriptProc == proc) m_scriptProc = nullptr;
+            if (m_scriptPath == path) m_scriptPath.clear();
             QFile::remove(path);
             m_scanning = false;
             m_rescan->setEnabled(true);
@@ -3116,6 +3127,7 @@ private:
     QThread *m_scanThread = nullptr;
     ScanWorker *m_worker = nullptr;
     QProcess *m_scriptProc = nullptr;
+    QString m_scriptPath;
     QByteArray m_scriptOutput;
     QVector<Finding> m_findings;
 #ifndef NDEBUG

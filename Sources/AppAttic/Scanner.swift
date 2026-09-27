@@ -489,7 +489,11 @@ final class ScannerViewModel {
                 try writeOwnerOnlyFile(Data(), to: errURL)
                 defer { try? FileManager.default.removeItem(at: errURL) }
                 let errHandle = try FileHandle(forWritingTo: errURL)
-                defer { try? errHandle.close() }
+                // Closed before the file is read back, and the defer is the
+                // exit-path close: closing a FileHandle twice is an exception
+                // Foundation does not raise as a Swift error.
+                var openHandle: FileHandle? = errHandle
+                defer { try? openHandle?.close() }
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/sh")
                 process.arguments = [url.path]
@@ -501,6 +505,7 @@ final class ScannerViewModel {
                 process.waitUntilExit()
                 try errHandle.synchronize()
                 try errHandle.close()
+                openHandle = nil
                 let status = process.terminationStatus
                 let errText = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
                 DispatchQueue.main.async {

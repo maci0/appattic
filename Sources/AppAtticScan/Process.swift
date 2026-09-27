@@ -98,10 +98,14 @@ public func augmentedProcessEnvironment(
 
 /// How long the pipe readers may keep draining after the command itself is
 /// gone. A descendant that inherited the write end (a backgrounded grandchild,
-/// a helper `brew` forgot to reap) holds the pipe open, and `readDataToEndOfFile`
-/// then blocks long past the exit. A pipe still drains at once once its last
-/// writer closed, so a normal command never spends this.
+/// a helper `brew` forgot to reap) holds the pipe open, so the reader has no
+/// EOF to wait for and is given a deadline instead. A pipe still drains at once
+/// once its last writer closed, so a normal command never spends this.
 public let commandPipeDrainGrace: TimeInterval = 2
+
+/// How often a reader wakes to re-read its deadline, which the calling thread
+/// opens once the process has exited.
+private let commandPipePollSliceMs: Int = 100
 
 /// Runs `cmd` without a shell and returns (status, stdout, stderr). Status 127
 /// with empty stdout means the command never ran: empty argv, executable not
@@ -138,12 +142,12 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
     // for threads).
     group.enter()
     Thread.detachNewThread {
-        collected.out = outPipe.fileHandleForReading.readDataToEndOfFile()
+        collected.out = collected.drain(outPipe.fileHandleForReading)
         group.leave()
     }
     group.enter()
     Thread.detachNewThread {
-        collected.err = errPipe.fileHandleForReading.readDataToEndOfFile()
+        collected.err = collected.drain(errPipe.fileHandleForReading)
         group.leave()
     }
     let exited = DispatchSemaphore(value: 0)
@@ -153,6 +157,7 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
     } catch {
         try? outPipe.fileHandleForWriting.close()
         try? errPipe.fileHandleForWriting.close()
+        collected.closeDrainWindow()
         group.wait()
         return (127, "", error.localizedDescription)
     }
@@ -172,11 +177,13 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
         }
     }
     process.waitUntilExit()
-    // Bounded, not unconditional: the exit above ends the direct child, but a
-    // descendant holding the write end leaves the readers blocked. The timeout
-    // is meant to bound the whole call, so waiting on them without a deadline
-    // would turn a hung command into a hung scan.
-    _ = group.wait(timeout: .now() + commandPipeDrainGrace)
+    // The exit above ends the direct child, but a descendant holding the write
+    // end leaves the readers with no EOF. Handing them a deadline is what makes
+    // them finish: a detached reader blocked on `read` outlives the call, and a
+    // scan that runs dozens of commands leaks two threads and two descriptors
+    // per such command.
+    collected.closeDrainWindow()
+    group.wait()
     if timedOut {
         return (127, "", "timeout")
     }
@@ -189,6 +196,7 @@ private final class CommandPipes: @unchecked Sendable {
     private let lock = NSLock()
     private var _out = Data()
     private var _err = Data()
+    private var drainDeadline = TimeInterval.greatestFiniteMagnitude
     var out: Data {
         get { lock.lock(); defer { lock.unlock() }; return _out }
         set { lock.lock(); defer { lock.unlock() }; _out = newValue }
@@ -196,5 +204,54 @@ private final class CommandPipes: @unchecked Sendable {
     var err: Data {
         get { lock.lock(); defer { lock.unlock() }; return _err }
         set { lock.lock(); defer { lock.unlock() }; _err = newValue }
+    }
+
+    /// Opens the window a `drain` may spend past the command's own exit. Until
+    /// it is called the reader waits for EOF: a command still writing must not
+    /// be cut off at its timeout.
+    func closeDrainWindow() {
+        lock.lock()
+        drainDeadline = monotonicSeconds() + commandPipeDrainGrace
+        lock.unlock()
+    }
+
+    private func drainTimeLeft() -> TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        return drainDeadline - monotonicSeconds()
+    }
+
+    /// Reads to EOF, or until the drain window closes, whichever comes first.
+    /// `readDataToEndOfFile` cannot express the second case: it blocks on a
+    /// descriptor a backgrounded grandchild still holds open.
+    func drain(_ handle: FileHandle) -> Data {
+        let fd = handle.fileDescriptor
+        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+        var data = Data()
+        while true {
+            let left = drainTimeLeft()
+            if left <= 0 { break }
+            var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            // Re-check the deadline in short slices: the window is opened from
+            // the caller's thread after the process exits.
+            let waitMs = Int32(min(left * 1000, Double(commandPipePollSliceMs)))
+            let ready = poll(&pfd, 1, waitMs)
+            if ready < 0 {
+                if errno == EINTR { continue }
+                break
+            }
+            if ready == 0 { continue }
+            let n = buffer.withUnsafeMutableBytes { raw -> Int in
+                guard let base = raw.baseAddress else { return -1 }
+                return read(fd, base, raw.count)
+            }
+            if n < 0 {
+                if errno == EINTR { continue }
+                break
+            }
+            if n == 0 { break }
+            data.append(contentsOf: buffer[0..<n])
+        }
+        return data
     }
 }
