@@ -684,6 +684,23 @@ final class PackagingTests: XCTestCase {
         XCTAssertEqual(coreTestRc, 2, coreTestErr)
         XCTAssertTrue(coreTestErr.contains("missing plugin name"), coreTestErr)
 
+        let (coreTestArgRc, _, coreTestArgErr) = try run("core/build.sh", ["test", "jsonbuf.zig", "a", "b"])
+        XCTAssertEqual(coreTestArgRc, 2, coreTestArgErr)
+        XCTAssertTrue(coreTestArgErr.contains("at most a module and a test name"), coreTestArgErr)
+
+        // A test-name filter that matches nothing has to fail. `zig test
+        // --test-filter` reports "All 0 tests passed" and exits 0, so a
+        // contributor who mistypes the name would read it as a green run.
+        try XCTSkipIf(whichCommand("zig") == nil, "zig is needed to run the core test filter")
+        let (noMatchRc, _, noMatchErr) = try run("core/build.sh", ["test", "jsonbuf.zig", "noSuchTestName"])
+        XCTAssertEqual(noMatchRc, 1, noMatchErr)
+        XCTAssertTrue(noMatchErr.contains("no test in jsonbuf.zig matches"), noMatchErr)
+
+        let (matchRc, matchOut, matchErr) = try run("core/build.sh", ["test", "jsonbuf.zig", "isSafeIdent"])
+        XCTAssertEqual(matchRc, 0, matchErr)
+        XCTAssertTrue(matchOut.contains("isSafeIdent"), matchOut)
+        XCTAssertFalse(matchOut.contains("All 0 tests passed"), matchOut)
+
         let (lintRc, _, lintErr) = try run("scripts/lint.sh", ["nope"])
         XCTAssertEqual(lintRc, 2, lintErr)
 
@@ -694,5 +711,42 @@ final class PackagingTests: XCTestCase {
         let (flatpakRc, _, flatpakErr) = try run("scripts/linux-flatpak.sh", ["nope"])
         XCTAssertEqual(flatpakRc, 2, flatpakErr)
         XCTAssertTrue(flatpakErr.contains("unknown argument"), flatpakErr)
+    }
+
+    /// The no-flag run of scripts/linux-deps.sh is the preflight a contributor
+    /// opens the clone with, so it has to say which dependency is present and
+    /// which is missing. It used to print the same install line either way, so
+    /// a machine that already had a tool was told to install it again and the
+    /// one thing still missing had to be found by running the gate.
+    func testLinuxDepsPreflightReportsEachDependency() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let shell = try XCTUnwrap(whichCommand("bash"), "bash is needed to run the shell scripts")
+        let (rc, stdout, stderr) = runCommand(
+            [shell, root.appendingPathComponent("scripts/linux-deps.sh").path],
+            timeout: 60
+        )
+        XCTAssertEqual(rc, 0, "rc=\(rc) stderr=\(stderr)")
+        XCTAssertTrue(stdout.contains("family:"), stdout)
+
+        for tool in ["zig", "Qt 6", "Wasmtime C API", "shellcheck", "swift"] {
+            let state = try XCTUnwrap(
+                stdout.split(separator: "\n").first {
+                    ($0.contains("present ") || $0.contains("missing ")) && $0.contains(tool)
+                },
+                "linux-deps.sh reports no present/missing line for \(tool): \(stdout)"
+            )
+            XCTAssertTrue(
+                state.contains("present ") || state.contains("missing "),
+                "\(tool) line is neither present nor missing: \(state)"
+            )
+        }
+        // An install hint belongs to a missing tool only: a line that reads
+        // "present" followed by a command to run is the old output.
+        for line in stdout.split(separator: "\n") where line.contains("present ") {
+            XCTAssertFalse(line.contains("--install"), "install hint on a present tool: \(line)")
+        }
     }
 }

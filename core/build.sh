@@ -1,29 +1,38 @@
 #!/usr/bin/env bash
 # WASM core + plugins + host.
-# Usage: ./core/build.sh [test <name.zig> | test-core]
+# Usage: ./core/build.sh [test <name.zig> [testName] | test-core]
 set -euo pipefail
 export LC_ALL=C
 export LANG=C
 export TZ=UTC
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: $0 [test <name.zig> | test-core]"
-    echo "  (no args)          WASM + all zig tests + host (needs wasmtime C API)"
-    echo "  test brew.zig      one plugin (fast edit loop)"
-    echo "  test-core          zig fmt --check + every zig test (no wasmtime, no Qt)"
+    echo "Usage: $0 [test <name.zig> [testName] | test-core]"
+    echo "  (no args)              WASM + all zig tests + host (needs wasmtime C API)"
+    echo "  test brew.zig          one module (fast edit loop)"
+    echo "  test brew.zig isSafeIdent  one test in that module"
+    echo "  test-core              zig fmt --check + every zig test (no wasmtime, no Qt)"
     exit 0
 fi
 
 if [ "${1:-}" = "test" ] && [ -z "${2:-}" ]; then
     echo "error: missing plugin name" >&2
-    echo "Usage: $0 test <name.zig>" >&2
+    echo "Usage: $0 test <name.zig> [testName]" >&2
     echo "example: $0 test brew.zig" >&2
+    exit 2
+fi
+
+# test takes a name and an optional filter; anything past the filter is a typo
+# rather than a name to guess at.
+if [ "${1:-}" = "test" ] && [ "$#" -gt 3 ]; then
+    echo "error: expected at most a module and a test name, got $#" >&2
+    echo "Usage: $0 test <name.zig> [testName]" >&2
     exit 2
 fi
 
 if [ -n "${1:-}" ] && [ "${1:-}" != "test" ] && [ "${1:-}" != "test-core" ]; then
     echo "error: unknown argument: $1" >&2
-    echo "Usage: $0 [test <name.zig> | test-core]" >&2
+    echo "Usage: $0 [test <name.zig> [testName] | test-core]" >&2
     echo "       $0 --help" >&2
     exit 2
 fi
@@ -74,6 +83,24 @@ if [ "${1:-}" = "test" ]; then
         exit 1
     fi
     zig fmt --check "$root/src/$name"
+    filter="${3:-}"
+    if [ -n "$filter" ]; then
+        # zig test exits 0 and prints "All 0 tests passed" when --test-filter
+        # matches nothing, so a typo in the name would read as a green run.
+        # The count is taken from the progress lines the runner prints.
+        log="$(zig test --test-filter "$filter" "$root/src/$name" 2>&1)" || {
+            printf '%s\n' "$log" >&2
+            exit 1
+        }
+        printf '%s\n' "$log"
+        if ! printf '%s\n' "$log" | grep -qE '^[0-9]+/[0-9]+ '; then
+            echo "error: no test in $name matches '$filter'" >&2
+            printf 'list them: zig test %s 2>&1 | grep -oE %s\n' \
+                "$root/src/$name" "'\btest\.[A-Za-z0-9_.]+'" >&2
+            exit 1
+        fi
+        exit 0
+    fi
     zig test "$root/src/$name"
     exit 0
 fi

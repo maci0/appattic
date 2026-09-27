@@ -183,7 +183,8 @@ swift build --target AppAtticScan -c debug --disable-automatic-resolution
 bash scripts/test.sh                                           # AppAtticScanTests
 bash scripts/test.sh DiskSizeTests                             # one class
 bash scripts/test.sh DiskSizeTests/testParseDuKBRequiresLeadingInteger   # one test
-./core/build.sh test brew.zig                                  # one Zig plugin
+./core/build.sh test brew.zig                                  # one Zig module
+./core/build.sh test brew.zig isSafeIdent                     # one Zig test
 ./core/build.sh test-core                                      # whole Zig core, no wasmtime/Qt
 bash scripts/lint.sh
 ```
@@ -214,7 +215,7 @@ You cannot cross-compile the Qt UI from macOS and call that a Linux link. Build 
 Qt discovery looks in the Debian multiarch directory, `/usr/lib`, and `/usr/lib64`, so the same commands work on Fedora and openSUSE, where Qt 6 installs under `lib64`. The Qt window needs glibc 2.28 or newer (`statx`, in `ui/linux-qt/diskusage.cpp`); the CLI and `AppAtticScan` are pure Swift and link no C host, so they carry only the floor Swift itself has. musl is not a target: the AppImage, the Flatpak (`org.kde.Platform`), and `core/host` all build against glibc.
 
 ```bash
-./scripts/linux-deps.sh              # print Qt 6 + Wasmtime + Swift + shellcheck notes
+./scripts/linux-deps.sh              # preflight: what is present, what is missing
 ./scripts/linux-deps.sh --install    # Qt 6 headers, cmake, ninja, clang (root)
 ./scripts/linux-deps.sh --install-wasmtime
 ./scripts/linux-deps.sh --install-zig

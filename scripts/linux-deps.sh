@@ -17,6 +17,8 @@ WASMTIME_VER="${WASMTIME_C_API_VERSION:-28.0.0}"
 # shellcheck source=find-zig.sh
 . "$_script_dir/find-zig.sh"
 ZIG_VER="$(appattic_zig_version)" || exit 1
+# shellcheck source=find-wasmtime.sh
+. "$_script_dir/find-wasmtime.sh"
 # The Swift note has to name the exact version, not a series: find-swift.sh
 # rejects anything but the one in .swift-version, so a preflight that said
 # "5.10" would pass a machine that scripts/check.sh then refuses.
@@ -29,7 +31,8 @@ usage() {
 Usage: scripts/linux-deps.sh [--install] [--install-swift] [--install-wasmtime] [--install-zig]
                               [--install-shellcheck] [--install-desktop-file-utils]
 
-  (no flags)           Print Qt 6, Wasmtime, Swift, and shellcheck notes for this distro.
+  (no flags)           Preflight: report every dependency as present or missing,
+                       against the versions .zig-version and .swift-version pin.
   --install            Install Qt 6 Widgets headers, cmake, ninja, pkg-config, clang (needs root).
   --install-swift      Install the .swift-version toolchain (official Ubuntu 22.04
                        tarball) to /opt/swift, or .deps/swift without root.
@@ -218,60 +221,100 @@ install_family_pkgs() {
     esac
 }
 
-qt_cmd=""
-case "$family" in
-    arch)
-        qt_cmd="pacman -S --needed --noconfirm ${arch_qt_pkgs[*]}"
-        ;;
-    fedora)
-        qt_cmd="dnf install -y ${fedora_qt_pkgs[*]}"
-        ;;
-    suse)
-        qt_cmd="zypper --non-interactive install ${suse_qt_pkgs[*]}"
-        ;;
-    debian)
-        qt_cmd="enable universe (Ubuntu), apt-get update, apt-get install -y ${debian_qt_pkgs[*]}"
-        ;;
-    *)
-        qt_cmd=""
-        ;;
-esac
-
 echo "distro: ${ID:-unknown}  family: $family"
-if [[ -n "$qt_cmd" ]]; then
-    echo "Qt 6: $qt_cmd"
+
+# Every dependency is reported as found or missing, so this doubles as the
+# preflight a contributor runs first: before, it printed the same install
+# command on a machine that already had the tool, and nothing said what was
+# still missing. `present <name>: <detail>` and `missing <name>:` are the only
+# two shapes, and the install hint follows a `missing` line only.
+present() { echo "  present $1${2:+ ($2)}"; }
+missing() {
+    echo "  missing $1"
+    shift
+    printf '    %s\n' "$@"
+}
+
+# zig_ok reads .zig-version, so a zig of another version counts as missing
+# rather than as a tool that is there and wrong.
+if command -v zig >/dev/null 2>&1; then
+    have="$(zig version 2>/dev/null || true)"
+    if [[ "$have" == "$ZIG_VER" ]]; then
+        present "zig ${ZIG_VER}" "$have"
+    else
+        missing "zig (need ${ZIG_VER}, found ${have:-unknown})" "bash $0 --install-zig"
+    fi
 else
-    echo "Qt 6: install Qt 6 Widgets development files, cmake, ninja, pkg-config, and clang."
-    echo "Debian/Ubuntu: apt install qt6-base-dev qt6-qpa-plugins libgl1 xvfb cmake ninja-build pkg-config clang"
-    echo "Fedora:        dnf install qt6-qtbase-devel cmake ninja-build pkgconf-pkg-config clang"
-    echo "Arch:          pacman -S qt6-base cmake ninja pkgconf clang"
-    echo "openSUSE:      zypper install qt6-base-devel cmake ninja pkgconf-pkg-config clang"
+    missing "zig ${ZIG_VER}" \
+        "bash $0 --install-zig" \
+        "checksummed tarball on every distro, never a distro package"
 fi
 
-echo "Zig ${ZIG_VER}: checksummed tarball on every distro, never a distro package"
-echo "shellcheck: needed by scripts/lint.sh. bash $0 --install-shellcheck"
-echo "Wasmtime C API ${WASMTIME_VER}: bash $0 --install-wasmtime"
-echo "Swift ${SWIFT_VER}: needed to compile the CLI and tests. Not shipped as a universal Linux binary."
-case "$family" in
-    arch)
-        echo "  Arch extra has no Swift compiler. AUR: swift-bin (or swiftly-bin)."
-        echo "  Or: $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
-        ;;
-    debian)
-        echo "  swiftly: https://www.swift.org/install/linux/"
-        echo "  Or Ubuntu 22.04/24.04 Swift.org packages, or $0 --install-swift"
-        ;;
-    fedora|suse)
-        echo "  swiftly: https://www.swift.org/install/linux/"
-        echo "  Or: $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
-        ;;
-    *)
-        echo "  swiftly: https://www.swift.org/install/linux/"
-        echo "  Or: $0 --install-swift"
-        ;;
-esac
+if qt6_dev_ok; then
+    ver="$(pkg-config --modversion Qt6Widgets 2>/dev/null || printf 'cmake config only')"
+    present "Qt 6" "$ver"
+else
+    missing "Qt 6 Widgets development files" \
+        "cmake, ninja, pkg-config and clang come with it" \
+        "Debian/Ubuntu: apt install qt6-base-dev qt6-qpa-plugins libgl1 xvfb cmake ninja-build pkg-config clang" \
+        "Fedora:        dnf install qt6-qtbase-devel cmake ninja-build pkgconf-pkg-config clang" \
+        "Arch:          pacman -S qt6-base cmake ninja pkgconf clang" \
+        "openSUSE:      zypper install qt6-base-devel cmake ninja pkgconf-pkg-config clang"
+fi
+
+if appattic_find_wasmtime; then
+    present "Wasmtime C API ${WASMTIME_VER}" "${WASMTIME_DIR:-pkg-config}"
+else
+    missing "Wasmtime C API ${WASMTIME_VER} (embed.c and the Qt link need it)" \
+        "bash $0 --install-wasmtime"
+fi
+
+if command -v shellcheck >/dev/null 2>&1; then
+    present "shellcheck" "$(command -v shellcheck)"
+else
+    missing "shellcheck (scripts/lint.sh needs it)" "bash $0 --install-shellcheck"
+fi
+
+if command -v yamllint >/dev/null 2>&1; then
+    present "yamllint" "$(command -v yamllint)"
+else
+    missing "yamllint (scripts/lint.sh needs it)" \
+        "uv tool install \"yamllint==$(bash "$_script_dir/deps.sh" yamllint-version)\""
+fi
+
+if command -v cc >/dev/null 2>&1; then
+    present "cc" "$(command -v cc)"
+else
+    missing "cc (the C host gate needs it)" "install a C compiler: gcc or clang"
+fi
+
+# Swift is the one tool with no single install command: the distro packages
+# differ, and the tarball is built for another glibc. Report the version found
+# against the pin, because a swift of the wrong version fails the same way a
+# missing one does.
+if appattic_find_swift; then
+    have="$(swift --version 2>/dev/null | head -n 1)"
+    case "$have" in
+        *"Swift version ${SWIFT_VER} "*|*"Apple Swift version ${SWIFT_VER} "*)
+            present "swift ${SWIFT_VER}" "$have"
+            ;;
+        *)
+            missing "swift ${SWIFT_VER} (found: ${have:-unknown})" \
+                "swiftly: https://www.swift.org/install/linux/" \
+                "or: bash $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
+            ;;
+    esac
+else
+    missing "swift ${SWIFT_VER} (needed to compile the CLI and tests)" \
+        "swiftly: https://www.swift.org/install/linux/" \
+        "or: bash $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
+    if [[ "$family" == arch ]]; then
+        echo "    Arch extra has no Swift compiler. AUR: swift-bin (or swiftly-bin)."
+    fi
+fi
+
 echo "Build on the machine you run. Do not copy an Ubuntu build onto Arch and expect it to start."
-echo "After Qt 6 + Wasmtime + zig are installed: bash scripts/linux-qt-link.sh"
+echo "With Qt 6, Wasmtime and zig present: bash scripts/linux-qt-link.sh"
 if [[ "$family" == debian ]]; then
     ver="${VERSION_ID:-}"
     if [[ "$ver" == 24.04 ]]; then
