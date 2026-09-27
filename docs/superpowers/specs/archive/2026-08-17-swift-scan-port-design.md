@@ -6,7 +6,7 @@
 
 Date: 2026-08-17
 Updated: 2026-09-05
-Status: Implemented
+Status: Implemented, superseded by [`2026-08-26-zig-wasm-core-design.md`](../2026-08-26-zig-wasm-core-design.md)
 
 Port the Python scanner into Swift so the Mac UI and Linux CLI/UI run with no Python. Product behavior stays the same: leftovers, stale software, outdated version signal. Nothing auto-deletes. Outdated is report-only except Homebrew formulas/casks and Flatpak, which apply only through the explicit `update` command or UI confirm. Distro managers, Snap, and the App Store stay report-only.
 
@@ -168,7 +168,7 @@ No dual-run of Python and Swift in production.
 - macOS: build UI, stage `AppAttic.app`, ad-hoc codesign. Do not copy Python.
 - Linux: always build `appattic` CLI. Build Qt UI via `scripts/linux-qt-link.sh` only if `pkg-config Qt6Widgets` succeeds. Do not fail the whole script for missing Qt when the user only needs CLI.
 
-`README.md` matches the above. Version is `1.2.1`; `appAtticVersion` in `Sources/AppAtticScan/Util.swift` is the source of truth.
+`README.md` matches the above. Version at the port was `1.2.1`; `appAtticVersion` in `Sources/AppAtticScan/Util.swift` is the source of truth.
 
 ## Success
 

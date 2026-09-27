@@ -71,7 +71,7 @@ Result JSON:
 
 ## Inventory (in scope)
 
-Manifest dir: `core/plugins/<id>/manifest.json`. `url` names the built `.wasm`. Backlog ids have no manifest and must not be added to the host load list. Query plugins call `host.exec`. Darwin leftover roots stay in Swift `AppAtticScan`.
+Plugin membership lives in one place: the `wasm_sources` list in `core/build.sh`. One `core/src/<id>.zig` compiles to `core/out/<id>.wasm`; there is no manifest directory. Backlog ids are not in `wasm_sources`, so no `.wasm` is built for them. Query plugins call `host.exec`. Darwin leftover roots stay in Swift `AppAtticScan`.
 
 ### Manager plugins
 
@@ -116,7 +116,7 @@ Linux leftover roots plus `path-user-bin`, `path-home-dot`, and `path-shadow`. D
 
 ## Backlog
 
-Not in this spike. No WASM. No `core/plugins/<id>/` manifest this turn. Not on the host load list.
+Not in this spike. No `core/src/<id>.zig`, so no `.wasm` is built and the host load list never contains one.
 
 | id | Scope |
 |---|---|
@@ -127,7 +127,7 @@ Not in this spike. No WASM. No `core/plugins/<id>/` manifest this turn. Not on t
 
 ## Host load list
 
-`core/build.sh` emits `appattic_core.wasm` plus one `.wasm` per in-scope plugin. Linux Qt (`ui/linux-qt/corehost.cpp` `pluginWasmFiles`) and the host CLI take the same set. Tag `0` on any of them: coeffect missing, empty findings, plugin still loads. Missing file: host skips that argv (INACTIVE). `chocolatey`, `nuget`, `appstore`, `steam` are not arguments and must not be added.
+`core/build.sh` emits `appattic_core.wasm` plus one `.wasm` per in-scope plugin, and prints the argv below. Linux Qt (`ui/linux-qt/corehost.cpp` `pluginWasmFiles`) keeps no second registry: it loads every `.wasm` in `core/out` except the core. So a new plugin lands on both sides by being added to `wasm_sources` in `core/build.sh`, never by being listed in a second place. Tag `0` on any of them: coeffect missing, empty findings, plugin still loads. Missing file: host skips that argv (INACTIVE). `chocolatey`, `nuget`, `appstore`, `steam` are backlog: no `.wasm` is built for them, so they are never arguments. `core/build.sh` also precompiles each module to a `<id>.wasm.cwasm` sidecar; the host deserializes it when it is at least as new as the `.wasm` and compiles the source otherwise, so a stale sidecar costs speed, never correctness.
 
 ```bash
 ./core/build.sh
@@ -144,6 +144,7 @@ Not in this spike. No WASM. No `core/plugins/<id>/` manifest this turn. Not on t
   ./core/out/path_home_dot.wasm=1 \
   ./core/out/path_shadow.wasm=1 \
   ./core/out/pacman.wasm=1 \
+  ./core/out/aur.wasm=1 \
   ./core/out/apt.wasm=1 \
   ./core/out/dnf.wasm=1 \
   ./core/out/zypper.wasm=1 \
