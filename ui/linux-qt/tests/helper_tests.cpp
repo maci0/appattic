@@ -310,6 +310,13 @@ static int verifyHelpers() {
         std::fprintf(stderr, "commandNeedsRoot: guarded removal judged on its action\n");
         return 1;
     }
+    // A comment names a path the way a command does and runs nothing.
+    if (commandNeedsRoot(QStringLiteral("# skipped packaged path '/etc/apt/sources.list.d/x.list'"))
+        || !withRootCmd(QStringLiteral("# skipped packaged path '/etc/apt/sources.list.d/x.list'"))
+                .startsWith(QLatin1Char('#'))) {
+        std::fprintf(stderr, "commandNeedsRoot: a comment line never escalates\n");
+        return 1;
+    }
     Finding keepRm;
     keepRm.plugin = QStringLiteral("path-xdg-config");
     keepRm.kind = QStringLiteral("orphan-dir");

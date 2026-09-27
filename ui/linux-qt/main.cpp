@@ -2764,12 +2764,24 @@ private:
         return finishScript(header, body);
     }
 
+    /// Body lines only. The `rootcmd` helper belongs to the script being merged
+    /// into, not to the body appended to it: two copies redefine the same
+    /// function and read like two different escalation paths.
     static QString scriptBodyLines(const QString &script) {
         QString out;
+        bool inRootHelper = false;
         for (const QString &line : script.split(QLatin1Char('\n'))) {
             const QString t = line.trimmed();
+            if (inRootHelper) {
+                if (t == QLatin1String("}")) inRootHelper = false;
+                continue;
+            }
             if (t.isEmpty() || t.startsWith(QLatin1Char('#')) || t == QLatin1String("#!/bin/sh")
                 || t.startsWith(QLatin1String("set "))) {
+                continue;
+            }
+            if (t == QLatin1String("rootcmd() {")) {
+                inRootHelper = true;
                 continue;
             }
             out += line + QLatin1Char('\n');
@@ -2777,15 +2789,34 @@ private:
         return out;
     }
 
+    /// True when a body line calls `rootcmd`, in either the bare or the guarded
+    /// spelling `if q; then rootcmd action; fi`.
+    static bool bodyNeedsRootHelper(const QString &body) {
+        return body.startsWith(QLatin1String("rootcmd "))
+            || body.contains(QLatin1String("\nrootcmd "))
+            || body.contains(QLatin1String("; then rootcmd "));
+    }
+
     QString previewAllScript() const {
         QString out = cleanupScript();
         if (scriptHasCommands(updateScript())) {
+            const QString body = scriptBodyLines(updateScript());
+            // The stripped body has no helper of its own. The merged script
+            // keeps one, and it has to be there when the section being appended
+            // is what escalates and the cleanup half does not.
+            if (bodyNeedsRootHelper(body) && !bodyNeedsRootHelper(out)) {
+                out += scriptRootHelper() + QLatin1Char('\n');
+            }
             out += QStringLiteral("\n# Update selected packages\n");
-            out += scriptBodyLines(updateScript());
+            out += body;
         }
         if (scriptHasCommands(markManualScript())) {
+            const QString body = scriptBodyLines(markManualScript());
+            if (bodyNeedsRootHelper(body) && !bodyNeedsRootHelper(out)) {
+                out += scriptRootHelper() + QLatin1Char('\n');
+            }
             out += QStringLiteral("\n# Mark as manually installed. Delete in the UI does not run these lines.\n");
-            out += scriptBodyLines(markManualScript());
+            out += body;
         }
         return out;
     }

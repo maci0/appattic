@@ -589,6 +589,9 @@ std::optional<GuardedRemove> parseGuardedRemove(const QString &cmd) {
 bool commandNeedsRoot(const QString &cmd) {
     QString t = cmd.trimmed();
     if (t.startsWith(QLatin1String("rootcmd "))) return false;
+    // A `#` line is a comment. It mentions a path the way a command does, and
+    // it runs nothing, so it never escalates.
+    if (t.startsWith(QLatin1Char('#'))) return false;
     // A guarded removal is `if <query>; then <action>; fi`. Judge the action,
     // or the leading `if` hides an action that needs root.
     if (const GuardedRemove guarded = parseGuardedRemove(t)) t = guarded.action;
@@ -607,9 +610,15 @@ bool commandNeedsRoot(const QString &cmd) {
         || first == QLatin1String("zypper")
         || first == QLatin1String("snap")
         || t.contains(QLatin1String(" '/etc/apt/sources.list.d/"))
+        || t.contains(QLatin1String(" \"/etc/apt/sources.list.d/"))
         || t.contains(QLatin1String(" /etc/apt/sources.list.d/"));
 }
 
+/// Escalate one generated line. A guarded removal keeps the guard outside the
+/// wrapper: `rootcmd if q; then rm; fi` is a `/bin/sh` syntax error (`then`
+/// outside an `if`), and a syntax error takes the whole script down before its
+/// first line runs. The presence check is a read and stays unprivileged; only
+/// the action escalates.
 QString withRootCmd(const QString &cmd) {
     if (cmd.isEmpty() || !commandNeedsRoot(cmd)) return cmd;
     // Escalating the whole line hands `rootcmd` the words `if` and `<query>` as

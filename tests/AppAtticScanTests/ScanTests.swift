@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import AppAtticScan
 
@@ -603,6 +604,7 @@ final class ScriptPreviewTests: XCTestCase {
             pacman,
             "if pacman -Qq jq >/dev/null 2>&1; then rootcmd pacman -Rns jq; fi"
         )
+        XCTAssertTrue(shScriptParses(pacman), pacman)
         XCTAssertTrue(callsRootHelper(pacman), pacman)
         // Wrapping again must not escalate twice.
         XCTAssertEqual(withRootCmd(pacman), pacman)
@@ -611,6 +613,24 @@ final class ScriptPreviewTests: XCTestCase {
         XCTAssertEqual(withRootCmd("apt-mark manual libfoo"), "rootcmd apt-mark manual libfoo")
         XCTAssertTrue(callsRootHelper("rootcmd apt-mark manual libfoo"))
         XCTAssertFalse(callsRootHelper("rm -rf /tmp/x"))
+    }
+
+    /// AUR helpers and snap install and remove with root like the distro
+    /// managers, so `appattic update` on Arch has to escalate too. Without it
+    /// the script asks for no password and then fails on a permission error.
+    func testAURAndSnapEscalate() {
+        for base in ["paru", "yay", "pikaur", "snap"] {
+            XCTAssertTrue(commandNeedsRoot("\(base) --noconfirm -S vim"), base)
+            XCTAssertTrue(commandNeedsRoot("if \(base) list vim >/dev/null 2>&1; then \(base) remove vim; fi"), base)
+        }
+        XCTAssertEqual(
+            withRootCmd("paru --noconfirm -S vim"),
+            "rootcmd paru --noconfirm -S vim"
+        )
+        XCTAssertEqual(
+            withRootCmd("if snap list hello >/dev/null 2>&1; then snap remove hello; fi"),
+            "if snap list hello >/dev/null 2>&1; then rootcmd snap remove hello; fi"
+        )
     }
 
     /// `parseGuardedRemove` round-trips the guard `guardedRemoveCommand` writes.
@@ -622,5 +642,107 @@ final class ScriptPreviewTests: XCTestCase {
         XCTAssertNil(parseGuardedRemove("rm -rf /tmp/x"))
         XCTAssertNil(parseGuardedRemove("if true; then"))
         XCTAssertNil(parseGuardedRemove(""))
+    }
+
+    /// A PPA sources file is the one leftover under a packaged root that is
+    /// removable, and `shellQuote` wraps it, so the quoted spelling has to be
+    /// recognised. A comment names the same path and runs nothing.
+    func testQuotedPpaRemovalEscalatesAndItsCommentDoesNot() {
+        let rm = leftoverRemoveCommand(
+            path: "/etc/apt/sources.list.d/deadsnakes.list",
+            rootLabel: "/etc/apt/sources.list.d",
+            extraPaths: []
+        )
+        XCTAssertEqual(rm, "rm -rf '/etc/apt/sources.list.d/deadsnakes.list'")
+        XCTAssertTrue(commandNeedsRoot(rm), rm)
+        XCTAssertEqual(withRootCmd(rm), "rootcmd " + rm)
+        let skip = leftoverRemoveCommand(
+            path: "/etc/apt/sources.list.d/../../evil",
+            rootLabel: "/etc/apt/sources.list.d",
+            extraPaths: []
+        )
+        XCTAssertTrue(skip.hasPrefix("#"), skip)
+        XCTAssertFalse(commandNeedsRoot(skip), skip)
+        XCTAssertEqual(withRootCmd(skip), skip)
+    }
+
+    /// Every generated script that calls `rootcmd` has to define it. A missing
+    /// helper is `sh: rootcmd: not found`, and under `set -e` that stops the run.
+    func testScriptsThatEscalateDefineRootcmd() {
+        let scripts = [
+            packageActionScript(
+                remove: [PackageEntry(name: "jq", manager: "pacman", kind: "orphan")],
+                markManual: []
+            ),
+            updateScript([OutdatedPkg(name: "vim", manager: "aur", currentVersion: "1", latestVersion: "2")]),
+            leftoverCleanupScript(
+                [DataItem(
+                    path: "/etc/apt/sources.list.d/deadsnakes.list",
+                    name: "deadsnakes.list",
+                    rootLabel: "/etc/apt/sources.list.d",
+                    kind: "ppa",
+                    status: "orphaned",
+                    sizeBytes: 0,
+                    sizeMeasured: false,
+                    extraPaths: []
+                )],
+                scannedAt: Date(timeIntervalSince1970: 0)
+            ),
+        ]
+        for script in scripts {
+            XCTAssertTrue(script.contains("rootcmd() {"), script)
+            XCTAssertTrue(shScriptParses(script), script)
+        }
+        // No escalation, no helper: a brew-only script must not carry one.
+        let brew = packageActionScript(
+            remove: [PackageEntry(name: "jq", manager: "brew-formula", kind: "global")],
+            markManual: []
+        )
+        XCTAssertFalse(brew.contains("rootcmd"), brew)
+    }
+
+    /// Merging a cleanup script with an update script keeps exactly one
+    /// `rootcmd` definition, and has one even when only the update half
+    /// escalates.
+    func testMergedScriptCarriesOneRootHelper() {
+        let cleanup = leftoverCleanupScript(
+            [DataItem(
+                path: "/home/alice/.config/gone-app",
+                name: "gone-app",
+                rootLabel: ".config",
+                kind: "orphan-dir"
+            )],
+            scannedAt: Date(timeIntervalSince1970: 0)
+        )
+        XCTAssertFalse(cleanup.contains("rootcmd"), cleanup)
+        let update = updateScript([OutdatedPkg(name: "vim", manager: "aur", currentVersion: "1", latestVersion: "2")])
+        let merged = previewScript(cleanup: cleanup, update: update)
+        XCTAssertEqual(merged.components(separatedBy: "rootcmd() {").count - 1, 1, merged)
+        XCTAssertTrue(merged.contains(" --noconfirm -S 'vim'"), merged)
+        XCTAssertTrue(shScriptParses(merged), merged)
+    }
+}
+
+/// Ask the real shell to parse a generated script. A design that emits
+/// something `/bin/sh` rejects is a defect the unit tests above would not see.
+func shScriptParses(_ script: String) -> Bool {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("appattic-script-\(UUID().uuidString)")
+    do {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("check.sh")
+        // `sh -n` parses without running: no command in the script executes.
+        try Data(script.utf8).write(to: file)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-n", file.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    } catch {
+        return false
     }
 }

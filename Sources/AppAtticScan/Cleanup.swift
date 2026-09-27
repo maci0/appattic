@@ -151,12 +151,50 @@ public func scriptHasActionableCommands(_ script: String) -> Bool {
     return false
 }
 
+/// True when a script body calls `rootcmd`, in either the bare or the guarded
+/// spelling `if q; then rootcmd action; fi`.
+private func bodyNeedsRootHelper(_ script: String) -> Bool {
+    script.split(whereSeparator: \.isNewline).contains { line in
+        let t = line.trimmingCharacters(in: .whitespaces)
+        return t.hasPrefix("rootcmd ") || t.contains("; then rootcmd ")
+    }
+}
+
+/// Add the `rootcmd` helper to a script that is about to receive a body which
+/// calls it and does not define it. A `rootcmd` call with no helper is
+/// `sh: rootcmd: not found`, and under `set -e` that stops the script there.
+public func ensureRootHelper(_ script: String) -> String {
+    if !bodyNeedsRootHelper(script) || script.contains("rootcmd() {") { return script }
+    var lines = script.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+    var at = 0
+    while at < lines.count {
+        let t = lines[at].trimmingCharacters(in: .whitespaces)
+        if t.isEmpty || t.hasPrefix("#") || t.hasPrefix("set -") { at += 1; continue }
+        break
+    }
+    let helper = scriptRootHelper.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        .map(String.init)
+    while helper.last?.isEmpty == true { helper.removeLast() }
+    lines.insert(contentsOf: helper + [""], at: at)
+    return lines.joined(separator: "\n")
+}
+
 public func stripShellHeader(_ script: String) -> String {
     var lines = script.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
     while let first = lines.first {
         let line = first.trimmingCharacters(in: .whitespaces)
         if line.isEmpty || line.hasPrefix("#!") || line.hasPrefix("#") || line == "set -e" || line.hasPrefix("set -") {
             lines.removeFirst()
+            continue
+        }
+        // The `rootcmd` helper belongs to the script being merged into, not to
+        // the body appended to it. Two copies redefine the same function and
+        // read like two different escalation paths.
+        if line == "rootcmd() {" {
+            while let inner = lines.first {
+                lines.removeFirst()
+                if inner.trimmingCharacters(in: .whitespaces) == "}" { break }
+            }
             continue
         }
         break
@@ -202,7 +240,12 @@ public func previewScript(cleanup: String, update: String) -> String {
         while body.hasSuffix("\n") { body.removeLast() }
         let extra = stripShellHeader(update)
         if extra.isEmpty { return terminated(cleanup) }
-        return body + "\n\n# Update section. Delete in the UI does not run these lines.\n" + extra + "\n"
+        // `stripShellHeader` drops the update script's own `rootcmd` helper. The
+        // merged script keeps one, and it has to be there when the update half
+        // is what escalates and the cleanup half does not.
+        let section = "# Update section. Delete in the UI does not run these lines.\n" + extra + "\n"
+        body = ensureRootHelper(body + "\n\n" + section)
+        return body
     }
     if hasUpdate { return terminated(update) }
     return terminated(cleanup)
@@ -284,22 +327,42 @@ public func isPpaSourcesPath(_ path: String) -> Bool {
     return clean.hasPrefix("/etc/apt/sources.list.d/")
 }
 
+/// Manager list, same as Qt `commandNeedsRoot`: the AUR helpers and snap are in
+/// it because they install and remove with root, exactly like the distro
+/// managers they sit next to. A list that is short here is a script that asks
+/// for no password and then fails.
+private let rootCommandBases: Set<String> = [
+    "apt", "apt-get", "apt-mark", "pacman", "paru", "yay", "pikaur",
+    "dnf", "dnf5", "yum", "zypper", "snap",
+]
+
 public func commandNeedsRoot(_ cmd: String) -> Bool {
     var t = cmd.trimmingCharacters(in: .whitespaces)
     if t.hasPrefix("rootcmd ") { return false }
+    // A `#` line is a comment. It mentions a path the way a command does, and
+    // it runs nothing, so it never escalates.
+    if t.hasPrefix("#") { return false }
     // A guarded remove is `if <query>; then <action>; fi`. Judge the action, or
     // the wrapper's leading `if` hides an action that needs root.
     if let guarded = parseGuardedRemove(t) { t = guarded.action }
     let first = t.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
     let base = first.split(separator: "/").last.map(String.init) ?? first
-    switch base {
-    case "apt-get", "apt-mark", "apt", "pacman", "dnf", "dnf5", "yum", "zypper":
-        return true
-    default:
-        return t.contains(" /etc/apt/sources.list.d/")
-    }
+    if rootCommandBases.contains(base) { return true }
+    // A PPA sources file is the one leftover under a packaged root that is
+    // removable. `shellQuote` wraps it in single quotes, so match the quoted
+    // spelling as well as the bare one.
+    return t.contains(" /etc/apt/sources.list.d/")
+        || t.contains(" '/etc/apt/sources.list.d/")
+        || t.contains(" \"/etc/apt/sources.list.d/")
 }
 
+/// Escalate one generated line.
+///
+/// A guarded removal keeps the guard outside the wrapper. `rootcmd if q; then
+/// rm; fi` is a `/bin/sh` syntax error (`then` outside an `if`), and a syntax
+/// error takes the whole script down before its first line runs, so the user
+/// reviews a script that cannot do anything. The presence check is a read and
+/// stays unprivileged; only the action escalates.
 public func withRootCmd(_ cmd: String) -> String {
     guard commandNeedsRoot(cmd) else { return cmd }
     // Escalating the whole line hands `rootcmd` the words `if` and `<query>` as
@@ -380,7 +443,7 @@ func appendLeftoverCommands(_ lines: inout [String], items: [DataItem]) {
     lines.append("")
     lines.append("# Leftover data and PATH overlays")
     for i in items {
-        lines.append(leftoverRemoveCommand(path: i.path, rootLabel: i.rootLabel, extraPaths: i.extraPaths))
+        lines.append(withRootCmd(leftoverRemoveCommand(path: i.path, rootLabel: i.rootLabel, extraPaths: i.extraPaths)))
     }
 }
 
@@ -389,50 +452,64 @@ func appendRemoveVerdicts(_ lines: inout [String], result: ScanResult) {
         let s = v.software
         lines.append("")
         lines.append("# \(shellComment(s.name)) (\(shellComment(s.source))) not used for a long time")
-        lines.append(uninstallCommand(
+        lines.append(withRootCmd(uninstallCommand(
             source: s.source,
             name: s.name,
             path: s.path,
             caskName: s.caskName,
             steamAppId: s.extra["steam_appid"],
             pkgId: s.pkgId
-        ))
+        )))
         if s.dataBytes > 0 {
             lines.append("# (its user data, if any, is listed in the report)")
         }
     }
 }
 
+/// Header plus body, with the `rootcmd` helper when a body line escalates.
+/// A `rootcmd` call with no helper defined is `sh: rootcmd: not found`, and
+/// under `set -e` that stops the script, so the helper is part of emitting the
+/// wrapper rather than an extra the caller remembers.
+public func scriptWithHeader(_ header: [String], _ body: [String]) -> String {
+    var lines = header
+    if bodyNeedsRootHelper(body.joined(separator: "\n")) {
+        lines.append(scriptRootHelper)
+    }
+    lines.append(contentsOf: body)
+    return lines.joined(separator: "\n") + "\n"
+}
+
 func leftoverCleanupScript(_ items: [DataItem], scannedAt: Date) -> String {
-    var lines = [
+    let header = [
         "#!/bin/sh",
         "set -e",
         "# AppAttic leftover cleanup script generated \(scriptStamp(scannedAt))",
         "# Review every path before running. Nothing here is deleted automatically.",
     ]
+    var body: [String] = []
     if items.isEmpty {
-        lines.append("")
-        lines.append("# No leftover data matched.")
+        body.append("")
+        body.append("# No leftover data matched.")
     } else {
-        appendLeftoverCommands(&lines, items: items)
+        appendLeftoverCommands(&body, items: items)
     }
-    return lines.joined(separator: "\n") + "\n"
+    return scriptWithHeader(header, body)
 }
 
 func staleCleanupScript(_ result: ScanResult) -> String {
-    var lines = [
+    let header = [
         "#!/bin/sh",
         "set -e",
         "# AppAttic stale uninstall script generated \(scriptStamp(result.scannedAt))",
         "# Review every path before running. Nothing here is deleted automatically.",
     ]
-    let before = lines.count
-    appendRemoveVerdicts(&lines, result: result)
-    if lines.count == before {
-        lines.append("")
-        lines.append("# No remove-tier unused software.")
+    var body: [String] = []
+    appendRemoveVerdicts(&body, result: result)
+    if body.isEmpty {
+        body.append("")
+        body.append("# No remove-tier unused software.")
     }
-    return lines.joined(separator: "\n") + "\n"
+    return scriptWithHeader(header, body)
 }
 
 /// Printable `/bin/sh` for this CLI command. `outdated` comments every upgrade; `update` is named live upgrades after confirm.
@@ -474,20 +551,21 @@ public func dryRunScript(
 }
 
 public func cleanupScript(_ result: ScanResult, category: [String] = [], top: Int? = nil) -> String {
-    var lines = [
+    let header = [
         "#!/bin/sh",
         "set -e",
         "# AppAttic cleanup script generated \(scriptStamp(result.scannedAt))",
         "# Review every path before running. Nothing here is deleted automatically.",
     ]
-    appendLeftoverCommands(&lines, items: leftoverDryRunItems(result, category: category, top: top))
-    appendRemoveVerdicts(&lines, result: result)
+    var body: [String] = []
+    appendLeftoverCommands(&body, items: leftoverDryRunItems(result, category: category, top: top))
+    appendRemoveVerdicts(&body, result: result)
     if !result.outdated.isEmpty {
-        lines.append("")
-        lines.append("# Outdated packages (report only; not run)")
-        lines.append(contentsOf: commentedOutdatedLines(result.outdated))
+        body.append("")
+        body.append("# Outdated packages (report only; not run)")
+        body.append(contentsOf: commentedOutdatedLines(result.outdated))
     }
-    return lines.joined(separator: "\n") + "\n"
+    return scriptWithHeader(header, body)
 }
 
 public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [], now: Date = Date()) -> ScanResult {

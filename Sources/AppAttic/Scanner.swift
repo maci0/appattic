@@ -254,41 +254,46 @@ final class ScannerViewModel {
 
     func generateCleanupScript() -> String {
         guard let data = scanData else { return "" }
-        var lines = [
+        let header = [
             "#!/bin/sh",
             "set -e",
             "# AppAttic cleanup",
             "# Review every line before running. Nothing here is deleted automatically.",
             "",
         ]
+        var body: [String] = []
         let leftItems = visibleOrphanedLeftovers(data.leftovers, ignoring: ignoredLeftovers)
             .filter { selectedLeftovers.contains($0.path) }
         let appItems = data.software.filter { selectedApps.contains($0.path) && StaleTier.isSelectable($0.tierKind) }
         if !leftItems.isEmpty {
-            lines.append("# Leftover data and PATH overlays")
+            body.append("# Leftover data and PATH overlays")
             for item in leftItems {
-                lines.append(leftoverRemoveCommand(for: item))
+                body.append(withRootCmd(leftoverRemoveCommand(for: item)))
             }
         }
         for app in appItems {
-            lines.append("")
-            lines.append("# \(shellComment(app.name))")
-            lines.append(uninstallCommand(for: app))
+            body.append("")
+            body.append("# \(shellComment(app.name))")
+            body.append(withRootCmd(uninstallCommand(for: app)))
         }
         let pkgItems = allPackages.filter { selectedPackages.contains($0.id) }
         if !pkgItems.isEmpty {
-            lines.append("")
-            lines.append("# Distro orphans and language globals")
+            body.append("")
+            body.append("# Distro orphans and language globals")
             for item in pkgItems {
-                lines.append(packageRemoveCommand(item))
+                body.append(withRootCmd(packageRemoveCommand(item)))
             }
         }
-        return lines.joined(separator: "\n") + "\n"
+        return scriptWithHeader(header, body)
     }
 
     func generateScript() -> String {
-        previewScript(cleanup: generateCleanupScript(), update: generateUpdateScript())
-            + markManualPreview()
+        let merged = previewScript(cleanup: generateCleanupScript(), update: generateUpdateScript())
+        let manual = markManualPreview()
+        guard !manual.isEmpty else { return merged }
+        // The mark-manual body arrives without its own `rootcmd` helper, so the
+        // merged script needs one when this section is what escalates.
+        return ensureRootHelper(merged + manual)
     }
 
     func generateMarkManualScript() -> String {
