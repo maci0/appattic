@@ -11,14 +11,21 @@ public enum AppAtticIOError: Error, Equatable, LocalizedError, CustomStringConve
     case decodeFailed(path: String, message: String)
 
     /// The cache and settings paths sit under the account home, so the account
-    /// name is in them. `description` returns the raw path; callers that print
-    /// or log an error wrap the line in `redactHomePaths` so the account name
-    /// never leaves the machine.
+    /// name is in them. The composed line is redacted here, exactly as
+    /// `SettingsError.description` and `DiskUsageError.description` do it: the
+    /// wrap used to be every caller's job, and a caller that printed
+    /// `localizedDescription` without it — the CLI's own top-level handler, a
+    /// future one, the error bar — leaked the account name. The callers'
+    /// `redactHomePaths` stays, and is a no-op on an already-redacted line.
     public var errorDescription: String? {
         description
     }
 
     public var description: String {
+        redactHomePaths(rawDescription)
+    }
+
+    private var rawDescription: String {
         switch self {
         case .createDirectoryFailed(let path, let message):
             return "Could not create directory \(path): \(message)"
