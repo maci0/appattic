@@ -61,6 +61,34 @@ public func posixFolded(_ s: String) -> String {
     return low.utf8.contains(where: { $0 >= 0x80 }) ? low.precomposedStringWithCanonicalMapping : low
 }
 
+/// Text a terminal reads as a command rather than as characters.
+///
+/// A name reaches a report from the filesystem, a package listing, or the
+/// scan cache, so a directory an unprivileged process can name is a channel
+/// into whatever terminal runs `appattic`. `ESC [ 2 J` clears the screen and
+/// `ESC ] 0 ;` retitles the window, so one leftover row can hide the rows
+/// under it or rename the shell. `stripBidiControls` covers the reordering
+/// scalars; these are the ones a terminal executes.
+///
+/// Every C0 control, DEL, and C1 control becomes U+FFFD, the same marker
+/// `decodeUTF8` puts on a byte that is not text. Tab is a C0 control and goes
+/// too: inside a table cell it moves the cursor and the columns stop lining
+/// up. Printable ASCII, the common case, returns as-is.
+public func terminalSafe(_ s: String) -> String {
+    if s.utf8.allSatisfy({ $0 >= 0x20 && $0 < 0x7F }) { return s }
+    let replacement: Unicode.Scalar = "\u{FFFD}"
+    var out = String.UnicodeScalarView()
+    for scalar in s.unicodeScalars {
+        let v = scalar.value
+        if v < 0x20 || v == 0x7F || (v >= 0x80 && v <= 0x9F) {
+            out.append(replacement)
+        } else {
+            out.append(scalar)
+        }
+    }
+    return String(out)
+}
+
 /// Read a file as UTF-8. Invalid sequences become U+FFFD, matching `runCommand`.
 public func readUTF8File(_ path: String) -> String? {
     guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }

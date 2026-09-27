@@ -94,6 +94,28 @@ final class TextTests: XCTestCase {
     }
 
 
+    func testTerminalSafeReplacesControlCharacters() {
+        // A directory name is text a terminal executes: ESC [ 2 J clears the
+        // report the row is printed in, ESC ] 0 ; retitles the window.
+        XCTAssertEqual(terminalSafe("gone\u{1B}[2Japp"), "gone\u{FFFD}[2Japp")
+        XCTAssertEqual(terminalSafe("a\u{0}b\u{7F}c"), "a\u{FFFD}b\u{FFFD}c")
+        // Tab is a C0 control: inside a table cell it moves the cursor and the
+        // columns stop lining up.
+        XCTAssertEqual(terminalSafe("a\tb"), "a\u{FFFD}b")
+        // C1 controls, the 8-bit half an emulated terminal also acts on.
+        XCTAssertEqual(terminalSafe("a\u{9B}c"), "a\u{FFFD}c")
+    }
+
+    func testTerminalSafeLeavesTextAndNamesAlone() {
+        XCTAssertEqual(terminalSafe("Firefox"), "Firefox")
+        XCTAssertEqual(terminalSafe("/home/u/Library/Caches"), "/home/u/Library/Caches")
+        // The bidi scalars `stripBidiControls` removes are not controls, so
+        // they survive here and are that function's business.
+        XCTAssertEqual(terminalSafe("Cafe\u{202E}f"), "Cafe\u{202E}f")
+        XCTAssertEqual(terminalSafe("日本語"), "日本語")
+        XCTAssertEqual(terminalSafe(""), "")
+    }
+
     func testCollatedBeforeOrdersByName() {
         XCTAssertTrue(collatedBefore("Alpha", "Beta", tieBreak: "/a", "/b"))
         XCTAssertFalse(collatedBefore("Beta", "Alpha", tieBreak: "/b", "/a"))

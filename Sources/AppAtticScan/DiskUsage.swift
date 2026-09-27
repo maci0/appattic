@@ -346,7 +346,10 @@ public func formatDiskTree(
         if n.unreadable { extra += " unreadable" }
         if n.mountPoint { extra += " other-filesystem" }
         let size = humanSize(n.metric(allocatedSize: allocatedSize))
-        lines.append("\(indent)\(n.name)  \(size)\(extra)")
+        // The name is whatever a directory on the scanned tree is called, so
+        // it goes through `terminalSafe`: a folder whose name carries an
+        // escape would otherwise repaint the report it is a row in.
+        lines.append("\(indent)\(terminalSafe(n.name))  \(size)\(extra)")
         var kids = n.children
         if let top {
             kids = Array(kids.prefix(max(0, top)))

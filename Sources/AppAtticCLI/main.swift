@@ -66,10 +66,10 @@ enum AppAtticCLI {
             // the report uses.
             let when = parseISODate(resolved.data.scanned_at)
                 .map { TimestampFormat.string(from: $0) } ?? resolved.data.scanned_at
-            fputs("using cached scan from \(when) (pass --fresh to scan now)\n", stderr)
+            fputs("using cached scan from \(terminalSafe(when)) (pass --fresh to scan now)\n", stderr)
         }
         if let cacheFailure = resolved.cacheWriteFailure {
-            fputs("warning: scan not cached: \(redactHomePaths(cacheFailure)); the next run rescans\n", stderr)
+            fputs("warning: scan not cached: \(terminalSafe(redactHomePaths(cacheFailure))); the next run rescans\n", stderr)
         }
         if resolved.data.incomplete == true {
             fputs("warning: a check failed; the outdated and unused-package lists are incomplete and the scan is not cached\n", stderr)
@@ -115,7 +115,7 @@ enum AppAtticCLI {
             fputs("Updating \(n) package(s)…\n", stderr)
             let run = runShellScript(script)
             if run.status != 0 {
-                fputs("error: \(commandFailureMessage(status: run.status, stderr: run.stderr))\n", stderr)
+                fputs("error: \(terminalSafe(commandFailureMessage(status: run.status, stderr: run.stderr)))\n", stderr)
                 // The lines before the failing one already ran, so the cached
                 // snapshot no longer describes the machine.
                 clearScanCache()
@@ -154,7 +154,7 @@ enum AppAtticCLI {
 func runConfigCommand(_ opts: CLIOptions, settings: AppAtticSettings) {
     let config = EffectiveConfig(settings: settings, includeSystemFlag: opts.includeSystem)
     for line in config.lines {
-        print(line)
+        print(terminalSafe(line))
     }
     if let jsonPath = opts.json {
         writeJSONFile(config, to: jsonPath)
@@ -188,7 +188,7 @@ func runDiskCommand(_ opts: CLIOptions) {
     } catch {
         failUsage(redactHomePaths(error.localizedDescription))
     }
-    fputs("scanning \(redactHomePaths(root))\n", stderr)
+    fputs("scanning \(terminalSafe(redactHomePaths(root)))\n", stderr)
     fflush(stderr)
     let tree = scanDiskUsage(root: root, oneFileSystem: !opts.allFileSystems)
     // `scanDiskUsage` ranks by allocated blocks; the default report prints
@@ -220,7 +220,7 @@ func writeJSONFile(_ data: Data, to path: String) {
     } catch {
         failJSONWrite(error)
     }
-    fputs("JSON written to \(redactHomePaths(path))\n", stderr)
+    fputs("JSON written to \(terminalSafe(redactHomePaths(path)))\n", stderr)
 }
 
 func writeJSONFile<T: Encodable>(_ value: T, to path: String) {
@@ -234,12 +234,12 @@ func writeJSONFile<T: Encodable>(_ value: T, to path: String) {
 }
 
 func failJSONWrite(_ error: Error) -> Never {
-    fputs("error writing JSON: \(redactHomePaths(error.localizedDescription))\n", stderr)
+    fputs("error writing JSON: \(terminalSafe(redactHomePaths(error.localizedDescription)))\n", stderr)
     Foundation.exit(1)
 }
 
 func failUsage(_ message: String) -> Never {
-    fputs("error: \(message)\n", stderr)
+    fputs("error: \(terminalSafe(message))\n", stderr)
     fputs("\(cliUsageHint)\n", stderr)
     Foundation.exit(2)
 }
@@ -257,8 +257,12 @@ enum C {
         )
     }
     static func paint(_ s: String, _ codes: String...) -> String {
-        if !enabled || codes.isEmpty { return s }
-        return codes.map { "\u{1b}[\($0)m" }.joined() + s + "\u{1b}[0m"
+        if !enabled || codes.isEmpty { return terminalSafe(s) }
+        // The value goes through `terminalSafe` before the codes wrap it: a
+        // painted cell is where a scanned name lands, and the codes are ours
+        // while the value is the filesystem's.
+        let safe = terminalSafe(s)
+        return codes.map { "\u{1b}[\($0)m" }.joined() + safe + "\u{1b}[0m"
     }
     static func bold(_ s: String) -> String { paint(s, "1") }
     static func dim(_ s: String) -> String { paint(s, "2") }
@@ -421,7 +425,7 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
         let last = s.usageSource == "unknown" ? C.dim("no data") : fmtDt(s.lastUsed)
         rows.append([
             style(label),
-            s.name,
+            terminalSafe(s.name),
             C.dim(softwareDisplaySummary(s)),
             C.dim(s.source.replacingOccurrences(of: "-", with: " ")),
             last,
@@ -461,7 +465,7 @@ func printOutdated(_ result: ScanResult) {
             latest = p.latestVersion ?? "?"
         }
         rows.append([
-            p.title ?? p.name,
+            terminalSafe(p.title ?? p.name),
             C.dim(outdatedSummaryFallback(p)),
             C.dim(p.manager.replacingOccurrences(of: "-", with: " ")),
             C.dim(p.currentVersion ?? "-"),
@@ -493,7 +497,7 @@ func printPackages(_ result: ScanResult) {
         let kindPaint: (String) -> String = p.kind == "global" ? C.yellow : C.red
         let size = p.size_measured ? humanSize(p.size_bytes ?? 0) : C.dim("unknown")
         rows.append([
-            p.name,
+            terminalSafe(p.name),
             C.dim(p.summary ?? packageWhatText(manager: p.manager, kind: p.kind)),
             C.dim(p.manager.replacingOccurrences(of: "-", with: " ")),
             kindPaint(kind),
