@@ -809,7 +809,10 @@ bool isStaleTierStatus(const QString &status) {
         || status == QLatin1String("stale");
 }
 
-/// Leftover dirs are not unused apps. Stale stays empty on Linux until a stale plugin ships.
+/// Leftover dirs are not unused apps, and an outdated row is not either, so
+/// both are excluded. The tier check is the path a plugin takes without a
+/// dedicated kind: no core plugin emits `review` or `remove` today, so the page
+/// is empty until one does.
 
 bool isStale(const Finding &f) {
     if (f.kind.contains(QLatin1String("stale")) || f.kind.contains(QLatin1String("unused-app"))

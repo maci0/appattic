@@ -75,8 +75,6 @@ static int config_injection_token(const char *t) {
            eq(t, "--sysroot") || strncmp(t, "--sysroot", 8) == 0;
 }
 
-/* docker/podman query shapes only: images -f dangling=true, volume ls -f dangling=true,
-   ps -a -f status=exited. Never rmi, rm, prune, system. */
 /* ls: listing flags only (-1/-a/-A, glued). One optional path. No -R/-l/--*. */
 static int ls_listing_flag(const char *t) {
     if (!t || t[0] != '-' || t[1] == '\0' || t[1] == '-') return 0;
@@ -117,6 +115,8 @@ static int test_query_ok(char **tok, int n) {
     return has_flag && has_path;
 }
 
+/* docker/podman query shapes only: images -f dangling=true, volume ls -f dangling=true,
+   ps -a -f status=exited. Never rmi, rm, prune, system. */
 static int ctr_query_ok(char **tok, int n) {
     int has_images = 0, has_volume = 0, has_ls = 0, has_ps = 0;
     int has_a = 0, has_dangling = 0, has_exited = 0;
@@ -396,8 +396,8 @@ static int env_flag(const char *name) {
     pthread_mutex_unlock(&warned_lock);
     if (report)
         fprintf(stderr,
-                "appattic: %s=\"%s\" is not a boolean; use 1 or 0. Reading it "
-                "as 0.\n",
+                "appattic: %s=\"%s\" is not a boolean; use 1, true, yes, or on "
+                "(0, false, no, and off are off). Reading it as 0.\n",
                 name, raw);
     return 0;
 }

@@ -529,10 +529,10 @@ func appendRemoveVerdicts(_ lines: inout [String], result: ScanResult) {
 }
 
 /// Preamble every generated script opens with: the same shell, the same safety
-/// line, and a title naming what the script does. The helpers that read a
-/// generated script back (`scriptHasCommands`, `scriptHasActionableCommands`)
-/// skip a `#!/` or `set -` line, so the first two lines are the shell and
-/// `set -e` and everything after them is comments.
+/// line, and a title naming what the script does. `scriptHasActionableCommands`
+/// reads a generated script back and skips comments and `set -` lines, so the
+/// first two lines are the shell and `set -e` and everything after them is
+/// comments.
 func scriptHeader(_ kind: String, scannedAt: Date) -> [String] {
     [
         "#!/bin/sh",

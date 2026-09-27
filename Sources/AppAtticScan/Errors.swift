@@ -1,6 +1,8 @@
 import Foundation
 
-/// Recoverable I/O failures from cache and settings persistence.
+/// Recoverable I/O failures from scan-cache persistence. Settings have their
+/// own type: `SettingsError`, because a settings failure is one the user is
+/// asked to fix by hand rather than one a rescan clears.
 public enum AppAtticIOError: Error, Equatable, LocalizedError, CustomStringConvertible, Sendable {
     case createDirectoryFailed(path: String, message: String)
     case encodeFailed(message: String)

@@ -147,14 +147,14 @@ Entry points, in the order a caller reaches them:
 
 | Call | Gives you |
 |---|---|
-| `runFullScan(includeSystem:now:clock:progress:)` | `ScanData` from a live scan. `progress` is called with each status line. |
+| `runFullScan(includeSystem:now:clock:progress:)` | `ScanData` from a live scan. `progress` is called with each status line, on collector worker threads and serialized, so it needs its own lock and must not start a scan. One scan runs at a time per process. |
 | `resolveScan(includeSystem:fresh:forceLive:cacheURL:now:fingerprintFn:liveScan:)` | `ResolvedScan`: the last scan when it is still current, a live scan and a cache write when it is not. `cacheWriteFailure` says why a live scan was not kept. |
 | `scanResult(from:ignoringLeftovers:now:)` | `ScanResult`, the grouped and filtered view every report is built from. |
 | `exportedScanData(from:ignoringLeftovers:fromCache:now:)` | The `ScanData` a `--json` report prints, with totals recomputed from what is listed. |
-| `cleanupScript(from:ignoringLeftovers:now:)` / `updateScript(from:selectedIds:)` | The `sh` script for a cleanup or a named upgrade. Both are printed for review; nothing runs them. |
+| `cleanupScript(from:ignoringLeftovers:now:)` / `updateScript(from:selectedIds:)` | The `sh` script for a cleanup or a named upgrade. A cleanup script is only printed, for review. `updateScript` is what CLI `update` runs, after its confirmation, and the cache is dropped once it succeeds. |
 | `validateDiskRoot(_:)` / `scanDiskUsage(root:oneFileSystem:cancel:)` / `formatDiskTree(_:allocatedSize:top:depth:)` | Disk usage. `validateDiskRoot` throws `DiskRootError` for a missing path or a file, so the failure is catchable before the walk starts. `cancel` is polled during the walk and a cancel returns the partial tree. |
 | `listDiskVolumes(home:mountsText:)` | `DiskVolume` rows for the volume list. |
-| `readScanCache(from:)` / `writeScanCache(_:to:)` / `commitScanCache(includeSystem:data:before:after:to:)` | The scan cache. `readScanCache` throws `AppAtticIOError`; `loadScanCache` is the same read with the error swallowed. `commitScanCache` returns `false` when the scan was deliberately not kept, and throws when the write itself failed. |
+| `readScanCache(from:)` / `writeScanCache(_:to:)` / `commitScanCache(includeSystem:data:before:after:to:)` | The scan cache. `readScanCache` throws `AppAtticIOError`; `loadScanCache` returns nil instead, and deletes a file that fails to decode rather than re-reading it on every run. `commitScanCache` returns `false` when the scan was deliberately not kept, and throws when the write itself failed. |
 | `isScanCacheStale(_:includeSystem:fingerprint:now:maxAge:)` | Whether a cached scan still describes this machine. `scanFingerprint()` is the stamp to compare it against. |
 | `loadSettings(from:)` / `saveSettings(_:to:)` / `effectiveIncludeSystem(cliFlag:settings:)` | `AppAtticSettings`, from `settings.json` next to the cache. A malformed file throws `SettingsError`; it is never silently replaced by the defaults. |
 | `parseCLIArguments(_:)` | `CLIOptions` for an argv array without the leading program name. `parseError` carries the usage error, `error` its text, and `cliHelpText` / `cliUsageHint` the wording the CLI prints. |
@@ -290,7 +290,7 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 ## Notes
 
 - Homebrew `outdated` is called without `--greedy`, so auto-updating casks are not flagged just because the bottle is older than the running app.
-- An untrusted Homebrew cask is still listed on Outdated. Other formula and cask descriptions still load. AppAttic will not trust the tap.
+- An untrusted Homebrew cask is still listed on Outdated. Other formula and cask descriptions still load. AppAttic will not trust the tap. This is `AppAtticScan` behavior (the CLI and the macOS window); the Zig `brew` plugin does not read tap trust yet, so the Linux window lists every outdated cask.
 - Named outdated upgrades (Homebrew, Flatpak, apt, pacman, AUR, dnf/yum, zypper) run from the Outdated page (confirm first) or `./run.sh update` (runs now; pass `--dry-run` to print the script). App Store and Snap stay report-only.
 - Missing package managers are skipped. A check that ran and failed (network, dead remote, broken `brew outdated`, a locked `dpkg` blocking `apt-get -s autoremove`) does not fail the scan, but the scan is marked incomplete and the last-scan cache is not written, so a failed check is never served later as "up to date" or as "no unused packages".
 - Review every path in a generated script before running it.

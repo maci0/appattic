@@ -120,8 +120,8 @@ static const int kScriptTimeoutMs = 600000;
 
 /// How long a stopped script gets to exit before it is killed. `sh` and the
 /// package managers below it both handle SIGTERM, so this is only reached by a
-/// process that is stuck rather than slow. It blocks the window for at most two
-/// seconds, once, after the run has already spent ten minutes.
+/// process that is stuck rather than slow. It blocks the window for at most one
+/// second, once, after the run has already spent ten minutes.
 static const int kScriptStopGraceMs = 1000;
 
 /// How long the destructor waits for the scan thread. A run notices the cancel
@@ -3464,7 +3464,9 @@ int main(int argc, char **argv) {
             for (int i = 1; i + 2 < argc; ++i) {
                 if (std::strcmp(argv[i], "--dev-check") == 0) dir = argv[i + 2];
             }
-            w.startShots(dir ? QString::fromUtf8(dir) : QStringLiteral("/tmp/appattic-shots"));
+            // Relative default: the shots are build output, so they land beside
+            // the binary that took them and not on a tmpfs that discards them.
+            w.startShots(dir ? QString::fromUtf8(dir) : QStringLiteral("shots"));
             return app.exec();
         }
         std::fprintf(stderr, "usage: --dev-check <table|stream|disk|shot> [dir]\n");

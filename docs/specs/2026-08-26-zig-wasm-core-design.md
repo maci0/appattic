@@ -212,5 +212,5 @@ Settled by this record, kept here only so a later change knows what was decided:
 
 Still open, and deliberately undecided by this record:
 
-- `idleDays` default 30? No plugin emits `idleDays` (`core/src/container_runtime.zig:348` pins its absence) and nothing is filtered by age today. The native `Finding.idleDays` (`ui/linux-qt/finding.h:47`) is filled from `mtime` for the row label only, so a default is still undecided.
+- `idleDays` default 30? No plugin emits `idleDays` (`core/src/container_runtime.zig:355` pins its absence) and nothing is filtered by age today. The native `Finding.idleDays` (`ui/linux-qt/finding.h:47`) is filled from `mtime` for the row label only, so a default is still undecided.
 - podman-docker shim vs Docker Desktop?

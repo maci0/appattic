@@ -21,7 +21,11 @@ Every manager and leftover path is a plugin: one `<id>.zig` compiled to `<id>.wa
 > user-global list out of `pip list --user --outdated --format=json`, where Swift starts from
 > `pip list --user --not-required --format=json`, and the `--outdated` rows it also reports
 > are Zig-only so far), `deno.zig` ↔
-> `listDenoGlobals`. `gem.zig` and `composer.zig` have no Swift counterpart yet. The Swift
+> `listDenoGlobals`. `gem.zig`, `composer.zig`, and `apt.zig`'s `parsePpaSources` have no
+> Swift counterpart yet. One behavior is Swift-only in the other direction:
+> `BrewInfo.swift` reads Homebrew's "Refusing to load cask ... from untrusted tap"
+> error and marks those rows report-only, and `brew.zig` does not, so every
+> outdated cask it finds is updatable. The Swift
 > `ParserParityTests` pin edge behavior; mirror new
 > edges there too. `linux-system-names.txt` is mirrored the same way, with
 > `core/src/linux-system-names.txt` as the declaration: `@embedFile` and a

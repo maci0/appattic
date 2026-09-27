@@ -16,7 +16,9 @@ typedef void (*appattic_progress_fn)(
     void *user
 );
 
-/* Load core.wasm, then each plugin spec ("path.wasm" or "path.wasm=tag").
+/* Load the core module (built as appattic_core.wasm), then each plugin spec
+   ("path.wasm" or "path.wasm=tag"). The tag is split at the LAST '=', so a
+   plugin path may itself contain one.
    tag 0 = missing coeffect; default 1. container-runtime: 1 docker, 2 podman.
    Missing plugin files are skipped. Returns 0 on success, 1 on plugin/abi error, 2 on usage.
    Host intercept rejects `system prune`, `rmi -f`, `volume prune`,
