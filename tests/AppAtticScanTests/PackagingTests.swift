@@ -137,8 +137,14 @@ final class PackagingTests: XCTestCase {
         let packaged = root.appendingPathComponent("Sources/AppAtticScan/linux-system-names.txt")
         let values = try packaged.resourceValues(forKeys: [.isSymbolicLinkKey])
         XCTAssertEqual(values.isSymbolicLink, true, packaged.path)
+        // Resolved from the link's own directory, not with
+        // `resolvingSymlinksInPath`: on Linux Swift 5.10.1 that returns a
+        // relative link's path unchanged (an absolute target resolves), and the
+        // repository's link has to stay relative so a checkout works from any
+        // mount.
+        let target = try FileManager.default.destinationOfSymbolicLink(atPath: packaged.path)
         XCTAssertEqual(
-            try packaged.resolvingSymlinksInPath().path,
+            packaged.deletingLastPathComponent().appendingPathComponent(target).standardizedFileURL.path,
             root.appendingPathComponent("core/src/linux-system-names.txt").path,
             "the Swift resource must resolve to the table the Zig core embeds"
         )
@@ -237,7 +243,14 @@ final class PackagingTests: XCTestCase {
         var plugins: Set<String> = []
         for doc in docs {
             let text = try String(contentsOf: root.appendingPathComponent(doc), encoding: .utf8)
-            filters.formUnion(captures(#"scripts/test\.sh[ \t]+([A-Za-z][A-Za-z0-9_]*)"#, in: text))
+            // An invocation, at the start of a line with an optional `bash` in
+            // front of it. Prose that mentions the script (`scripts/test.sh and
+            // core/build.sh`) and a placeholder for the shape
+            // (`scripts/test.sh Class/testName`) are not examples, and reading
+            // them as filters made the check fail on words no class answers to.
+            filters.formUnion(
+                captures(#"(?m)^[ \t]*(?:bash[ \t]+)?scripts/test\.sh[ \t]+([A-Za-z][A-Za-z0-9_]*)"#, in: text)
+            )
             filters.formUnion(
                 captures(#"([A-Z][A-Za-z0-9_]*Tests/[A-Za-z][A-Za-z0-9_]*)"#, in: text)
             )
