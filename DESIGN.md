@@ -85,13 +85,13 @@ The product mark (`packaging/appattic.svg`) uses that same dark fill `#1e1e1e`, 
 
 macOS uses 13pt body and 11pt secondary columns on the system UI face. Linux Qt uses Selawik when it is installed (TMOG's application font), otherwise the desktop UI font. Page and section titles use bundled Michroma (OFL), the TMOG display face. Instrument and inspector labels are small, uppercase, and tracked. Values sit under those labels at body size plus two points, DemiBold, with tabular figures on sizes. Paths and scripts use the desktop fixed-width font. No VFD digit grid. No oversized marketing numerals.
 
-The roles are named, not retyped at each call site. `TypeScale` in `Sources/AppAttic/Theme.swift` and the `aa*Font` functions in `ui/linux-qt/uistyle.h` are the same scale on both platforms: body, small, title, label, value, mono. A level means the same thing on macOS and Linux, so neither shell grows a private size literal. The two display steps (`aaPageFont`, `aaSectionFont`) exist only on Qt, because the Michroma page and section titles are a Linux-shell affordance with no macOS counterpart.
+The roles are named, not retyped at each call site. `TypeScale` in `Sources/AppAttic/Theme.swift` and the `aa*Font` functions in `ui/linux-qt/uistyle.h` are the same scale on both platforms: body, small, title, label, value, mono. A level means the same thing on macOS and Linux, so neither shell grows a private size literal. The two display steps (`aaPageFont`, `aaSectionFont`) exist only on Qt, because the Michroma page and section titles are a Linux-shell affordance with no macOS counterpart. They are steps above the application font (four points and two), not point sizes of their own, so a desktop set to a large text size keeps the titles above the body text they label.
 
 The Linux sidebar is a source list (window fill, theme icons, style-drawn rows) with Settings pinned at the bottom, like TMOG. The detail pane carries a Michroma page title. Toolbars are QToolBar.
 
 ## Layout
 
-`NavigationSplitView`: source-list sidebar (min width ~220) plus detail. Detail is a compact toolbar of tools (search, Select All, Rescan), then content, then a Finder-style status bar when something is checked. The page name lives in the sidebar and as a Michroma title in the detail toolbar, matching TMOG. Content insets ~16.
+`NavigationSplitView`: source-list sidebar (min width ~220) plus detail. Detail is a compact toolbar of tools (search, Select All, Rescan), then content, then a Finder-style status bar when something is checked. The page name lives in the sidebar, where the current row carries it; the detail toolbar holds the item count, status, search, and verbs, not a title, because macOS has no display step. Content insets ~16.
 
 Overview is a cockpit: one row of instruments (uppercase label, value, semantic color on leftovers), then three dense lists. Installed apps stay "Not scanned" on Linux. Empty structure stays visible while a scan runs.
 

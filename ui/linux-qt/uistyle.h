@@ -92,21 +92,30 @@ inline QFont aaTitleFont() {
     return f;
 }
 
-inline QFont aaPageFont() {
+// Page and section titles are steps above the body size, not point sizes of
+// their own. 14pt and 12pt were the same shape as a 10pt desktop font and
+// nothing else: on a desktop set to 16pt text the page title came out below
+// the body text it labels. Pixels step at 3:2, the ratio `aaValueFont` uses.
+constexpr int kPageTitleStepPt = 4;
+constexpr int kSectionTitleStepPt = 2;
+
+inline QFont aaSteppedTitleFont(int stepPt) {
     QFont f(QStringLiteral("Michroma"));
     if (!QFontInfo(f).family().contains(QLatin1String("Michroma"), Qt::CaseInsensitive)) {
         f = aaTitleFont();
     }
-    f.setPointSize(14);
+    // A font built from a family name alone carries no size, so the step is
+    // taken from the application font every other role scales with.
+    const QFont app = QApplication::font();
+    if (app.pointSize() > 0) f.setPointSize(app.pointSize() + stepPt);
+    else if (app.pixelSize() > 0) f.setPixelSize(app.pixelSize() + stepPt * 3 / 2);
     f.setLetterSpacing(QFont::PercentageSpacing, 102);
     return aaWithScriptFallback(f);
 }
 
-inline QFont aaSectionFont() {
-    QFont f = aaPageFont();
-    f.setPointSize(12);
-    return f;
-}
+inline QFont aaPageFont() { return aaSteppedTitleFont(kPageTitleStepPt); }
+
+inline QFont aaSectionFont() { return aaSteppedTitleFont(kSectionTitleStepPt); }
 
 inline QFont aaLabelFont() {
     QFont f = aaSmallFont();
