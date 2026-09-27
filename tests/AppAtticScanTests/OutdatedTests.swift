@@ -410,6 +410,16 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(script.contains("# zypper update vim"), script)
     }
 
+    func testScriptStampCarriesTheZoneOffset() {
+        let when = Date(timeIntervalSince1970: 1_700_000_000)
+        let stamp = scriptStamp(when)
+        let offset = TimeZone.current.secondsFromGMT(for: when)
+        let sign = offset < 0 ? "-" : "+"
+        let magnitude = abs(offset)
+        let zone = String(format: "%02d%02d", magnitude / 3600, (magnitude % 3600) / 60)
+        XCTAssertTrue(stamp.hasSuffix(" \(sign)\(zone)"), stamp)
+    }
+
     func testOutdatedReportFooterMentionsNamedDistroUpgrades() {
         let lines = outdatedReportFooter([
             OutdatedPkg(name: "firefox", manager: "pacman", currentVersion: "1", latestVersion: "2"),
@@ -868,7 +878,7 @@ final class OutdatedTests: XCTestCase {
 
     func testItunesRequestReportsTransportFailure() {
         var failures: [String] = []
-        let rows = itunesRequest(["bundleId": "com.example.app", "country": "us"], session: stubURLSession(error: URLError(.notConnectedToInternet))) { failures.append($0) }
+        let rows = itunesRequest(["bundleId": "com.example.app", "country": "us"], session: stubURLSession(status: 0, error: URLError(.notConnectedToInternet))) { failures.append($0) }
         XCTAssertTrue(rows.isEmpty)
         XCTAssertEqual(failures.count, 1)
         XCTAssertTrue(failures[0].hasPrefix("no response"), failures[0])

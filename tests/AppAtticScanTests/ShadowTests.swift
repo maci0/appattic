@@ -231,8 +231,8 @@ final class ShadowTests: XCTestCase {
             root: ".local/bin",
             kind: "file",
             status: "shadow",
-            shadows: "/usr/bin/python3",
-            extra_paths: ["/home/u/.local/share/python3", "/usr/bin/python3"]
+            extra_paths: ["/home/u/.local/share/python3", "/usr/bin/python3"],
+            shadows: "/usr/bin/python3"
         )
         XCTAssertEqual(
             leftoverRemoveCommand(for: item),

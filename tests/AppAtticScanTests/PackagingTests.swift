@@ -10,8 +10,12 @@ final class PackagingTests: XCTestCase {
             return ""
         }
         let next = lines.index(after: at)
-        guard next < lines.endIndex, let value = lines[next].split(separator: ">").nth(1)?
-            .split(separator: "<").first else {
+        guard next < lines.endIndex else {
+            XCTFail("\(key) has no <string> on the next line")
+            return ""
+        }
+        let parts: [Substring] = lines[next].split(separator: ">")
+        guard parts.count > 1, let value = parts[1].split(separator: "<").first else {
             XCTFail("\(key) has no <string> on the next line")
             return ""
         }
@@ -158,7 +162,7 @@ final class PackagingTests: XCTestCase {
     private func capture(_ pattern: String, in text: String) -> String {
         guard let match = try? NSRegularExpression(pattern: pattern),
               let hit = match.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              let group = Range(match.range(at: 1), in: text)
+              let group = Range(hit.range(at: 1), in: text)
         else { return "" }
         return String(text[group])
     }

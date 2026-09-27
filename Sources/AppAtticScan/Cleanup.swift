@@ -452,12 +452,24 @@ public func uninstallCommand(for item: SoftwareItem) -> String {
     )
 }
 
-func scriptStamp(_ date: Date) -> String {
+/// Local wall time plus the zone's offset. The stamp is the only record of
+/// when a scan ran, and a generated script outlives the machine it was made
+/// on: without the offset, a script written in `Europe/Warsaw` reads as the
+/// same minute of the day as one written in `America/New_York` on a machine an
+/// hour or nine off.
+private let scriptStampFormatter: DateFormatter = {
     let f = DateFormatter()
     f.locale = Locale(identifier: "en_US_POSIX")
-    f.dateFormat = "yyyy-MM-dd HH:mm"
-    f.timeZone = TimeZone.current
-    return f.string(from: date)
+    f.calendar = Calendar(identifier: .gregorian)
+    f.dateFormat = "yyyy-MM-dd HH:mm Z"
+    return f
+}()
+
+func scriptStamp(_ date: Date) -> String {
+    // Set per call, not at init: a process that outlives a zone change (a
+    // laptop crossing a border) stamps with the zone it started in.
+    scriptStampFormatter.timeZone = .current
+    return scriptStampFormatter.string(from: date)
 }
 
 /// Largest first, collated path breaking size ties.

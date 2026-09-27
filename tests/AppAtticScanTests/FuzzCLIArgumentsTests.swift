@@ -98,19 +98,19 @@ final class FuzzCLIArgumentsTests: XCTestCase {
     /// A token the parser does not know is a usage error, wherever it sits in
     /// the vector, and the message names the offending token.
     func testRejectedTokenAnywhereYieldsAUsageError() {
-        var rng = FuzzRandom(seed: 0x5EED_C11B)
-        for (seed, token) in fuzzSeeds.enumerated() {
+        for token in FuzzCLIArgumentsTests.rejectedTokens {
             for filler in FuzzCLIArgumentsTests.validVectors {
-                let placement = rng.int(filler.count + 1)
-                var args = filler
-                args.insert(token, at: placement)
-                let opts = parseCLIArguments(args)
-                guard let error = opts.parseError else {
-                    XCTFail("accepted \(token) in \(describe(args)) (seed \(seed))")
-                    continue
+                for placement in 0...filler.count {
+                    var args = filler
+                    args.insert(token, at: placement)
+                    let opts = parseCLIArguments(args)
+                    guard let error = opts.parseError else {
+                        XCTFail("accepted \(token) in \(describe(args))")
+                        continue
+                    }
+                    XCTAssertFalse(error.description.isEmpty, describe(args))
+                    XCTAssertEqual(opts.error, error.description, describe(args))
                 }
-                XCTAssertFalse(error.description.isEmpty, describe(args))
-                XCTAssertEqual(opts.error, error.description, describe(args))
             }
         }
     }

@@ -12,7 +12,7 @@ final class ConfigTests: XCTestCase {
     }
 
     func testEffectiveConfigNamesTheFileAndItsValues() throws {
-        let url = settingsFile(#"{"includeSystem": true, "confirmDelete": false}"#)
+        let url = try settingsFile(#"{"includeSystem": true, "confirmDelete": false}"#)
         let settings = AppAtticSettings(includeSystem: true, confirmDelete: false, ignoredLeftoverPaths: ["/tmp/a"])
         let config = EffectiveConfig(settings: settings, settingsURL: url, includeSystemFlag: false, env: [:])
         XCTAssertEqual(config.settingsPath, url.path)

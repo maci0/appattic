@@ -645,8 +645,8 @@ final class RecommendTests: XCTestCase {
             kind: "app",
             path: "/Applications/iTerm.app",
             source: "pkg/other",
-            dataMtime: now.addingTimeInterval(5 * 86400),
-            installedAt: now.addingTimeInterval(-400 * 86400)
+            installedAt: now.addingTimeInterval(-400 * 86400),
+            dataMtime: now.addingTimeInterval(5 * 86400)
         )
         let v = evaluate(sw, now: now)
         XCTAssertEqual(v.tier, "review", v.reason)
