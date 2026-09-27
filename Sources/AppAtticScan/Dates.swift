@@ -132,7 +132,7 @@ func isoFastParse(_ b: UnsafeBufferPointer<UInt8>) -> Date? {
                 om = m
                 i += 2
             }
-            guard i == n, om <= 59 else { return nil }
+            guard i == n, om <= 59, oh < 14 || om == 0 else { return nil }
             offset = sign * (oh * 3600 + om * 60)
         } else {
             return nil

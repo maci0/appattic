@@ -373,13 +373,16 @@ public func resolveScan(
     let after = fingerprintFn()
     var cacheWriteFailure: String?
     do {
-        _ = try commitScanCache(
+        let committed = try commitScanCache(
             includeSystem: includeSystem,
             data: data,
             before: before,
             after: after,
             to: cacheURL
         )
+        if !committed, data.incomplete != true {
+            cacheWriteFailure = "installed software changed while the scan was running"
+        }
     } catch {
         cacheWriteFailure = error.localizedDescription
     }

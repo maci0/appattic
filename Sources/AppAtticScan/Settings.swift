@@ -161,7 +161,11 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
     /// `includeSystem` shows where the value came from, since the file and the
     /// flag combine with OR and the flag is the only one that can turn it on.
     public var lines: [String] {
-        let source = includeSystemFlag ? "on (--include-system)" : (settingsFileExists ? "file" : "default")
+        // Only a file that turned the setting on is the layer in force: a file
+        // that omits the key and one that writes `false` leave the same value,
+        // and naming the file for a value it did not supply sends the reader
+        // looking for a `true` that is not there.
+        let source = includeSystemFlag ? "on (--include-system)" : (includeSystemFile ? "file" : "default")
         return [
             "settings file: \(settingsPath)\(settingsFileExists ? "" : " (missing, using defaults)")",
             "includeSystem: \(includeSystem) [\(source)]",

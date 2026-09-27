@@ -414,12 +414,57 @@ let linuxWrapperNames: Set<String> = [
     "flatpak", "snap", "env", "sh", "bash", "dash", "python", "python3",
 ]
 
+/// Split an `Exec=` value the way the desktop entry spec does: a double-quoted
+/// argument may contain spaces, a backslash escapes the next character inside a
+/// quoted run, and leading `NAME=value` assignments are dropped so
+/// `Exec=GDK_BACKEND=x myapp %U` resolves to `myapp`.
 func execTokens(_ exec: String) -> [String] {
-    exec.split(whereSeparator: \.isWhitespace).map { token in
-        var s = String(token)
-        if s.hasPrefix("\"") { s = s.trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
-        return s
-    }.filter { !$0.isEmpty }
+    var tokens: [String] = []
+    var current = ""
+    var inQuotes = false
+    var escaped = false
+    var started = false
+    for ch in exec {
+        if escaped {
+            current.append(ch)
+            escaped = false
+            continue
+        }
+        if ch == "\\", inQuotes {
+            escaped = true
+            continue
+        }
+        if ch == "\"" {
+            inQuotes.toggle()
+            started = true
+            continue
+        }
+        if ch.isWhitespace, !inQuotes {
+            if started {
+                tokens.append(current)
+                current = ""
+                started = false
+            }
+            continue
+        }
+        current.append(ch)
+        started = true
+    }
+    if started { tokens.append(current) }
+    while let first = tokens.first, isEnvAssignment(first) {
+        tokens.removeFirst()
+    }
+    return tokens
+}
+
+/// `NAME=value`, the shape a desktop entry puts before the command in an
+/// `env`-launched `Exec` line. The name is non-empty and carries no `=`.
+func isEnvAssignment(_ token: String) -> Bool {
+    guard let eq = token.firstIndex(of: "="), eq != token.startIndex else { return false }
+    let name = token[token.startIndex..<eq]
+    guard let first = name.unicodeScalars.first else { return false }
+    guard first == "_" || CharacterSet.letters.contains(first) else { return false }
+    return name.unicodeScalars.allSatisfy { $0 == "_" || $0 == "." || CharacterSet.alphanumerics.contains($0) }
 }
 
 func linuxDesktopSource(sourceDir: String, exec: String) -> String? {

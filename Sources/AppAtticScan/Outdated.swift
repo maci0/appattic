@@ -491,7 +491,9 @@ private func snapNameVersionMap(_ text: String) -> [String: String] {
 public func parseSnapRefreshList(_ refreshText: String, installedText: String = "") -> [OutdatedPkg] {
     let latest = snapNameVersionMap(refreshText)
     let current = snapNameVersionMap(installedText)
-    return latest.map { name, ver in
+    // `latest` is a dictionary, and Swift seeds hashing per process: walking it
+    // unsorted gives the outdated list a different order on every run.
+    return latest.sorted(by: { $0.key < $1.key }).map { name, ver in
         OutdatedPkg(name: name, manager: "snap", currentVersion: current[name], latestVersion: ver)
     }
 }
@@ -982,8 +984,12 @@ func itunesRequest(
         box.mutate { $0.rows = indexItunesResults(obj) }
     }.resume()
     var result = box.value
-    if !result.answered, sem.wait(timeout: .now() + itunesLookupTimeout) == .timedOut {
-        result.failure = "no answer within \(Int(itunesLookupTimeout))s"
+    if !result.answered {
+        if sem.wait(timeout: .now() + itunesLookupTimeout) == .timedOut {
+            result.failure = "no answer within \(Int(itunesLookupTimeout))s"
+        } else {
+            result = box.value
+        }
     }
     if let failure = result.failure {
         onFailure?(failure)
