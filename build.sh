@@ -123,7 +123,10 @@ if [[ "$OS" == Darwin && "$HAVE_MAC_UI" -eq 1 ]]; then
     # Bundle mtimes come from the copy, so zipping the .app twice gives two
     # archives. Sign first: codesign rewrites the bundle, so touch has to be
     # the last thing that writes to it.
-    find AppAttic.app -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} +
+    # BSD touch (macOS) has no -h and no @epoch form; -t is the one both
+    # spell. The bundle holds only copied files, so nothing follows a symlink.
+    stamp="$(date -u -r "$SOURCE_DATE_EPOCH" +%Y%m%d%H%M.%S)"
+    find AppAttic.app -exec touch -t "$stamp" {} +
     echo "Built AppAttic.app"
     echo "Launch: open AppAttic.app"
     echo "CLI:    ./run.sh report"

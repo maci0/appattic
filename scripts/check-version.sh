@@ -60,6 +60,36 @@ extract() {
     printf '%s\n' "$out"
 }
 
+version_gt() {
+    # $1 sorts after $2, comparing each dot-separated field numerically with
+    # the missing fields read as 0. Not `sort -V`: that is GNU coreutils only
+    # and BSD sort (macOS) rejects it, and this script runs on both.
+    local -a a=() b=()
+    IFS='.' read -r -a a <<< "$1"
+    IFS='.' read -r -a b <<< "$2"
+    local i n="${#a[@]}"
+    if (( ${#b[@]} > n )); then n=${#b[@]}; fi
+    for (( i = 0; i < n; i++ )); do
+        local x="${a[i]:-0}" y="${b[i]:-0}"
+        x="${x%%[^0-9]*}"; x="${x:-0}"
+        y="${y%%[^0-9]*}"; y="${y:-0}"
+        (( 10#$x > 10#$y )) && return 0
+        (( 10#$x < 10#$y )) && return 1
+    done
+    return 1
+}
+
+newest_version() {
+    # Highest version on stdin, empty input gives empty output.
+    local best="" line
+    while IFS= read -r line; do
+        if [[ -n "$line" ]] && { [[ -z "$best" ]] || version_gt "$line" "$best"; }; then
+            best="$line"
+        fi
+    done
+    printf '%s\n' "$best"
+}
+
 plist_string() {
     # $1: label, $2: key, $3: file. The value is the <string> on the line after
     # the <key>, which is how a plist written one key per line spells a string.
@@ -75,7 +105,7 @@ plist_string() {
 swift_version="$(extract "appAtticVersion" "$VERSION_SRC" 's/^public let appAtticVersion = "\([^"]*\)"$/\1/p')"
 # The newest release by version, not by position: an entry appended out of
 # order must not leave an older one looking like the release of record.
-meta_version="$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' "$METAINFO" 2>/dev/null | sort -V | tail -n 1)"
+meta_version="$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' "$METAINFO" 2>/dev/null | newest_version)"
 if [[ -z "$meta_version" ]]; then
     echo "error: no <release> found in the AppStream metainfo ($METAINFO)" >&2
     exit 1
