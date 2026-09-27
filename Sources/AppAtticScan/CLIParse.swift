@@ -228,7 +228,9 @@ commands:
   `--` ends the options: `appattic disk -- -backup` reads `-backup` as the PATH.
 
 options:
-  --json FILE         also write full results as JSON to FILE
+  --json FILE         also write the scan as JSON to FILE. The file is the whole
+                      scan: --top, --category, --leftovers-only, and --stale-only
+                      shape what is printed, not what is written
   --include-system    on report, leftovers, stale, outdated, packages, update, config:
                       include OS system apps in the stale list
   --fresh             on report, leftovers, stale, outdated, packages, update: ignore

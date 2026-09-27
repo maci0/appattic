@@ -46,7 +46,8 @@ Debug build only. Run one gate and exit:
 (the page renders go to
 .IR dir ).
 The gate is compiled out of a release build, which rejects the option with
-exit 2 rather than opening the window.
+exit 2 rather than opening the window. A gate name outside that list is
+rejected with exit 2 before the window is built.
 .SH ENVIRONMENT
 .TP
 .B APPATTIC_CORE_OUT

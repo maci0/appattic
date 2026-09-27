@@ -61,6 +61,15 @@ final class CLIFlagTests: XCTestCase {
         )
     }
 
+    /// `--json` exports the whole scan (`exportedScanData`), so the help has to
+    /// say that the report filters shape the printout, not the file. A script
+    /// that reads the file expecting `--top` to have cut it is reading a
+    /// different set than the one it printed.
+    func testHelpSaysJSONIgnoresReportFilters() {
+        XCTAssertTrue(cliHelpText.contains("--json FILE"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("not what is written"), cliHelpText)
+    }
+
     /// `erase` deletes the stored snapshot, so it scans nothing and reads no
     /// setting: it takes no positional argument and no scan flag.
     func testEraseCommand() {

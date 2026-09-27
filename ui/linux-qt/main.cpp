@@ -3473,6 +3473,17 @@ int main(int argc, char **argv) {
     /* Dev-only gates: table model, streaming rows, disk streaming, renders.
        Release ships only --smoke, which the AppImage step self-checks with. */
     if (const char *which = argvValue(argc, argv, "--dev-check")) {
+        /* The name is checked before QApplication and the window exist: a typo
+           has to read as a usage error with exit 2, the same as the release
+           build's rejection of the flag itself, rather than the app opening and
+           then complaining. */
+        if (std::strcmp(which, "table") != 0 && std::strcmp(which, "stream") != 0
+            && std::strcmp(which, "disk") != 0 && std::strcmp(which, "shot") != 0) {
+            std::fprintf(stderr, "error: unknown check: %s\n", which);
+            std::fprintf(stderr, "usage: --dev-check <table|stream|disk|shot> [dir]\n");
+            std::fprintf(stderr, "Try 'appattic-qt --help' for more information.\n");
+            return 2;
+        }
         if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
             && qEnvironmentVariableIsEmpty("DISPLAY")
             && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
@@ -3498,7 +3509,10 @@ int main(int argc, char **argv) {
             w.startShots(dir ? QString::fromUtf8(dir) : QStringLiteral("shots"));
             return app.exec();
         }
-        std::fprintf(stderr, "usage: --dev-check <table|stream|disk|shot> [dir]\n");
+        /* The name was checked before the window existed, so reaching here
+           means a name was added to that check without a branch: fail, rather
+           than open the window and run nothing. */
+        std::fprintf(stderr, "error: --dev-check %s is not wired to a check\n", which);
         return 2;
     }
 #else
@@ -3509,6 +3523,7 @@ int main(int argc, char **argv) {
     if (argvHas(argc, argv, "--dev-check")) {
         std::fprintf(stderr, "error: --dev-check is a debug-build gate; this is a release build\n");
         std::fprintf(stderr, "       --smoke is the headless check that ships\n");
+        std::fprintf(stderr, "Try 'appattic-qt --help' for more information.\n");
         return 2;
     }
 #endif
