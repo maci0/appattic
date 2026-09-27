@@ -91,4 +91,38 @@ final class LeftoversTests: XCTestCase {
         result.dataItems.reverse()
         XCTAssertEqual(orphanedBySize(result).map(\.name), ["huge", "alpha", "beta"])
     }
+
+    func testUnmeasuredLeftoverSaysWhyItHasNoSize() {
+        // A measured row prints its bytes.
+        XCTAssertEqual(
+            leftoverSizeText(measured: true, sizeBytes: 2048, kind: "dir", root: "Caches"),
+            humanSize(2048)
+        )
+        // A nested row's bytes are already in the parent total, so it says so.
+        let nested: [(kind: String, root: String)] = [
+            ("bundleid", "Application Support"),
+            ("group", "Application Support"),
+            ("dir", "Containers"),
+            ("dir", "Group Containers"),
+            ("dir", "WebKit"),
+        ]
+        for row in nested {
+            XCTAssertTrue(
+                leftoverSizeIsNested(kind: row.kind, root: row.root),
+                "\(row.kind) under \(row.root) is measured by the row above it"
+            )
+            XCTAssertEqual(
+                leftoverSizeText(measured: false, sizeBytes: 0, kind: row.kind, root: row.root),
+                "n/a (counted above)"
+            )
+        }
+        // A failed size query is not a permissions boundary. Printing "protected"
+        // for it claimed the path was deliberately not measured, and told the
+        // operator nothing about the bytes missing from the total.
+        XCTAssertFalse(leftoverSizeIsNested(kind: "dir", root: "Caches"))
+        XCTAssertEqual(
+            leftoverSizeText(measured: false, sizeBytes: 0, kind: "dir", root: "Caches"),
+            "n/a (size unknown)"
+        )
+    }
 }

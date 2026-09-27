@@ -109,6 +109,21 @@ static qint64 addBytes(qint64 a, qint64 b) {
 /// the last 400, so this only has to cover them with room for a whole line.
 static const int kScriptOutputCap = 64 * 1024;
 
+/// How long a generated cleanup, update, or mark-manual script may run before
+/// it is stopped. The same bound the Swift runner applies (`scriptRunTimeout`),
+/// and for the same reason: a script blocked on a stale dpkg lock, an
+/// unreachable mirror, or a prompt nothing can answer otherwise leaves every
+/// action disabled with only the busy bar to say so, and the window is unusable
+/// until the app is killed. These scripts are not rolled back, so a stop
+/// mid-run is reported as partial work, never as a clean failure.
+static const int kScriptTimeoutMs = 600000;
+
+/// How long a stopped script gets to exit before it is killed. `sh` and the
+/// package managers below it both handle SIGTERM, so this is only reached by a
+/// process that is stuck rather than slow. It blocks the window for at most two
+/// seconds, once, after the run has already spent ten minutes.
+static const int kScriptStopGraceMs = 1000;
+
 /// How long the destructor waits for the scan thread. A run notices the cancel
 /// flag between plugins, so a normal quit returns at once; a subprocess wedged
 /// past its own timeout does not, and the wait has to end for the app to.
@@ -839,6 +854,7 @@ public:
     }
 
     ~MainWindow() override {
+        if (m_scriptTimer) m_scriptTimer->stop();
         if (m_scriptProc) {
             m_scriptProc->kill();
             m_scriptProc->waitForFinished(3000);
@@ -2917,10 +2933,20 @@ private:
         env.insert(QStringLiteral("APT_LISTCHANGES_FRONTEND"), QStringLiteral("none"));
         proc->setProcessEnvironment(env);
         m_scriptOutput.clear();
+        m_scriptStopped = false;
+        if (!m_scriptTimer) {
+            m_scriptTimer = new QTimer(this);
+            m_scriptTimer->setSingleShot(true);
+            connect(m_scriptTimer, &QTimer::timeout, this, [this]() { stopScript(); });
+        }
+        m_scriptTimer->start(kScriptTimeoutMs);
         connect(proc, &QProcess::readyRead, this, [this, proc] {
             appendScriptOutput(proc->readAll());
         });
         connect(proc, &QProcess::finished, this, [this, proc, path = tmp.fileName()](int code) {
+            m_scriptTimer->stop();
+            const bool stopped = m_scriptStopped;
+            m_scriptStopped = false;
             if (m_scriptProc == proc) m_scriptProc = nullptr;
             if (m_scriptPath == path) m_scriptPath.clear();
             QFile::remove(path);
@@ -2934,7 +2960,7 @@ private:
                scanned directory, so it is dropped here rather than left to serve
                rows for what the script just removed. */
             removeScanCacheFile(scanCacheFilePath());
-            if (code != 0) {
+            if (stopped || code != 0) {
                 appendScriptOutput(proc->readAll());
                 QString err = redactHomePaths(QString::fromUtf8(m_scriptOutput).trimmed());
                 if (err.size() > 400) {
@@ -2947,7 +2973,17 @@ private:
                     while (drop < err.size() && err.at(drop).isLowSurrogate()) ++drop;
                     if (drop > 0) err.remove(0, drop);
                 }
-                if (err.isEmpty()) {
+                if (stopped) {
+                    /* The exit status says SIGTERM or SIGKILL, which describes
+                       how the stop was carried out and not what went wrong. The
+                       reason is the deadline, and what it cost is the lines that
+                       already ran. */
+                    const QString head = QStringLiteral(
+                        "The script was stopped after %1 minutes without finishing. "
+                        "Commands before the stop may have already run."
+                    ).arg(kScriptTimeoutMs / 60000);
+                    err = err.isEmpty() ? head : head + QStringLiteral("\n") + err;
+                } else if (err.isEmpty()) {
                     err = QStringLiteral(
                         "The script failed (exit %1). Commands before the failure may have already run."
                     ).arg(code);
@@ -2957,6 +2993,7 @@ private:
                     ).arg(code).arg(err);
                 }
                 showError(err);
+                if (stopped) statusBar()->showMessage(QStringLiteral("Script stopped."));
                 refreshActionBar();
             } else {
                 if (!m_settingsError) {
@@ -2972,6 +3009,8 @@ private:
         });
         connect(proc, &QProcess::errorOccurred, this, [this, proc, path = tmp.fileName()](QProcess::ProcessError err) {
             if (err != QProcess::FailedToStart) return;
+            m_scriptTimer->stop();
+            m_scriptStopped = false;
             if (m_scriptProc == proc) m_scriptProc = nullptr;
             if (m_scriptPath == path) m_scriptPath.clear();
             QFile::remove(path);
@@ -2983,6 +3022,19 @@ private:
             proc->deleteLater();
         });
         proc->start(QStringLiteral("/bin/sh"), {tmp.fileName()});
+    }
+
+    /// The script deadline fired. Escalate to a kill and let the `finished`
+    /// handler report it, so the temp file, the busy bar, the buttons, and the
+    /// cache drop all happen on the one path that already gets them right.
+    void stopScript() {
+        QProcess *proc = m_scriptProc;
+        if (!proc) return;
+        m_scriptStopped = true;
+        proc->terminate();
+        if (proc->waitForFinished(kScriptStopGraceMs)) return;
+        proc->kill();
+        proc->waitForFinished(kScriptStopGraceMs);
     }
 
     void applySystemAppearance() {
@@ -3194,6 +3246,8 @@ private:
     QThread *m_scanThread = nullptr;
     ScanWorker *m_worker = nullptr;
     QProcess *m_scriptProc = nullptr;
+    QTimer *m_scriptTimer = nullptr;
+    bool m_scriptStopped = false;
     QString m_scriptPath;
     QByteArray m_scriptOutput;
     QVector<Finding> m_findings;

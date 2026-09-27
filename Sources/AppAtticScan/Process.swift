@@ -349,10 +349,14 @@ public func runGeneratedScript(
         .appendingPathComponent("appattic-script-\(UUID().uuidString).sh")
     let errURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("appattic-script-\(UUID().uuidString).err")
-    try writeOwnerOnlyFile(Data(script.utf8), to: url)
+    // Registered before either write, not after. A write is two steps, the
+    // file then the owner-only mode, and a failure in the second leaves the
+    // file behind. With the removal armed first, that path takes the temp file
+    // with it; a removal for a file the write never created is a no-op.
     defer { try? FileManager.default.removeItem(at: url) }
-    try writeOwnerOnlyFile(Data(), to: errURL)
     defer { try? FileManager.default.removeItem(at: errURL) }
+    try writeOwnerOnlyFile(Data(script.utf8), to: url)
+    try writeOwnerOnlyFile(Data(), to: errURL)
     let errHandle = try FileHandle(forWritingTo: errURL)
     // Closed before the file is read back, and the defer is the exit-path
     // close: closing a FileHandle twice is an exception Foundation does not

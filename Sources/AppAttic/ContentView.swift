@@ -1409,13 +1409,12 @@ struct ContentView: View {
     }
 
     func leftoverSizeLabel(_ item: LeftoverItem) -> String {
-        if item.size_measured { return humanSize(item.size_bytes ?? 0) }
-        if item.kind == "bundleid" || item.kind == "group"
-            || item.root == "Containers" || item.root == "Group Containers" || item.root == "WebKit"
-        {
-            return "protected"
-        }
-        return "unknown"
+        leftoverSizeText(
+            measured: item.size_measured,
+            sizeBytes: item.size_bytes ?? 0,
+            kind: item.kind,
+            root: item.root
+        )
     }
 
     func packageSizeLabel(_ item: PackageEntry) -> String {

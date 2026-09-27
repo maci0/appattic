@@ -206,6 +206,30 @@ public func skipNestedProbe(_ item: DataItem) -> Bool {
     return false
 }
 
+/// True when a leftover's bytes are already counted by the row above it, so
+/// the scan measures neither again. False for an ordinary leftover whose size
+/// query simply failed.
+public func leftoverSizeIsNested(kind: String, root: String) -> Bool {
+    if kind == "bundleid" || kind == "group" { return true }
+    return skipNestedRoots.contains(root)
+}
+
+/// The size a report prints for one leftover row, and why it is missing when
+/// it is.
+///
+/// A row with no byte count has one of two reasons, and they read very
+/// differently. A nested row is deliberately not walked again because its
+/// bytes are already in the parent total. Any other unmeasured row is a size
+/// query that failed: `du` was not installed, ran out of time, hit the output
+/// limit, or the walk could not open the tree. One label for both told the
+/// operator a failed measurement was a permissions boundary, which is a claim
+/// nothing established about a path the scan has not read.
+public func leftoverSizeText(measured: Bool, sizeBytes: Int, kind: String, root: String) -> String {
+    if measured { return humanSize(sizeBytes) }
+    if leftoverSizeIsNested(kind: kind, root: root) { return "n/a (counted above)" }
+    return "n/a (size unknown)"
+}
+
 /// One `stat` (follows symlinks, like the old `attributesOfItem`): mtime and
 
 /// kind together, without Foundation's owner/group lookup per entry.

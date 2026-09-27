@@ -291,7 +291,13 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
     let shown = limit.map { Array(orphans.prefix($0)) } ?? orphans
     var rows: [[String]] = []
     for i in shown {
-        let size = i.sizeMeasured ? humanSize(i.sizeBytes) : C.dim("n/a (protected)")
+        let label = leftoverSizeText(
+            measured: i.sizeMeasured,
+            sizeBytes: i.sizeBytes,
+            kind: i.kind,
+            root: i.rootLabel
+        )
+        let size = i.sizeMeasured ? label : C.dim(label)
         let nameColor: (String) -> String = i.leftoverStatus == .shadow ? C.yellow : C.red
         rows.append([
             nameColor(leftoverDisplayName(name: i.name, extraPaths: i.extraPaths)),
@@ -326,6 +332,16 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
     if !system.isEmpty {
         print()
         print(C.dim("System-owned data (not counted as reclaimable): \(system.count) items"))
+    }
+    // The total is a sum over the rows that carry a byte count. A row whose
+    // size query failed is in the item count and not in the bytes, so the
+    // line says so instead of letting the two read as one number.
+    let unmeasured = orphans.filter {
+        !$0.sizeMeasured && !leftoverSizeIsNested(kind: $0.kind, root: $0.rootLabel)
+    }
+    if !unmeasured.isEmpty {
+        print()
+        print(C.dim("\(unmeasured.count) item(s) could not be sized and are missing from the total below"))
     }
     if !orphans.isEmpty {
         print()
