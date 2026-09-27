@@ -223,17 +223,25 @@ final class ScannerViewModel {
                     vm.progressMessage = "Saving scan cache…"
                 }
             }
-            _ = commitScanCache(
-                includeSystem: includeSystem,
-                data: result,
-                before: before,
-                after: after
-            )
+            var cacheWriteFailure: String?
+            do {
+                _ = try commitScanCache(
+                    includeSystem: includeSystem,
+                    data: result,
+                    before: before,
+                    after: after
+                )
+            } catch {
+                cacheWriteFailure = error.localizedDescription
+            }
             DispatchQueue.main.async {
                 vm.scanData = result
                 vm.pruneSelection()
                 vm.isScanning = false
                 vm.statusText = "scanned \(formatDate(result.scanned_at)) · \(formatSeconds(result.duration_s))s"
+                if let cacheWriteFailure {
+                    vm.statusText += " · not cached: \(redactHomePaths(cacheWriteFailure))"
+                }
             }
         }
     }
@@ -478,6 +486,7 @@ final class ScannerViewModel {
                     vm.isScanning = false
                     if status != 0 {
                         vm.errorMessage = commandFailureMessage(status: status, stderr: errText)
+                            + " Selection kept."
                         completion(false)
                         return
                     }

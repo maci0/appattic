@@ -55,6 +55,9 @@ enum AppAtticCLI {
         if resolved.fromCache {
             fputs("using cached scan from \(resolved.data.scanned_at) (pass --fresh to scan now)\n", stderr)
         }
+        if let cacheFailure = resolved.cacheWriteFailure {
+            fputs("warning: scan not cached: \(redactHomePaths(cacheFailure)); the next run rescans\n", stderr)
+        }
         let ignored = Set(settings.ignoredLeftoverPaths)
         let result = scanResult(from: resolved.data, ignoringLeftovers: ignored, now: now)
         if let jsonPath = opts.json {
@@ -101,9 +104,9 @@ enum AppAtticCLI {
                 Foundation.exit(1)
             }
             fputs("Updating \(n) package(s)…\n", stderr)
-            let rc = runShellScript(script)
-            if rc != 0 {
-                fputs("error: update failed (exit \(rc))\n", stderr)
+            let run = runShellScript(script)
+            if run.status != 0 {
+                fputs("error: \(commandFailureMessage(status: run.status, stderr: run.stderr))\n", stderr)
                 Foundation.exit(1)
             }
             clearScanCache()
@@ -441,20 +444,34 @@ func confirmUpdate(count: Int, assumeYes: Bool) -> Bool {
     return answer == "y" || answer == "yes"
 }
 
-func runShellScript(_ script: String) -> Int32 {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-update-\(UUID().uuidString).sh")
+/// Runs a generated script under `/bin/sh`. Returns the exit status and
+/// whatever the script wrote to stderr, which is the only thing that says
+/// which of `set -e`'s lines failed.
+func runShellScript(_ script: String) -> (status: Int32, stderr: String) {
+    let dir = FileManager.default.temporaryDirectory
+    let url = dir.appendingPathComponent("appattic-update-\(UUID().uuidString).sh")
+    let errURL = dir.appendingPathComponent("appattic-update-\(UUID().uuidString).err")
     do {
         try writeOwnerOnlyFile(Data(script.utf8), to: url)
         defer { try? FileManager.default.removeItem(at: url) }
+        try writeOwnerOnlyFile(Data(), to: errURL)
+        defer { try? FileManager.default.removeItem(at: errURL) }
+        let errHandle = try FileHandle(forWritingTo: errURL)
+        defer { try? errHandle.close() }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [url.path]
         process.environment = augmentedProcessEnvironment()
+        process.standardError = errHandle
+        process.standardInput = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
-        return process.terminationStatus
+        try? errHandle.synchronize()
+        let status = process.terminationStatus
+        let errText = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
+        return (status, errText)
     } catch {
         fputs("error: \(redactHomePaths(error.localizedDescription))\n", stderr)
-        return 1
+        return (1, "")
     }
 }

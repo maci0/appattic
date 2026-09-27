@@ -91,6 +91,13 @@ public func augmentedProcessEnvironment(
     return out
 }
 
+/// How long the pipe readers may keep draining after the command itself is
+/// gone. A descendant that inherited the write end (a backgrounded grandchild,
+/// a helper `brew` forgot to reap) holds the pipe open, and `readDataToEndOfFile`
+/// then blocks long past the exit. A pipe still drains at once once its last
+/// writer closed, so a normal command never spends this.
+public let commandPipeDrainGrace: TimeInterval = 2
+
 public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, String, String) {
     guard let exe = cmd.first else { return (127, "", "empty command") }
     let resolved: String
@@ -155,7 +162,11 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
         }
     }
     process.waitUntilExit()
-    group.wait()
+    // Bounded, not unconditional: the exit above ends the direct child, but a
+    // descendant holding the write end leaves the readers blocked. The timeout
+    // is meant to bound the whole call, so waiting on them without a deadline
+    // would turn a hung command into a hung scan.
+    _ = group.wait(timeout: .now() + commandPipeDrainGrace)
     if timedOut {
         return (127, "", "timeout")
     }

@@ -333,22 +333,19 @@ final class CacheTests: XCTestCase {
             leftovers: [],
             software: []
         )
-        XCTAssertFalse(commitScanCache(includeSystem: false, data: data, before: "a", after: "b", to: url))
+        XCTAssertFalse(try commitScanCache(includeSystem: false, data: data, before: "a", after: "b", to: url))
         XCTAssertNil(loadScanCache(from: url))
         var incomplete = data
         incomplete.incomplete = true
-        XCTAssertFalse(commitScanCache(includeSystem: false, data: incomplete, before: "a", after: "a", to: url))
+        XCTAssertFalse(try commitScanCache(includeSystem: false, data: incomplete, before: "a", after: "a", to: url))
         XCTAssertNil(loadScanCache(from: url))
-        XCTAssertTrue(commitScanCache(includeSystem: false, data: data, before: "a", after: "a", to: url))
+        XCTAssertTrue(try commitScanCache(includeSystem: false, data: data, before: "a", after: "a", to: url))
         let saved = try XCTUnwrap(loadScanCache(from: url))
         XCTAssertEqual(saved.fingerprint, "a")
     }
 
     func testCommitScanCacheReportsWriteFailure() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("appattic-commit-directory-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let blocked = try blockedCacheParent("commit")
         let data = ScanData(
             scanned_at: "2026-08-17T12:00:00Z",
             duration_s: 1,
@@ -366,13 +363,45 @@ final class CacheTests: XCTestCase {
             software: []
         )
 
-        XCTAssertFalse(commitScanCache(
+        XCTAssertThrowsError(try commitScanCache(
             includeSystem: false,
             data: data,
             before: "a",
             after: "a",
-            to: directory
-        ))
+            to: blocked.appendingPathComponent("last-scan.json")
+        )) { error in
+            XCTAssertTrue(error is AppAtticIOError, "a failed write must name the I/O failure, not look like a skip")
+        }
+    }
+
+    /// A scan that never reached disk is not a scan that was deliberately not
+    /// kept, so `resolveScan` has to hand the reason back to its caller.
+    func testCommitScanCacheReportsWriteFailureToResolveScan() throws {
+        let blocked = try blockedCacheParent("commit-resolve")
+
+        let resolved = resolveScan(
+            includeSystem: false,
+            fresh: true,
+            forceLive: true,
+            cacheURL: blocked.appendingPathComponent("last-scan.json"),
+            fingerprintFn: { "a" },
+            liveScan: { _ in sampleScanData(scannedAt: "2026-08-17T13:00:00Z") }
+        )
+        XCTAssertFalse(resolved.fromCache)
+        XCTAssertEqual(resolved.data.scanned_at, "2026-08-17T13:00:00Z")
+        let failure = try XCTUnwrap(resolved.cacheWriteFailure)
+        XCTAssertFalse(failure.isEmpty)
+    }
+
+    /// A regular file standing where the cache directory must be: creating the
+    /// directory fails on every platform, so the write failure is certain
+    /// rather than a race with `rename` semantics.
+    private func blockedCacheParent(_ tag: String) throws -> URL {
+        let blocker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-blocker-\(tag)-\(UUID().uuidString)")
+        try Data().write(to: blocker)
+        addTeardownBlock { try? FileManager.default.removeItem(at: blocker) }
+        return blocker
     }
 
     func testClearScanCacheRemovesFile() throws {

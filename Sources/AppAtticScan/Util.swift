@@ -1,0 +1,1173 @@
+import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
+public let appAtticVersion = "1.3.4"
+
+public enum PlatformOverride {
+    nonisolated(unsafe) public static var linux: Bool?
+    public static var isLinux: Bool {
+        if let linux { return linux }
+        #if os(Linux)
+        return true
+        #else
+        return false
+        #endif
+    }
+    public static var isDarwin: Bool { !isLinux }
+}
+
+public func parseOsRelease(_ text: String) -> [String: String] {
+    var out: [String: String] = [:]
+    // Byte scan: `trimmingCharacters` + `firstIndex(of:)` per line cost ~26 µs
+    // for a 12-line os-release. Keys/values are ASCII; only the two result
+    // Strings allocate.
+    //
+    // Split on raw LF/CR bytes, not `split(separator: "\n")`: Swift treats
+    // "\r\n" as one grapheme cluster, so that never splits a CRLF file.
+    let bytes = Array(text.utf8)
+    let n = bytes.count
+    func emit(_ s: Int, _ e: Int) {
+        var (a, b) = (s, e)
+        while a < b, bytes[a] == 0x20 || bytes[a] == 0x09 { a += 1 }
+        while b > a, bytes[b - 1] == 0x20 || bytes[b - 1] == 0x09 { b -= 1 }
+        guard a < b, bytes[a] != 0x23 /* # */ else { return }
+        var eq = a
+        while eq < b, bytes[eq] != 0x3D /* = */ { eq += 1 }
+        guard eq < b else { return }
+        var (vs, ve) = (eq + 1, b)
+        while vs < ve, bytes[vs] == 0x20 || bytes[vs] == 0x09 { vs += 1 }
+        while ve > vs, bytes[ve - 1] == 0x20 || bytes[ve - 1] == 0x09 { ve -= 1 }
+        if ve - vs >= 2 {
+            let f = bytes[vs]
+            let l = bytes[ve - 1]
+            if (f == 0x22 && l == 0x22) || (f == 0x27 && l == 0x27) { vs += 1; ve -= 1 }
+        }
+        out[String(decoding: bytes[a..<eq], as: UTF8.self)] =
+            String(decoding: bytes[vs..<ve], as: UTF8.self)
+    }
+    var i = 0
+    while i < n {
+        var j = i
+        while j < n, bytes[j] != 0x0A, bytes[j] != 0x0D { j += 1 }
+        emit(i, j)
+        // One CRLF (or run of breaks) is one boundary.
+        while j < n, bytes[j] == 0x0A || bytes[j] == 0x0D { j += 1 }
+        i = j
+    }
+    return out
+}
+
+public func linuxDistroFamily(osRelease: String) -> String {
+    let fields = parseOsRelease(osRelease)
+    let id = (fields["ID"] ?? "").lowercased()
+    let like = (fields["ID_LIKE"] ?? "").lowercased()
+        .split(whereSeparator: \.isWhitespace)
+        .map(String.init)
+    let tokens = ([id] + like).filter { !$0.isEmpty }
+    func matches(_ needles: Set<String>) -> Bool {
+        tokens.contains { needles.contains($0) }
+    }
+    if matches(["arch", "archlinux", "manjaro", "endeavouros", "garuda", "cachyos", "artix", "archarm"]) {
+        return "arch"
+    }
+    if matches(["fedora", "rhel", "centos", "rocky", "almalinux", "alma", "nobara", "ol", "amzn"]) {
+        return "fedora"
+    }
+    if tokens.contains(where: { $0.contains("suse") || $0 == "sles" || $0.hasPrefix("opensuse") }) {
+        return "suse"
+    }
+    if matches(["debian", "ubuntu", "linuxmint", "pop", "elementary", "raspbian", "kali", "zorin", "neon"]) {
+        return "debian"
+    }
+    return "unknown"
+}
+
+/// Distro package manager used for orphans and outdated queries.
+///
+/// `dpkg` is not a query target: `resolveDistroPackageManager` never returns
+/// it, and `dpkg -l` rc rows are collected inside the `.apt` query because
+/// both belong to Debian. The case still exists so `DistroPackageManager(rawValue:)`
+/// admits every `PackageEntry.manager` a collector can emit, which is what
+/// `PackageEntry.canMarkManual` asks.
+public enum DistroPackageManager: String, Sendable {
+    case pacman
+    case apt
+    case dpkg
+    case dnf
+    // The pinned toolchain (Swift 5.10.1) fails to resolve a case literally
+    // spelled `zypper` on this enum, failing the build with "has no member".
+    // The raw value is what every manager string, JSON field, and generated
+    // script compares against, so renaming the case fixes the compiler without
+    // touching observable output.
+    case zypperPkg = "zypper"
+}
+
+/// Family from os-release, then PATH order pacman, dnf, zypper, apt.
+public func resolveDistroPackageManager(family: String, which: WhichFn) -> DistroPackageManager? {
+    switch family {
+    case "arch":
+        return .pacman
+    case "debian":
+        return .apt
+    case "fedora":
+        return .dnf
+    case "suse":
+        return DistroPackageManager.zypperPkg
+    default:
+        break
+    }
+    if which("pacman") != nil { return .pacman }
+    if which("dnf5") != nil || which("dnf") != nil || which("yum") != nil { return .dnf }
+    if which("zypper") != nil { return DistroPackageManager.zypperPkg }
+    if which("apt-get") != nil || which("apt") != nil { return .apt }
+    return nil
+}
+
+/// UTF-8 decode. Invalid bytes become U+FFFD. A leading BOM is not content.
+public func decodeUTF8(_ data: Data) -> String {
+    var text = String(decoding: data, as: UTF8.self)
+    if text.hasPrefix("\u{FEFF}") {
+        text.removeFirst()
+    }
+    return text
+}
+
+/// Case fold that does not follow the process locale.
+/// `String.lowercased()` maps "I" to "ı" in tr_TR, which breaks identity keys.
+///
+/// ASCII fast path: byte fold (~30 ns) instead of the Locale/ICU pass
+/// (~1.5 µs). Only non-ASCII input takes the slow path, where POSIX and
+/// Turkish mappings can actually differ.
+public func posixLowercased(_ s: String) -> String {
+    // ASCII check first: works on small/non-contiguous strings too, where
+    // `withContiguousStorageIfAvailable` gives up and would force the slow path.
+    guard s.utf8.contains(where: { $0 >= 0x80 }) else {
+        let n = s.utf8.count
+        guard n > 0 else { return "" }
+        return withUnsafeTemporaryAllocation(of: UInt8.self, capacity: n) { buf in
+            var k = 0
+            for c in s.utf8 {
+                buf[k] = (c >= 0x41 && c <= 0x5A) ? c &+ 32 : c
+                k += 1
+            }
+            return String(decoding: UnsafeBufferPointer(start: buf.baseAddress, count: n), as: UTF8.self)
+        }
+    }
+    return s.lowercased(with: Locale(identifier: "en_US_POSIX"))
+}
+
+/// Read a file as UTF-8. Invalid sequences become U+FFFD, matching `runCommand`.
+public func readUTF8File(_ path: String) -> String? {
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+    return decodeUTF8(data)
+}
+
+public func linuxOsReleaseText(
+    readFile: (String) -> String? = { path in
+        readUTF8File(path)
+    }
+) -> String {
+    readFile("/etc/os-release") ?? readFile("/usr/lib/os-release") ?? ""
+}
+
+/// XDG Base Directory: unset, empty, or non-absolute values use `home/fallback`.
+public func xdgUserDir(
+    _ variable: String,
+    fallback: String,
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    if let raw = env[variable]?.trimmingCharacters(in: .whitespacesAndNewlines), raw.hasPrefix("/") {
+        return raw
+    }
+    return (home as NSString).appendingPathComponent(fallback)
+}
+
+public func xdgDataHome(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    xdgUserDir("XDG_DATA_HOME", fallback: ".local/share", home: home, env: env)
+}
+
+public func xdgConfigHome(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    xdgUserDir("XDG_CONFIG_HOME", fallback: ".config", home: home, env: env)
+}
+
+public func xdgCacheHome(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    xdgUserDir("XDG_CACHE_HOME", fallback: ".cache", home: home, env: env)
+}
+
+public func xdgStateHome(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    xdgUserDir("XDG_STATE_HOME", fallback: ".local/state", home: home, env: env)
+}
+
+/// XDG Base Directory: an unset or empty `XDG_DATA_DIRS` uses the spec default.
+/// An empty variable is not the same as a variable listing no system dirs.
+private let defaultXDGDataDirs = "/usr/local/share:/usr/share"
+
+public func xdgSystemDirs(
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    let raw = env["XDG_DATA_DIRS"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return raw.isEmpty ? defaultXDGDataDirs : raw
+}
+
+/// Identity token for leftover/app matching. NFC and NFD spellings of the same
+/// word collapse (macOS filenames are NFD, plist names are usually NFC).
+/// Fold one scalar the way the slow path does: NFD -> case+diacritic fold -> keep
+/// ASCII letters/digits. Only the non-ASCII path needs the full Unicode machinery.
+private func normSlow(_ s: String) -> String {
+    s.decomposedStringWithCanonicalMapping
+        .folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: Locale(identifier: "en_US_POSIX")
+        )
+        .filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+}
+
+public func norm(_ s: String) -> String {
+    // Fast path: for pure-ASCII input, canonical decomposition and diacritic
+    // folding are no-ops, so this is exactly lowercasing then keeping [a-z0-9].
+    // Most app names take it, avoiding three String allocations per call.
+    var bytes: [UInt8] = []
+    bytes.reserveCapacity(s.utf8.count)
+    for b in s.utf8 {
+        if b >= 0x80 {
+            return normSlow(s)
+        }
+        let c = (b >= 0x41 && b <= 0x5A) ? b &+ 32 : b
+        if (c >= 0x61 && c <= 0x7A) || (c >= 0x30 && c <= 0x39) {
+            bytes.append(c)
+        }
+    }
+    return String(decoding: bytes, as: UTF8.self)
+}
+
+/// Comparison form for leftover ignore paths. NFC so a pasted path matches
+/// a filesystem path that used combining marks.
+public func pathIdentityKey(_ path: String) -> String {
+    path.precomposedStringWithCanonicalMapping
+}
+
+/// Standardized home, cached: `homeDirectoryForCurrentUser` (6.7 µs) plus
+/// `standardizingPath` (4 µs) dominated this function, not the scan itself.
+/// Bounded: `redactHomePaths` takes a caller-supplied home, so the key space is
+/// whatever a long-lived process passes in, and the map outlives every scan.
+private let redactHomeLock = NSLock()
+private let redactHomeCacheLimit = 8
+nonisolated(unsafe) private var redactHomeCache: [String: String] = [:]
+
+/// Drop one entry once the map is over the limit. Which entry goes is the
+/// dictionary's hash order, not an age: the two real callers pass the process
+/// home, so the bound exists to cap a caller that feeds it unbounded keys, not
+/// to serve a working set.
+private func trimRedactHomeCache() {
+    guard redactHomeCache.count > redactHomeCacheLimit, let victim = redactHomeCache.keys.first else { return }
+    redactHomeCache.removeValue(forKey: victim)
+}
+
+private func standardizedHome(_ home: String) -> String {
+    redactHomeLock.lock()
+    defer { redactHomeLock.unlock() }
+    if let cached = redactHomeCache[home] { return cached }
+    let std = (home as NSString).standardizingPath
+    redactHomeCache[home] = std
+    trimRedactHomeCache()
+    return std
+}
+
+/// Process home, resolved once: `homeDirectoryForCurrentUser` costs ~7 µs per
+/// call and the old default-arg form paid it on every log line.
+private func processHome() -> String {
+    redactHomeLock.lock()
+    defer { redactHomeLock.unlock() }
+    if let cached = redactHomeCache[""] { return cached }
+    let std = (FileManager.default.homeDirectoryForCurrentUser.path as NSString).standardizingPath
+    redactHomeCache[""] = std
+    trimRedactHomeCache()
+    return std
+}
+
+/// Replace the user's home directory prefix with `~` so logs and errors do not
+/// carry the account path. `/home/alice2` is left alone when home is `/home/alice`.
+public func redactHomePaths(
+    _ text: String,
+    home: String? = nil
+) -> String {
+    // No path separator, no home prefix.
+    guard text.contains("/") else { return text }
+    let homePath: String
+    var rawHome: String?
+    if let home {
+        homePath = standardizedHome(home)
+        // `standardizingPath` resolves symlinks on Darwin (/home, /tmp, /var),
+        // so a subprocess error can carry either spelling. Try both.
+        if home != homePath { rawHome = home }
+    } else {
+        homePath = processHome()
+    }
+    for candidate in homePathSpellings(homePath) + (rawHome.map(homePathSpellings) ?? []) {
+        if candidate.count > 1, text.contains(candidate),
+           let redacted = redactHomePrefix(text, homePath: candidate) {
+            return redacted
+        }
+    }
+    return text
+}
+
+/// Spellings of a path that name the same path. macOS reports account and app
+/// names in NFD, while tools and pasted text print NFC, so a byte comparison
+/// finds no home prefix in a log line carrying an accented account name.
+private func homePathSpellings(_ path: String) -> [String] {
+    let nfc = path.precomposedStringWithCanonicalMapping
+    let nfd = path.decomposedStringWithCanonicalMapping
+    var out = [path]
+    for variant in [nfc, nfd] where variant != path { out.append(variant) }
+    return out
+}
+
+/// Replace every `homePath` occurrence in `text` that ends on a path boundary
+/// with `~`. Nil when there is none. `range(of:)` works on any String, so the
+/// Darwin bridged-NSString case needs no byte-scan fallback.
+private func redactHomePrefix(_ text: String, homePath: String) -> String? {
+    var ranges: [Range<String.Index>] = []
+    var search = text.startIndex
+    while let r = text.range(of: homePath, range: search..<text.endIndex) {
+        if r.upperBound == text.endIndex || isHomeBoundary(text[r.upperBound]) {
+            ranges.append(r)
+        }
+        search = text.index(after: r.lowerBound)
+    }
+    guard !ranges.isEmpty else { return nil }
+    var out = text
+    // Replace back to front so earlier indices stay valid.
+    for r in ranges.reversed() {
+        out.replaceSubrange(r, with: "~")
+    }
+    return out
+}
+
+/// A path prefix may only be redacted when it ends here: end of text, a
+/// separator, or one of `[\s:"',;]`.
+private func isHomeBoundary(_ c: Character) -> Bool {
+    c == "/" || c == " " || c == "\t" || c == "\n" || c == "\r"
+        || c == ":" || c == "\"" || c == "'" || c == "," || c == ";"
+}
+
+public func restrictOwnerOnlyFile(at url: URL) throws {
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+}
+
+public func restrictOwnerOnlyDirectory(at url: URL) throws {
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+}
+
+/// Owner-only mode on a private data file. If the parent directory is named
+/// `appattic`, that directory is owner-only as well. Other parents are left alone.
+public func restrictPrivateDataFile(at url: URL) throws {
+    try restrictOwnerOnlyFile(at: url)
+    let dir = url.deletingLastPathComponent()
+    if dir.lastPathComponent.lowercased() == "appattic" {
+        try restrictOwnerOnlyDirectory(at: dir)
+    }
+}
+
+public func writeOwnerOnlyFile(_ data: Data, to url: URL) throws {
+    try data.write(to: url, options: .atomic)
+    try restrictOwnerOnlyFile(at: url)
+}
+
+public func pmap<T, R>(_ items: [T], workers: Int = 16, _ fn: (T) -> R) -> [R] {
+    guard !items.isEmpty else { return [] }
+    if items.count == 1 || workers <= 1 { return items.map(fn) }
+    var results = [R?](repeating: nil, count: items.count)
+    let lock = NSLock()
+    let sem = DispatchSemaphore(value: max(workers, 1))
+    // `concurrentPerform` keeps `fn` non-escaping end to end. Handing it to
+    // `queue.async` needs `withoutActuallyEscaping`, whose runtime check is
+    // racy: a dispatched block can outlive the join, so the check aborts the
+    // process with "non-escaping closure has escaped" mid-scan.
+    DispatchQueue.concurrentPerform(iterations: items.count) { i in
+        sem.wait()
+        let value = fn(items[i])
+        lock.lock()
+        results[i] = value
+        lock.unlock()
+        sem.signal()
+    }
+    return results.map { $0! }
+}
+
+/// Truncate ISO-8601 fractional seconds so `ISO8601DateFormatter` can parse
+/// GTK/GNOME timestamps that carry microseconds (`…T15:00:00.123456Z`).
+func truncateISOFractionalSeconds(_ s: String, maxDigits: Int = 3) -> String {
+    guard let tIndex = s.firstIndex(of: "T") else { return s }
+    guard let dot = s[tIndex...].firstIndex(of: ".") else { return s }
+    var digitEnd = s.index(after: dot)
+    var count = 0
+    while digitEnd < s.endIndex, s[digitEnd].isNumber {
+        count += 1
+        digitEnd = s.index(after: digitEnd)
+    }
+    if count <= maxDigits { return s }
+    let keepEnd = s.index(dot, offsetBy: 1 + maxDigits)
+    return String(s[..<keepEnd]) + String(s[digitEnd...])
+}
+
+/// Configured once and never mutated, so concurrent `date(from:)` is safe.
+private let isoFractionalFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
+private let isoBasicFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+}()
+
+private let isoFallbackFormats = [
+    "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+    "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX",
+    "yyyy-MM-dd'T'HH:mm:ssZ",
+    "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+    "yyyy-MM-dd HH:mm:ss Z",
+    "yyyy-MM-dd'T'HH:mm:ss",
+    "yyyy-MM-dd'T'HH:mm:ss.SSS",
+]
+
+/// One formatter per format, built once. `dateFormat` is never mutated after this,
+/// so parallel parses do not race on shared mutable state.
+private let isoFallbackFormatters: [DateFormatter] = isoFallbackFormats.map { fmt in
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.calendar = Calendar(identifier: .gregorian)
+    f.timeZone = TimeZone(secondsFromGMT: 0)
+    f.isLenient = false
+    f.dateFormat = fmt
+    return f
+}
+
+public func parseISODate(_ value: String?) -> Date? {
+    guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+        return nil
+    }
+    // Contiguous UTF-8 fast path. Bridged NSStrings are discontiguous, so copy
+    // the bytes once rather than falling into the ~25 µs formatter path.
+    if let fast = raw.utf8.withContiguousStorageIfAvailable({ isoFastParse($0) }) ?? nil {
+        return fast
+    }
+    return raw.withCString { cstr in
+        let n = strlen(cstr)
+        guard n >= 19, n < 4096 else { return parseISODateViaFormatters(raw) }
+        return withUnsafeTemporaryAllocation(of: UInt8.self, capacity: n) { buf in
+            var p = cstr
+            for k in 0..<n {
+                buf[k] = UInt8(bitPattern: p.pointee)
+                p = p.successor()
+            }
+            return isoFastParse(UnsafeBufferPointer(start: buf.baseAddress, count: n))
+                ?? parseISODateViaFormatters(raw)
+        }
+    }
+}
+
+/// Direct parse of the ISO-8601 shapes the formatters above accept, by integer
+/// arithmetic. `parseISODate` spent 23 µs per call building variant strings and
+/// trying up to nine formatters.
+///
+/// Only unambiguous, well-formed input is accepted; everything else returns nil
+/// so the formatter path stays authoritative: unknown widths, out-of-range
+/// fields, day-overflow for the month (where the formatters may roll over or
+/// reject), lowercase `t`, and offsets beyond ±14:00.
+func isoFastParse(_ b: UnsafeBufferPointer<UInt8>) -> Date? {
+    let n = b.count
+    guard n >= 19 else { return nil }
+    guard let year = isoDigits(b, 0, 4), b[4] == 0x2D,
+          let month = isoDigits(b, 5, 2), b[7] == 0x2D,
+          let day = isoDigits(b, 8, 2), b[10] == 0x54,
+          let hour = isoDigits(b, 11, 2), b[13] == 0x3A,
+          let minute = isoDigits(b, 14, 2), b[16] == 0x3A,
+          let second = isoDigits(b, 17, 2)
+    else { return nil }
+    guard year >= 1, month >= 1, month <= 12, hour <= 23, minute <= 59, second <= 59,
+          day >= 1, day <= isoDaysInMonth(year, month)
+    else { return nil }
+
+    var i = 19
+    var millis = 0
+    if i < n, b[i] == 0x2E {
+        i += 1
+        let first = i
+        while i < n, b[i] >= 0x30, b[i] <= 0x39 { i += 1 }
+        let digits = i - first
+        guard digits >= 1 else { return nil }
+        // ISO8601DateFormatter truncates to milliseconds, it does not round.
+        for k in 0..<3 {
+            millis = millis * 10 + (k < digits ? Int(b[first + k] - 0x30) : 0)
+        }
+    }
+
+    var offset = 0
+    if i < n {
+        let c = b[i]
+        if c == 0x5A || c == 0x7A {
+            i += 1
+            guard i == n else { return nil }
+        } else if c == 0x2B || c == 0x2D {
+            let sign = c == 0x2D ? -1 : 1
+            i += 1
+            guard let oh = isoDigits(b, i, 2), oh <= 14 else { return nil }
+            i += 2
+            var om = 0
+            if i < n, b[i] == 0x3A {
+                i += 1
+                guard let m = isoDigits(b, i, 2) else { return nil }
+                om = m
+                i += 2
+            } else if i < n, b[i] >= 0x30, b[i] <= 0x39 {
+                guard let m = isoDigits(b, i, 2) else { return nil }
+                om = m
+                i += 2
+            }
+            guard i == n, om <= 59 else { return nil }
+            offset = sign * (oh * 3600 + om * 60)
+        } else {
+            return nil
+        }
+    }
+
+    let days = isoDaysFromCivil(year, month, day)
+    let epoch = days * 86400 + hour * 3600 + minute * 60 + second - offset
+    let base = Double(epoch)
+    return Date(timeIntervalSince1970: millis == 0 ? base : base + Double(millis) / 1000.0)
+}
+
+@inline(__always)
+private func isoDigits(_ b: UnsafeBufferPointer<UInt8>, _ i: Int, _ len: Int) -> Int? {
+    guard i + len <= b.count else { return nil }
+    var v = 0
+    for k in 0..<len {
+        let c = b[i + k]
+        guard c >= 0x30, c <= 0x39 else { return nil }
+        v = v * 10 + Int(c - 0x30)
+    }
+    return v
+}
+
+private func isoDaysInMonth(_ year: Int, _ month: Int) -> Int {
+    switch month {
+    case 2:
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+        return leap ? 29 : 28
+    case 4, 6, 9, 11:
+        return 30
+    default:
+        return 31
+    }
+}
+
+/// Howard Hinnant's days_from_civil: days since 1970-01-01, proleptic Gregorian.
+private func isoDaysFromCivil(_ y: Int, _ m: Int, _ d: Int) -> Int {
+    let yy = m <= 2 ? y - 1 : y
+    let era = (yy >= 0 ? yy : yy - 399) / 400
+    let yoe = yy - era * 400
+    let doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    return era * 146097 + doe - 719468
+}
+
+func parseISODateViaFormatters(_ raw: String) -> Date? {
+    func tryISO(_ s: String) -> Date? {
+        isoFractionalFormatter.date(from: s) ?? isoBasicFormatter.date(from: s)
+    }
+
+    var variants: [String] = []
+    func add(_ s: String) {
+        if !s.isEmpty, !variants.contains(s) { variants.append(s) }
+    }
+    add(raw)
+    let truncated = truncateISOFractionalSeconds(raw)
+    if truncated != raw { add(truncated) }
+    for base in Array(variants) {
+        if base.hasSuffix("Z") || base.hasSuffix("z") {
+            let stem = String(base.dropLast())
+            add(stem + "+00:00")
+            add(stem + "Z")
+        }
+        if base.hasSuffix("+00:00") {
+            add(String(base.dropLast(6)) + "Z")
+        }
+    }
+
+    for s in variants {
+        if let d = tryISO(s) { return d }
+    }
+
+    for s in variants {
+        for f in isoFallbackFormatters {
+            if let d = f.date(from: s) { return d }
+        }
+    }
+    return nil
+}
+
+/// Configured once and never mutated, so concurrent `string(from:)` is safe.
+private let isoStringFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    f.timeZone = TimeZone(secondsFromGMT: 0)
+    return f
+}()
+
+public func isoString(_ date: Date?) -> String? {
+    guard let date else { return nil }
+    return isoStringFormatter.string(from: date)
+}
+
+/// Instant from a Unix epoch that may be seconds, milliseconds, or microseconds.
+/// GNOME `last-seen` is seconds, but `g_get_real_time()` is microseconds; mixing
+/// those units would put last-used in year 56 million and look like "used now".
+public func dateFromUnixEpoch(_ raw: TimeInterval) -> Date {
+    let mag = abs(raw)
+    if mag > 1e14 {
+        return Date(timeIntervalSince1970: raw / 1_000_000)
+    }
+    if mag > 1e11 {
+        return Date(timeIntervalSince1970: raw / 1_000)
+    }
+    return Date(timeIntervalSince1970: raw)
+}
+
+func monotonicSeconds() -> TimeInterval {
+    ProcessInfo.processInfo.systemUptime
+}
+
+/// Whole local calendar days from `date` to `now` (0 = same local day).
+/// Use for "Today"/"Yesterday" labels. Idle thresholds keep `daysSince` (elapsed).
+public func calendarDaysSince(
+    _ date: Date?,
+    now: Date = Date(),
+    calendar: Calendar = .current
+) -> Int? {
+    guard let date else { return nil }
+    let from = calendar.startOfDay(for: date)
+    let to = calendar.startOfDay(for: now)
+    return calendar.dateComponents([.day], from: from, to: to).day
+}
+
+/// Bytes that need no quoting in a POSIX shell word.
+@inline(__always)
+func isSafeShellByte(_ c: UInt8) -> Bool {
+    (c >= 0x61 && c <= 0x7A) || (c >= 0x41 && c <= 0x5A) ||
+        (c >= 0x30 && c <= 0x39) ||
+        c == 0x5F || c == 0x40 || c == 0x25 || c == 0x2B || c == 0x3D ||
+        c == 0x3A || c == 0x2C || c == 0x2E || c == 0x2F || c == 0x2D
+}
+
+/// East Asian Wide and Fullwidth blocks, which a terminal draws two columns
+/// wide. Ambiguous-width scalars (Latin-1 letters, box drawing) stay one column
+/// so the tables do not depend on the terminal's locale setting.
+private let wideColumnRanges: [ClosedRange<UInt32>] = [
+    0x1100...0x115F, 0x2E80...0x303E, 0x3041...0x33FF, 0x3400...0x4DBF,
+    0x4E00...0x9FFF, 0xA000...0xA4CF, 0xA960...0xA97F, 0xAC00...0xD7A3,
+    0xF900...0xFAFF, 0xFE10...0xFE19, 0xFE30...0xFE6F, 0xFF00...0xFF60,
+    0xFFE0...0xFFE6, 0x1B000...0x1B2FF, 0x1F1E6...0x1F1FF, 0x1F200...0x1F2FF,
+    0x1F300...0x1F64F, 0x1F900...0x1F9FF, 0x20000...0x2FFFD, 0x30000...0x3FFFD,
+]
+
+private func scalarIsZeroWidth(_ s: Unicode.Scalar) -> Bool {
+    switch s.properties.generalCategory {
+    case .nonspacingMark, .enclosingMark, .format, .control, .unassigned,
+         .lineSeparator, .paragraphSeparator:
+        return true
+    default:
+        return false
+    }
+}
+
+/// Terminal columns a string occupies. `String.count` counts grapheme
+/// clusters, so a CJK name from the filesystem pads to the wrong width and
+/// shifts every later column. One cluster is one glyph: a combining mark or a
+/// ZWJ sequence rides on its base scalar's width instead of adding columns.
+public func displayWidth(_ s: String) -> Int {
+    var width = 0
+    for cluster in s {
+        for scalar in cluster.unicodeScalars where !scalarIsZeroWidth(scalar) {
+            width += wideColumnRanges.contains { $0.contains(scalar.value) } ? 2 : 1
+            break
+        }
+    }
+    return width
+}
+
+public func shellQuote(_ value: String) -> String {
+    if value.isEmpty { return "''" }
+    // Byte scan: `CharacterSet.inverted` + `rangeOfCharacter` cost ~2.9 µs per
+    // call, and this runs on every scripted path.
+    //
+    // The non-contiguous fallback applies the same predicate instead of
+    // assuming "needs quoting": values bridged from NSString (Darwin) are not
+    // contiguous, and guessing there made the same command quote differently
+    // per platform.
+    // Cold path (one call per script line): plain stdlib iteration.
+    let needsQuote = value.utf8.contains { !isSafeShellByte($0) }
+    if !needsQuote { return value }
+    // Only `'` needs escaping inside single quotes.
+    if !value.contains("'") { return "'" + value + "'" }
+    return "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+}
+
+/// Wrap a removal so an already-removed target is a no-op instead of a failure.
+///
+/// Generated scripts run under `set -e`, so an unguarded `pkgmgr remove` on a
+/// target a previous run already deleted exits nonzero and `set -e` stops the
+/// script there: the items after it never run. `present` is a read-only query
+/// that exits 0 only while the target is still installed.
+public func guardedRemoveCommand(present: String, remove: String) -> String {
+    "if \(present) >/dev/null 2>&1; then \(remove); fi"
+}
+
+/// Untrusted text (app names, paths, manager labels) for a `#` comment line in
+/// a generated script. A newline ends the comment, and everything after it is a
+/// command the script runs, so a folder named `Game\nrm -rf ~` would otherwise
+/// inject a line into the script the UI runs after one preview. `shellQuote`
+/// does not help here: a quoted newline is legal but the value is not quoted
+/// when it lands in a comment.
+public func shellComment(_ value: String) -> String {
+    let flattened = value
+        .replacingOccurrences(of: "\r\n", with: " ")
+        .replacingOccurrences(of: "\n", with: " ")
+        .replacingOccurrences(of: "\r", with: " ")
+        .replacingOccurrences(of: "\u{2028}", with: " ")
+        .replacingOccurrences(of: "\u{2029}", with: " ")
+    return flattened.trimmingCharacters(in: .whitespaces)
+}
+
+/// Cached process username: environment copy + trims + folds per call cost
+/// ~2 µs, and `classify` calls this per entry. The account name cannot change
+/// mid-scan.
+private let cachedUsernameLock = NSLock()
+nonisolated(unsafe) private var cachedUsername: String? = nil
+
+func currentUsername() -> String {
+    cachedUsernameLock.lock()
+    defer { cachedUsernameLock.unlock() }
+    if let cached = cachedUsername { return cached }
+    let resolved: String = {
+        let env = ProcessInfo.processInfo.environment
+        let raw = (env["USER"] ?? env["LOGNAME"] ?? "").trimmingCharacters(in: .whitespaces)
+        if !raw.isEmpty { return posixLowercased(raw) }
+        #if os(macOS)
+        let name = NSUserName().trimmingCharacters(in: .whitespaces)
+        if !name.isEmpty { return posixLowercased(name) }
+        #endif
+        return posixLowercased(ProcessInfo.processInfo.userName)
+    }()
+    cachedUsername = resolved
+    return resolved
+}
+
+public func cleanupPathDirectories(home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [String] {
+    [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/home/linuxbrew/.linuxbrew/bin",
+        (home as NSString).appendingPathComponent(".local/bin"),
+        (home as NSString).appendingPathComponent("bin"),
+        "/usr/bin",
+        "/bin",
+    ]
+}
+
+/// Process environment with `cleanupPathDirectories()` prepended to PATH,
+/// de-duplicated and first-wins.
+public func augmentedProcessEnvironment(
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> [String: String] {
+    var out = env
+    var seen = Set<String>()
+    var parts: [String] = []
+    for dir in cleanupPathDirectories() + (env["PATH"] ?? "").split(separator: ":").map(String.init) {
+        if !dir.isEmpty, seen.insert(dir).inserted {
+            parts.append(dir)
+        }
+    }
+    out["PATH"] = parts.joined(separator: ":")
+    return out
+}
+
+/// ASCII substring search without bridging to CFStringFind (`String.contains`
+/// costs ~1 µs via ICU + retain churn; this is ~20 ns). Exact: the fast path
+/// runs only when BOTH sides are fully ASCII (ICU literal search is byte-exact
+/// there); any non-ASCII byte anywhere takes the bridged slow path, including
+/// combining-mark edges where ICU and byte search can disagree.
+public func asciiContains(_ haystack: String, _ needle: String) -> Bool {
+    // Degenerate case delegates: empty-needle differs by platform (stdlib true,
+    // corelibs-Foundation false). All real callers pass literals.
+    guard !needle.isEmpty else { return haystack.contains(needle) }
+    let r = haystack.utf8.withContiguousStorageIfAvailable { h -> Int in
+        needle.utf8.withContiguousStorageIfAvailable { n -> Int in
+            for k in 0..<n.count {
+                if n[k] >= 0x80 { return -1 }
+            }
+            for k in 0..<h.count {
+                if h[k] >= 0x80 { return -1 }
+            }
+            if n.count == 1 {
+                return h.contains(n[0]) ? 1 : 0
+            }
+            guard h.count >= n.count else { return 0 }
+            var i = 0
+            while i + n.count <= h.count {
+                var k = 0
+                while k < n.count, h[i + k] == n[k] { k += 1 }
+                if k == n.count { return 1 }
+                i += 1
+            }
+            return 0
+        } ?? -1
+    } ?? -1
+    if r >= 0 { return r == 1 }
+    return haystack.contains(needle)
+}
+
+/// Single-ASCII-byte membership. `String.contains` routes through ICU
+/// (`CFStringFind`, ~1 µs); even the generic `UTF8View.contains` closure costs
+/// ~100 ns in retain churn. Hand-rolled contiguous scan: ~10 ns.
+@inline(__always)
+public func asciiHasByte(_ s: String, _ b: UInt8) -> Bool {
+    s.utf8.withContiguousStorageIfAvailable { u -> Bool in
+        var i = 0
+        while i < u.count {
+            if u[i] == b { return true }
+            i += 1
+        }
+        return false
+    } ?? s.utf8.contains(b)
+}
+
+/// Saturating sum for non-negative byte totals. Overflow becomes Int.max.
+public func addBytes(_ a: Int, _ b: Int) -> Int {
+    let (sum, overflow) = a.addingReportingOverflow(b)
+    return overflow ? Int.max : sum
+}
+
+/// Saturating product for non-negative byte totals. Overflow becomes Int.max.
+public func mulBytes(_ a: Int, _ b: Int) -> Int {
+    let (product, overflow) = a.multipliedReportingOverflow(by: b)
+    return overflow ? Int.max : product
+}
+
+/// Decimal separator of the current locale, read once. `String(format:)` pays
+/// for locale setup on every call (~1.2 µs); the separator is a single lookup.
+let localeDecimalSeparator: String = {
+    let f = NumberFormatter()
+    f.locale = .current
+    f.numberStyle = .decimal
+    f.usesGroupingSeparator = false
+    return f.decimalSeparator ?? "."
+}()
+
+/// One decimal place without `String(format:)` (~1.2 µs/call from locale +
+/// varargs overhead). Rounds half away from zero the way `%.1f` prints.
+func oneDecimal(_ n: Double) -> String {
+    let neg = n < 0
+    let tenths = Int((abs(n) * 10).rounded())
+    return (neg ? "-" : "") + "\(tenths / 10)\(localeDecimalSeparator)\(tenths % 10)"
+}
+
+public func humanSize(_ bytes: Int) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    var n = Double(bytes)
+    var unit = 0
+    while unit < units.count - 1 {
+        if abs(n) < 1024 {
+            // %.1f can round 1023.95 to 1024.0; bump the unit instead of printing "1024.0 KB".
+            if (abs(n) * 10).rounded() / 10 >= 1024 {
+                n /= 1024
+                unit += 1
+                continue
+            }
+            if unit == 0 { return "\(bytes) B" }
+            return oneDecimal(n) + " " + units[unit]
+        }
+        n /= 1024
+        unit += 1
+    }
+    return oneDecimal(n) + " " + units[unit]
+}
+
+public func humanDays(_ days: Double) -> String {
+    if days < 1 {
+        return "\(max(Int(days * 24), 1))h"
+    }
+    if days < 60 {
+        return days >= 14 ? "\(Int(days / 7))w" : "\(Int(days))d"
+    }
+    if days < 365 * 1.5 {
+        return "\(Int(days / 30))mo"
+    }
+    return oneDecimal(days / 365) + "y"
+}
+
+func intFromSizeAttribute(_ raw: Any?) -> Int {
+    let v: Int64
+    if let u = raw as? UInt64 {
+        if u > UInt64(Int64.max) { return Int.max }
+        v = Int64(u)
+    } else if let n = raw as? NSNumber {
+        v = n.int64Value
+    } else if let i = raw as? Int {
+        v = Int64(i)
+    } else if let i = raw as? Int64 {
+        v = i
+    } else {
+        return 0
+    }
+    if v < 0 { return 0 }
+    if v > Int64(Int.max) { return Int.max }
+    return Int(v)
+}
+
+public func fileSize(_ path: String) -> Int {
+    intFromSizeAttribute(try? FileManager.default.attributesOfItem(atPath: path)[.size])
+}
+
+public func duSize(_ path: String, timeout: TimeInterval = 8, run: CommandRun = runCommand) -> (Int, Bool) {
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+        return (0, false)
+    }
+    if !isDir.boolValue {
+        return (fileSize(path), true)
+    }
+    if path.hasSuffix(".app"), let bytes = spotlightFSSize(path, run: run) {
+        return (bytes, true)
+    }
+    for exe in ["/usr/bin/du", "du"] {
+        let (rc, out, _) = run([exe, "-sk", path], timeout)
+        if rc == 0 {
+            let pair = parseDuKB(out)
+            if pair.1, pair.0 > 0 { return pair }
+        }
+    }
+    return directoryByteSize(path, timeout: timeout)
+}
+
+public func spotlightFSSize(_ path: String, run: CommandRun = runCommand) -> Int? {
+    let (rc, out, _) = run(["/usr/bin/mdls", "-name", "kMDItemFSSize", "-raw", path], 5)
+    guard rc == 0 else { return nil }
+    let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty || trimmed == "(null)" { return nil }
+    guard let n = Int(trimmed), n > 0 else { return nil }
+    return n
+}
+
+func parseDuKB(_ out: String) -> (Int, Bool) {
+    guard let first = out.split(whereSeparator: \.isWhitespace).first, let kb = Int(first), kb > 0 else {
+        return (0, false)
+    }
+    let (bytes, overflow) = kb.multipliedReportingOverflow(by: 1024)
+    if overflow { return (0, false) }
+    return (bytes, true)
+}
+
+/// Split into consecutive runs of at most `n` elements.
+func chunked<T>(_ xs: [T], into n: Int) -> [[T]] {
+    guard n > 0 else { return [] }
+    var out: [[T]] = []
+    out.reserveCapacity((xs.count + n - 1) / n)
+    var i = 0
+    while i < xs.count {
+        out.append(Array(xs[i..<min(i + n, xs.count)]))
+        i += n
+    }
+    return out
+}
+
+/// Batch `du -sk` for many directories: one spawn per chunk instead of one
+/// per path. A full leftover scan spawns `du` hundreds of times (~50 ms each);
+/// batching cuts that to a handful. Missing/error lines fall back to the
+/// in-process walk, never to another spawn.
+///
+/// `du` separates size and path with a tab. Paths containing newlines cannot
+/// round-trip through line parsing; unmatched lines fall back safely, but a
+/// mangled fragment could theoretically collide with another queried path.
+public func duSizes(
+    _ paths: [String],
+    timeout: TimeInterval = 8,
+    run: CommandRun = runCommand
+) -> [String: (Int, Bool)] {
+    var out: [String: (Int, Bool)] = [:]
+    var dirs: [String] = []
+    for path in paths {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+            out[path] = (0, false)
+            continue
+        }
+        if !isDir.boolValue {
+            out[path] = (fileSize(path), true)
+            continue
+        }
+        dirs.append(path)
+    }
+    // Chunk well under ARG_MAX even for very long paths.
+    for chunk in chunked(dirs, into: 128) {
+        var missing = Set(chunk)
+        for exe in ["/usr/bin/du", "du"] {
+            let (rc, duOut, _) = run([exe, "-sk"] + chunk, timeout)
+            if rc != 0, duOut.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            var parsedAny = false
+            for raw in duOut.split(separator: "\n", omittingEmptySubsequences: false) {
+                guard let tab = raw.firstIndex(of: "\t") else { continue }
+                guard let kb = Int(raw[..<tab]), kb > 0 else { continue }
+                let p = String(raw[raw.index(after: tab)...])
+                guard missing.contains(p) else { continue }
+                let (bytes, overflow) = kb.multipliedReportingOverflow(by: 1024)
+                guard !overflow else { continue }
+                out[p] = (bytes, true)
+                missing.remove(p)
+                parsedAny = true
+            }
+            // The binary ran: leftovers are genuinely unreadable by du, so
+            // fall back to the walk instead of retrying another binary.
+            if parsedAny || rc == 0 { break }
+        }
+        for path in missing {
+            out[path] = directoryByteSize(path, timeout: timeout)
+        }
+    }
+    return out
+}
+
+/// Logical file bytes for a directory tree: sum of regular-file `st_size`,
+/// symlinks not followed.
+///
+/// Uses `opendir`/`fstatat` rather than `FileManager.enumerator` +
+/// `resourceValues`. On corelibs-foundation those populate owner names, which
+/// costs an NSS lookup per entry (~0.5 ms here: `libnss_systemd` D-Bus round
+/// trip), so a 2 300-file tree took 1.2 s instead of ~3 ms.
+public func directoryByteSize(_ path: String, timeout: TimeInterval = 8) -> (Int, Bool) {
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+        return (0, false)
+    }
+    if !isDir.boolValue {
+        return (fileSize(path), true)
+    }
+    let fd = path.withCString { open($0, O_RDONLY | O_DIRECTORY | O_CLOEXEC) }
+    guard fd >= 0 else {
+        return (0, false)
+    }
+    defer { close(fd) }
+    var total = 0
+    var sawError = false
+    let complete = walkLogicalBytes(
+        fd: fd,
+        total: &total,
+        sawError: &sawError,
+        deadline: monotonicSeconds() + timeout
+    )
+    if !complete { return (total, false) }
+    return (total, !sawError)
+}
+
+/// Returns false when the deadline passed before the tree was fully walked.
+func walkLogicalBytes(
+    fd: Int32,
+    total: inout Int,
+    sawError: inout Bool,
+    deadline: TimeInterval
+) -> Bool {
+    if monotonicSeconds() > deadline { return false }
+    let dupfd = dup(fd)
+    guard dupfd >= 0 else {
+        sawError = true
+        return true
+    }
+    guard let dirp = fdopendir(dupfd) else {
+        close(dupfd)
+        sawError = true
+        return true
+    }
+    defer { closedir(dirp) }
+    while true {
+        errno = 0
+        guard let ent = readdir(dirp) else {
+            if errno != 0 { sawError = true }
+            break
+        }
+        guard let name = direntName(ent) else {
+            // A name that is not UTF-8 has no byte-faithful path to descend.
+            sawError = true
+            continue
+        }
+        if name == "." || name == ".." { continue }
+        var st = stat()
+        guard name.withCString({ fstatat(fd, $0, &st, AT_SYMLINK_NOFOLLOW) }) == 0 else {
+            sawError = true
+            continue
+        }
+        let kind = Int32(st.st_mode) & Int32(S_IFMT)
+        if kind == Int32(S_IFDIR) {
+            let childFd = name.withCString { openat(fd, $0, childDirFlags) }
+            if childFd < 0 {
+                sawError = true
+            } else {
+                let complete = walkLogicalBytes(
+                    fd: childFd,
+                    total: &total,
+                    sawError: &sawError,
+                    deadline: deadline
+                )
+                close(childFd)
+                if !complete { return false }
+            }
+        } else if kind == Int32(S_IFREG) {
+            total = addBytes(total, Int(st.st_size))
+        }
+        if monotonicSeconds() > deadline { return false }
+    }
+    return true
+}
+
+/// One formatter, built once. `dateFormat` is never mutated after this,
+/// so parallel parses do not race on shared mutable state.
+private let mdlsDateFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.calendar = Calendar(identifier: .gregorian)
+    f.timeZone = TimeZone(secondsFromGMT: 0)
+    f.isLenient = false
+    f.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
+    return f
+}()
+
+public func parseMdlsDate(_ value: String) -> Date? {
+    var v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    v = v.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+    if v.isEmpty || v == "(null)" { return nil }
+    return mdlsDateFormatter.date(from: v)
+}
+
+public func daysSince(_ date: Date?, now: Date = Date()) -> Double? {
+    guard let date else { return nil }
+    return max(0, now.timeIntervalSince(date) / 86400)
+}

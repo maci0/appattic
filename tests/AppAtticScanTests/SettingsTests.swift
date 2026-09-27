@@ -281,7 +281,7 @@ final class SettingsTests: XCTestCase {
     func testCommandFailureMessageIncludesStderr() {
         XCTAssertEqual(
             commandFailureMessage(status: 1, stderr: ""),
-            "Command failed (exit 1). Selection kept."
+            "Command failed (exit 1)."
         )
         XCTAssertEqual(
             commandFailureMessage(status: 2, stderr: "  brew: no such keg  "),

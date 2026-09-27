@@ -134,7 +134,7 @@ public func commandFailureMessage(
         home: home
     )
     if trimmed.isEmpty {
-        return "Command failed (exit \(status)). Selection kept."
+        return "Command failed (exit \(status))."
     }
     let detail = trimmed.count > 400 ? String(trimmed.prefix(400)) : trimmed
     return "Command failed (exit \(status)). \(detail)"

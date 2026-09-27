@@ -102,6 +102,9 @@ public func clearScanCache(at url: URL = defaultScanCacheURL()) {
 
 /// Save only when the inventory stamp is unchanged across the scan and the
 /// result is complete. Otherwise a later hit would serve a mixed snapshot.
+/// `false` means the scan was dropped on purpose; a write that failed throws,
+/// because a scan that never reached disk is not the same as one that was
+/// deliberately not kept.
 @discardableResult
 public func commitScanCache(
     includeSystem: Bool,
@@ -109,18 +112,14 @@ public func commitScanCache(
     before: String,
     after: String,
     to url: URL = defaultScanCacheURL()
-) -> Bool {
+) throws -> Bool {
     if data.incomplete == true { return false }
     guard before == after else { return false }
-    do {
-        try writeScanCache(
-            ScanCacheFile(fingerprint: after, includeSystem: includeSystem, data: data),
-            to: url
-        )
-        return true
-    } catch {
-        return false
-    }
+    try writeScanCache(
+        ScanCacheFile(fingerprint: after, includeSystem: includeSystem, data: data),
+        to: url
+    )
+    return true
 }
 
 /// Inventory stamp for cache invalidation: apps, brew lists, leftover roots, and package-manager state.
@@ -303,10 +302,14 @@ func androidSdkStamp(sdkDirs: [String]? = nil) -> String {
 public struct ResolvedScan: Sendable {
     public var data: ScanData
     public var fromCache: Bool
+    /// Why the live scan could not be saved, or nil when it was. The scan
+    /// itself stands; the next run has no cache to start from.
+    public var cacheWriteFailure: String?
 
-    public init(data: ScanData, fromCache: Bool) {
+    public init(data: ScanData, fromCache: Bool, cacheWriteFailure: String? = nil) {
         self.data = data
         self.fromCache = fromCache
+        self.cacheWriteFailure = cacheWriteFailure
     }
 }
 
@@ -331,14 +334,19 @@ public func resolveScan(
     }
     let data = (liveScan ?? { runFullScan(includeSystem: $0, now: now) })(includeSystem)
     let after = fingerprintFn()
-    _ = commitScanCache(
-        includeSystem: includeSystem,
-        data: data,
-        before: before,
-        after: after,
-        to: cacheURL
-    )
+    var cacheWriteFailure: String?
+    do {
+        _ = try commitScanCache(
+            includeSystem: includeSystem,
+            data: data,
+            before: before,
+            after: after,
+            to: cacheURL
+        )
+    } catch {
+        cacheWriteFailure = error.localizedDescription
+    }
     var out = data
     out.from_cache = false
-    return ResolvedScan(data: out, fromCache: false)
+    return ResolvedScan(data: out, fromCache: false, cacheWriteFailure: cacheWriteFailure)
 }

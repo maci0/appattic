@@ -38,6 +38,21 @@ final class ProcessTests: XCTestCase {
     }
 
 
+    /// A backgrounded grandchild inherits the write end of the pipe, so
+    /// `readDataToEndOfFile` stays blocked after the command itself exited.
+    /// The timeout has to bound the whole call, not just the direct child.
+    func testRunCommandReturnsWhenGrandchildHoldsThePipe() {
+        let start = monotonicSeconds()
+        let (rc, _, err) = runCommand(["/bin/sh", "-c", "sleep 6 & exit 0"], timeout: 5)
+        XCTAssertEqual(rc, 0, err)
+        XCTAssertLessThan(
+            monotonicSeconds() - start,
+            commandPipeDrainGrace + 1.5,
+            "the pipe drain must be bounded, so a lingering grandchild cannot hang the scan"
+        )
+    }
+
+
     func testPmapRunCommandKeepsStdoutWithWorker() {
         let n = 32
         let results = pmap(Array(0..<n), workers: 16) { i -> String in
