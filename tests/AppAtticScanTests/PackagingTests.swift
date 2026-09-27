@@ -707,7 +707,9 @@ final class PackagingTests: XCTestCase {
         try XCTSkipIf(whichCommand("zig") == nil, "zig is needed to run the core test filter")
         let (noMatchRc, _, noMatchErr) = try run("core/build.sh", ["test", "jsonbuf.zig", "noSuchTestName"])
         XCTAssertEqual(noMatchRc, 1, noMatchErr)
-        XCTAssertTrue(noMatchErr.contains("no test in jsonbuf.zig matches"), noMatchErr)
+        XCTAssertTrue(
+            noMatchErr.contains("no test named 'noSuchTestName' in jsonbuf.zig"), noMatchErr
+        )
 
         let (matchRc, matchOut, matchErr) = try run("core/build.sh", ["test", "jsonbuf.zig", "isSafeIdent"])
         XCTAssertEqual(matchRc, 0, matchErr)
