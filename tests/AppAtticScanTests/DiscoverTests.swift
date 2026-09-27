@@ -43,7 +43,9 @@ final class DiscoverTests: XCTestCase {
         let path = dir.appendingPathComponent("backup.desktop").path
         try body.write(toFile: path, atomically: true, encoding: .utf8)
         let app = parseDesktopFile(path, sourceDir: "/usr/share/applications")
-        XCTAssertEqual(app?.bundleId, "evalfexe")
+        // The key carries no `a`, so what comes back is the override removed and
+        // nothing else: `Evil\u{202E}fexe` folds and filters to `evilfexe`.
+        XCTAssertEqual(app?.bundleId, "evilfexe")
     }
 
     func testParseDesktopFileStripsUTF8BOM() throws {
@@ -344,7 +346,11 @@ final class DiscoverTests: XCTestCase {
         // rather than a macOS location the Linux path must never produce.
         XCTAssertEqual(found.map(\.displayName), ["TempScanApp"])
         let path = try XCTUnwrap(found.first?.path)
+        // The entry's own file names the record. `Exec=/usr/bin/true` exists
+        // on this box, and returning that instead would hand the caller a
+        // binary the scan did not list.
         XCTAssertTrue(path.hasPrefix(td.path), path)
+        XCTAssertTrue(path.hasSuffix(".desktop"), path)
         XCTAssertFalse(path.hasPrefix("/Applications/"), path)
     }
 

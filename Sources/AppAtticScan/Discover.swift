@@ -509,22 +509,21 @@ func linuxPkgId(source: String, desktopId: String, exec: String) -> String {
     }
 }
 
-func linuxDesktopAppPath(source: String?, desktopPath: String, exec: String, firstExe: String) -> String {
-    if source == "appimage" {
-        if let image = execTokens(exec).first(where: { posixLowercased($0).contains(".appimage") }),
-           FileManager.default.fileExists(atPath: image) {
-            return image
-        }
-    }
-    if source == "flatpak" || source == "snap" {
-        return desktopPath
-    }
-    let base = posixLowercased(URL(fileURLWithPath: firstExe).lastPathComponent)
-    if linuxWrapperNames.contains(base) {
-        return desktopPath
-    }
-    if !firstExe.isEmpty, FileManager.default.fileExists(atPath: firstExe) {
-        return firstExe
+/// The path a `.desktop` record names: the entry itself, except for an
+/// AppImage, which is a single file the entry launches and the only one of the
+/// two a removal can take with it.
+///
+/// The `Exec` binary is deliberately not the record's path. It is a path the
+/// scan never listed — often a shared system binary, where the removal can only
+/// be skipped — and `findLinuxApps` dedupes, sorts, and measures the record by
+/// this path, so it has to be the file that was found. A wrapper's own name is
+/// not the app either; that rule is in the identity below, which the dedupe
+/// key depends on.
+func linuxDesktopAppPath(source: String?, desktopPath: String, exec: String) -> String {
+    if source == "appimage",
+       let image = execTokens(exec).first(where: { posixLowercased($0).contains(".appimage") }),
+       FileManager.default.fileExists(atPath: image) {
+        return image
     }
     return desktopPath
 }
@@ -555,9 +554,13 @@ public func parseDesktopFile(_ path: String, sourceDir: String = "") -> AppRecor
         : wmclass
     // `StartupWMClass` is a `.desktop` key, so it is attacker-controlled the
     // same way `Name=` is, and this is the value `findLinuxApps` dedupes on.
-    var bundleId = stripBidiControls(posixLowercased(identity))
+    // The controls come out first, so the identity is spelled out of a string
+    // that never held an invisible character: the fold passes a bidi override
+    // through unchanged today, so the two orders agree, but only one of them
+    // still agrees if a later fold ever acts on one.
+    var bundleId = posixLowercased(stripBidiControls(identity))
     let linuxSource = linuxDesktopSource(sourceDir: sourceDir, exec: execLine)
-    let appPath = linuxDesktopAppPath(source: linuxSource, desktopPath: path, exec: execLine, firstExe: exe)
+    let appPath = linuxDesktopAppPath(source: linuxSource, desktopPath: path, exec: execLine)
     let isSystem = linuxSource == nil && sourceDir.hasPrefix("/usr/")
     var extra: [String: String] = [
         "desktop": path,
