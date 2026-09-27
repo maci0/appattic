@@ -100,6 +100,10 @@ public func duSizes(
         for exe in ["/usr/bin/du", "du"] {
             let (rc, duOut, _) = run([exe, "-sk"] + chunk, timeout)
             if rc != 0, duOut.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            // `du` exits non-zero when any queried path failed, so a line it
+            // still printed is a partial total. `duSize` refuses those; so does
+            // this, or the batch path reports an under-count as a real size.
+            let measured = rc == 0
             var parsedAny = false
             for raw in duOut.split(separator: "\n", omittingEmptySubsequences: false) {
                 guard let tab = raw.firstIndex(of: "\t") else { continue }
@@ -108,7 +112,7 @@ public func duSizes(
                 guard missing.contains(p) else { continue }
                 let (bytes, overflow) = kb.multipliedReportingOverflow(by: 1024)
                 guard !overflow else { continue }
-                out[p] = (bytes, true)
+                out[p] = (bytes, measured)
                 missing.remove(p)
                 parsedAny = true
             }
@@ -153,10 +157,14 @@ public func directoryByteSize(
     defer { close(fd) }
     var total = 0
     var sawError = false
+    var seen = Set<WalkedDirKey>()
+    var rootStat = stat()
+    if fstat(fd, &rootStat) == 0 { seen.insert(WalkedDirKey(rootStat)) }
     let complete = walkLogicalBytes(
         fd: fd,
         total: &total,
         sawError: &sawError,
+        seen: &seen,
         deadline: clock() + timeout,
         clock: clock
     )
@@ -164,11 +172,31 @@ public func directoryByteSize(
     return (total, !sawError)
 }
 
+/// A directory the walk has entered, by device and inode. `childDirFlags`
+/// carries `O_NOFOLLOW`, so a symlink loop cannot recurse; a bind mount
+/// (`mount --bind /a /a/b`) can, and without this the walk spins until the
+/// deadline on a tree that is finite.
+struct WalkedDirKey: Hashable {
+    let dev: UInt64
+    let ino: UInt64
+
+    init(dev: UInt64, ino: UInt64) {
+        self.dev = dev
+        self.ino = ino
+    }
+
+    init(_ st: stat) {
+        self.dev = UInt64(st.st_dev)
+        self.ino = UInt64(st.st_ino)
+    }
+}
+
 /// Returns false when the deadline passed before the tree was fully walked.
 func walkLogicalBytes(
     fd: Int32,
     total: inout Int,
     sawError: inout Bool,
+    seen: inout Set<WalkedDirKey>,
     deadline: TimeInterval,
     clock: MonotonicFn = monotonicSeconds
 ) -> Bool {
@@ -203,19 +231,25 @@ func walkLogicalBytes(
         }
         let kind = Int32(st.st_mode) & Int32(S_IFMT)
         if kind == Int32(S_IFDIR) {
-            let childFd = name.withCString { openat(fd, $0, childDirFlags) }
-            if childFd < 0 {
+            if seen.contains(WalkedDirKey(st)) {
                 sawError = true
             } else {
-                let complete = walkLogicalBytes(
-                    fd: childFd,
-                    total: &total,
-                    sawError: &sawError,
-                    deadline: deadline,
-                    clock: clock
-                )
-                close(childFd)
-                if !complete { return false }
+                let childFd = name.withCString { openat(fd, $0, childDirFlags) }
+                if childFd < 0 {
+                    sawError = true
+                } else {
+                    seen.insert(WalkedDirKey(st))
+                    let complete = walkLogicalBytes(
+                        fd: childFd,
+                        total: &total,
+                        sawError: &sawError,
+                        seen: &seen,
+                        deadline: deadline,
+                        clock: clock
+                    )
+                    close(childFd)
+                    if !complete { return false }
+                }
             }
         } else if kind == Int32(S_IFREG) {
             total = addBytes(total, Int(st.st_size))

@@ -135,3 +135,11 @@ dnf5
 yum
 zypper
 rpm
+java
+gradle
+m2
+maven
+java
+gradle
+m2
+maven

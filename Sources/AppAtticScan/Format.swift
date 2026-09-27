@@ -31,7 +31,9 @@ func oneDecimal(_ n: Double) -> String {
 
 /// Binary-unit size, one decimal above KB. Bytes print as an exact integer.
 public func humanSize(_ bytes: Int) -> String {
-    let units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    // Past the largest unit the loop stops, so the unit list has to reach the
+    // size `Int.max` saturates at (8 EiB), not stop at PB and print 8192 PB.
+    let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
     var n = Double(bytes)
     var unit = 0
     while unit < units.count - 1 {

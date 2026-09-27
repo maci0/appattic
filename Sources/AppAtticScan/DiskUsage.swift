@@ -269,7 +269,13 @@ private func walkDiskFd(
         let childPath = node.path.hasSuffix("/") ? node.path + name : node.path + "/" + name
         var st = stat()
         let rc = name.withCString { fstatat(fd, $0, &st, AT_SYMLINK_NOFOLLOW) }
-        if rc != 0 { continue }
+        if rc != 0 {
+            // ENOENT is the entry leaving under a live scan: it is gone, not
+            // uncountable. Any other errno leaves an entry of unknown size in
+            // this total, so the tree is partial and says so.
+            if errno != ENOENT { node.unreadable = true }
+            continue
+        }
         let meta = unixMetaFromStat(st)
         let child = DiskUsageNode(
             name: name,
