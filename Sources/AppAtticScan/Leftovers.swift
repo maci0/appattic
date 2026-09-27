@@ -263,9 +263,14 @@ public func probeActivityMtime(
         if best == nil || mtime > best! { best = mtime }
         if depth >= maxDepth || !isDir { continue }
         guard let dirp = current.withCString({ opendir($0) }) else { continue }
-        // Collect names first, then close before pushing children.
+        // Collect names first, then close before pushing children. The read is
+        // bounded by the same budget as the walk: a name past it can never be
+        // visited, and a directory with hundreds of thousands of entries used
+        // to be fully read and materialized as Strings before the budget was
+        // consulted at all.
         var names: [String] = []
-        while true {
+        while names.count < maxEntries - seen {
+            if clock() - start > timeout { break }
             errno = 0
             guard let ent = readdir(dirp) else { break }
             guard let name = direntName(ent) else { continue }
@@ -367,6 +372,8 @@ public func scanLeftovers(
         // One `du -sk` per chunk, not one spawn per folder.
         let sizes = duSizes(toMeasure.map(\.path), timeout: 6, run: run)
         let measuredIds = Set(toMeasure.map { ObjectIdentifier($0) })
+        var dirPaths = Set<String>()
+        dirPaths.reserveCapacity(items.count)
         for item in items {
             if measuredIds.contains(ObjectIdentifier(item)) {
                 let pair = sizes[item.path] ?? (0, false)
@@ -379,19 +386,20 @@ public func scanLeftovers(
                 item.sizeBytes = 0
                 item.sizeMeasured = true
             }
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: item.path),
-               let mt = attrs[.modificationDate] as? Date {
+            if let (mt, isDir) = statMtimeKind(item.path) {
                 item.mtime = mt
+                // The nested probe walks directories only, and this is the
+                // same `stat` that reads the mtime: a separate
+                // `fileExists(atPath:isDirectory:)` per item was a third stat
+                // for a fact this pass already had.
+                if isDir { dirPaths.insert(item.path) }
             }
         }
-        progress("  · checking nested mtimes for \(items.filter { $0.leftoverStatus != .system }.count) entries…")
+        progress("  · checking nested mtimes for \(items.lazy.filter { $0.leftoverStatus != .system }.count) entries…")
         let acts = pmap(items, workers: 8) { item -> Date? in
             if skipNestedProbe(item) { return item.mtime }
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: item.path, isDirectory: &isDir), isDir.boolValue {
-                return probeActivityMtime(item.path, clock: clock) ?? item.mtime
-            }
-            return item.mtime
+            guard dirPaths.contains(item.path) else { return item.mtime }
+            return probeActivityMtime(item.path, clock: clock) ?? item.mtime
         }
         for (item, act) in zip(items, acts) {
             item.activityMtime = act

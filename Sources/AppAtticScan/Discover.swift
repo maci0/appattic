@@ -220,10 +220,10 @@ private func lprojCandidates() -> [String] {
     return out
 }
 
-func readInfoPlist(_ appPath: String) -> [String: Any] {
+func readInfoPlist(_ appPath: String, bases: [String]? = nil) -> [String: Any] {
     var data: [String: Any] = [:]
-    let bases = appBundleBases(appPath)
-    for base in bases {
+    let resolved = bases ?? appBundleBases(appPath)
+    for base in resolved {
         for rel in ["Contents/Info.plist", "Info.plist"] {
             let loaded = loadPlist((base as NSString).appendingPathComponent(rel))
             if !loaded.isEmpty {
@@ -233,10 +233,13 @@ func readInfoPlist(_ appPath: String) -> [String: Any] {
         }
         if !data.isEmpty { break }
     }
-    for base in bases {
+    // `lprojCandidates` copies the whole process environment to read `LANG`.
+    // Resolved once per app instead of once per base and resource directory.
+    let locs = lprojCandidates()
+    for base in resolved {
         for resName in ["Contents/Resources", "Resources"] {
             let res = (base as NSString).appendingPathComponent(resName)
-            for loc in lprojCandidates() {
+            for loc in locs {
                 let path = ((res as NSString).appendingPathComponent("\(loc).lproj") as NSString)
                     .appendingPathComponent("InfoPlist.strings")
                 let strings = loadPlist(path)
@@ -252,8 +255,8 @@ func readInfoPlist(_ appPath: String) -> [String: Any] {
     return data
 }
 
-public func hasMasReceipt(_ appPath: String) -> Bool {
-    for base in appBundleBases(appPath) {
+public func hasMasReceipt(_ appPath: String, bases: [String]? = nil) -> Bool {
+    for base in bases ?? appBundleBases(appPath) {
         for rel in ["Contents/_MASReceipt/receipt", "_MASReceipt/receipt"] {
             if FileManager.default.fileExists(atPath: (base as NSString).appendingPathComponent(rel)) {
                 return true
@@ -284,7 +287,10 @@ public func makeApp(from appPath: String) -> AppRecord? {
     let real = URL(fileURLWithPath: appPath).resolvingSymlinksInPath().path
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: real, isDirectory: &isDir), isDir.boolValue else { return nil }
-    let info = readInfoPlist(real)
+    // One bundle-base resolution, which stats and lists `WrappedBundle` and
+    // `Wrapper`; the plist read and the receipt probe used to do it each.
+    let bases = appBundleBases(real)
+    let info = readInfoPlist(real, bases: bases)
     let name = stripBidiControls(
         (info["CFBundleDisplayName"] as? String)
             ?? (info["CFBundleName"] as? String)
@@ -314,7 +320,7 @@ public func makeApp(from appPath: String) -> AppRecord? {
     if let ver = (info["CFBundleShortVersionString"] as? String) ?? (info["CFBundleVersion"] as? String) {
         extra["version"] = ver
     }
-    if hasMasReceipt(real) { extra["mas_receipt"] = "1" }
+    if hasMasReceipt(real, bases: bases) { extra["mas_receipt"] = "1" }
     if let desc = plistDescription(info, appName: name) { extra["comment"] = desc }
     if let cat = categoryLabel(info["LSApplicationCategoryType"] as? String) { extra["category"] = cat }
     return AppRecord(path: real, displayName: name, bundleId: bid, sourceDir: sourceDir, isSystem: isSystem, extra: extra)

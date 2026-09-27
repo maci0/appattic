@@ -193,8 +193,17 @@ public func infoJSONForNames(
         if rc == 0 {
             return parseInfoJSON(out)
         }
-        guard let token = refusedCaskToken(err) else { return [:] }
-        let dropped = remaining.filter { $0 != token && !$0.hasSuffix("/" + token) }
+        // Every refusal in this stderr is dropped in one retry, not one
+        // subprocess per cask: each retry is a fresh `brew info` over the
+        // remaining names, and a machine with k untrusted taps paid k of them.
+        let tokens = refusedCasks(from: err).map(\.name)
+        guard !tokens.isEmpty else { return [:] }
+        let exact = Set(tokens)
+        let qualified = tokens.map { "/" + $0 }
+        let dropped = remaining.filter { name in
+            guard !exact.contains(name) else { return false }
+            return !qualified.contains(where: { name.hasSuffix($0) })
+        }
         if dropped.count == remaining.count { return [:] }
         remaining = dropped
     }
@@ -351,18 +360,35 @@ public func collectBrew(
                 info.casks[i].desc = descMap[info.casks[i].name]
             }
         }
+        // Installed name -> index, first occurrence wins, so a lookup lands on
+        // the same entry `firstIndex(where:)` did. Both keys a row can match
+        // on, `name` and `full_name`, are compared against the installed name,
+        // so one index serves both and the earlier of the two hits is the
+        // match. The linear scan this replaces ran once per JSON row over a
+        // few thousand installed formulae.
+        var formulaByName: [String: Int] = [:]
+        formulaByName.reserveCapacity(info.formulas.count)
+        for (i, entry) in info.formulas.enumerated() where formulaByName[entry.name] == nil {
+            formulaByName[entry.name] = i
+        }
         for f in formulae {
-            let fname = (f["name"] as? String) ?? (f["full_name"] as? String)
-            guard let match = info.formulas.firstIndex(where: { $0.name == fname || $0.name == (f["full_name"] as? String) }) else { continue }
+            let byName = (f["name"] as? String).flatMap { formulaByName[$0] }
+            let byFull = (f["full_name"] as? String).flatMap { formulaByName[$0] }
+            var match = byName
+            if let byFull { match = match.map { min($0, byFull) } ?? byFull }
+            guard let match else { continue }
             info.formulas[match].aliases = (f["aliases"] as? [String])?.filter { !$0.isEmpty } ?? []
             let installed = f["installed"] as? [[String: Any]] ?? []
             let ver = (installed.first?["version"] as? String) ?? ((f["versions"] as? [String: Any])?["stable"] as? String)
             info.formulas[match].version = ver
         }
+        var caskByToken: [String: Int] = [:]
+        caskByToken.reserveCapacity(info.casks.count)
+        for (i, entry) in info.casks.enumerated() where caskByToken[entry.name] == nil {
+            caskByToken[entry.name] = i
+        }
         for c in casksJSON {
-            guard let token = c["token"] as? String,
-                  let match = info.casks.firstIndex(where: { $0.name == token })
-            else { continue }
+            guard let token = c["token"] as? String, let match = caskByToken[token] else { continue }
             info.casks[match].version = (c["version"] as? String) ?? ((c["versions"] as? [String: Any])?["stable"] as? String)
             var pretty: [String] = []
             if let names = c["name"] as? [String] {
@@ -417,15 +443,26 @@ public func collectBrew(
     info.outdatedFailed = brewOutdated.failed
     attachSummaries(info.outdated, summaries: descMap, titles: titleMap)
     var unique: [UntrustedCask] = []
+    var keys: [String] = []
     var seen = Set<String>()
-    for u in refused where seen.insert(u.name.posixLowercased()).inserted {
+    for u in refused {
+        let key = u.name.posixLowercased()
+        guard seen.insert(key).inserted else { continue }
         unique.append(u)
+        keys.append(key)
     }
     info.untrustedCasks = unique
-    for u in unique {
-        if let i = info.casks.firstIndex(where: { $0.name.posixLowercased() == u.name.posixLowercased() }) {
-            info.casks[i].untrustedTap = u.tap
-        }
+    // Lowercased installed name -> index, first occurrence wins, matching the
+    // `firstIndex(where:)` this replaces. The lowered form is computed once per
+    // cask here rather than twice per comparison over the whole list.
+    var caskByLowered: [String: Int] = [:]
+    caskByLowered.reserveCapacity(info.casks.count)
+    for (i, entry) in info.casks.enumerated() {
+        let key = entry.name.posixLowercased()
+        if caskByLowered[key] == nil { caskByLowered[key] = i }
+    }
+    for (k, u) in unique.enumerated() {
+        if let i = caskByLowered[keys[k]] { info.casks[i].untrustedTap = u.tap }
     }
     return info
 }

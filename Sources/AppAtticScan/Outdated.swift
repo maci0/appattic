@@ -242,22 +242,32 @@ private func outdatedReason(
 /// place; only newly added rows are exclusive to the returned array.
 public func applyUntrustedCasks(_ pkgs: [OutdatedPkg], refused: [UntrustedCask]) -> [OutdatedPkg] {
     var out = pkgs
+    // Lowercased brew-cask name -> the row, so each refusal is one lookup. The
+    // linear scan this replaces recomputed `posixLowercased()` on every
+    // candidate and widened as the loop appended.
+    var caskByLowered: [String: OutdatedPkg] = [:]
+    for pkg in out where pkg.manager == "brew-cask" {
+        let key = pkg.name.posixLowercased()
+        if caskByLowered[key] == nil { caskByLowered[key] = pkg }
+    }
     for u in refused {
         let key = u.name.posixLowercased()
-        if let existing = out.first(where: { $0.manager == "brew-cask" && $0.name.posixLowercased() == key }) {
+        if let existing = caskByLowered[key] {
             existing.kind = "untrusted"
             existing.reason = untrustedCaskReason(u)
             if existing.summary?.isEmpty ?? true {
                 existing.summary = untrustedCaskSummary(u)
             }
         } else {
-            out.append(OutdatedPkg(
+            let added = OutdatedPkg(
                 name: u.name,
                 manager: "brew-cask",
                 summary: untrustedCaskSummary(u),
                 reason: untrustedCaskReason(u),
                 kind: "untrusted"
-            ))
+            )
+            caskByLowered[key] = added
+            out.append(added)
         }
     }
     return out
@@ -1023,10 +1033,11 @@ private final class LockBox<T>: @unchecked Sendable {
 public func itunesLookup(
     _ bundleId: String,
     session: URLSession = .shared,
-    onFailure: ((String) -> Void)? = nil
+    onFailure: ((String) -> Void)? = nil,
+    countries: [String]? = nil
 ) -> [String: Any]? {
     if bundleId.isEmpty { return nil }
-    for country in storeCountries() {
+    for country in countries ?? storeCountries() {
         let idx = itunesRequest(
             ["bundleId": bundleId, "country": country],
             session: session,
@@ -1040,12 +1051,13 @@ public func itunesLookup(
 public func itunesLookupBatch(
     _ adamIds: [String],
     session: URLSession = .shared,
-    onFailure: ((String) -> Void)? = nil
+    onFailure: ((String) -> Void)? = nil,
+    countries: [String]? = nil
 ) -> [String: [String: Any]] {
     let ids = adamIds.filter { !$0.isEmpty }
     if ids.isEmpty { return [:] }
     var out: [String: [String: Any]] = [:]
-    for country in storeCountries() {
+    for country in countries ?? storeCountries() {
         let missing = ids.filter { out[$0] == nil }
         if missing.isEmpty { break }
         var i = 0
@@ -1127,7 +1139,10 @@ func masCatalog(
         }
         if let adam { ids.append(adam) }
     }
-    var catalog = itunesLookupBatch(ids, session: session, onFailure: onFailure)
+    // Resolved once: `storeCountries` shells out to `defaults`, and the
+    // per-app fallback below calls it again for every app the batch missed.
+    let countries = storeCountries()
+    var catalog = itunesLookupBatch(ids, session: session, onFailure: onFailure, countries: countries)
     for app in mutated {
         let extra = app.extra
         let adam = extra["mas_adam_id"] ?? ""
@@ -1136,7 +1151,7 @@ func masCatalog(
             continue
         }
         guard let bid else { continue }
-        guard let row = itunesLookup(bid, session: session, onFailure: onFailure) else { continue }
+        guard let row = itunesLookup(bid, session: session, onFailure: onFailure, countries: countries) else { continue }
         catalog[bid] = row
         if let tid = row["trackId"] {
             catalog["\(tid)"] = row
@@ -1236,18 +1251,30 @@ public func queryFlatpak(
         return (rc1, updates, rc2 == 0 ? installed : "")
     }
     var (rc, updates, installed) = pair(withMeta: true)
+    // Non-nil once `updates` has been parsed with no installed text, which is
+    // exactly what the final call computes. The retry path used to parse the
+    // same `flatpak list` output a third time.
+    var parsed: [OutdatedPkg]?
     // A failing remote (GPG error on stderr) still prints other remotes'
     // rows on stdout: use them instead of discarding and repaying the
     // full `remote-ls` cost with plain columns. Retry plain only when BOTH
     // outputs parse to nothing: that means old flatpak without --columns,
     // not a flaky remote (local `list` still succeeds then).
-    if rc != 0, parseFlatpakUpdates(updates).isEmpty, installed.isEmpty {
-        (rc, updates, installed) = pair(withMeta: false)
-        if rc != 0, parseFlatpakUpdates(updates).isEmpty {
-            noteScanCheckFailed("flatpak")
-            return []
+    if rc != 0 {
+        let first = parseFlatpakUpdates(updates)
+        if first.isEmpty, installed.isEmpty {
+            (rc, updates, installed) = pair(withMeta: false)
+            let retried = parseFlatpakUpdates(updates)
+            if rc != 0, retried.isEmpty {
+                noteScanCheckFailed("flatpak")
+                return []
+            }
+            parsed = retried
+        } else {
+            parsed = first
         }
     }
+    if let parsed, installed.isEmpty { return parsed }
     return parseFlatpakUpdates(updates, installedText: installed)
 }
 
