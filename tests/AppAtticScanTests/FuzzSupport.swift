@@ -41,11 +41,20 @@ enum FuzzMutator {
         0xE2, 0x94, 0x80, 0xF0, 0x9F, 0x92, 0xA9,
     ]
 
+    /// The ASCII half of `hotBytes`, for a harness that holds two readers of
+    /// one file against each other and can only require them to agree where
+    /// the byte and the Unicode reading of a character are the same.
+    static let asciiHotBytes: [UInt8] = hotBytes.filter { $0 < 0x80 }
+
     /// Largest output a harness builds, so one seed cannot turn into a
     /// multi-megabyte line the parser has to walk per iteration.
     static let maxBytes = 8192
 
-    static func bytes(from seed: [UInt8], using rng: inout FuzzRandom) -> [UInt8] {
+    static func bytes(
+        from seed: [UInt8],
+        using rng: inout FuzzRandom,
+        hotBytes: [UInt8] = FuzzMutator.hotBytes
+    ) -> [UInt8] {
         var out = seed
         for _ in 0...(1 + rng.int(8)) {
             guard !out.isEmpty else { break }
@@ -71,8 +80,12 @@ enum FuzzMutator {
         return out
     }
 
-    static func text(from seed: String, using rng: inout FuzzRandom) -> String {
-        String(decoding: bytes(from: Array(seed.utf8), using: &rng), as: UTF8.self)
+    static func text(
+        from seed: String,
+        using rng: inout FuzzRandom,
+        hotBytes: [UInt8] = FuzzMutator.hotBytes
+    ) -> String {
+        String(decoding: bytes(from: Array(seed.utf8), using: &rng, hotBytes: hotBytes), as: UTF8.self)
     }
 }
 

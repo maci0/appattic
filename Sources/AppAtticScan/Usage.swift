@@ -397,7 +397,10 @@ func parseHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Set<St
         var end = pos
         while end < count, bytes[end] != 0x0A { end += 1 }
         var stop = end
-        if stop > pos, bytes[stop - 1] == 0x0D { stop -= 1 }
+        // Every trailing CR, not just one: a `\r\r\n` line leaves a CR on the
+        // token the byte path keeps whole, and the regex path normalizes the
+        // CRLF away and reads the command.
+        while stop > pos, bytes[stop - 1] == 0x0D { stop -= 1 }
 
         var trimmedStart = pos
         while trimmedStart < stop, hxTrimEdge(bytes[trimmedStart]) { trimmedStart += 1 }
@@ -470,7 +473,10 @@ func parseFishHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Se
         var end = pos
         while end < count, bytes[end] != 0x0A { end += 1 }
         var stop = end
-        if stop > pos, bytes[stop - 1] == 0x0D { stop -= 1 }
+        // Every trailing CR, not just one: a `\r\r\n` line leaves a CR on the
+        // token the byte path keeps whole, and the regex path normalizes the
+        // CRLF away and reads the command.
+        while stop > pos, bytes[stop - 1] == 0x0D { stop -= 1 }
 
         var handledByCmd = false
         if stop - pos >= 6,
