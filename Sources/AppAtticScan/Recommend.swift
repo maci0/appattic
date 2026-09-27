@@ -404,6 +404,12 @@ func isSteamClientSoftware(_ sw: Software) -> Bool {
         && sw.name.compare("Steam", options: .caseInsensitive) == .orderedSame
 }
 
+func isSteamClientSoftware(_ item: SoftwareItem) -> Bool {
+    item.source == "steam"
+        && item.steam_appid == nil
+        && item.name.compare("Steam", options: .caseInsensitive) == .orderedSame
+}
+
 /// KEEP / REVIEW / REMOVE / SYSTEM from usage age, data size, and how easy reinstall is.
 /// System apps and the Steam client are never REMOVE. Missing last-used is REVIEW unless
 /// a brew formula has a long enough shell-history span.
@@ -539,20 +545,40 @@ public func evaluateAll(_ software: [Software], now: Date = Date()) -> [Verdict]
 }
 
 public func softwareDisplaySummary(_ sw: Software) -> String {
-    if let s = sw.summary, !s.isEmpty, !isJunkAppBlurb(s) {
+    softwareDisplaySummary(
+        summary: sw.summary,
+        kind: sw.kind,
+        source: sw.source,
+        steamClient: isSteamClientSoftware(sw)
+    )
+}
+
+/// Same label for a JSON `SoftwareItem` row, which carries `steam_appid` where
+/// `Software` carries `extra`, so the Steam-client test has to be re-derived.
+public func softwareDisplaySummary(_ item: SoftwareItem) -> String {
+    softwareDisplaySummary(
+        summary: item.summary,
+        kind: item.kind,
+        source: item.source,
+        steamClient: isSteamClientSoftware(item)
+    )
+}
+
+private func softwareDisplaySummary(summary: String?, kind: String, source: String, steamClient: Bool) -> String {
+    if let s = summary, !s.isEmpty, !isJunkAppBlurb(s) {
         let words = s.split(whereSeparator: \.isWhitespace)
-        if sw.source != "steam" || isSteamClientSoftware(sw) || words.count >= 4 {
+        if source != "steam" || steamClient || words.count >= 4 {
             return s
         }
     }
-    if sw.kind == "formula" || sw.source == "brew-formula" { return "Homebrew formula" }
-    if sw.source == "brew-cask" { return "Homebrew cask" }
-    if sw.source == "flatpak" { return "Flatpak app" }
-    if sw.source == "snap" { return "Snap app" }
-    if sw.source == "appimage" { return "AppImage" }
-    if isSteamClientSoftware(sw) { return "Steam client" }
-    if sw.source == "steam" { return "Steam game" }
-    if sw.source == "crossover" { return "CrossOver bottle" }
-    if sw.kind == "app" { return "Installed application" }
+    if kind == "formula" || source == "brew-formula" { return "Homebrew formula" }
+    if source == "brew-cask" { return "Homebrew cask" }
+    if source == "flatpak" { return "Flatpak app" }
+    if source == "snap" { return "Snap app" }
+    if source == "appimage" { return "AppImage" }
+    if steamClient { return "Steam client" }
+    if source == "steam" { return "Steam game" }
+    if source == "crossover" { return "CrossOver bottle" }
+    if kind == "app" { return "Installed application" }
     return "Installed software"
 }

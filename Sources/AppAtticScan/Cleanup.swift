@@ -23,7 +23,7 @@ public struct CleanupSelection: Equatable, Sendable {
 }
 
 /// UI can opt REVIEW and REMOVE into cleanup. CLI `--dry-run` for report/stale only emits REMOVE.
-public let selectableCleanupTiers: Set<String> = Set(StaleTier.selectable.map(\.rawValue))
+let selectableCleanupTiers: Set<String> = Set(StaleTier.selectable.map(\.rawValue))
 
 public func pruneCleanupSelection(
     leftovers: Set<String>,

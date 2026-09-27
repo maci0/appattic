@@ -435,7 +435,7 @@ struct ContentView: View {
                                 ForEach(Array(outdatedRows.prefix(12)), id: \.id) { item in
                                     overviewTappableRow(
                                         item.displayName,
-                                        outdatedWhat(item),
+                                        outdatedSummaryFallback(item),
                                         item.kind == "untrusted"
                                             ? "untrusted tap"
                                             : "\(item.current_version ?? "-") → \(item.latest_version ?? "?")"
@@ -955,29 +955,8 @@ struct ContentView: View {
         return Color.appText
     }
 
-    func staleWhat(_ item: SoftwareItem) -> String {
-        if let summary = item.summary, !summary.isEmpty, !isJunkAppBlurb(summary) {
-            if item.source != "steam" || summary.split(whereSeparator: \.isWhitespace).count >= 4 {
-                return summary
-            }
-        }
-        if item.source == "brew-formula" { return "Homebrew formula" }
-        if item.source == "brew-cask" { return "Homebrew cask" }
-        if item.source == "steam" {
-            if item.steam_appid == nil, item.name.compare("Steam", options: .caseInsensitive) == .orderedSame {
-                return "Steam client"
-            }
-            return "Steam game"
-        }
-        if item.source == "crossover" { return "CrossOver bottle" }
-        if item.source == "flatpak" { return "Flatpak app" }
-        if item.source == "snap" { return "Snap app" }
-        if item.source == "appimage" { return "AppImage" }
-        return "Installed application"
-    }
-
     func staleOverviewDetail(_ item: SoftwareItem) -> String {
-        let what = staleWhat(item)
+        let what = softwareDisplaySummary(item)
         let data = item.data_bytes ?? 0
         if data > 0 {
             return "\(what) · \(humanSize(data)) data"
@@ -988,21 +967,6 @@ struct ContentView: View {
     func staleWhy(_ item: SoftwareItem) -> String {
         if let reason = item.reason, !reason.isEmpty { return displayStaleReason(reason) }
         return "Flagged as unused or unconfirmed."
-    }
-
-    func outdatedWhat(_ item: OutdatedEntry) -> String {
-        if let summary = item.summary, !summary.isEmpty { return summary }
-        return "Package managed by \(item.manager.replacingOccurrences(of: "-", with: " "))"
-    }
-
-    func outdatedWhy(_ item: OutdatedEntry) -> String {
-        if let reason = item.reason, !reason.isEmpty { return reason }
-        let cur = item.current_version ?? "installed"
-        let latest = item.latest_version ?? "newer"
-        if item.updatable {
-            return "\(item.manager.replacingOccurrences(of: "-", with: " ")) reports \(cur) installed, \(latest) available. You can update it from this page."
-        }
-        return "\(item.manager.replacingOccurrences(of: "-", with: " ")) reports \(cur) installed, \(latest) available. AppAttic does not run this upgrade."
     }
 
     func rowPrimary(_ selected: Bool) -> Color {
@@ -1064,7 +1028,7 @@ struct ContentView: View {
         inspectorPane {
             Text(item.name)
                 .font(.system(size: TypeScale.title, weight: .semibold))
-            infoBlock("What", staleWhat(item))
+            infoBlock("What", softwareDisplaySummary(item))
             infoBlock("Why", staleWhy(item))
             inspectorSection(topPad: 4) {
                 infoRow("Status", displayTier(item.tier), color: tierColor(item.tier))
@@ -1111,8 +1075,8 @@ struct ContentView: View {
                     .font(.system(size: TypeScale.monoSmall))
                     .foregroundColor(Color.appDim)
             }
-            infoBlock("What", outdatedWhat(item))
-            infoBlock("Why", outdatedWhy(item))
+            infoBlock("What", outdatedSummaryFallback(item))
+            infoBlock("Why", outdatedReason(item, page: "this page"))
             inspectorSection(topPad: 4) {
                 infoRow("Manager", item.manager.replacingOccurrences(of: "-", with: " "))
                 if item.kind == "untrusted" {

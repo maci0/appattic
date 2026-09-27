@@ -301,7 +301,9 @@ public let relativeDayLimit = 45
 public enum TimestampFormat {
     /// Absolute date, no time. `dateStyle` rather than `dateFormat`, so the
     /// pattern and the era come from CLDR instead of a fixed template.
-    public static let date: DateFormatter = {
+    /// Internal: a public formatter would hand every target a handle to
+    /// reconfigure a shared, process-wide object. Callers use `string(from:)`.
+    static let date: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .none
@@ -309,7 +311,7 @@ public enum TimestampFormat {
     }()
 
     /// "Today", "Yesterday", "3 days ago", localized and correctly pluralized.
-    public static let relativeDays: DateComponentsFormatter = {
+    static let relativeDays: DateComponentsFormatter = {
         let f = DateComponentsFormatter()
         f.allowedUnits = .day
         f.unitsStyle = .named

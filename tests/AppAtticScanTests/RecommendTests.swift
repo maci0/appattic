@@ -610,4 +610,28 @@ final class RecommendTests: XCTestCase {
         XCTAssertEqual(row.data_bytes, 12)
         XCTAssertEqual(row.data_paths, ["/tmp/Library/Application Support/Sketch"])
     }
+
+    func testSoftwareDisplaySummaryMatchesRuntimeModelForJSONRow() {
+        let sw = Software(name: "Sketch", kind: "app", path: "/Applications/Sketch.app", source: "pkg/other")
+        let item = SoftwareItem(name: "Sketch", kind: "app", path: "/Applications/Sketch.app", source: "pkg/other")
+        XCTAssertEqual(softwareDisplaySummary(item), softwareDisplaySummary(sw))
+    }
+
+    func testSoftwareDisplaySummaryNamesTheSteamClientFromJSONRow() {
+        let client = SoftwareItem(name: "Steam", kind: "app", path: "/Applications/Steam.app", source: "steam")
+        let game = SoftwareItem(name: "Portal 2", kind: "app", path: "/games/Portal 2", source: "steam")
+        XCTAssertEqual(softwareDisplaySummary(client), "Steam client")
+        XCTAssertEqual(softwareDisplaySummary(game), "Steam game")
+    }
+
+    func testSoftwareDisplaySummaryRejectsAJunkBlurb() {
+        let item = SoftwareItem(
+            name: "Thing",
+            kind: "app",
+            path: "/Applications/Thing.app",
+            source: "pkg/other",
+            summary: "Unity Technologies, all rights reserved"
+        )
+        XCTAssertEqual(softwareDisplaySummary(item), "Installed application")
+    }
 }

@@ -410,3 +410,89 @@ public func collectBrew(
     }
     return info
 }
+
+// MARK: - Homebrew outdated queries
+// Parsers and metadata for the Homebrew side of the Outdated report. They
+// belong with the rest of the brew feature, not in the manager-agnostic report.
+
+public func parseBrewOutdatedJSON(_ text: String) -> [OutdatedPkg] {
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return [] }
+    var out: [OutdatedPkg] = []
+    for (key, manager) in [("formulae", "brew-formula"), ("casks", "brew-cask")] {
+        for item in obj[key] as? [[String: Any]] ?? [] {
+            guard let name = item["name"] as? String, !name.isEmpty else { continue }
+            var current: String?
+            if let installed = item["installed_versions"] as? [String] {
+                current = installed.first
+            } else if let installed = item["installed_versions"] as? String {
+                current = installed
+            }
+            out.append(OutdatedPkg(
+                name: name,
+                manager: manager,
+                currentVersion: current,
+                latestVersion: item["current_version"] as? String
+            ))
+        }
+    }
+    return out
+}
+
+func queryBrewStatus(
+    _ brew: String,
+    progress: ((String) -> Void)? = nil,
+    run: CommandRun = runCommand
+) -> (pkgs: [OutdatedPkg], failed: Bool) {
+    if brew.isEmpty { return ([], false) }
+    progress?("  · checking for outdated Homebrew packages…")
+    let (rc, out, _) = run([brew, "outdated", "--json=v2"], 90)
+    if rc != 0 { return ([], true) }
+    if out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return ([], false) }
+    return (parseBrewOutdatedJSON(out), false)
+}
+
+public func brewPackageMeta(_ data: [String: Any]) -> ([String: String], [String: String]) {
+    var summaries: [String: String] = [:]
+    var titles: [String: String] = [:]
+    for f in data["formulae"] as? [[String: Any]] ?? [] {
+        let name = (f["name"] as? String) ?? (f["full_name"] as? String)
+        let desc = (f["desc"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let name, !name.isEmpty, !desc.isEmpty {
+            summaries[name] = desc
+        }
+    }
+    for c in data["casks"] as? [[String: Any]] ?? [] {
+        guard let token = c["token"] as? String, !token.isEmpty else { continue }
+        let desc = (c["desc"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !desc.isEmpty { summaries[token] = desc }
+        var pretty: String?
+        if let names = c["name"] as? [String], let first = names.first {
+            pretty = first.trimmingCharacters(in: .whitespaces)
+        } else if let name = c["name"] as? String {
+            pretty = name.trimmingCharacters(in: .whitespaces)
+        }
+        if let pretty, !pretty.isEmpty, pretty.posixLowercased() != token.posixLowercased() {
+            titles[token] = pretty
+        }
+    }
+    return (summaries, titles)
+}
+
+public func attachSummaries(
+    _ pkgs: [OutdatedPkg],
+    summaries: [String: String],
+    titles: [String: String] = [:]
+) {
+    for p in pkgs {
+        if p.summary?.isEmpty ?? true {
+            let text = (summaries[p.name] ?? "").trimmingCharacters(in: .whitespaces)
+            if !text.isEmpty { p.summary = text }
+        }
+        if p.title?.isEmpty ?? true {
+            let text = (titles[p.name] ?? "").trimmingCharacters(in: .whitespaces)
+            if !text.isEmpty, text.posixLowercased() != p.name.posixLowercased() {
+                p.title = text
+            }
+        }
+    }
+}

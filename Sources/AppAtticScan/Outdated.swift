@@ -156,13 +156,44 @@ private let managerLabel: [String: String] = [
 public let outdatedSkippedManagersNote =
     "Untrusted casks, App Store, and Snap are skipped."
 
-public func outdatedReason(_ pkg: OutdatedPkg) -> String {
-    if let reason = pkg.reason, !reason.isEmpty { return reason }
-    let mgr = managerLabel[pkg.manager] ?? pkg.manager.replacingOccurrences(of: "-", with: " ")
-    let cur = pkg.currentVersion ?? "the installed version"
-    let latest = pkg.latestVersion ?? "a newer version"
-    if pkg.updatable {
-        return "\(mgr) reports \(cur) installed and \(latest) available. You can update it from Outdated."
+public func outdatedReason(_ pkg: OutdatedPkg, page: String = "Outdated") -> String {
+    outdatedReason(
+        manager: pkg.manager,
+        reason: pkg.reason,
+        currentVersion: pkg.currentVersion,
+        latestVersion: pkg.latestVersion,
+        updatable: pkg.updatable,
+        page: page
+    )
+}
+
+/// Same reason for a JSON `OutdatedEntry` row, for a surface that never holds
+/// the runtime `OutdatedPkg` it was serialized from.
+public func outdatedReason(_ entry: OutdatedEntry, page: String = "Outdated") -> String {
+    outdatedReason(
+        manager: entry.manager,
+        reason: entry.reason,
+        currentVersion: entry.current_version,
+        latestVersion: entry.latest_version,
+        updatable: entry.updatable,
+        page: page
+    )
+}
+
+private func outdatedReason(
+    manager: String,
+    reason: String?,
+    currentVersion: String?,
+    latestVersion: String?,
+    updatable: Bool,
+    page: String
+) -> String {
+    if let reason, !reason.isEmpty { return reason }
+    let mgr = managerLabel[manager] ?? manager.replacingOccurrences(of: "-", with: " ")
+    let cur = currentVersion ?? "the installed version"
+    let latest = latestVersion ?? "a newer version"
+    if updatable {
+        return "\(mgr) reports \(cur) installed and \(latest) available. You can update it from \(page)."
     }
     return "\(mgr) reports \(cur) installed and \(latest) available. AppAttic does not run this upgrade."
 }
@@ -266,91 +297,18 @@ public func updateScript(from data: ScanData, selectedIds: Set<String>? = nil) -
 }
 
 public func outdatedSummaryFallback(_ pkg: OutdatedPkg) -> String {
-    if let summary = pkg.summary, !summary.isEmpty { return summary }
-    let mgr = managerLabel[pkg.manager] ?? pkg.manager.replacingOccurrences(of: "-", with: " ")
+    outdatedSummaryFallback(summary: pkg.summary, manager: pkg.manager)
+}
+
+/// Same fallback for a JSON `OutdatedEntry` row.
+public func outdatedSummaryFallback(_ entry: OutdatedEntry) -> String {
+    outdatedSummaryFallback(summary: entry.summary, manager: entry.manager)
+}
+
+private func outdatedSummaryFallback(summary: String?, manager: String) -> String {
+    if let summary, !summary.isEmpty { return summary }
+    let mgr = managerLabel[manager] ?? manager.replacingOccurrences(of: "-", with: " ")
     return "Package managed by \(mgr)"
-}
-
-public func parseBrewOutdatedJSON(_ text: String) -> [OutdatedPkg] {
-    guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return [] }
-    var out: [OutdatedPkg] = []
-    for (key, manager) in [("formulae", "brew-formula"), ("casks", "brew-cask")] {
-        for item in obj[key] as? [[String: Any]] ?? [] {
-            guard let name = item["name"] as? String, !name.isEmpty else { continue }
-            var current: String?
-            if let installed = item["installed_versions"] as? [String] {
-                current = installed.first
-            } else if let installed = item["installed_versions"] as? String {
-                current = installed
-            }
-            out.append(OutdatedPkg(
-                name: name,
-                manager: manager,
-                currentVersion: current,
-                latestVersion: item["current_version"] as? String
-            ))
-        }
-    }
-    return out
-}
-
-func queryBrewStatus(
-    _ brew: String,
-    progress: ((String) -> Void)? = nil,
-    run: CommandRun = runCommand
-) -> (pkgs: [OutdatedPkg], failed: Bool) {
-    if brew.isEmpty { return ([], false) }
-    progress?("  · checking for outdated Homebrew packages…")
-    let (rc, out, _) = run([brew, "outdated", "--json=v2"], 90)
-    if rc != 0 { return ([], true) }
-    if out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return ([], false) }
-    return (parseBrewOutdatedJSON(out), false)
-}
-
-public func brewPackageMeta(_ data: [String: Any]) -> ([String: String], [String: String]) {
-    var summaries: [String: String] = [:]
-    var titles: [String: String] = [:]
-    for f in data["formulae"] as? [[String: Any]] ?? [] {
-        let name = (f["name"] as? String) ?? (f["full_name"] as? String)
-        let desc = (f["desc"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if let name, !name.isEmpty, !desc.isEmpty {
-            summaries[name] = desc
-        }
-    }
-    for c in data["casks"] as? [[String: Any]] ?? [] {
-        guard let token = c["token"] as? String, !token.isEmpty else { continue }
-        let desc = (c["desc"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !desc.isEmpty { summaries[token] = desc }
-        var pretty: String?
-        if let names = c["name"] as? [String], let first = names.first {
-            pretty = first.trimmingCharacters(in: .whitespaces)
-        } else if let name = c["name"] as? String {
-            pretty = name.trimmingCharacters(in: .whitespaces)
-        }
-        if let pretty, !pretty.isEmpty, pretty.posixLowercased() != token.posixLowercased() {
-            titles[token] = pretty
-        }
-    }
-    return (summaries, titles)
-}
-
-public func attachSummaries(
-    _ pkgs: [OutdatedPkg],
-    summaries: [String: String],
-    titles: [String: String] = [:]
-) {
-    for p in pkgs {
-        if p.summary?.isEmpty ?? true {
-            let text = (summaries[p.name] ?? "").trimmingCharacters(in: .whitespaces)
-            if !text.isEmpty { p.summary = text }
-        }
-        if p.title?.isEmpty ?? true {
-            let text = (titles[p.name] ?? "").trimmingCharacters(in: .whitespaces)
-            if !text.isEmpty, text.posixLowercased() != p.name.posixLowercased() {
-                p.title = text
-            }
-        }
-    }
 }
 
 private func flatpakRows(_ text: String) -> [String: (String?, String?, String?)] {

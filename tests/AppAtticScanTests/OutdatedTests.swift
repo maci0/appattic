@@ -786,4 +786,32 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(movie.outdated)
         XCTAssertEqual(movie.latestVersion, "10.4.4")
     }
+
+    func testOutdatedEntrySummaryFallbackUsesTheManagerLabel() {
+        let entry = OutdatedEntry(name: "iMovie", manager: "app-store")
+        XCTAssertEqual(outdatedSummaryFallback(entry), "Package managed by the App Store")
+    }
+
+    func testOutdatedEntryReasonNamesTheSurface() {
+        let entry = OutdatedEntry(
+            name: "wget",
+            manager: "brew-formula",
+            current_version: "1.21.4",
+            latest_version: "1.24.5"
+        )
+        let text = outdatedReason(entry, page: "this page")
+        XCTAssertTrue(text.contains("Homebrew"))
+        XCTAssertTrue(text.contains("this page"))
+        XCTAssertEqual(outdatedReason(entry), outdatedReason(OutdatedPkg(
+            name: "wget",
+            manager: "brew-formula",
+            currentVersion: "1.21.4",
+            latestVersion: "1.24.5"
+        )))
+    }
+
+    func testOutdatedEntryKeepsAnExistingReason() {
+        let entry = OutdatedEntry(name: "wget", manager: "brew-formula", reason: "already explained")
+        XCTAssertEqual(outdatedReason(entry, page: "this page"), "already explained")
+    }
 }
