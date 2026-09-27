@@ -161,11 +161,50 @@ private func trimPartialLeadingUTF8(_ bytes: [UInt8]) -> [UInt8] {
     return start == 0 ? bytes : Array(bytes[start...])
 }
 
+/// Bytes a single stream of one command may contribute before the result is
+/// declared unusable. Every query this app runs prints a listing, not a log:
+/// the largest of them (`brew outdated --json`, `dnf list --upgrades`, `pip list
+/// --format=json`) is orders of magnitude below this, and a command that
+/// exceeds it is misbehaving or stuck in a loop. Without a cap the whole
+/// stream is held in memory, and the scan's cost is whatever the command
+/// decides to print. The C host makes the same call against the same kind of
+/// output (`appattic_host_exec` takes the cap from its caller and stops there).
+public let commandOutputLimit: Int = 8 * 1024 * 1024
+
+/// How long a generated cleanup, update, or mark-manual script may run before
+/// it is terminated. These scripts are the only commands here that change the
+/// system, and a package manager is entitled to take minutes, so the bound is
+/// generous; the point is that a script blocked on a stale dpkg lock, an
+/// unreachable mirror, or a prompt that can never be answered leaves the UI
+/// with its buttons disabled forever. Query commands use the 60 s default of
+/// `runCommand` instead.
+public let scriptRunTimeout: TimeInterval = 600
+
+/// Run `process` and wait for it, escalating to SIGKILL if it ignores SIGTERM
+/// for a second. Returns true when it exited on its own within `timeout`,
+/// false when the deadline passed and the process was killed. The exit status
+/// is left on the process either way, so a timed-out run still has to be
+/// reported as the failure it is: commands before the deadline may already
+/// have run.
+@discardableResult
+public func runAndWait(_ process: Process, timeout: TimeInterval) throws -> Bool {
+    let exited = DispatchSemaphore(value: 0)
+    process.terminationHandler = { _ in exited.signal() }
+    try process.run()
+    if exited.wait(timeout: .now() + timeout) == .success { return true }
+    process.terminate()
+    if exited.wait(timeout: .now() + 1) == .success { return true }
+    kill(process.processIdentifier, SIGKILL)
+    _ = exited.wait(timeout: .now() + 1)
+    return false
+}
+
 /// Runs `cmd` without a shell and returns (status, stdout, stderr). Status 127
-/// with empty stdout means the command never ran: empty argv, executable not
-/// found, or a timeout that killed the process. A timeout discards the real
-/// status and stderr, so a caller cannot tell a missing binary from a hang and
-/// must report the tool as unavailable either way.
+/// with empty stdout means the command produced no usable result: empty argv,
+/// executable not found, a timeout that killed the process, or output past
+/// `commandOutputLimit`. A timeout discards the real status and stderr, so a
+/// caller cannot tell a missing binary from a hang and must report the tool as
+/// unavailable either way.
 public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, String, String) {
     guard let exe = cmd.first else { return (127, "", "empty command") }
     let resolved: String
@@ -241,6 +280,9 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
     if timedOut {
         return (127, "", "timeout")
     }
+    if collected.overflowed {
+        return (127, "", "output limit exceeded: \(commandOutputLimit) bytes")
+    }
     let out = decodeUTF8(collected.out)
     let err = decodeUTF8(collected.err)
     return (process.terminationStatus, out, err)
@@ -251,6 +293,7 @@ private final class CommandPipes: @unchecked Sendable {
     private var _out = Data()
     private var _err = Data()
     private var drainDeadline = TimeInterval.greatestFiniteMagnitude
+    private var _overflowed = false
     var out: Data {
         get { lock.lock(); defer { lock.unlock() }; return _out }
         set { lock.lock(); defer { lock.unlock() }; _out = newValue }
@@ -258,6 +301,12 @@ private final class CommandPipes: @unchecked Sendable {
     var err: Data {
         get { lock.lock(); defer { lock.unlock() }; return _err }
         set { lock.lock(); defer { lock.unlock() }; _err = newValue }
+    }
+    /// True once a stream passed `commandOutputLimit`. The result is then
+    /// unusable: a prefix of a listing is not a listing, and no parser of a
+    /// truncated stream is entitled to the answer.
+    var overflowed: Bool {
+        lock.lock(); defer { lock.unlock() }; return _overflowed
     }
 
     /// Opens the window a `drain` may spend past the command's own exit. Until
@@ -275,9 +324,30 @@ private final class CommandPipes: @unchecked Sendable {
         return drainDeadline - monotonicSeconds()
     }
 
+    private func appendCapped(_ slice: ArraySlice<UInt8>, to data: inout Data) {
+        let room = commandOutputLimit - data.count
+        if room <= 0 {
+            lock.lock()
+            _overflowed = true
+            lock.unlock()
+            return
+        }
+        if slice.count > room {
+            data.append(contentsOf: slice.prefix(room))
+            lock.lock()
+            _overflowed = true
+            lock.unlock()
+            return
+        }
+        data.append(contentsOf: slice)
+    }
+
     /// Reads to EOF, or until the drain window closes, whichever comes first.
     /// `readDataToEndOfFile` cannot express the second case: it blocks on a
-    /// descriptor a backgrounded grandchild still holds open.
+    /// descriptor a backgrounded grandchild still holds open. Reading past
+    /// `commandOutputLimit` continues without buffering, because a reader that
+    /// stops early blocks the writer and turns a runaway command into a hung
+    /// one.
     func drain(_ handle: FileHandle) -> Data {
         let fd = handle.fileDescriptor
         var buffer = [UInt8](repeating: 0, count: 16 * 1024)
@@ -304,7 +374,7 @@ private final class CommandPipes: @unchecked Sendable {
                 break
             }
             if n == 0 { break }
-            data.append(contentsOf: buffer[0..<n])
+            appendCapped(buffer[0..<n], to: &data)
         }
         return data
     }

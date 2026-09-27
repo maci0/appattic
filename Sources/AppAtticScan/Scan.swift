@@ -12,12 +12,12 @@ public final class ScanResult {
     public var outdated: [OutdatedPkg]
     public var packages: [PackageEntry]
     public var appsInstalled: Int
-    /// A package check that could not run: the Homebrew query, any manager or
-    /// store query below, or a package-manager listing that returned a failure
-    /// status. The rest of the scan ran, so this is not "the scan was cut
-    /// short": it gates scan-cache reuse and writes, so a cached scan is retried
-    /// instead of serving an outdated or package list that is missing every
-    /// entry the failed check would have reported.
+    /// A check that ran and failed: the Homebrew update query, any manager or
+    /// store update query, or a package listing. The rest of the scan ran, so
+    /// this is not "the scan was cut short": it gates scan-cache reuse and
+    /// writes, so a cached scan is retried instead of serving an outdated or
+    /// unused-package list that is missing everything the failed check would
+    /// have reported.
     public var incomplete: Bool
 
     public init(
@@ -236,11 +236,11 @@ public func performScan(
     result.verdicts = evaluateAll(result.software, now: now)
     progress("Listing unused distro packages and language globals…")
     result.packages = packages ?? collectPackages(progress: progress, which: which, run: run)
-    // A check that could not run is an unknown, not an empty list. It reaches
+    // A check that ran and failed is an unknown, not an empty list. It reaches
     // the scan cache through `incomplete`, so the next run retries instead of
-    // serving "up to date" or "no orphans" for a day. Read after the package
-    // collector, which reports its own failures here. Only the ones that were
-    // actually attempted count: a manager that is not installed never failed.
+    // serving "up to date", or "no unused packages", for a day. Read after
+    // every check has run, update and package listing alike. Only the ones that
+    // were actually attempted count: a tool that is not installed never failed.
     let failed = scanCheckFailures()
     if !failed.isEmpty {
         progress("  · check unavailable: \(failed.joined(separator: ", "))")

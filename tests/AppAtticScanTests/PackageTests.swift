@@ -355,6 +355,62 @@ final class PackageTests: XCTestCase {
         XCTAssertFalse(cmds.contains { $0.contains("mas") })
     }
 
+    func testFailedPackageQueryIsRecordedNotAnEmptyAnswer() {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        // pacman is installed and its query fails: an unknown, not the answer
+        // "no unused packages". Left unrecorded it would be cached and served
+        // as an empty list for a day.
+        let pkgs = collectPackages(
+            which: { name in name == "pacman" ? "/usr/bin/pacman" : nil },
+            run: { _, _ in (1, "", "dpkg is locked") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertTrue(pkgs.isEmpty)
+        XCTAssertTrue(scanCheckFailures().contains("pacman"), "\(scanCheckFailures())")
+        // A tool that is not installed never ran, so it is not a failure.
+        resetScanCheckFailures()
+        let none = collectPackages(
+            which: { _ in nil },
+            run: { _, _ in (1, "", "") },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertTrue(none.isEmpty)
+        XCTAssertTrue(scanCheckFailures().isEmpty)
+    }
+
+    func testFailedPackageQueryKeepsTheScanOutOfTheCache() throws {
+        resetScanCheckFailures()
+        defer { resetScanCheckFailures() }
+        // Every tool is "installed" and every command fails, so the package
+        // listing is an unknown and the scan must not become a cached one.
+        let result = performScan(
+            includeSystem: false,
+            apps: [],
+            brew: BrewSnapshot(available: false),
+            leftoverItems: [],
+            leftoverAgents: [],
+            history: HistoryIndex(),
+            which: { _ in "/usr/bin/appattic-missing" as String? },
+            run: { _, _ in (1, "", "") },
+            skipLiveUsage: true
+        )
+        XCTAssertTrue(result.packages.isEmpty)
+        XCTAssertTrue(result.incomplete)
+        XCTAssertTrue(scanCheckFailures().contains("pacman"), "\(scanCheckFailures())")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-failed-pkg-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertFalse(try commitScanCache(
+            includeSystem: false,
+            data: result.toScanData(),
+            before: "a",
+            after: "a",
+            to: url
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
     func testCollectPackagesFedoraUsesRepoqueryNotLeaves() {
         var cmds: [[String]] = []
         let cmdsLock = NSLock()

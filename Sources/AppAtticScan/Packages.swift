@@ -559,6 +559,11 @@ func runPackageQuery(
         attempted = true
         let (rc, out, _) = run([path] + args, timeout)
         if ok(rc) { return PackageQueryResult(output: out, failed: false) }
+        // A query that ran and failed is an unknown, not the answer "no unused
+        // packages". The empty list it would otherwise leave behind is written
+        // to the scan cache and served for a day, so it is recorded the same
+        // way a failed update check is.
+        noteScanCheckFailed(name)
     }
     return PackageQueryResult(output: nil, failed: attempted)
 }

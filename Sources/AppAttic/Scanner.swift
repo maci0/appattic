@@ -188,9 +188,13 @@ final class ScannerViewModel {
     }
 
     func scan(includeSystem: Bool) {
+        // Guard first. A suppressed scan owns no data, so it must not leave the
+        // model describing a view the running scan will not produce: with the
+        // assignment after the guard, the rows on screen came from a scan with
+        // the old includeSystem while the model claimed the new one.
+        guard !isScanning else { return }
         self.includeSystem = includeSystem
         invalidateRowCache()
-        guard !isScanning else { return }
         runScan(includeSystem: includeSystem)
     }
 
@@ -257,9 +261,10 @@ final class ScannerViewModel {
                 vm.statusText = "scanned \(formatDate(result.scanned_at)) · \(formatSeconds(result.duration_s))s"
                 if result.incomplete == true {
                     // No cache is written for this scan, and the outdated and
-                    // package lists are missing whatever the failed checks would
-                    // have found. Saying so beats a list that looks complete.
-                    vm.statusText += " · package check failed, not cached"
+                    // unused-package lists are missing whatever the failed
+                    // checks would have found. Saying so beats lists that look
+                    // complete.
+                    vm.statusText += " · check failed, not cached"
                 }
                 if let cacheWriteFailure {
                     vm.statusText += " · not cached: \(redactHomePaths(cacheWriteFailure))"
@@ -517,13 +522,22 @@ final class ScannerViewModel {
                 process.standardOutput = FileHandle.nullDevice
                 process.standardError = errHandle
                 process.standardInput = FileHandle.nullDevice
-                try process.run()
-                process.waitUntilExit()
+                let finished = try runAndWait(process, timeout: scriptRunTimeout)
                 try errHandle.synchronize()
                 try errHandle.close()
                 openHandle = nil
-                let status = process.terminationStatus
-                let errText = readCommandOutputTail(from: errURL)
+                var status = process.terminationStatus
+                var errText = readCommandOutputTail(from: errURL)
+                if !finished {
+                    // A script blocked on a stale package lock, an unreachable
+                    // mirror, or a prompt nothing can answer would otherwise
+                    // hold isScanning forever with every action disabled. What
+                    // it already did is not undone, so the message says so and
+                    // the selections stay.
+                    if status == 0 { status = 124 }
+                    let note = "timed out after \(Int(scriptRunTimeout))s; commands before the timeout may have already run"
+                    errText = errText.isEmpty ? note : errText + "\n" + note
+                }
                 DispatchQueue.main.async {
                     vm.isScanning = false
                     if status != 0 {

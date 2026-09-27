@@ -65,7 +65,7 @@ enum AppAtticCLI {
             fputs("warning: scan not cached: \(redactHomePaths(cacheFailure)); the next run rescans\n", stderr)
         }
         if resolved.data.incomplete == true {
-            fputs("warning: a package check failed; the outdated and package lists are incomplete and the scan is not cached\n", stderr)
+            fputs("warning: a check failed; the outdated and unused-package lists are incomplete and the scan is not cached\n", stderr)
         }
         let ignored = Set(settings.ignoredLeftoverPaths)
         let result = scanResult(from: resolved.data, ignoringLeftovers: ignored, now: now)
@@ -477,11 +477,18 @@ func runShellScript(_ script: String) -> (status: Int32, stderr: String) {
         process.environment = augmentedProcessEnvironment()
         process.standardError = errHandle
         process.standardInput = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
+        let finished = try runAndWait(process, timeout: scriptRunTimeout)
         try? errHandle.synchronize()
-        let status = process.terminationStatus
-        let errText = readCommandOutputTail(from: errURL)
+        var status = process.terminationStatus
+        var errText = readCommandOutputTail(from: errURL)
+        if !finished {
+            // A script blocked on a stale package lock or an unreachable mirror
+            // would otherwise hang the command line forever. What it already
+            // did is not undone, so the message says so.
+            if status == 0 { status = 124 }
+            let note = "timed out after \(Int(scriptRunTimeout))s; commands before the timeout may have already run"
+            errText = errText.isEmpty ? note : errText + "\n" + note
+        }
         return (status, errText)
     } catch {
         fputs("error: \(redactHomePaths(error.localizedDescription))\n", stderr)
