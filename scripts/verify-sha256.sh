@@ -3,8 +3,8 @@
 # Looks up names in dep-checksums.sha256 next to this file and checks SHA-256.
 
 require_sha256sum() {
-    if ! command -v sha256sum >/dev/null 2>&1; then
-        echo "error: sha256sum required to verify downloads" >&2
+    if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+        echo "error: sha256sum (coreutils) or shasum required to verify downloads" >&2
         exit 1
     fi
 }
@@ -30,8 +30,15 @@ checksum_for() {
     ' "$sums"
 }
 
+# shasum is the macOS spelling of the same digest. Without it the inventory
+# and the pin check cannot run on a macOS host, and the only place they run is
+# the release builder, which is exactly where a gap in them goes unnoticed.
 file_sha256() {
-    sha256sum -- "$1" | awk '{print $1}'
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -- "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
 }
 
 curl_fetch() {

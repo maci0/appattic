@@ -440,6 +440,13 @@ swiftpm_declared() {
 # identity|version|location|revision, one per pin, tab separated. SwiftPM
 # writes no revision for a branch or a plain range, so that column is empty
 # and the check has to reject it.
+#
+# Two rules keep every pin in the inventory. A record ends when the next one
+# begins, so the last one needs an END flush: without it the final pin leaves
+# the check, the count, and the SBOM. And the file carries a top-level
+# "version" (its format number) at two spaces, where a pin's keys sit at six
+# and its state at eight, so a key rule has to match an indented line or that
+# number lands on the last pin as its version.
 swiftpm_pins() {
     awk '
         function flush() {
@@ -448,10 +455,11 @@ swiftpm_pins() {
             }
             identity = ""; version = ""; revision = ""; location = ""
         }
-        /"identity"/    { flush(); identity = value() }
-        /"location"/    { location = value() }
-        /"revision"/    { revision = value() }
-        /"version"/     { version = value() }
+        /^   +"identity"/ { flush(); identity = value() }
+        /^   +"location"/ { location = value() }
+        /^   +"revision"/ { revision = value() }
+        /^   +"version"/  { version = value() }
+        END { flush() }
         function value(   line) {
             line = $0
             sub(/^[^"]*"[^"]*"[[:space:]]*:[[:space:]]*"/, "", line)

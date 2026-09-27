@@ -249,6 +249,9 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(verify.contains("--tlsv1.2"), verify)
         XCTAssertTrue(verify.contains("BASH_SOURCE[0]"), verify)
         XCTAssertFalse(verify.contains("$ROOT/scripts/dep-checksums.sha256"), verify)
+        // shasum is the macOS spelling of the same digest. Without it neither
+        // the inventory nor the pin check can run on the macOS runner.
+        XCTAssertTrue(verify.contains("shasum -a 256"), verify)
 
         let appimage = try String(
             contentsOf: root.appendingPathComponent("scripts/linux-appimage.sh"),
