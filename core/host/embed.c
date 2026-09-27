@@ -531,13 +531,15 @@ static wasm_functype_t *functype_i32x4_i32(void) {
     };
     wasm_valtype_t *rs[1] = { wasm_valtype_new_i32() };
     wasm_valtype_vec_t params, results;
+    /* The vec copies the pointer array, then wasm_functype_new takes the vecs
+       over ("This function takes ownership of the params and results
+       arguments", doc-wasm.h) and frees the valtypes it read. Deleting the
+       five here as well is a double free, which is what aborted every Qt run
+       in the tcache. `ps` and `rs` are only the caller's until the vec is
+       built; after that they name freed memory and must not be touched. */
     wasm_valtype_vec_new(&params, 4, ps);
     wasm_valtype_vec_new(&results, 1, rs);
-    /* wasm_functype_new copies the valtypes, so the five above are the
-       caller's to free. A scan that re-runs leaks them each time. */
     wasm_functype_t *ty = wasm_functype_new(&params, &results);
-    for (int i = 0; i < 4; i++) wasm_valtype_delete(ps[i]);
-    wasm_valtype_delete(rs[0]);
     return ty;
 }
 
