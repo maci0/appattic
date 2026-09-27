@@ -226,10 +226,7 @@ public func loadSettings(from url: URL = defaultSettingsURL()) throws -> AppAtti
 public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSettingsURL()) throws {
     let dir = url.deletingLastPathComponent()
     do {
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if dir.lastPathComponent.posixLowercased() == "appattic" {
-            try restrictOwnerOnlyDirectory(at: dir)
-        }
+        try prepareStateDirectory(dir)
     } catch {
         throw SettingsError.unwritable(path: url.path, reason: error.localizedDescription)
     }

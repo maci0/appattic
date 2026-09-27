@@ -501,61 +501,30 @@ final class ScannerViewModel {
         let vm = self
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let url = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("appattic-run-\(UUID().uuidString).sh")
-                let errURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("appattic-run-\(UUID().uuidString).err")
-                try writeOwnerOnlyFile(Data(script.utf8), to: url)
-                defer { try? FileManager.default.removeItem(at: url) }
-                try writeOwnerOnlyFile(Data(), to: errURL)
-                defer { try? FileManager.default.removeItem(at: errURL) }
-                let errHandle = try FileHandle(forWritingTo: errURL)
-                // Closed before the file is read back, and the defer is the
-                // exit-path close: closing a FileHandle twice is an exception
-                // Foundation does not raise as a Swift error.
-                var openHandle: FileHandle? = errHandle
-                defer { try? openHandle?.close() }
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/sh")
-                process.arguments = [url.path]
-                process.environment = augmentedProcessEnvironment()
-                process.standardOutput = FileHandle.nullDevice
-                process.standardError = errHandle
-                process.standardInput = FileHandle.nullDevice
-                let finished = try runAndWait(process, timeout: scriptRunTimeout)
-                try errHandle.synchronize()
-                try errHandle.close()
-                openHandle = nil
-                var status = process.terminationStatus
-                var errText = readCommandOutputTail(from: errURL)
-                if !finished {
-                    // A script blocked on a stale package lock, an unreachable
-                    // mirror, or a prompt nothing can answer would otherwise
-                    // hold isScanning forever with every action disabled. What
-                    // it already did is not undone, so the message says so and
-                    // the selections stay.
-                    if status == 0 { status = 124 }
-                    let note = "timed out after \(Int(scriptRunTimeout))s; commands before the timeout may have already run"
-                    errText = errText.isEmpty ? note : errText + "\n" + note
-                }
+                // A script blocked on a stale package lock, an unreachable
+                // mirror, or a prompt nothing can answer would otherwise hold
+                // isScanning forever with every action disabled. The runner
+                // stops it and says what it had already done; the selections
+                // stay, because what the script did before the stop is unknown
+                // and re-running the same list is the operator's call.
+                let run = try runGeneratedScript(script, discardStdout: true)
                 DispatchQueue.main.async {
                     vm.isScanning = false
                     // Both failure paths below drop the snapshot: `set -e` halts
                     // the line after the failure, so the lines before it
                     // already ran, and a cache kept across the run describes
                     // software that is gone.
-                    if !finished {
-                        // The selection stays: what the script did before the
-                        // stop is unknown, and re-running the same list is the
-                        // operator's call.
-                        vm.errorMessage = scriptStoppedMessage() + " Selection kept."
-                            + (errText.isEmpty ? "" : "\n" + commandFailureMessage(status: status, stderr: errText))
+                    if !run.finished {
+                        // A stopped run always carries the reason in its
+                        // stderr, so there is no empty case to skip.
+                        vm.errorMessage = scriptStoppedMessage() + " Selection kept.\n"
+                            + commandFailureMessage(status: run.status, stderr: run.stderr)
                         clearScanCache()
                         completion(false)
                         return
                     }
-                    if status != 0 {
-                        vm.errorMessage = commandFailureMessage(status: status, stderr: errText)
+                    if run.status != 0 {
+                        vm.errorMessage = commandFailureMessage(status: run.status, stderr: run.stderr)
                             + " Selection kept."
                         clearScanCache()
                         completion(false)

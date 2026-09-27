@@ -177,8 +177,26 @@ public let commandOutputLimit: Int = 8 * 1024 * 1024
 /// generous; the point is that a script blocked on a stale dpkg lock, an
 /// unreachable mirror, or a prompt that can never be answered leaves the UI
 /// with its buttons disabled forever. Query commands use the 60 s default of
-/// `runCommand` instead.
+/// `runCommand` instead. The scripts are not rolled back, so a stop mid-run is
+/// reported as partial work, never as a clean failure.
 public let scriptRunTimeout: TimeInterval = 600
+
+/// How long a terminated process gets to exit before it is killed. `sh` and
+/// the package managers below it both handle SIGTERM, so this is only reached
+/// by a process that is stuck rather than slow.
+private let processStopGrace: TimeInterval = 1
+
+/// SIGTERM, then SIGKILL if the process is still there a second later.
+/// Returns true when it left on the first signal. `exited` is the semaphore
+/// `runAndWait` and `runCommand` signalled the process's `terminationHandler`
+/// with.
+private func stopProcess(_ process: Process, exited: DispatchSemaphore) -> Bool {
+    process.terminate()
+    if exited.wait(timeout: .now() + processStopGrace) == .success { return true }
+    kill(process.processIdentifier, SIGKILL)
+    _ = exited.wait(timeout: .now() + processStopGrace)
+    return false
+}
 
 /// Run `process` and wait for it, escalating to SIGKILL if it ignores SIGTERM
 /// for a second. Returns true when it exited on its own within `timeout`,
@@ -192,11 +210,7 @@ public func runAndWait(_ process: Process, timeout: TimeInterval) throws -> Bool
     process.terminationHandler = { _ in exited.signal() }
     try process.run()
     if exited.wait(timeout: .now() + timeout) == .success { return true }
-    process.terminate()
-    if exited.wait(timeout: .now() + 1) == .success { return true }
-    kill(process.processIdentifier, SIGKILL)
-    _ = exited.wait(timeout: .now() + 1)
-    return false
+    return stopProcess(process, exited: exited)
 }
 
 /// Runs `cmd` without a shell and returns (status, stdout, stderr). Status 127
@@ -263,11 +277,7 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
     var timedOut = false
     if exited.wait(timeout: .now() + timeout) == .timedOut {
         timedOut = true
-        process.terminate()
-        if exited.wait(timeout: .now() + 1) == .timedOut {
-            kill(process.processIdentifier, SIGKILL)
-            _ = exited.wait(timeout: .now() + 1)
-        }
+        _ = stopProcess(process, exited: exited)
     }
     process.waitUntilExit()
     // The exit above ends the direct child, but a descendant holding the write
@@ -288,48 +298,87 @@ public func runCommand(_ cmd: [String], timeout: TimeInterval = 60) -> (Int32, S
     return (process.terminationStatus, out, err)
 }
 
-/// How long a generated cleanup, update, or mark-manual script may run before
-/// it is stopped. A package transaction legitimately runs for minutes, so the
-/// bound is far above a real one; it is here because `waitUntilExit` has none
-/// and a script blocked on a stale package-manager lock, a dead network
-/// mirror, or a root prompt leaves the caller waiting on a process that never
-/// ends. The scripts are not rolled back, so a stop mid-run is reported as
-/// partial work, never as a clean failure.
-public let cleanupScriptTimeout: TimeInterval = 30 * 60
-
 /// The status a stopped script reports, 124 being the shell's own "timed out".
 public let scriptStoppedStatus: Int32 = 124
 
-/// What a stopped script means for the operator. A generated script removes
-/// files and uninstalls packages, so there is no rollback: the wording says
-/// the run was cut short instead of letting a partial removal read as a clean
-/// one.
-public func scriptStoppedMessage(timeout: TimeInterval = cleanupScriptTimeout) -> String {
+/// What a stopped script means for the operator, as a banner. A generated
+/// script removes files and uninstalls packages, so there is no rollback: the
+/// wording says the run was cut short instead of letting a partial removal
+/// read as a clean one.
+public func scriptStoppedMessage(timeout: TimeInterval = scriptRunTimeout) -> String {
     "the script was stopped after \(Int(timeout / 60)) minutes without finishing; "
         + "commands before the stop may have already run."
 }
 
-/// Runs `process` and waits up to `timeout` for it to exit. On the deadline the
-/// process is terminated, then killed if it ignored the signal, and false is
-/// returned so the caller can report the stop instead of the status the kill
-/// left behind. Replaces the caller's own `terminationHandler`: both script
-/// runners only wait, none of them observes the exit themselves.
-@discardableResult
-public func runWithTimeout(_ process: Process, timeout: TimeInterval) throws -> Bool {
-    let exited = DispatchSemaphore(value: 0)
-    process.terminationHandler = { _ in exited.signal() }
-    try process.run()
-    if exited.wait(timeout: .now() + timeout) != .timedOut {
-        process.waitUntilExit()
-        return true
+/// The same stop, as a line appended to the script's own stderr, where it
+/// lands next to whatever `set -e` reported.
+public func scriptStoppedNote(timeout: TimeInterval = scriptRunTimeout) -> String {
+    "timed out after \(Int(timeout))s; commands before the timeout may have already run"
+}
+
+/// What a generated script run left behind: the exit status, the tail of its
+/// stderr, and whether it finished before the deadline.
+public struct ScriptRun: Sendable {
+    public let status: Int32
+    public let stderr: String
+    public let finished: Bool
+}
+
+/// Runs a generated cleanup, update, or mark-manual script under `/bin/sh` and
+/// waits up to `timeout` for it.
+///
+/// The script and its stderr go to temp files rather than pipes: under `set -e`
+/// the first failing line is the only thing that says what went wrong, and it
+/// has to arrive after the run, not interleaved with a UI that is still
+/// scanning. A script that outruns `timeout` is stopped and reported as
+/// `scriptStoppedStatus` with the reason appended to stderr, so the caller
+/// never sees a killed process as an ordinary nonzero exit. `discardStdout`
+/// sends the script's own output to the void, which is what a UI run wants:
+/// the operator reads the progress already on screen, not a shell's
+/// scrollback.
+public func runGeneratedScript(
+    _ script: String,
+    discardStdout: Bool = false,
+    timeout: TimeInterval = scriptRunTimeout
+) throws -> ScriptRun {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("appattic-script-\(UUID().uuidString).sh")
+    let errURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("appattic-script-\(UUID().uuidString).err")
+    try writeOwnerOnlyFile(Data(script.utf8), to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    try writeOwnerOnlyFile(Data(), to: errURL)
+    defer { try? FileManager.default.removeItem(at: errURL) }
+    let errHandle = try FileHandle(forWritingTo: errURL)
+    // Closed before the file is read back, and the defer is the exit-path
+    // close: closing a FileHandle twice is an exception Foundation does not
+    // raise as a Swift error.
+    var openErrHandle: FileHandle? = errHandle
+    defer { try? openErrHandle?.close() }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = [url.path]
+    process.environment = augmentedProcessEnvironment()
+    if discardStdout {
+        process.standardOutput = FileHandle.nullDevice
     }
-    process.terminate()
-    if exited.wait(timeout: .now() + 1) == .timedOut {
-        kill(process.processIdentifier, SIGKILL)
-        _ = exited.wait(timeout: .now() + 1)
+    process.standardError = errHandle
+    process.standardInput = FileHandle.nullDevice
+    let finished = try runAndWait(process, timeout: timeout)
+    try? errHandle.synchronize()
+    try? errHandle.close()
+    openErrHandle = nil
+    var status = process.terminationStatus
+    var stderr = readCommandOutputTail(from: errURL)
+    if !finished {
+        // A script blocked on a stale package lock, an unreachable mirror, or
+        // a prompt nothing can answer would otherwise wait forever. What it
+        // already did is not undone, so the message says so.
+        if status == 0 { status = scriptStoppedStatus }
+        let note = scriptStoppedNote(timeout: timeout)
+        stderr = stderr.isEmpty ? note : stderr + "\n" + note
     }
-    process.waitUntilExit()
-    return false
+    return ScriptRun(status: status, stderr: stderr, finished: finished)
 }
 
 private final class CommandPipes: @unchecked Sendable {

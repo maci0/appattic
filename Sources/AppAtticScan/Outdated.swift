@@ -128,7 +128,7 @@ public final class OutdatedPkg {
 
     /// The manager behind `updatable`, or nil for report-only managers and untrusted casks.
     public var upgradableManager: UpgradableManager? {
-        kind == "untrusted" ? nil : UpgradableManager(rawValue: manager)
+        outdatedUpgradableManager(manager: manager, kind: kind)
     }
 
     public func toEntry() -> OutdatedEntry {

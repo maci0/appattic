@@ -402,10 +402,10 @@ public func buildSoftware(
 }
 
 func spanNote(_ sw: Software) -> String {
-    if sw.historySpanDays == nil {
+    guard let span = sw.historySpanDays else {
         return "shell history has no timestamps"
     }
-    return "no usage in the last \(humanDays(sw.historySpanDays!)) of shell history"
+    return "no usage in the last \(humanDays(span)) of shell history"
 }
 
 func isSteamClientSoftware(_ sw: Software) -> Bool {
@@ -467,8 +467,10 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
             return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Installed \(humanDays(ageDays)) ago: too new to judge")
         }
         if sw.kind == "formula" {
-            let span = sw.historySpanDays
-            if span == nil || span! < Double(staleDays) {
+            // A history with no span at all is the weakest signal there is,
+            // so it lands on the same side as a span below the bound.
+            let span = sw.historySpanDays ?? 0
+            if span < Double(staleDays) {
                 return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "\(spanNote(sw)): not enough history to judge usage")
             }
             return Verdict(
@@ -481,7 +483,7 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
             return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Homebrew cask with no app bundle: no unused-app signal")
         }
         if reinstallEasy {
-            let when = ageDays != nil ? humanDays(ageDays!) : "a while"
+            let when = ageDays.map(humanDays) ?? "a while"
             return Verdict(
                 software: sw,
                 tier: StaleTier.review.rawValue,

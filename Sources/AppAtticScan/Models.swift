@@ -254,7 +254,7 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
 
     /// The manager behind `updatable`, or nil for report-only managers and untrusted casks.
     public var upgradableManager: UpgradableManager? {
-        kind == "untrusted" ? nil : UpgradableManager(rawValue: manager)
+        outdatedUpgradableManager(manager: manager, kind: kind)
     }
 
     public init(
@@ -283,6 +283,13 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
 public func outdatedIsUpdatable(manager: String, kind: String?) -> Bool {
     if kind == "untrusted" { return false }
     return UpgradableManager(rawValue: manager) != nil
+}
+
+/// The manager behind an outdated row's upgrade path, or nil when there is
+/// none. Both the wire type and the domain type answer this the same way, so
+/// the answer lives here rather than in each of them.
+public func outdatedUpgradableManager(manager: String, kind: String?) -> UpgradableManager? {
+    kind == "untrusted" ? nil : UpgradableManager(rawValue: manager)
 }
 
 public struct PackageEntry: Codable, Identifiable, Hashable, Sendable {

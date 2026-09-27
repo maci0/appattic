@@ -147,4 +147,29 @@ final class ProcessTests: XCTestCase {
             .appendingPathComponent("appattic-tail-absent-\(UUID().uuidString).err")
         XCTAssertEqual(readCommandOutputTail(from: missing), "")
     }
+
+    func testRunGeneratedScriptReportsFailingLineAndCleanExit() throws {
+        let run = try runGeneratedScript("exit 0\n")
+        XCTAssertTrue(run.finished)
+        XCTAssertEqual(run.status, 0)
+        XCTAssertEqual(run.stderr, "")
+
+        let failed = try runGeneratedScript("set -e\necho first >&2\necho second >&2\nfalse\necho third >&2\n")
+        XCTAssertTrue(failed.finished)
+        XCTAssertNotEqual(failed.status, 0)
+        XCTAssertTrue(failed.stderr.contains("first"), failed.stderr)
+        XCTAssertFalse(failed.stderr.contains("third"), "`set -e` must stop the script at the failing line")
+    }
+
+    /// A script that outruns the deadline is stopped, not reported as an
+    /// ordinary nonzero exit, and the reason says the work before it stands.
+    func testRunGeneratedScriptStopsAtTheDeadline() throws {
+        let start = monotonicSeconds()
+        let run = try runGeneratedScript("echo before-sleep >&2\nsleep 30\n", timeout: 0.5)
+        XCTAssertFalse(run.finished)
+        XCTAssertEqual(run.status, scriptStoppedStatus)
+        XCTAssertTrue(run.stderr.contains("before-sleep"), run.stderr)
+        XCTAssertTrue(run.stderr.contains(scriptStoppedNote(timeout: 0.5)), run.stderr)
+        XCTAssertLessThan(monotonicSeconds() - start, 0.5 + Self.timingSlack)
+    }
 }

@@ -472,48 +472,13 @@ func confirmUpdate(count: Int, assumeYes: Bool) -> Bool {
     return answer == "y" || answer == "yes"
 }
 
-/// Runs a generated script under `/bin/sh`. Returns the exit status and
+/// Runs a generated script under `/bin/sh` and returns the exit status and
 /// whatever the script wrote to stderr, which is the only thing that says
-/// which of `set -e`'s lines failed. A script that outruns
-/// `cleanupScriptTimeout` is stopped and reported as `scriptStoppedStatus`
-/// with the reason appended, so the caller never sees a killed process as an
-/// ordinary nonzero exit.
+/// which of `set -e`'s lines failed.
 func runShellScript(_ script: String) -> (status: Int32, stderr: String) {
-    let dir = FileManager.default.temporaryDirectory
-    let url = dir.appendingPathComponent("appattic-update-\(UUID().uuidString).sh")
-    let errURL = dir.appendingPathComponent("appattic-update-\(UUID().uuidString).err")
     do {
-        try writeOwnerOnlyFile(Data(script.utf8), to: url)
-        defer { try? FileManager.default.removeItem(at: url) }
-        try writeOwnerOnlyFile(Data(), to: errURL)
-        defer { try? FileManager.default.removeItem(at: errURL) }
-        let errHandle = try FileHandle(forWritingTo: errURL)
-        // Closed before the file is read back, and the defer is the exit-path
-        // close: closing a FileHandle twice is an exception Foundation does not
-        // raise as a Swift error.
-        var openHandle: FileHandle? = errHandle
-        defer { try? openHandle?.close() }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = [url.path]
-        process.environment = augmentedProcessEnvironment()
-        process.standardError = errHandle
-        process.standardInput = FileHandle.nullDevice
-        let finished = try runAndWait(process, timeout: scriptRunTimeout)
-        try? errHandle.synchronize()
-        try? errHandle.close()
-        openHandle = nil
-        var status = process.terminationStatus
-        var errText = readCommandOutputTail(from: errURL)
-        if !finished {
-            // A script blocked on a stale package lock or an unreachable mirror
-            // would otherwise hang the command line forever. What it already
-            // did is not undone, so the message says so.
-            if status == 0 { status = 124 }
-            let note = "timed out after \(Int(scriptRunTimeout))s; commands before the timeout may have already run"
-            errText = errText.isEmpty ? note : errText + "\n" + note
-        }
-        return (status, errText)
+        let run = try runGeneratedScript(script)
+        return (run.status, run.stderr)
     } catch {
         // The reason goes back through the caller, which prints one error.
         // Reporting here too would print the reason and then "Command failed

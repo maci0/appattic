@@ -51,10 +51,7 @@ public func readScanCache(from url: URL = defaultScanCacheURL()) throws -> ScanC
 public func writeScanCache(_ cache: ScanCacheFile, to url: URL = defaultScanCacheURL()) throws {
     let dir = url.deletingLastPathComponent()
     do {
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if dir.lastPathComponent.posixLowercased() == "appattic" {
-            try restrictOwnerOnlyDirectory(at: dir)
-        }
+        try prepareStateDirectory(dir)
     } catch {
         throw AppAtticIOError.createDirectoryFailed(path: dir.path, message: error.localizedDescription)
     }
