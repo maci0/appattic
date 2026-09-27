@@ -308,24 +308,36 @@ public let relativeDayLimit = 45
 /// border, a `TZ` change under a running CLI) would otherwise decide "today" in
 /// the new zone and print the date in the old one, and the two disagree by a day
 /// for every row near local midnight.
-private final class LocaleScopedTimestamps {
+final class LocaleScopedTimestamps {
     private let lock = NSLock()
     private var localeID: String?
     private var zoneID: String?
     private var dateFormatter: DateFormatter?
     private var relativeClosure: ((Date, Date) -> String?)?
 
-    /// The formatters for the current locale and zone, rebuilt when either changes.
-    func current() -> (date: DateFormatter, relativeDays: ((Date, Date) -> String?)?) {
+    /// The formatters for one locale and zone, rebuilt when either changes.
+    ///
+    /// The pair is a parameter and not read inside because `Locale.current` and
+    /// `TimeZone.current` are get-only on Darwin and in swift-corelibs-foundation
+    /// alike: nothing in a test can switch either one, so the cache key is handed
+    /// in and the rebuild can be checked. Callers pass the process values, which
+    /// is what the defaults read at each call.
+    func current(
+        locale: Locale = .current,
+        zone: TimeZone = .current
+    ) -> (date: DateFormatter, relativeDays: ((Date, Date) -> String?)?) {
         lock.lock()
         defer { lock.unlock() }
-        let id = Locale.current.identifier
-        let zone = TimeZone.current.identifier
-        if let cached = dateFormatter, localeID == id, zoneID == zone { return (cached, relativeClosure) }
+        if let cached = dateFormatter,
+           localeID == locale.identifier,
+           zoneID == zone.identifier {
+            return (cached, relativeClosure)
+        }
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .none
-        f.timeZone = .current
+        f.locale = locale
+        f.timeZone = zone
         #if canImport(Darwin)
         // `RelativeDateTimeFormatter`, not `DateComponentsFormatter`: the
         // recipe for a named relative day — "yesterday", "in 3 days" — is
@@ -343,8 +355,8 @@ private final class LocaleScopedTimestamps {
         #endif
         dateFormatter = f
         relativeClosure = relative
-        localeID = id
-        zoneID = zone
+        localeID = locale.identifier
+        zoneID = zone.identifier
         return (f, relative)
     }
 }

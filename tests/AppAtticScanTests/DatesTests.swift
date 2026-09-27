@@ -215,18 +215,21 @@ final class DatesTests: XCTestCase {
     /// from the first call answers in the old language for the rest of the
     /// session: German reads "25.02.2026", English "Feb 25, 2026".
     ///
-    /// Darwin only: swift-corelibs-foundation declares `Locale.current`
-    /// get-only, so there is no way to switch it and nothing to assert.
-    #if canImport(Darwin)
-    func testTimestampFormatFollowsALocaleChange() {
-        let saved = Locale.current
-        defer { Locale.current = saved }
+    /// `Locale.current` is get-only in swift-corelibs-foundation and on Darwin
+    /// alike, so nothing here can switch the process locale: the pair the cache
+    /// is keyed on is handed in instead, which is the same code path
+    /// `TimestampFormat` takes with the process values. The last assertion
+    /// pins that: what the shipped accessor prints is what this pair prints.
+    func testTimestampFormatFollowsALocaleChange() throws {
+        let scoped = LocaleScopedTimestamps()
+        let utc = try XCTUnwrap(TimeZone(identifier: "UTC"))
         let instant = Date(timeIntervalSince1970: 1_772_000_000)
-        Locale.current = Locale(identifier: "en_US")
-        let english = TimestampFormat.date.string(from: instant)
-        Locale.current = Locale(identifier: "de_DE")
-        let german = TimestampFormat.date.string(from: instant)
+        let english = scoped.current(locale: Locale(identifier: "en_US"), zone: utc)
+            .date.string(from: instant)
+        let german = scoped.current(locale: Locale(identifier: "de_DE"), zone: utc)
+            .date.string(from: instant)
         XCTAssertNotEqual(english, german, "the date formatter kept the old locale")
+        XCTAssertEqual(TimestampFormat.date.string(from: instant), scoped.current().date.string(from: instant))
     }
 
     /// A `DateFormatter` keeps the time zone it was built with, so a formatter
@@ -234,18 +237,22 @@ final class DatesTests: XCTestCase {
     /// started in. The day count in `string(from:now:)` already reads
     /// `Calendar.current`, so a stale formatter makes the relative label and
     /// the absolute date disagree by a day.
+    ///
+    /// The zone is handed in for the same reason as the locale above:
+    /// `TimeZone.current` is get-only too.
     func testTimestampFormatFollowsATimeZoneChange() throws {
-        let saved = TimeZone.current
-        defer { TimeZone.current = saved }
+        let scoped = LocaleScopedTimestamps()
         // 2026-03-08T04:30Z is the previous day in New York and the same day in
         // Tokyo, so a formatter that keeps its startup zone prints a different
         // date on each side of the switch.
         let instant = Date(timeIntervalSince1970: 1_772_944_200)
-        TimeZone.current = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
-        let newYork = TimestampFormat.date.string(from: instant)
-        TimeZone.current = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
-        let tokyo = TimestampFormat.date.string(from: instant)
+        let english = Locale(identifier: "en_US")
+        let newYork = scoped.current(
+            locale: english, zone: try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        ).date.string(from: instant)
+        let tokyo = scoped.current(
+            locale: english, zone: try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+        ).date.string(from: instant)
         XCTAssertNotEqual(newYork, tokyo, "the date formatter kept the old time zone")
     }
-    #endif
 }
