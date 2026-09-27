@@ -2,6 +2,22 @@ import XCTest
 @testable import AppAtticScan
 
 final class PackagingTests: XCTestCase {
+    /// The <string> on the line after <key>, which is how the plist spells one.
+    private func plistString(_ plist: String, _ key: String) -> String {
+        let lines = plist.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let at = lines.firstIndex(where: { $0.contains("<key>\(key)</key>") }) else {
+            XCTFail("no \(key) in the plist")
+            return ""
+        }
+        let next = lines.index(after: at)
+        guard next < lines.endIndex, let value = lines[next].split(separator: ">").nth(1)?
+            .split(separator: "<").first else {
+            XCTFail("\(key) has no <string> on the next line")
+            return ""
+        }
+        return String(value)
+    }
+
     func testMacBundleSourcesMatchPlatformFloor() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -13,6 +29,17 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(plist.contains("<key>LSMinimumSystemVersion</key>"), plist)
         XCTAssertTrue(plist.contains("<string>13.0</string>"), plist)
         XCTAssertFalse(plist.contains("<string>14.0</string>"), plist)
+        XCTAssertEqual(
+            plistString(plist, "CFBundleShortVersionString"),
+            appAtticVersion,
+            "the macOS bundle version must be the declared version; bump it in the same commit"
+        )
+        let buildNumber = plistString(plist, "CFBundleVersion")
+        XCTAssertNotNil(
+            Int(buildNumber),
+            "CFBundleVersion is the build number beside the version, and it has to be an integer: \(buildNumber)"
+        )
+        XCTAssertGreaterThan(Int(buildNumber) ?? 0, 0, buildNumber)
         XCTAssertTrue(FileManager.default.fileExists(atPath: iconURL.path), iconURL.path)
         let build = try String(contentsOf: root.appendingPathComponent("build.sh"), encoding: .utf8)
         XCTAssertTrue(build.contains("packaging/Info.plist"), build)
@@ -161,6 +188,19 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(release.contains("linux-appimage.sh"), release)
         XCTAssertTrue(release.contains("fail_on_unmatched_files: true"), release)
         XCTAssertTrue(release.contains("concurrency:"), release)
+
+        // The Info.plist copy of the version is only safe to leave ungated
+        // until it is actually gated.
+        let checkVersion = try String(
+            contentsOf: root.appendingPathComponent("scripts/check-version.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(checkVersion.contains("CFBundleShortVersionString"), checkVersion)
+        XCTAssertTrue(checkVersion.contains("CFBundleVersion"), checkVersion)
+        XCTAssertTrue(checkVersion.contains("packaging/Info.plist"), checkVersion)
+        let lint = try String(contentsOf: root.appendingPathComponent("scripts/lint.sh"), encoding: .utf8)
+        XCTAssertTrue(lint.contains("check-version.sh"), lint)
+        XCTAssertTrue(release.contains("check-version.sh --tag"), release)
     }
 
     func testLinuxQtLinkScriptRefusesDarwin() throws {

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The release version has one declaration (appAtticVersion in Util.swift) and
-# one copy to keep in step (the newest AppStream release). CMakeLists.txt reads
-# the declaration, so this is the place that checks the copy and the derivation.
+# two copies to keep in step (the newest AppStream release, and
+# CFBundleShortVersionString in the macOS Info.plist). CMakeLists.txt reads
+# the declaration, so this is the place that checks the copies and the derivation.
 # Usage: bash scripts/check-version.sh [--tag TAG]
 #   prints the declared version on stdout
 #   --tag  also requires TAG (a v* ref name or a bare version) to match it
@@ -13,6 +14,7 @@ ROOT="$(cd "$_script_dir/.." && pwd)"
 UTIL="$ROOT/Sources/AppAtticScan/Util.swift"
 CMAKE="$ROOT/ui/linux-qt/CMakeLists.txt"
 METAINFO="$ROOT/packaging/org.appattic.AppAttic.metainfo.xml"
+PLIST="$ROOT/packaging/Info.plist"
 
 TAG=""
 while [[ $# -gt 0 ]]; do
@@ -29,8 +31,9 @@ while [[ $# -gt 0 ]]; do
             cat <<'EOF'
 Usage: bash scripts/check-version.sh [--tag TAG]
 
-  Checks that the newest AppStream release matches appAtticVersion, and that
-  CMakeLists.txt still derives its version from Util.swift.
+  Checks that the newest AppStream release and the macOS Info.plist match
+  appAtticVersion, and that CMakeLists.txt still derives its version from
+  Util.swift.
   Prints the declared version. With --tag, the tag must match it too.
 EOF
             exit 0
@@ -54,12 +57,32 @@ extract() {
     printf '%s\n' "$out"
 }
 
+plist_string() {
+    # $1: label, $2: key, $3: file. The value is the <string> on the line after
+    # the <key>, which is how a plist written one key per line spells a string.
+    local out
+    out="$(sed -n "/<key>$2<\\/key>/{n;s/.*<string>\\([^<]*\\)<\\/string>.*/\\1/p}" "$3" 2>/dev/null | head -n 1)"
+    if [[ -z "$out" ]]; then
+        echo "error: no $2 string in $1 ($3)" >&2
+        exit 1
+    fi
+    printf '%s\n' "$out"
+}
+
 swift_version="$(extract "appAtticVersion" "$UTIL" 's/^public let appAtticVersion = "\([^"]*\)"$/\1/p')"
-meta_version="$(extract "newest AppStream release" "$METAINFO" 's/.*<release version="\([^"]*\)".*/\1/p')"
+# The newest release by version, not by position: an entry appended out of
+# order must not leave an older one looking like the release of record.
+meta_version="$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' "$METAINFO" 2>/dev/null | sort -V | tail -n 1)"
+if [[ -z "$meta_version" ]]; then
+    echo "error: no <release> found in the AppStream metainfo ($METAINFO)" >&2
+    exit 1
+fi
+plist_short="$(plist_string "Info.plist" CFBundleShortVersionString "$PLIST")"
+plist_build="$(plist_string "Info.plist" CFBundleVersion "$PLIST")"
 
 # CMakeLists.txt has no version of its own: it reads appAtticVersion out of
-# $UTIL with string(REGEX MATCH). There is no third declaration to compare, so
-# check that the derivation is still there and that no literal crept back in.
+# $UTIL with string(REGEX MATCH). There is no copy of it to compare, so check
+# that the derivation is still there and that no literal crept back in.
 if grep -qE '^[[:space:]]*set\(APPATTIC_VERSION[[:space:]]+"[0-9]' "$CMAKE"; then
     echo "error: $CMAKE declares APPATTIC_VERSION literally; it must read appAtticVersion from $UTIL" >&2
     exit 1
@@ -74,6 +97,23 @@ fi
 if [[ "$meta_version" != "$swift_version" ]]; then
     echo "error: version mismatch: AppStream release is $meta_version, appAtticVersion is $swift_version" >&2
     echo "error: bump both in the same commit: $UTIL, $METAINFO" >&2
+    exit 1
+fi
+
+# build.sh copies this plist into AppAttic.app unchanged, so its short version
+# is what Finder and macOS read, not appAtticVersion.
+if [[ "$plist_short" != "$swift_version" ]]; then
+    echo "error: version mismatch: $PLIST CFBundleShortVersionString is $plist_short, appAtticVersion is $swift_version" >&2
+    echo "error: bump all three in the same commit: $UTIL, $METAINFO, $PLIST" >&2
+    exit 1
+fi
+
+# The build number is the other half of a bundle version: macOS orders updates
+# by (short version, build number) and refuses a reinstall at or below the one
+# it already has, so it goes up on every release even for a patch.
+if [[ ! "$plist_build" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: $PLIST CFBundleVersion is '$plist_build', which is not a build number" >&2
+    echo "error: it is a positive integer that rises every release, not the semver version" >&2
     exit 1
 fi
 
