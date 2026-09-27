@@ -590,7 +590,12 @@ QVector<DiskVolume> listDiskVolumes() {
         v.bytesAvailable = s.bytesAvailable();
         v.readOnly = s.isReadOnly();
         v.isRoot = root == QLatin1String("/");
-        v.isHome = home == root || home.startsWith(root + QLatin1Char('/'));
+        // "/" + "/" is "//", which no path starts with, so the root volume
+        // has to be compared on its own. Matches listDiskVolumes in
+        // Sources/AppAtticScan/DiskUsage.swift.
+        v.isHome = home == root
+            || (v.isRoot ? home.startsWith(QLatin1Char('/'))
+                         : home.startsWith(root + QLatin1Char('/')));
         v.name = s.displayName();
         if (v.name.isEmpty() || v.name == root) {
             if (v.isRoot) v.name = QStringLiteral("File system");

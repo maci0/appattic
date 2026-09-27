@@ -783,6 +783,12 @@ static int checkDiskUsage() {
     bool hasRoot = false;
     for (const DiskVolume &v : vols) {
         if (v.isRoot && v.bytesTotal > 0) hasRoot = true;
+        // "/" + "/" is "//", so the root volume only counts as home if the
+        // comparison special-cases it.
+        if (v.isRoot && !v.isHome) {
+            std::fprintf(stderr, "disk: root volume not marked isHome\n");
+            return 1;
+        }
         if (v.rootPath == QLatin1String("/proc")) {
             std::fprintf(stderr, "disk: listed virtual /proc\n");
             return 1;

@@ -114,5 +114,17 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertFalse(vols.contains { $0.rootPath == "/proc" })
         XCTAssertTrue(vols.contains { $0.rootPath == "/home" && $0.isHome })
     }
+
+    func testListDiskVolumesUnescapesOctalInMountPoint() {
+        // The kernel escapes space, tab, newline, and backslash as octal.
+        let mounts = """
+        /dev/sda1 / rw ext4 rw 0 0
+        /dev/sdb1 /mnt/my\\040disk ext4 rw 0 0
+        /dev/sdc1 /mnt/back\\134slash ext4 rw 0 0
+        """
+        let vols = listDiskVolumes(home: "/home/u", mountsText: mounts)
+        XCTAssertTrue(vols.contains { $0.rootPath == "/mnt/my disk" })
+        XCTAssertTrue(vols.contains { $0.rootPath == "/mnt/back\\slash" })
+    }
     #endif
 }

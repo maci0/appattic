@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# The release version is declared in Util.swift and the AppStream metainfo,
-# which no tool keeps in sync. The Qt build reads it out of Util.swift at
-# configure time, so the declaration is one. This is the one place that reads
-# them, so a bump that misses one is a build failure instead of an artifact
-# that reports the wrong version.
+# The release version has one declaration (appAtticVersion in Util.swift) and
+# one copy to keep in step (the newest AppStream release). CMakeLists.txt reads
+# the declaration, so this is the place that checks the copy and the derivation.
 # Usage: bash scripts/check-version.sh [--tag TAG]
 #   prints the declared version on stdout
 #   --tag  also requires TAG (a v* ref name or a bare version) to match it
@@ -31,8 +29,8 @@ while [[ $# -gt 0 ]]; do
             cat <<'EOF'
 Usage: bash scripts/check-version.sh [--tag TAG]
 
-  Checks that the AppStream release is the declared Swift version, and that
-  the Qt build still derives its version from the Swift declaration.
+  Checks that the newest AppStream release matches appAtticVersion, and that
+  CMakeLists.txt still derives its version from Util.swift.
   Prints the declared version. With --tag, the tag must match it too.
 EOF
             exit 0
@@ -59,11 +57,14 @@ extract() {
 swift_version="$(extract "appAtticVersion" "$UTIL" 's/^public let appAtticVersion = "\([^"]*\)"$/\1/p')"
 meta_version="$(extract "newest AppStream release" "$METAINFO" 's/.*<release version="\([^"]*\)".*/\1/p')"
 
-# CMake holds no version literal: ui/linux-qt/CMakeLists.txt reads
-# appAtticVersion out of Util.swift at configure time. Check that derivation
-# is intact, so a reworded regex fails the gate instead of quietly building a
-# Qt binary with no version.
-if ! grep -qF 'public let appAtticVersion = ' "$CMAKE" \
+# CMakeLists.txt has no version of its own: it reads appAtticVersion out of
+# $UTIL with string(REGEX MATCH). There is no third declaration to compare, so
+# check that the derivation is still there and that no literal crept back in.
+if grep -qE '^[[:space:]]*set\(APPATTIC_VERSION[[:space:]]+"[0-9]' "$CMAKE"; then
+    echo "error: $CMAKE declares APPATTIC_VERSION literally; it must read appAtticVersion from $UTIL" >&2
+    exit 1
+fi
+if ! grep -qF 'public let appAtticVersion' "$CMAKE" \
     || ! grep -qF 'CMAKE_MATCH_1' "$CMAKE"; then
     echo "error: $CMAKE no longer derives APPATTIC_VERSION from $UTIL" >&2
     echo "       keep the appAtticVersion regex and the CMAKE_MATCH_1 it reads" >&2

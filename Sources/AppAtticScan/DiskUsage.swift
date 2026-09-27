@@ -395,6 +395,29 @@ private let virtualFs: Set<String> = [
     "squashfs", "nsfs", "efivarfs", "tmpfs",
 ]
 
+/// `/proc/mounts` writes space, tab, newline, and backslash in a field as
+/// three-digit octal. Undo all four; a mount point with a tab or a backslash in
+/// its name is otherwise listed under a path that does not exist.
+/// Linux-only: nothing else writes this format.
+func unescapeProcMountField(_ field: String) -> String {
+    var out = ""
+    var rest = field[...]
+    while let slash = rest.firstIndex(of: "\\") {
+        let first = rest.index(after: slash)
+        guard first + 2 < rest.endIndex,
+              let octal = rest[first...first + 2],
+              let byte = UInt8(octal, radix: 8) else {
+            out += rest[...slash]
+            rest = rest[first...]
+            continue
+        }
+        out += rest[..<slash]
+        out.append(Character(UnicodeScalar(byte)))
+        rest = rest[rest.index(first, offsetBy: 3)...]
+    }
+    return out + rest
+}
+
 public func listDiskVolumes(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     mountsText: String? = nil
@@ -407,7 +430,7 @@ public func listDiskVolumes(
         let parts = raw.split(whereSeparator: \.isWhitespace).map(String.init)
         guard parts.count >= 3 else { continue }
         let device = parts[0]
-        let root = parts[1].replacingOccurrences(of: "\\040", with: " ")
+        let root = unescapeProcMountField(parts[1])
         let fs = parts[2]
         if seen.contains(root) { continue }
         if virtualFs.contains(fs) && root != "/" { continue }
