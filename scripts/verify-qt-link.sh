@@ -20,8 +20,21 @@ Usage: bash scripts/verify-qt-link.sh [path/to/LINUX_QT_LINK.txt]
 EOF
             exit 0
             ;;
+        -*)
+            echo "error: unknown argument: $arg" >&2
+            echo "Usage: bash scripts/verify-qt-link.sh [path/to/LINUX_QT_LINK.txt]" >&2
+            exit 2
+            ;;
     esac
 done
+
+# Only the first argument names the proof, and the loop above scans the rest for
+# -h. A second path would be dropped, so a typo in it verifies the wrong file.
+if [[ $# -gt 1 ]]; then
+    echo "error: unexpected argument: $2" >&2
+    echo "Usage: bash scripts/verify-qt-link.sh [path/to/LINUX_QT_LINK.txt]" >&2
+    exit 2
+fi
 
 if [[ ! -f "$PROOF" ]]; then
     echo "error: no Qt link proof at $PROOF" >&2

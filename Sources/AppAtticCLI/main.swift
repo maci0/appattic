@@ -314,9 +314,11 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
     }
     if !rows.isEmpty {
         print(renderTable(headers: ["Name", "What", "Location", "Size", "Modified", "Why"], rows: rows))
-        if let limit, orphans.count > limit {
-            print(C.dim("  …and \(orphans.count - limit) more not shown (--top \(limit))"))
-        }
+    }
+    // Outside the table guard: `--top 0` shows no rows, and the count line is
+    // the only thing that says the cut was the reason.
+    if let limit, orphans.count > limit {
+        print(C.dim("  …and \(orphans.count - limit) more not shown (--top \(limit))"))
     }
     if !system.isEmpty {
         print()
@@ -342,6 +344,16 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
     let nReview = verdicts.filter { $0.tierKind == .review }.count
     print()
     print(C.bold("STALE: unused installed software (\(verdicts.count) items)"))
+    if verdicts.isEmpty {
+        // The other three sections say so instead of printing a table with no
+        // rows: a header and a rule read as a report about nothing.
+        print(C.green("  Nothing found: no unused installed software.")
+            + (includeSystem ? "" : C.dim(" System apps are hidden; --include-system shows them.")))
+        if !result.outdated.isEmpty {
+            print(C.dim("  \(result.outdated.count) package(s) have a newer version. See: appattic outdated"))
+        }
+        return
+    }
     print(C.dim("  \(C.yellow("\(nReview)")) review · \(C.red("\(nRemove)")) remove candidates"))
     var rows: [[String]] = []
     for v in verdicts {
@@ -491,7 +503,9 @@ func runShellScript(_ script: String) -> (status: Int32, stderr: String) {
         }
         return (status, errText)
     } catch {
-        fputs("error: \(redactHomePaths(error.localizedDescription))\n", stderr)
-        return (1, "")
+        // The reason goes back through the caller, which prints one error.
+        // Reporting here too would print the reason and then "Command failed
+        // (exit 1)" with nothing after it.
+        return (1, redactHomePaths(error.localizedDescription))
     }
 }
