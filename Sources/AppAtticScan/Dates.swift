@@ -311,12 +311,21 @@ public enum TimestampFormat {
     }()
 
     /// "Today", "Yesterday", "3 days ago", localized and correctly pluralized.
-    static let relativeDays: DateComponentsFormatter = {
+    ///
+    /// swift-corelibs-foundation declares `DateComponentsFormatter` without
+    /// implementing it, so `relativeDays` is nil there and `string(from:now:)`
+    /// falls back to the ASCII day unit. The type is erased into a closure so
+    /// the name does not appear in this file's signatures off Darwin.
+    static let relativeDays: ((Date, Date) -> String)? = {
+        #if canImport(Darwin)
         let f = DateComponentsFormatter()
         f.allowedUnits = .day
         f.unitsStyle = .named
         f.maximumUnitCount = 1
-        return f
+        return { f.string(from: $0, to: $1) }
+        #else
+        return nil
+        #endif
     }()
 
     /// A relative label within `relativeDayLimit` days, otherwise the date.
@@ -335,6 +344,7 @@ public enum TimestampFormat {
         guard let then = calendar.date(byAdding: .day, value: -days, to: today) else {
             return self.date.string(from: date)
         }
-        return relativeDays.string(from: then, to: today)
+        guard let relativeDays else { return "\(days) d" }
+        return relativeDays(then, today)
     }
 }

@@ -485,7 +485,7 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
     if days == nil {
         // Same bound: an install date in the future reads as "installed 1 h
         // ago", which is the "too new to judge" verdict with no way to age out.
-        let ageDays = plausible(sw.installedAt).map { daysSince($0, now: now) }
+        let ageDays = plausible(sw.installedAt).flatMap { daysSince($0, now: now) }
         if let ageDays, ageDays < Double(activeDays) {
             return Verdict(software: sw, tier: StaleTier.keep.rawValue, reason: "Installed \(humanDays(ageDays)) ago: too new to judge")
         }

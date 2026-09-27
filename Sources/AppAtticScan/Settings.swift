@@ -121,7 +121,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
     }
 
     public func encode(to encoder: Encoder) throws {
-        let c = encoder.container(keyedBy: CodingKeys.self)
+        var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(settingsPath, forKey: .settingsPath)
         try c.encode(settingsFileExists, forKey: .settingsFileExists)
         try c.encode(includeSystem, forKey: .includeSystem)

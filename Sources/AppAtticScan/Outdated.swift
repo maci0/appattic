@@ -479,7 +479,7 @@ private func snapNameVersionMap(_ text: String) -> [String: String] {
         let t = raw.trimmingCharacters(in: .whitespaces)
         if t.isEmpty { continue }
         if t.posixLowercased().hasPrefix("all snaps up to date") { return mapping }
-        headIdx = t.split(whereSeparator: \.isWhitespace).first?.posixLowercased() == "name" ? idx : nil
+        headIdx = t.split(whereSeparator: \.isWhitespace).first.map { String($0).posixLowercased() } == "name" ? idx : nil
         break
     }
     for (idx, raw) in raws.enumerated() {

@@ -3,7 +3,7 @@ import Foundation
 import FoundationXML
 #endif
 
-let indexWindowS: TimeInterval = 120
+public let indexWindowS: TimeInterval = 120
 let maxHistoryLines = 500_000
 
 /// How far past the scan time a recorded launch may sit and still be treated

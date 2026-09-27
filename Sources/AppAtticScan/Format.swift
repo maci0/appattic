@@ -68,7 +68,7 @@ public func humanDays(_ days: Double) -> String {
         return duration(.hour, max(Int(days * 24), 1))
     }
     if days < 60 {
-        return days >= 14 ? duration(.week, Int(days / 7)) : duration(.day, Int(days))
+        return days >= 14 ? duration(.weekOfYear, Int(days / 7)) : duration(.day, Int(days))
     }
     if days < 365 * 1.5 {
         return duration(.month, Int(days / 30))
@@ -79,29 +79,38 @@ public func humanDays(_ days: Double) -> String {
 /// One formatter per unit, built once and never mutated, so parallel calls are
 /// safe. `DateComponents` carries the count, so a month stays a month instead
 /// of being reconciled against a fixed number of days.
-private let durationFormatters: [Calendar.Component: DateComponentsFormatter] = {
-    var formatters: [Calendar.Component: DateComponentsFormatter] = [:]
-    for unit in [Calendar.Component.hour, .day, .week, .month, .year] {
+///
+/// swift-corelibs-foundation declares `DateComponentsFormatter` but leaves it
+/// unimplemented, so the table is empty there and `duration` below takes its
+/// ASCII fallback for every unit. The formatter type is erased into a closure so
+/// it does not appear in this file's signatures off Darwin.
+private let durationFormatters: [Calendar.Component: (DateComponents) -> String?] = {
+    #if canImport(Darwin)
+    var formatters: [Calendar.Component: (DateComponents) -> String?] = [:]
+    for unit in [.hour, .day, .weekOfYear, .month, .year] {
         let f = DateComponentsFormatter()
         var allowed: DateComponentsFormatter.Units = []
         allowed.insert(unit)
         f.allowedUnits = allowed
         f.unitsStyle = .abbreviated
-        formatters[unit] = f
+        formatters[unit] = { f.string(from: $0) }
     }
     return formatters
+    #else
+    return [:]
+    #endif
 }()
 
 /// Abbreviations for a locale that has no data for the unit, so a missing CLDR
 /// entry costs the reader the localized word and not the whole label.
 private let asciiDurationUnits: [Calendar.Component: String] = [
-    .hour: "h", .day: "d", .week: "w", .month: "mo", .year: "y",
+    .hour: "h", .day: "d", .weekOfYear: "w", .month: "mo", .year: "y",
 ]
 
 private func duration(_ unit: Calendar.Component, _ count: Int) -> String {
     var components = DateComponents()
     components.setValue(count, for: unit)
-    if let text = durationFormatters[unit]?.string(from: components) {
+    if let text = durationFormatters[unit]?(components) {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if !trimmed.isEmpty { return trimmed }
     }

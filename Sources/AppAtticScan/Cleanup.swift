@@ -187,7 +187,7 @@ public func ensureRootHelper(_ script: String) -> String {
         if t.isEmpty || t.hasPrefix("#") || t.hasPrefix("set -") { at += 1; continue }
         break
     }
-    let helper = scriptRootHelper.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+    var helper = scriptRootHelper.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         .map(String.init)
     while helper.last?.isEmpty == true { helper.removeLast() }
     lines.insert(contentsOf: helper + [""], at: at)

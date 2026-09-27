@@ -500,9 +500,7 @@ func unescapeProcMountField(_ field: String) -> String {
         let first = rest.index(after: slash)
         guard let last = rest.index(first, offsetBy: 2, limitedBy: rest.endIndex),
               last < rest.endIndex,
-              let octal = rest[first...last],
-              let byte = UInt8(octal, radix: 8) else {
-            out += rest[...slash]
+              let byte = UInt8(rest[first...last], radix: 8) else {            out += rest[...slash]
             rest = rest[first...]
             continue
         }
