@@ -1479,12 +1479,28 @@ private:
             if (needQ && !searchHaystack(f).contains(q)) continue;
             rows.push_back(f);
         }
-        // `std::sort` is not stable, so rows of equal size would keep the order
-        // the scan happened to emit, and many rows are the same size (every
-        // 4 KB directory, every unmeasured `-1`). Break the tie on the row
-        // identity, as `sortChildrenWith` in diskusage.cpp does on path.
-        std::sort(rows.begin(), rows.end(), [](const Finding &a, const Finding &b) {
+        // Largest first, then a total order. Size alone is not one: every
+        // 4 KB directory and every unmeasured row carries the same bytes and
+        // `std::sort` is not stable, so the same scan filled the table in a
+        // different order on the next run.
+        // `QCollator` orders the labels by the locale's rules rather than by
+        // UTF-16 code unit, which files "Ä" after "Z" in a byte-order compare;
+        // the C locale has no rules and keeps the code-unit order. The path
+        // breaks the next tie and the row identity the last one, the same
+        // order `sortChildrenWith` in diskusage.cpp gives the children.
+        const QLocale locale;
+        const bool collated = locale.name() != QLatin1String("C");
+        const QCollator collator(locale);
+        std::sort(rows.begin(), rows.end(), [collated, &collator](const Finding &a, const Finding &b) {
             if (a.bytes != b.bytes) return a.bytes > b.bytes;
+            if (collated) {
+                const int c = collator.compare(a.name, b.name);
+                if (c != 0) return c < 0;
+            } else {
+                const int c = a.name.compare(b.name, Qt::CaseInsensitive);
+                if (c != 0) return c < 0;
+            }
+            if (a.path != b.path) return a.path < b.path;
             return a.uid() < b.uid();
         });
         return rows;

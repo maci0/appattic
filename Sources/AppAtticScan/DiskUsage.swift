@@ -558,7 +558,11 @@ public func listDiskVolumes(
     return out.sorted { a, b in
         if a.isRoot != b.isRoot { return a.isRoot }
         if a.isHome != b.isHome { return a.isHome }
-        return a.rootPath < b.rootPath
+        // Collated: a mount point is a path, and byte order files every
+        // non-ASCII one ("/media/Ünïcode", "/Volumes/日本語") after the ASCII
+        // mounts. The path breaks the tie, since two rows can carry the same
+        // label and `sort` is not stable.
+        return collatedBefore(a.rootPath, b.rootPath, tieBreak: a.rootPath, b.rootPath)
     }
     #else
     _ = mountsText
@@ -581,7 +585,8 @@ public func listDiskVolumes(
     }
     // Sorted by mount point, the way the mount table above is read: the URL
     // list is in readdir order, so the rows and the JSON written from them
-    // would come out in a different order on every run.
-    return out.sorted { $0.rootPath < $1.rootPath }
+    // would come out in a different order on every run. Collated, so a
+    // non-ASCII mount name is not filed after every ASCII one.
+    return out.sorted { collatedBefore($0.rootPath, $1.rootPath, tieBreak: $0.rootPath, $1.rootPath) }
     #endif
 }

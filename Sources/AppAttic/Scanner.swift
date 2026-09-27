@@ -55,14 +55,20 @@ final class ScannerViewModel {
         visibleOrphanedLeftovers(scanData?.leftovers ?? [], ignoring: ignoredLeftovers)
             .sorted { a, b in
                 let (ls, rs) = (a.size_bytes ?? 0, b.size_bytes ?? 0)
-                return ls == rs ? a.path < b.path : ls > rs
+                // Collated tie-break, not byte order: two leftovers of the same
+                // size whose paths differ only in a non-ASCII name ("Über",
+                // "日本語") otherwise land in code-point order, which reads as
+                // unordered. Same order the CLI prints and the Qt window lists.
+                return ls == rs ? collatedBefore(a.path, b.path, tieBreak: a.path, b.path) : ls > rs
             }
     }
 
     var overviewStale: [SoftwareItem] {
         visibleStaleSoftware(scanData?.software ?? [], includeSystem: includeSystem)
             .sorted { a, b in
-                a.totalBytes == b.totalBytes ? a.path < b.path : a.totalBytes > b.totalBytes
+                a.totalBytes == b.totalBytes
+                    ? collatedBefore(a.path, b.path, tieBreak: a.path, b.path)
+                    : a.totalBytes > b.totalBytes
             }
     }
 
@@ -112,7 +118,7 @@ final class ScannerViewModel {
                 || (item.extra_paths ?? []).contains { posixFolded($0).contains(q) }
         }.sorted { a, b in
             let (ls, rs) = (a.size_bytes ?? 0, b.size_bytes ?? 0)
-            return ls == rs ? a.path < b.path : ls > rs
+            return ls == rs ? collatedBefore(a.path, b.path, tieBreak: a.path, b.path) : ls > rs
         }
         cachedStale = visibleStaleSoftware(data.software, includeSystem: includeSystem).filter { item in
             if q.isEmpty { return true }
@@ -124,7 +130,9 @@ final class ScannerViewModel {
                 || posixFolded(item.summary ?? "").contains(q)
                 || (item.outdated == true && "outdated".hasPrefix(q))
         }.sorted { a, b in
-            a.totalBytes == b.totalBytes ? a.path < b.path : a.totalBytes > b.totalBytes
+            a.totalBytes == b.totalBytes
+                ? collatedBefore(a.path, b.path, tieBreak: a.path, b.path)
+                : a.totalBytes > b.totalBytes
         }
         let outdated = data.outdated ?? []
         if q.isEmpty {

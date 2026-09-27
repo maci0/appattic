@@ -350,6 +350,21 @@ final class PackageTests: XCTestCase {
         XCTAssertEqual(filterPackages(unknownFirst, filter: .all).map(\.name), ["alpha", "zeta"])
     }
 
+    func testFilterPackagesOrdersEqualSizesByCollatedName() {
+        // Same size, so the name decides. Byte order puts "Zebra" first
+        // ("Z" is 0x5A, "a" is 0x61) and files "Über" after every ASCII name,
+        // which reads as unordered; the collator keeps both in a reader's order.
+        let rows = [
+            entry("Zebra", "apt", "orphan", size: 10),
+            entry("Über", "apt", "orphan", size: 10),
+            entry("apple", "apt", "orphan", size: 10),
+        ]
+        XCTAssertEqual(
+            filterPackages(rows, filter: .all).map(\.name),
+            ["apple", "Über", "Zebra"]
+        )
+    }
+
     func testCollectPackagesRoutesArchOrphansAndGlobals() {
         var cmds: [[String]] = []
         let cmdsLock = NSLock()

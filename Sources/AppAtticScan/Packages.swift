@@ -92,7 +92,11 @@ public func filterPackages(
         default:
             break
         }
-        return a.name.posixLowercased() < b.name.posixLowercased()
+        // Collated, not folded: the POSIX fold still orders by code point
+        // afterwards, so "Zebra" came before "apple" and "Ä" after "Z". Manager
+        // breaks the tie, since two managers can report the same name and
+        // `sort` is not stable.
+        return collatedBefore(a.name, b.name, tieBreak: a.manager, b.manager)
     }
 }
 
@@ -474,7 +478,10 @@ public func parsePipxList(_ text: String) -> [PackageEntry] {
             }
             out.append(makePackage(name: name, manager: "pipx", kind: "global", version: version))
         }
-        return out.sorted { $0.name < $1.name }
+        // Collated, so "Ä" is not parked after "Z" for a German or Swedish
+        // reader. `venvs` is a JSON object and its key order varies, so the
+        // version has to break the tie: `sort` is not stable.
+        return out.sorted { collatedBefore($0.name, $1.name, tieBreak: $0.version ?? "", $1.version ?? "") }
     }
     var out: [PackageEntry] = []
     out.reserveCapacity(64)

@@ -712,9 +712,18 @@ QVector<DiskVolume> listDiskVolumes() {
         }
         out.append(v);
     }
-    std::sort(out.begin(), out.end(), [](const DiskVolume &a, const DiskVolume &b) {
+    // Collation, not code units: `QString` orders by UTF-16 code unit, so a
+    // mount point with a non-ASCII name ("/media/Ünïcode", "/Volumes/日本語")
+    // lands after every ASCII one. `QCollator` holds the locale's rules; the C
+    // locale has none, so it keeps the code-unit order. Same order the macOS
+    // window prints, from listDiskVolumes in AppAtticScan/DiskUsage.swift.
+    const QLocale locale;
+    const bool collated = locale.name() != QLatin1String("C");
+    const QCollator collator(locale);
+    std::sort(out.begin(), out.end(), [collated, &collator](const DiskVolume &a, const DiskVolume &b) {
         if (a.isRoot != b.isRoot) return a.isRoot;
         if (a.isHome != b.isHome) return a.isHome;
+        if (collated) return collator.compare(a.rootPath, b.rootPath) < 0;
         return a.rootPath < b.rootPath;
     });
     return out;
