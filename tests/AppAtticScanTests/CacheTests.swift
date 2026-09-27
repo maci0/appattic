@@ -117,6 +117,36 @@ final class CacheTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
+    /// The two malformed strings the Swift `JSONDecoder` some Foundation
+    /// versions ship trap on rather than throw for: its keyed container
+    /// unwraps each object key with `try!` and the scanner leaves the
+    /// unescaped-control-character and invalid-UTF-8 checks to that unwrap. A
+    /// cache is a file anything running as the account can write, so a key
+    /// holding either one has to come back as a dropped file and not as a dead
+    /// process.
+    func testCacheKeyTheDecoderWouldTrapOnIsDropped() throws {
+        let inputs: [(what: String, bytes: Data)] = [
+            ("a raw newline in a key", Data("{\"fingerpr\nnt\":1}".utf8)),
+            ("invalid UTF-8 in a key", Data([0x7B, 0x22, 0x66, 0xFF, 0x22, 0x3A, 0x31, 0x7D])),
+        ]
+        for (what, bytes) in inputs {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("appattic-control-\(UUID().uuidString).json")
+            defer { try? FileManager.default.removeItem(at: url) }
+            try bytes.write(to: url)
+            XCTAssertThrowsError(try readScanCache(from: url), what) { error in
+                guard case AppAtticIOError.decodeFailed = error else {
+                    return XCTFail("\(what): expected decodeFailed, got \(error)")
+                }
+            }
+            XCTAssertNil(loadScanCache(from: url), what)
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: url.path),
+                "\(what): the refused file stayed on disk"
+            )
+        }
+    }
+
     /// The snapshot is a whole-inventory JSON, so its size scales with the
     /// number of rows. Past the ceiling it is not a snapshot, and reading it
     /// would take the whole file into memory before the decoder could reject it.
