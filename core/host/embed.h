@@ -41,7 +41,8 @@ int appattic_wasm_run(
 );
 
 /* Drop the cached engine and compiled modules. Call at teardown; the next
-   appattic_wasm_run builds them again. */
+   appattic_wasm_run builds them again. Blocks until every in-flight run and
+   precompile has returned, so never call it from a scan's own thread. */
 void appattic_wasm_shutdown(void);
 
 /* Write a precompiled image of `wasm_path` to `out_path` (wasmtime

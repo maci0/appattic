@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/stat.h>
@@ -100,6 +101,30 @@ static pthread_mutex_t g_mod_lock = PTHREAD_MUTEX_INITIALIZER;
 static wasm_engine_t *g_engine;
 static ModSlot g_mods[MOD_CACHE_MAX];
 static int g_mod_count;
+
+/* How many runs hold the engine right now. Compilation runs outside
+   g_mod_lock on purpose, so the module cache alone cannot keep the engine
+   alive: without this count, a shutdown on the teardown thread frees the
+   engine and its modules under a scan that is still executing. */
+static pthread_mutex_t g_life_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_life_idle = PTHREAD_COND_INITIALIZER;
+static int g_runs_active;
+
+/* How long the teardown waits for those runs before giving up on the cache. */
+#define SHUTDOWN_DRAIN_TIMEOUT_S 5
+
+static void run_enter(void) {
+    pthread_mutex_lock(&g_life_lock);
+    g_runs_active++;
+    pthread_mutex_unlock(&g_life_lock);
+}
+
+static void run_leave(void) {
+    pthread_mutex_lock(&g_life_lock);
+    g_runs_active--;
+    if (g_runs_active == 0) pthread_cond_broadcast(&g_life_idle);
+    pthread_mutex_unlock(&g_life_lock);
+}
 
 static wasm_engine_t *shared_engine(void) {
     wasm_engine_t *engine;
@@ -515,8 +540,24 @@ fail_plugin:
 
 /* Inverse of the engine and module cache above: drop every compiled module and
    the shared engine. The UI calls this from its own teardown, so the process
-   singleton has an owner and a dispose instead of living until exit. */
+   singleton has an owner and a dispose instead of living until exit. Waits for
+   in-flight runs first; call it from a thread that is not itself running one.
+   A run that never returns (a force-terminated scan thread) must not wedge the
+   teardown, so the wait is bounded and the modules are then left to the exit. */
 void appattic_wasm_shutdown(void) {
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += SHUTDOWN_DRAIN_TIMEOUT_S;
+    pthread_mutex_lock(&g_life_lock);
+    while (g_runs_active > 0) {
+        if (pthread_cond_timedwait(&g_life_idle, &g_life_lock, &deadline) != 0) break;
+    }
+    const int busy = g_runs_active;
+    pthread_mutex_unlock(&g_life_lock);
+    if (busy > 0) {
+        fprintf(stderr, "wasm: %d run(s) still active, keeping the engine\n", busy);
+        return;
+    }
     pthread_mutex_lock(&g_mod_lock);
     for (int i = 0; i < g_mod_count; i++) {
         wasmtime_module_delete(g_mods[i].module);
@@ -534,7 +575,12 @@ void appattic_wasm_shutdown(void) {
 
 /* Compile `wasm_path` and write the serialized image to `out_path`, so
    core/build.sh can ship a precompiled module beside the wasm. */
-int appattic_precompile(const char *wasm_path, const char *out_path, char *err, size_t errlen) {
+static int precompile_locked(
+    const char *wasm_path,
+    const char *out_path,
+    char *err,
+    size_t errlen
+) {
     Err e = {err, errlen, 0};
     wasm_engine_t *engine = shared_engine();
     if (!engine) {
@@ -566,7 +612,14 @@ int appattic_precompile(const char *wasm_path, const char *out_path, char *err, 
     return 0;
 }
 
-int appattic_wasm_run(
+int appattic_precompile(const char *wasm_path, const char *out_path, char *err, size_t errlen) {
+    run_enter();
+    const int rc = precompile_locked(wasm_path, out_path, err, errlen);
+    run_leave();
+    return rc;
+}
+
+static int wasm_run_locked(
     const char *core_wasm,
     char **plugin_specs,
     int plugin_count,
@@ -663,5 +716,23 @@ int appattic_wasm_run(
     wasmtime_extern_delete(&core_pabi);
     wasmtime_store_delete(store);
     wasmtime_linker_delete(linker);
+    return rc;
+}
+
+int appattic_wasm_run(
+    const char *core_wasm,
+    char **plugin_specs,
+    int plugin_count,
+    appattic_json_fn on_json,
+    appattic_progress_fn on_progress,
+    void *user,
+    char *err,
+    size_t errlen
+) {
+    run_enter();
+    const int rc = wasm_run_locked(
+        core_wasm, plugin_specs, plugin_count, on_json, on_progress, user, err, errlen
+    );
+    run_leave();
     return rc;
 }
