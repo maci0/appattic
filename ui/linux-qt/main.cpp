@@ -1,5 +1,6 @@
 #include "corehost.h"
 #include "diskpage.h"
+#include "diskusage.h"
 #include "finding.h"
 #include "findingmodel.h"
 #include "scanworker.h"
@@ -85,7 +86,6 @@
 
 #include <cstdio>
 #include <cstring>
-#include <limits>
 #include <string>
 #include <utility>
 
@@ -99,11 +99,6 @@ static QString packageChildMarkKey(const QString &parentUid, const QString &chil
     return parentUid + QChar(0x1e) + child;
 }
 
-static qint64 addBytes(qint64 a, qint64 b) {
-    if (b <= 0) return a;
-    if (a > std::numeric_limits<qint64>::max() - b) return std::numeric_limits<qint64>::max();
-    return a + b;
-}
 
 /// Bytes of script output kept for the failure report. The report itself shows
 /// the last 400, so this only has to cover them with room for a whole line.
@@ -1574,7 +1569,7 @@ private:
             if (!matchPage(f, Page::Leftovers) || leftoverIsIgnored(f, m_ignored)) continue;
             if (f.bytes < 0) continue;
             leftoverSized = true;
-            leftoverBytes = addBytes(leftoverBytes, f.bytes);
+            leftoverBytes = addSatBytes(leftoverBytes, f.bytes);
         }
         const bool scanningEmpty = isScanPending() && m_findings.isEmpty();
         const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
@@ -2711,7 +2706,7 @@ private:
             if (!m_marked.contains(f.uid()) && !m_markedManual.contains(f.uid())) continue;
             ++n;
             if (f.bytes < 0) ++unsized;
-            else bytes = addBytes(bytes, f.bytes);
+            else bytes = addSatBytes(bytes, f.bytes);
         }
         const Page page = currentPage();
         m_actionBar->setVisible(

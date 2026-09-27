@@ -511,8 +511,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 qint64 sumAllocated = 0;
                 int dirs = 0;
                 for (int i = 0; i < top->childCount(); ++i) {
-                    sumApparent += top->child(i)->data(1, Qt::UserRole).toLongLong();
-                    sumAllocated += top->child(i)->data(2, Qt::UserRole).toLongLong();
+                    sumApparent = addSatBytes(sumApparent, top->child(i)->data(1, Qt::UserRole).toLongLong());
+                    sumAllocated = addSatBytes(sumAllocated, top->child(i)->data(2, Qt::UserRole).toLongLong());
                     ++dirs;
                 }
                 // Placeholder root row: the totals of what has arrived so far.

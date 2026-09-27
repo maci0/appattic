@@ -116,7 +116,7 @@ void DiskChart::paintRings(QPainter &p, const QRect &box) {
     auto addChildren = [&](auto &&self, DiskNode *parent, int depth, qreal start, qreal span, int colorBase) -> void {
         if (depth >= rings) return;
         qint64 tot = 0;
-        for (DiskNode *ch : parent->children) tot += metric(ch);
+        for (DiskNode *ch : parent->children) tot = addSatBytes(tot, metric(ch));
         if (tot <= 0) return;
         qreal a = start;
         int i = 0;
@@ -192,7 +192,7 @@ void DiskChart::squarify(
     for (DiskNode *n : nodes) {
         const qint64 m = qMax(qint64(0), n->metric(m_allocated));
         sizes.append(m);
-        sum += m;
+        sum = addSatBytes(sum, m);
     }
     if (sum <= 0) {
         for (int i = 0; i < nodes.size(); ++i) out->append(QRectF());
@@ -273,7 +273,7 @@ void DiskChart::paintTreemap(QPainter &p, const QRect &box) {
         const qint64 m = ch->metric(m_allocated);
         if (m <= 0) continue;
         kids.append(ch);
-        tot += m;
+        tot = addSatBytes(tot, m);
     }
     QVector<QRectF> rects;
     squarify(kids, tot, QRectF(box), &rects);

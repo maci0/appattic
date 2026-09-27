@@ -19,7 +19,6 @@
 
 #include <atomic>
 #include <initializer_list>
-#include <limits>
 #include <thread>
 #include <vector>
 
@@ -795,10 +794,7 @@ void groupLinuxLeftovers(QVector<Finding> &findings) {
             if (i == primary) continue;
             if (!findings[i].path.isEmpty()) findings[primary].extraPaths << findings[i].path;
             findings[primary].extraPaths << findings[i].extraPaths;
-            if (findings[i].bytes > 0) {
-                if (findings[primary].bytes < 0) findings[primary].bytes = 0;
-                findings[primary].bytes += findings[i].bytes;
-            }
+            findings[primary].bytes = addSatBytes(findings[primary].bytes, findings[i].bytes);
             drop.insert(i);
         }
         if (!allSized) findings[primary].bytes = -1;
@@ -909,11 +905,7 @@ void enrichLeftoverSizes(
             }
             const qint64 n = measurePathBytes(p, opts);
             if (n < 0) return;
-            if (total > std::numeric_limits<qint64>::max() - n) {
-                total = std::numeric_limits<qint64>::max();
-            } else {
-                total += n;
-            }
+            total = addSatBytes(total, n);
             any = true;
         };
         add(f.path);

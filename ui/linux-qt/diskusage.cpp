@@ -45,13 +45,16 @@
 #endif
 #endif
 
-namespace {
-
-qint64 addSat(qint64 a, qint64 b) {
+qint64 addSatBytes(qint64 a, qint64 b) {
+    // A negative running total means "not measured", not a debt, so a measured
+    // addend starts the sum over rather than cancelling into it.
+    if (a < 0) a = 0;
     if (b <= 0) return a;
     if (a > std::numeric_limits<qint64>::max() - b) return std::numeric_limits<qint64>::max();
     return a + b;
 }
+
+namespace {
 
 bool isCancelled(const DiskScanOptions &opts) {
     return opts.cancelled && opts.cancelled(opts.user);
@@ -198,9 +201,9 @@ void pathPop(char *path, size_t *len, size_t saved) {
 constexpr size_t kMaxDeferredDirFds = 64;
 
 void addChildTotals(DiskNode *node, const DiskNode *child) {
-    node->apparent = addSat(node->apparent, child->apparent);
-    node->allocated = addSat(node->allocated, child->allocated);
-    node->items = addSat(node->items, child->items);
+    node->apparent = addSatBytes(node->apparent, child->apparent);
+    node->allocated = addSatBytes(node->allocated, child->allocated);
+    node->items = addSatBytes(node->items, child->items);
 }
 
 void walkDirFd(
@@ -425,10 +428,10 @@ void measureVisit(
     const bool seenDir = meta.isDir && seen->count(key);
     const bool hardDup = !meta.isDir && meta.nlink > 1 && seen->count(key);
     if (!hardDup) {
-        *allocated = addSat(*allocated, meta.allocated);
+        *allocated = addSatBytes(*allocated, meta.allocated);
         if (!meta.isDir && meta.nlink > 1) seen->insert(key);
     }
-    *apparent = addSat(*apparent, meta.apparent);
+    *apparent = addSatBytes(*apparent, meta.apparent);
     if (!meta.isDir) return;
     if (seenDir || (opts.oneFileSystem && meta.dev != rootDev)) return;
     seen->insert(key);

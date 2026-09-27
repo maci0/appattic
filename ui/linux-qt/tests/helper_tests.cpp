@@ -82,6 +82,35 @@ static int verifyHelpers() {
         std::fprintf(stderr, "a volume of unknown size has nothing used\n");
         return 1;
     }
+    // Byte totals saturate. The walk saturates each node, so one node can
+    // already hold qint64 max and a plain `+=` of a second one is signed
+    // overflow: a negative total, which then prints as a negative size and
+    // scales a treemap by a negative area.
+    if (addSatBytes(Q_INT64_C(1), Q_INT64_C(2)) != Q_INT64_C(3)) {
+        std::fprintf(stderr, "addSatBytes should add a measured size\n");
+        return 1;
+    }
+    if (addSatBytes(std::numeric_limits<qint64>::max(), Q_INT64_C(1))
+        != std::numeric_limits<qint64>::max()) {
+        std::fprintf(stderr, "addSatBytes should saturate instead of overflowing\n");
+        return 1;
+    }
+    if (addSatBytes(Q_INT64_C(10), std::numeric_limits<qint64>::max())
+        != std::numeric_limits<qint64>::max()) {
+        std::fprintf(stderr, "addSatBytes should saturate from either side\n");
+        return 1;
+    }
+    // -1 is how this host spells "not measured", not an amount, so it is
+    // skipped rather than subtracting from the total, and a negative running
+    // total restarts at zero when a measured size arrives.
+    if (addSatBytes(Q_INT64_C(5), -1) != Q_INT64_C(5)) {
+        std::fprintf(stderr, "an unmeasured size should not subtract\n");
+        return 1;
+    }
+    if (addSatBytes(-1, Q_INT64_C(7)) != Q_INT64_C(7)) {
+        std::fprintf(stderr, "a measured size should replace an unmeasured total\n");
+        return 1;
+    }
     QVector<Finding> largeSize;
     appendFindingsFromBlob(largeSize, QByteArrayLiteral(
         "{\"findings\":[{\"name\":\"large\",\"size_bytes\":9007199254740993}]}"));

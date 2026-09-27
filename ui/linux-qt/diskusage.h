@@ -58,6 +58,20 @@ struct DiskScanOptions {
     void *user = nullptr;
 };
 
+/// Saturating sum of byte counts. Overflow becomes
+/// `std::numeric_limits<qint64>::max()`, the same bound the Swift `addBytes`
+/// uses, so a total and the size that saturates it never disagree.
+///
+/// Every byte total in this host goes through here. The walk saturates each
+/// node, so a node can already hold `qint64` max, and adding a second such
+/// node with `+=` is signed overflow: undefined behaviour, and in practice a
+/// negative total that then prints as a negative size or scales a treemap by
+/// a negative area.
+///
+/// A negative operand is "not measured" rather than an amount, so it is
+/// skipped, and a negative running total restarts at zero when a measured
+/// addend arrives. That is how a size is spelled before it is known.
+qint64 addSatBytes(qint64 a, qint64 b);
 DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts);
 /// Allocated bytes for a file or directory tree. -1 when the path cannot be
 /// stat'ed; a tree whose entries cannot be opened still reports the totals the
