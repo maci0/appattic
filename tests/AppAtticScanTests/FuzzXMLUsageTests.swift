@@ -265,16 +265,29 @@ final class FuzzXMLUsageTests: XCTestCase {
     func testDeeplyNestedDocumentDoesNotTrap() throws {
         let path = try scratchPath("deep.xml")
         let depth = 200
-        let xbel = (0..<depth).map { "  <bookmark href=\"file:///tmp/\($0)\">" }.joined(separator: "\n")
-            + "\n" + String(repeating: "<application name=\"deep\" exec=\"/usr/bin/deep\" modified=\"2026-05-02T18:00:01Z\">", count: depth)
-            + "\n" + String(repeating: "</application>", count: depth) + "\n"
-            + String(repeating: "</bookmark>\n", count: depth)
+        // Hoisted rather than concatenated in one chain: against Darwin's
+        // String the solver gives up on a chain this long ("unable to
+        // type-check this expression in reasonable time"), and every piece is
+        // a value the document is built from anyway.
+        let openBookmarks = (0..<depth)
+            .map { "  <bookmark href=\"file:///tmp/\($0)\">" }
+            .joined(separator: "\n")
+        let openApplications = String(
+            repeating: "<application name=\"deep\" exec=\"/usr/bin/deep\" modified=\"2026-05-02T18:00:01Z\">",
+            count: depth
+        )
+        let closeApplications = String(repeating: "</application>", count: depth)
+        let closeBookmarks = String(repeating: "</bookmark>\n", count: depth)
+        let xbel = openBookmarks + "\n" + openApplications + "\n" + closeApplications + "\n" + closeBookmarks
         try Data(xbel.utf8).write(to: URL(fileURLWithPath: path))
         let hits = parseRecentlyUsedXbel(path, now: FuzzXMLUsageTests.now)
         assertWellFormed(hits, in: xbel, where_: "deep xbel")
 
-        let state = String(repeating: "<application-state><application id=\"deep.desktop\" last-seen=\"1717200000\">", count: depth)
-            + String(repeating: "</application></application-state>", count: depth)
+        let openState = String(
+            repeating: "<application-state><application id=\"deep.desktop\" last-seen=\"1717200000\">",
+            count: depth
+        )
+        let state = openState + String(repeating: "</application></application-state>", count: depth)
         try Data(state.utf8).write(to: URL(fileURLWithPath: path))
         assertWellFormed(parseGnomeApplicationState(path, now: FuzzXMLUsageTests.now), in: state, where_: "deep state")
     }
