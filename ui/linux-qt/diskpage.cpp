@@ -190,7 +190,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     lv->setContentsMargins(0, 0, 0, 0);
     lv->setSpacing(0);
     auto *intro = new QLabel(
-        QStringLiteral("Scan a folder or storage device.")
+        QStringLiteral("Scan a folder or storage device. Double-click a row to scan it.")
     );
     intro->setWordWrap(true);
     intro->setFont(aaSmallFont());
@@ -366,6 +366,12 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     connect(d->backBtn, &QPushButton::clicked, this, [this] { showScan(); });
     connect(d->devicesBtn, &QPushButton::clicked, this, [this] { showLocations(); });
     connect(d->volumes, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *it, int) {
+        if (!it) return;
+        startScan(it->data(1, Qt::UserRole).toString());
+    });
+    // A double click is what the rest of the app drills in with, and the intro
+    // line now promises it. Enter alone was the only way in before.
+    connect(d->volumes, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *it, int) {
         if (!it) return;
         startScan(it->data(1, Qt::UserRole).toString());
     });

@@ -1050,6 +1050,11 @@ struct ContentView: View {
                     vm.ignoreLeftover(item)
                     leftoverSel = nil
                     persistSettings()
+                    // The row is gone and the setting is written, so say so:
+                    // nothing on this page says it was hidden, not deleted.
+                    if vm.errorMessage == nil {
+                        vm.statusText = "Hidden \(leftoverName(item)) from the list. Restore it in Settings."
+                    }
                 }
             }
         }
@@ -1530,38 +1535,55 @@ struct ContentView: View {
         }
     }
 
+    // The selection is read by the run: a cleanup or update script is built
+    // from it, and a rescan prunes it. Nothing changes it while either runs.
     func leftoverToggle(_ path: String) -> Binding<Bool> {
         Binding(
             get: { vm.selectedLeftovers.contains(path) },
-            set: { on in vm.setLeftoverSelected(path, on) }
+            set: { on in
+                guard !vm.isScanning else { return }
+                vm.setLeftoverSelected(path, on)
+            }
         )
     }
 
     func staleToggle(_ path: String) -> Binding<Bool> {
         Binding(
             get: { vm.selectedApps.contains(path) },
-            set: { on in vm.setAppSelected(path, on) }
+            set: { on in
+                guard !vm.isScanning else { return }
+                vm.setAppSelected(path, on)
+            }
         )
     }
 
     func outdatedToggle(_ id: String) -> Binding<Bool> {
         Binding(
             get: { vm.selectedOutdated.contains(id) },
-            set: { on in vm.setOutdatedSelected(id, on) }
+            set: { on in
+                guard !vm.isScanning else { return }
+                vm.setOutdatedSelected(id, on)
+            }
         )
     }
 
     func packageToggle(_ id: String) -> Binding<Bool> {
         Binding(
             get: { vm.selectedPackages.contains(id) },
-            set: { on in vm.setPackageSelected(id, on) }
+            set: { on in
+                guard !vm.isScanning else { return }
+                vm.setPackageSelected(id, on)
+            }
         )
     }
 
     func markManualToggle(_ id: String) -> Binding<Bool> {
         Binding(
             get: { vm.selectedMarkManual.contains(id) },
-            set: { on in vm.setMarkManualSelected(id, on) }
+            set: { on in
+                guard !vm.isScanning else { return }
+                vm.setMarkManualSelected(id, on)
+            }
         )
     }
 

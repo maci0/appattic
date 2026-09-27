@@ -862,6 +862,7 @@ public:
                 });
         connect(m_table, &QTreeView::clicked, this, [this](const QModelIndex &idx) {
             if (!idx.isValid() || idx.column() != 0) return;
+            if (m_scanning) return;
             if (currentPage() == Page::Leftovers) return;
             const QString uid = m_model->data(idx, Qt::UserRole).toString();
             if (uid.isEmpty()) return;
@@ -1339,8 +1340,14 @@ private:
         auto *l = new QLabel(label.toUpper());
         l->setFont(labelFont());
         l->setForegroundRole(QPalette::PlaceholderText);
+        l->setWordWrap(true);
         auto *val = new QLabel(QStringLiteral("unknown"));
         val->setFont(valueFont());
+        // Wrapping is what lets the row shrink: a plain label's minimum width
+        // is its whole text, so seven instruments overflowed the window at
+        // small widths and the last ones (Last scan) were cut off with no way
+        // to read them. A wrapped label wraps instead.
+        val->setWordWrap(true);
         v->addWidget(l);
         v->addWidget(val);
         row->addWidget(w, 0, Qt::AlignTop);
@@ -1839,6 +1846,11 @@ private:
     /// Flip a row's check state from the view. The inspector checkbox and a
     /// click in column 0 both land here.
     void toggleRowMark(const Finding &f, const QString &child, bool on) {
+        // While a scan or a cleanup script runs, the selection is read by that
+        // run: the script is built from it, and a rescan prunes it. Accepting
+        // clicks then left the "N selected" count moving under a button that
+        // runs something else.
+        if (m_scanning) return;
         const Page page = currentPage();
         const QString uid = f.uid();
         if (!child.isEmpty()) {
@@ -2232,6 +2244,14 @@ public:
         if (m_model->data(first, Qt::CheckStateRole).toInt() != int(Qt::Checked)) {
             return fail("check state not painted");
         }
+        // A run builds its script from the selection, so a busy window refuses
+        // marks instead of moving the count under the button that runs it.
+        const int marksBefore = m_marked.size();
+        m_scanning = true;
+        toggleRowMark(biggest, QString(), false);
+        if (m_marked.size() != marksBefore) return fail("unmarked while busy");
+        if (!m_marked.contains(biggest.uid())) return fail("busy mark dropped the selection");
+        m_scanning = false;
         m_search->setText(QStringLiteral("table-app-1"));
         fillCurrent(true);
         if (m_model->rowCount() != 111) return fail("search rows");
@@ -2619,6 +2639,15 @@ private:
                 persistSettings();
                 m_selectedUid.clear();
                 fillCurrent();
+                // The row is gone and the setting is written, so say so: the
+                // only way back is the Settings page, and nothing on the list
+                // page says the item was hidden rather than deleted.
+                if (m_error->text().isEmpty()) {
+                    statusBar()->showMessage(
+                        QStringLiteral("Hidden %1 from the list. Restore it in Settings.")
+                            .arg(displayName(copy))
+                    );
+                }
             });
             m_inspectorLay->addWidget(ign);
         }
@@ -2652,6 +2681,9 @@ private:
         const bool canKeep = scriptHasCommands(markManualScript());
         if (m_clearSel) m_clearSel->setEnabled(!busy);
         if (m_preview) m_preview->setEnabled(!busy);
+        // Same rule as the row marks: nothing changes the selection while a
+        // scan or script is running.
+        if (m_selectAll) m_selectAll->setEnabled(!busy && m_selectAll->isVisible());
         m_deleteBtn->setVisible(canDelete);
         m_deleteBtn->setEnabled(canDelete && !busy);
         m_updateBtn->setVisible(canUpdate);
@@ -2835,6 +2867,15 @@ private:
         m_scanning = true;
         m_rescan->setEnabled(false);
         statusBar()->showMessage(progress);
+        /* A package removal runs for as long as the package manager takes, and
+           the disabled buttons were the only sign anything was happening. The
+           same bar the scan uses, busy, so the window says "working" here too. */
+        if (m_scanBar) {
+            m_scanBar->setRange(0, 0);
+            m_scanBar->setToolTip(progress);
+            m_scanBar->show();
+        }
+        if (m_count) m_count->setText(progress);
         refreshActionBar();
         /* cordis-boundary: emission. The script mutates packages and files in
            other processes; it cannot be reverted, so it is withheld until the
@@ -2858,6 +2899,7 @@ private:
             QFile::remove(path);
             m_scanning = false;
             m_rescan->setEnabled(true);
+            if (m_scanBar) m_scanBar->hide();
             if (code != 0) {
                 m_scriptOutput += proc->readAll();
                 QString err = redactHomePaths(QString::fromUtf8(m_scriptOutput).trimmed());
@@ -2891,6 +2933,7 @@ private:
             QFile::remove(path);
             m_scanning = false;
             m_rescan->setEnabled(true);
+            if (m_scanBar) m_scanBar->hide();
             showError(QStringLiteral("Could not run the script."));
             refreshActionBar();
             proc->deleteLater();
