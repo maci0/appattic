@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
@@ -57,8 +58,8 @@ fn renderUv(hits: []const UvTool) bool {
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"global\",\"command\":\"uv tool uninstall ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"global\",\"command\":\"");
+        guard.writeRowGuard(&w, &q_buf, "uv tool list", .{ .after = " v" }, "uv tool uninstall ", h.name);
         w.raw("\",\"manager\":\"uv\"}");
     }
     w.raw("],\"script\":");
@@ -67,8 +68,7 @@ fn renderUv(hits: []const UvTool) bool {
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic uv. Review before running.\\n");
         for (hits) |h| {
-            w.raw("uv tool uninstall ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeRowGuard(&w, &q_buf, "uv tool list", .{ .after = " v" }, "uv tool uninstall ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -137,6 +137,7 @@ test "plugin_query present JSON comes from uv tool list fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "0.6.8") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "httpie") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "uv tool uninstall ruff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if uv tool list | grep -qF -- 'ruff v'; then uv tool uninstall ruff; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "uv pip install") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pip install") == null);
 }

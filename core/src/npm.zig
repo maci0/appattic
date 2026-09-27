@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
@@ -51,8 +52,8 @@ fn renderNpm(hits: []const NpmGlobal, outdated: []const jsonscan.NamedVer) bool 
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"global\",\"command\":\"npm -g uninstall ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"global\",\"command\":\"");
+        guard.writeRowGuard(&w, &q_buf, "npm ls -g --depth=0", .{ .after = "@" }, "npm -g uninstall ", h.name);
         w.raw("\",\"manager\":\"npm\"}");
     }
     for (outdated) |h| {
@@ -66,8 +67,7 @@ fn renderNpm(hits: []const NpmGlobal, outdated: []const jsonscan.NamedVer) bool 
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic npm. Review before running.\\n");
         for (hits) |h| {
-            w.raw("npm -g uninstall ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeRowGuard(&w, &q_buf, "npm ls -g --depth=0", .{ .after = "@" }, "npm -g uninstall ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -141,6 +141,7 @@ test "plugin_query present JSON comes from npm ls -g fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "5.4.5") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "prettier") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "npm -g uninstall typescript") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if npm ls -g --depth=0 | grep -qF -- typescript@; then npm -g uninstall typescript; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"outdated\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"updatable\":false") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "5.5.0") != null);

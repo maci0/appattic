@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
@@ -112,8 +113,8 @@ fn renderPipx(hits: []const PipxTool) bool {
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"global\",\"command\":\"pipx uninstall ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"global\",\"command\":\"");
+        guard.writeRowGuard(&w, &q_buf, "pipx list", .{ .before = "package ", .after = " " }, "pipx uninstall ", h.name);
         w.raw("\",\"manager\":\"pipx\"}");
     }
     w.raw("],\"script\":");
@@ -122,8 +123,7 @@ fn renderPipx(hits: []const PipxTool) bool {
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic pipx. Review before running.\\n");
         for (hits) |h| {
-            w.raw("pipx uninstall ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeRowGuard(&w, &q_buf, "pipx list", .{ .before = "package ", .after = " " }, "pipx uninstall ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -238,6 +238,7 @@ test "plugin_query present JSON comes from pipx list fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "httpie") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "3.2.2") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pipx uninstall httpie") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if pipx list | grep -qF -- 'package httpie '; then pipx uninstall httpie; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pip install") == null);
 }
 

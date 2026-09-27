@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
@@ -99,8 +100,8 @@ fn renderPip(globals: []const PipOutdated, outdated: []const PipOutdated) bool {
             w.raw(",\"version\":");
             w.str(h.current);
         }
-        w.raw(",\"status\":\"global\",\"command\":\"pip uninstall -y --user ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"global\",\"command\":\"");
+        guard.writeNameGuard(&w, &q_buf, "pip show ", "pip uninstall -y --user ", h.name);
         w.raw("\",\"manager\":\"pip\"}");
     }
     for (outdated) |h| {
@@ -131,8 +132,7 @@ fn renderPip(globals: []const PipOutdated, outdated: []const PipOutdated) bool {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic pip. Review before running.\\n");
         for (globals) |h| {
             if (nameIn(outdated, h.name)) continue;
-            w.raw("pip uninstall -y --user ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeNameGuard(&w, &q_buf, "pip show ", "pip uninstall -y --user ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -257,6 +257,7 @@ test "plugin_query present JSON comes from pip list --user --outdated fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"global\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "httpie") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pip uninstall -y --user httpie") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if pip show httpie; then pip uninstall -y --user httpie; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "requests") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "2.28.1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "2.32.3") != null);

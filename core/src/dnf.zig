@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const fuzzsupport = @import("fuzzsupport.zig");
@@ -142,8 +143,7 @@ fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager:
         w.raw(",\"name\":");
         w.str(h.name);
         w.raw(",\"status\":\"orphaned\",\"command\":\"");
-        w.raw(rm);
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        guard.writeNameGuard(&w, &q_buf, "rpm -q ", rm, h.name);
         w.raw("\",\"manager\":");
         w.str(manager);
         w.raw("}");
@@ -161,8 +161,7 @@ fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager:
         w.raw(manager);
         w.raw(". Review before running.\\n");
         for (orphans) |h| {
-            w.raw(rm);
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeNameGuard(&w, &q_buf, "rpm -q ", rm, h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -239,6 +238,7 @@ test "plugin_query present JSON comes from dnf repoquery --unneeded fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "libfoo") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "python3-bar") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "dnf remove -y libfoo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if rpm -q libfoo; then dnf remove -y libfoo; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "dnf leaves") == null);
 }
 

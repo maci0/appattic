@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const fuzzsupport = @import("fuzzsupport.zig");
@@ -164,8 +165,8 @@ fn renderApt(
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"orphaned\",\"command\":\"apt-get purge -y ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"orphaned\",\"command\":\"");
+        guard.writeNameGuard(&w, &q_buf, "dpkg -s ", "apt-get purge -y ", h.name);
         w.raw("\",\"manager\":\"apt\"}");
     }
     for (rc_pkgs) |h| {
@@ -179,8 +180,8 @@ fn renderApt(
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"orphaned\",\"command\":\"apt-get purge -y ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"orphaned\",\"command\":\"");
+        guard.writeNameGuard(&w, &q_buf, "dpkg -s ", "apt-get purge -y ", h.name);
         w.raw("\",\"manager\":\"dpkg\",\"summary\":\"Removed package still has config files\",\"reason\":\"dpkg status rc: the package is gone, config remnants remain. Purge drops them.\"}");
     }
     for (ppas) |h| {
@@ -205,8 +206,7 @@ fn renderApt(
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic apt. Review before running.\\n");
         for (orphans) |h| {
-            w.raw("apt-get purge -y ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeNameGuard(&w, &q_buf, "dpkg -s ", "apt-get purge -y ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -311,6 +311,9 @@ test "plugin_query present JSON comes from apt-get -s autoremove fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "1.2.3") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "libbar1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "apt-get purge -y libfoo0") != null);
+    // `set -e` stops the script at the first nonzero line, so a rerun that
+    // already purged the package would never reach the ones after it.
+    try std.testing.expect(std.mem.indexOf(u8, json, "if dpkg -s libfoo0; then apt-get purge -y libfoo0; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "apt-get upgrade") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "dist-upgrade") == null);
 }

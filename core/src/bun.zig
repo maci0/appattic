@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
@@ -91,8 +92,8 @@ fn renderBun(hits: []const BunGlobal) bool {
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"global\",\"command\":\"bun remove -g ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"global\",\"command\":\"");
+        guard.writeRowGuard(&w, &q_buf, "bun pm ls -g", .{ .after = "@" }, "bun remove -g ", h.name);
         w.raw("\",\"manager\":\"bun\"}");
     }
     w.raw("],\"script\":");
@@ -101,8 +102,7 @@ fn renderBun(hits: []const BunGlobal) bool {
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic bun. Review before running.\\n");
         for (hits) |h| {
-            w.raw("bun remove -g ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeRowGuard(&w, &q_buf, "bun pm ls -g", .{ .after = "@" }, "bun remove -g ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -173,6 +173,7 @@ test "plugin_query present JSON comes from bun pm ls -g fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "typescript") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "prettier") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "bun remove -g typescript") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if bun pm ls -g | grep -qF -- typescript@; then bun remove -g typescript; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "bun add") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "package.json") == null);
 }

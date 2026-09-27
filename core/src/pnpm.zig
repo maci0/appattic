@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
@@ -47,8 +48,8 @@ fn renderPnpm(hits: []const PnpmGlobal) bool {
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"global\",\"command\":\"pnpm remove -g ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"global\",\"command\":\"");
+        guard.writeRowGuard(&w, &q_buf, "pnpm ls -g --depth=0", .{ .after = "@" }, "pnpm remove -g ", h.name);
         w.raw("\",\"manager\":\"pnpm\"}");
     }
     w.raw("],\"script\":");
@@ -57,8 +58,7 @@ fn renderPnpm(hits: []const PnpmGlobal) bool {
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic pnpm. Review before running.\\n");
         for (hits) |h| {
-            w.raw("pnpm remove -g ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeRowGuard(&w, &q_buf, "pnpm ls -g --depth=0", .{ .after = "@" }, "pnpm remove -g ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -127,6 +127,7 @@ test "plugin_query present JSON comes from pnpm ls -g fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "nx") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "19.0.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pnpm remove -g nx") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if pnpm ls -g --depth=0 | grep -qF -- nx@; then pnpm remove -g nx; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pnpm add") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "package.json") == null);
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const fuzzsupport = @import("fuzzsupport.zig");
@@ -90,8 +91,8 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"orphaned\",\"command\":\"pacman --noconfirm -Rns ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"orphaned\",\"command\":");
+        guard.writeNameGuard(&w, &q_buf, "pacman -Qq ", "pacman --noconfirm -Rns ", h.name);
         w.raw("\",\"manager\":\"pacman\"}");
     }
     for (outdated) |h| {
@@ -187,6 +188,7 @@ test "plugin_query present JSON comes from pacman -Qdt fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "1.2.3-1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "libbar") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "pacman --noconfirm -Rns libfoo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if pacman -Qq libfoo; then pacman --noconfirm -Rns libfoo; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "-Syu") == null);
 }
 

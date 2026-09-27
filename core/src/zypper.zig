@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const fuzzsupport = @import("fuzzsupport.zig");
@@ -109,8 +110,8 @@ fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated)
             w.raw(",\"version\":");
             w.str(h.version);
         }
-        w.raw(",\"status\":\"orphaned\",\"command\":\"zypper --non-interactive rm ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"orphaned\",\"command\":");
+        guard.writeNameGuard(&w, &q_buf, "rpm -q ", "zypper --non-interactive rm ", h.name);
         w.raw("\",\"manager\":\"zypper\"}");
     }
     for (outdated) |h| {
@@ -124,8 +125,7 @@ fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated)
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic zypper. Review before running.\\n");
         for (orphans) |h| {
-            w.raw("zypper --non-interactive rm ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeNameGuard(&w, &q_buf, "rpm -q ", "zypper --non-interactive rm ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -208,6 +208,7 @@ test "plugin_query present JSON comes from zypper packages --unneeded fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "1.2.3-1") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "libbar") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "zypper --non-interactive rm libfoo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if rpm -q libfoo; then zypper --non-interactive rm libfoo; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "zypper dup") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "list-updates") == null);
 }

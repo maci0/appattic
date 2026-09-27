@@ -1,6 +1,7 @@
 const std = @import("std");
 const plugin_abi = @import("plugin_abi.zig");
 const jsonbuf = @import("jsonbuf.zig");
+const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 
@@ -56,8 +57,8 @@ fn renderDeno(hits: []const DenoGlobal) bool {
         w.str(h.name);
         w.raw(",\"name\":");
         w.str(h.name);
-        w.raw(",\"status\":\"global\",\"command\":\"deno uninstall --global ");
-        jsonbuf.rawShQuote(&w, &q_buf, h.name);
+        w.raw(",\"status\":\"global\",\"command\":\"");
+        guard.writeNameGuard(&w, &q_buf, "test -e ~/.deno/bin/", "deno uninstall --global ", h.name);
         w.raw("\",\"manager\":\"deno\"}");
     }
     w.raw("],\"script\":");
@@ -66,8 +67,7 @@ fn renderDeno(hits: []const DenoGlobal) bool {
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic deno. Review before running.\\n");
         for (hits) |h| {
-            w.raw("deno uninstall --global ");
-            jsonbuf.rawShQuote(&w, &q_buf, h.name);
+            guard.writeNameGuard(&w, &q_buf, "test -e ~/.deno/bin/", "deno uninstall --global ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -133,6 +133,7 @@ test "plugin_query present JSON comes from deno bin listing fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "file_server") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deployctl") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deno uninstall --global file_server") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if test -e ~/.deno/bin/file_server; then deno uninstall --global file_server; fi") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"deno\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deno install") == null);
 }

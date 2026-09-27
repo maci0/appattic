@@ -85,7 +85,7 @@ wasm_sources=(
 )
 
 test_modules=(
-    host_exec.zig jsonbuf.zig jsonscan.zig path_listing.zig
+    host_exec.zig jsonbuf.zig jsonscan.zig path_listing.zig guarded_remove.zig
 )
 # Every WASM artifact is unit-tested too, derived from wasm_sources so adding a
 # plugin cannot silently skip its tests.
