@@ -275,6 +275,24 @@ final class CacheTests: XCTestCase {
         XCTAssertNotEqual(subSecond, beforeEpoch)
     }
 
+    /// A rewrite inside the same second is still a change: the stamp carries
+    /// sub-second precision, so the fingerprint does not miss it.
+    func testPathMtimeStampDistinguishesSubSecondRewrites() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mtime-subsecond-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1_700_000_000.1)],
+            ofItemAtPath: dir.path
+        )
+        let before = pathMtimeStamp("flatpak-user", dir.path)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1_700_000_000.9)],
+            ofItemAtPath: dir.path
+        )
+        XCTAssertNotEqual(before, pathMtimeStamp("flatpak-user", dir.path))
+    }
+
     func testAndroidSdkStampWhenPresent() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("sdk-stamp-\(UUID().uuidString)")
         let sdk = root.appendingPathComponent("Android")

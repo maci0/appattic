@@ -613,6 +613,17 @@ static int checkTiming() {
                 nyExpected.toUtf8().constData());
             return 1;
         }
+        Finding future;
+        future.mtime = QStringLiteral("2026-09-04T12:00:00Z");
+        const QDateTime nyNow2(QDate(2026, 9, 2), QTime(12, 0), ny);
+        const QString futureExpected = localeDateLabel(parseIsoInstant(future.mtime).toTimeZone(ny).date());
+        if (modifiedLabel(future, nyNow2) != futureExpected) {
+            std::fprintf(stderr,
+                "timing: a future mtime must show its local date (%s, want %s)\n",
+                modifiedLabel(future, nyNow2).toUtf8().constData(),
+                futureExpected.toUtf8().constData());
+            return 1;
+        }
         const QDateTime saturday(QDate(2026, 3, 7), QTime(23, 30), ny);
         const QDateTime sunday(QDate(2026, 3, 8), QTime(22, 30), ny);
         if (saturday.secsTo(sunday) >= 86400) {

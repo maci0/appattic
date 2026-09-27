@@ -293,14 +293,14 @@ func pathMtimeStamp(_ label: String, _ path: String) -> String {
           let attrs = try? FileManager.default.attributesOfItem(atPath: path),
           let mtime = attrs[.modificationDate] as? Date
     else { return "" }
-    // The stamp is the fingerprint, so it has to separate every mtime the
-    // filesystem can report. `Int(timeIntervalSince1970)` drops the fractional
-    // part, so a package tree touched twice inside one second, which a
-    // `flatpak install` of a small app does, keeps the stamp it had before the
-    // change and the next run is served the pre-change package list from
-    // cache. It also truncates toward zero, so distinct pre-1970 mtimes
-    // collapse onto each other. `inventoryEntryStamp` already stamps the raw
-    // bits for the same reason.
+    // bitPattern, like inventoryEntryStamp: the stamp is the fingerprint, so it
+    // has to separate every mtime the filesystem can report. Truncating to whole
+    // seconds gives two rewrites inside the same second the same stamp, and the
+    // fingerprint misses a manager that changed a manifest mid-scan, or a
+    // package tree touched twice inside one second, which a `flatpak install`
+    // of a small app does, keeping the stamp it had before the change and
+    // serving the pre-change package list from cache. Truncation is also toward
+    // zero, so distinct pre-1970 mtimes collapse onto each other.
     return "\(label):\(mtime.timeIntervalSince1970.bitPattern)"
 }
 

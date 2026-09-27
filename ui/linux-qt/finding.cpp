@@ -358,11 +358,14 @@ static qint64 localCalendarDaysSince(const QDateTime &instant, const QDateTime &
     return instant.toLocalTime().date().daysTo(now.toLocalTime().date());
 }
 
+/// Empty for a negative count, so a timestamp in the future (a restored
+/// archive, a file written while the clock was ahead) renders as its local
+/// date instead of claiming the file changed today.
 static QString relativeDayLabel(qint64 days) {
-    if (days <= 0) return QStringLiteral("Today");
+    if (days == 0) return QStringLiteral("Today");
     if (days == 1) return QStringLiteral("Yesterday");
-    if (days < 45) return QString::number(days) + QStringLiteral(" days ago");
-    return {};
+    if (days < 2 || days >= 45) return {};
+    return QString::number(days) + QStringLiteral(" days ago");
 }
 
 QString modifiedLabel(const Finding &f, const QDateTime &now) {
@@ -449,11 +452,11 @@ bool commandIsShellSafe(const QString &cmd) {
     // shell syntax here that the app itself adds, and it is what makes a second
     // run a no-op instead of a `set -e` abort. Judge the query and the action
     // by the same byte rule, or the guard would refuse every removal.
-    if (const GuardedRemove guarded = parseGuardedRemove(cmd)) {
+    if (const std::optional<GuardedRemove> guarded = parseGuardedRemove(cmd)) {
         static const QString kRedirect = QStringLiteral(" >/dev/null 2>&1");
-        QString query = guarded.present;
+        QString query = guarded->present;
         if (query.endsWith(kRedirect)) query.chop(kRedirect.size());
-        return !query.isEmpty() && commandIsShellSafe(query) && commandIsShellSafe(guarded.action);
+        return !query.isEmpty() && commandIsShellSafe(query) && commandIsShellSafe(guarded->action);
     }
     bool in_quote = false;
     for (int i = 0; i < cmd.size(); ++i) {
@@ -594,7 +597,7 @@ bool commandNeedsRoot(const QString &cmd) {
     if (t.startsWith(QLatin1Char('#'))) return false;
     // A guarded removal is `if <query>; then <action>; fi`. Judge the action,
     // or the leading `if` hides an action that needs root.
-    if (const GuardedRemove guarded = parseGuardedRemove(t)) t = guarded.action;
+    if (const std::optional<GuardedRemove> guarded = parseGuardedRemove(t)) t = guarded->action;
     QString first = t.section(QLatin1Char(' '), 0, 0);
     if (first.contains(QLatin1Char('/'))) first = first.section(QLatin1Char('/'), -1);
     return first == QLatin1String("apt-get")
@@ -624,9 +627,9 @@ QString withRootCmd(const QString &cmd) {
     // Escalating the whole line hands `rootcmd` the words `if` and `<query>` as
     // arguments and leaves a bare `then` behind, so the line stops parsing and
     // `set -e` ends the script there. Escalate the action inside the guard.
-    if (const GuardedRemove guarded = parseGuardedRemove(cmd)) {
-        return QStringLiteral("if ") + guarded.present
-            + QStringLiteral("; then rootcmd ") + guarded.action + QStringLiteral("; fi");
+    if (const std::optional<GuardedRemove> guarded = parseGuardedRemove(cmd)) {
+        return QStringLiteral("if ") + guarded->present
+            + QStringLiteral("; then rootcmd ") + guarded->action + QStringLiteral("; fi");
     }
     return QStringLiteral("rootcmd ") + cmd;
 }

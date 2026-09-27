@@ -318,10 +318,12 @@ public enum TimestampFormat {
     }()
 
     /// A relative label within `relativeDayLimit` days, otherwise the date.
-    /// Falls back to the date whenever the age cannot be measured, so an
-    /// out-of-range or far-future timestamp never renders as an empty cell.
+    /// Falls back to the date whenever the age cannot be measured or is
+    /// negative, so an out-of-range or future timestamp (a restored archive, a
+    /// file written while the clock was ahead) never renders as an empty cell
+    /// or claims to have changed today.
     public static func string(from date: Date, now: Date = Date()) -> String {
-        guard let days = calendarDaysSince(date, now: now), days < relativeDayLimit else {
+        guard let days = calendarDaysSince(date, now: now), days >= 0, days < relativeDayLimit else {
             return self.date.string(from: date)
         }
         // Anchor both ends at local midnight so the interval is a whole number

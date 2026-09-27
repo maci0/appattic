@@ -163,4 +163,14 @@ final class DatesTests: XCTestCase {
         let old = try XCTUnwrap(cal.date(byAdding: .day, value: -(relativeDayLimit + 10), to: now))
         XCTAssertEqual(TimestampFormat.string(from: old, now: now), TimestampFormat.date.string(from: old))
     }
+
+    /// A timestamp past now (a restored archive, a file written while the clock
+    /// was ahead) has no relative form: it shows its date, inside the window.
+    func testTimestampFormatFallsBackToDateForAFutureTimestamp() throws {
+        let cal = Calendar.current
+        let now = Date()
+        let ahead = try XCTUnwrap(cal.date(byAdding: .day, value: 3, to: now))
+        XCTAssertEqual(calendarDaysSince(ahead, now: now), -3)
+        XCTAssertEqual(TimestampFormat.string(from: ahead, now: now), TimestampFormat.date.string(from: ahead))
+    }
 }
