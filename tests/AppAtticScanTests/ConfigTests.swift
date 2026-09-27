@@ -140,4 +140,28 @@ final class ConfigTests: XCTestCase {
         }
         XCTAssertTrue(readme.contains("appattic config"), "the config command is undocumented")
     }
+
+    /// The Qt shell keeps its own table of page names and its own spelling of
+    /// the valid-values list, so a rename in `StartPage` has to land in
+    /// main.cpp too. It cannot link the Swift library, so this is the check.
+    func testQtShellKnowsEveryPageName() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("ui/linux-qt/main.cpp"),
+            encoding: .utf8
+        )
+        for page in StartPage.allCases {
+            XCTAssertTrue(
+                source.contains("QStringLiteral(\"\(page.rawValue)\"), Page::"),
+                "\(page.rawValue) has no entry in the Qt page table"
+            )
+        }
+        XCTAssertTrue(
+            source.contains("Valid values: \(StartPage.nameList)."),
+            "the Qt valid-values list differs from StartPage.nameList"
+        )
+    }
 }

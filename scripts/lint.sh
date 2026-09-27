@@ -19,6 +19,7 @@ Usage: bash scripts/lint.sh
   host C warnings-as-errors under every compiler on PATH,
   host C under ASan + UBSan,
   hostexec warnings-as-errors, dependency pin consistency,
+  the system-name list matches across the Zig core and the Swift library,
   zig fmt --check, no AI tool credit in commit messages
 EOF
         exit 0
@@ -58,6 +59,20 @@ shellcheck -x -P SCRIPTDIR "${shell_files[@]}"
 # number. Mismatch means an artifact reports one number while the packaging
 # record says another.
 bash "$ROOT/scripts/check-version.sh" >/dev/null
+
+# One system-name list, two trees. core/src/linux-system-names.txt is the
+# declaration docs/THREAT_MODEL.md cites. Zig embeds it with @embedFile and
+# SwiftPM copies it as a resource, and neither can reach outside its own tree,
+# so the file under Sources/AppAtticScan is a mirror. Nothing compared the two,
+# so a name added on one side silently stops classifying on the other, and a
+# credential tree reaches the cleanup script on the stale side.
+if ! cmp -s "$ROOT/core/src/linux-system-names.txt" \
+        "$ROOT/Sources/AppAtticScan/linux-system-names.txt"; then
+    echo "error: the system-name list differs between the Zig core and the Swift scan library" >&2
+    echo "       fix: cp core/src/linux-system-names.txt Sources/AppAtticScan/linux-system-names.txt" >&2
+    exit 1
+fi
+echo "system-name list mirror: ok"
 
 if ! command -v yamllint >/dev/null 2>&1; then
     # The pin lives in deps.sh, which also fails when the workflow and that pin
