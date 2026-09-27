@@ -69,6 +69,7 @@ Environment:
 | `APPATTIC_CORE_OUT` | Linux Qt | Directory of `appattic_core.wasm` and plugins. AppImage sets this. |
 | `APPATTIC_PAGE` | UI | Initial sidebar: `overview` (default), `leftovers`, `stale`, `outdated`, `packages`, `disk`, `settings`. An unset or empty value opens the overview; an unknown name is reported on stderr and also opens the overview. |
 | `NO_COLOR` | CLI | Disable ANSI color when set to a non-empty value. Also `--no-color` or `TERM=dumb`. |
+| `COLORFGBG` | CLI | Terminal background as `fg;bg`. Picks the light or dark status colors; unset uses the light set, which is the readable one on a white background. |
 | `XDG_DATA_HOME` | Linux | Absolute data root; parent of `appattic/settings.json`, `last-scan.json`, and user desktop entries. |
 | `XDG_CONFIG_HOME` | Linux | Absolute configuration root scanned for leftovers and usage history. |
 | `XDG_CACHE_HOME` | Linux | Absolute cache root scanned for leftovers. |

@@ -164,10 +164,13 @@ func failUsage(_ message: String) -> Never {
 
 enum C {
     static var noColorFlag = false
+    private static let env = ProcessInfo.processInfo.environment
+    /// Resolved once: the status colors a run uses cannot change mid-report.
+    static let tone = cliTone(env: env)
     static var enabled: Bool {
         cliColorEnabled(
             stdoutIsTTY: isatty(STDOUT_FILENO) != 0,
-            env: ProcessInfo.processInfo.environment,
+            env: env,
             noColorFlag: noColorFlag
         )
     }
@@ -177,9 +180,9 @@ enum C {
     }
     static func bold(_ s: String) -> String { paint(s, "1") }
     static func dim(_ s: String) -> String { paint(s, "2") }
-    static func red(_ s: String) -> String { paint(s, "31") }
-    static func green(_ s: String) -> String { paint(s, "32") }
-    static func yellow(_ s: String) -> String { paint(s, "33") }
+    static func red(_ s: String) -> String { paint(s, tone.forRole(.remove)) }
+    static func green(_ s: String) -> String { paint(s, tone.forRole(.keep)) }
+    static func yellow(_ s: String) -> String { paint(s, tone.forRole(.review)) }
 }
 
 func visibleLen(_ s: String) -> Int {

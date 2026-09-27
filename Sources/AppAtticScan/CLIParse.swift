@@ -187,6 +187,48 @@ settings.json (includeSystem, confirmDelete, ignored leftover paths):
 
 public let cliUsageHint = "Try 'appattic --help' for more information."
 
+/// Status colors, the same values the two windows use for the same three
+/// roles. `sources` is a truecolor SGR: 38;2;r;g;b.
+public struct CliTone: Sendable, Equatable {
+    public let sources: [String]
+
+    public init(sources: [String]) { self.sources = sources }
+
+    /// A terminal that cannot report its background, or reports a light one.
+    /// Amber on a light pair is 4.8:1; on the dark pair it is 1.4:1, which is
+    /// why the light pair is the fallback rather than the dark one.
+    public static let light = CliTone(sources: ["38;2;192;28;40", "38;2;158;102;0", "38;2;36;138;61"])
+    /// For a terminal known to have a dark background, where these reach
+    /// 4.9:1, 11.8:1, and 8.3:1.
+    public static let dark = CliTone(sources: ["38;2;255;69;58", "38;2;255;214;10", "38;2;48;209;88"])
+
+    public func forRole(_ role: Role) -> String { sources[role.rawValue] }
+
+    public enum Role: Int, Sendable {
+        case remove
+        case review
+        case keep
+    }
+}
+
+/// The dark or light tone for a terminal, read from `COLORFGBG`, which is
+/// "fg;bg" and only that: a value with any other field count is malformed and
+/// is not read. 0 to 6 are the base palette colors and 7 is white as an xterm
+/// index, but as a 0-100 percentage 7 is a near-black background, so 7 is the
+/// one value left to the safe fallback. 8 and up is a percentage, split at 50.
+/// Absent, unparsed, and ambiguous also fall back, which costs contrast on a
+/// dark terminal but never on a light one.
+public func cliTone(env: [String: String]) -> CliTone {
+    guard let raw = env["COLORFGBG"] else { return .light }
+    let fields = raw.split(separator: ";", omittingEmptySubsequences: false)
+    guard fields.count == 2,
+        let bg = Int(fields[1].trimmingCharacters(in: .whitespaces))
+    else { return .light }
+    if bg <= 6 { return .dark }
+    if bg < 8 { return .light }
+    return bg < 50 ? .dark : .light
+}
+
 /// Color on a tty unless `--no-color`, a non-empty `NO_COLOR`, or `TERM=dumb`.
 public func cliColorEnabled(
     stdoutIsTTY: Bool,

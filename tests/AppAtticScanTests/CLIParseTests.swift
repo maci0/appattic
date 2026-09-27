@@ -195,3 +195,37 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertTrue(cliHelpText.contains("disk [PATH]"), cliHelpText)
     }
 }
+
+final class CLIToneTests: XCTestCase {
+    /// The three status roles are the remove, review, and keep colors the two
+    /// windows use, so a report in a terminal and the same row in a window
+    /// carry the same meaning.
+    func testToneMatchesTheWindowStatusColors() {
+        XCTAssertEqual(CliTone.light.forRole(.remove), "38;2;192;28;40")
+        XCTAssertEqual(CliTone.light.forRole(.review), "38;2;158;102;0")
+        XCTAssertEqual(CliTone.light.forRole(.keep), "38;2;36;138;61")
+        XCTAssertEqual(CliTone.dark.forRole(.remove), "38;2;255;69;58")
+        XCTAssertEqual(CliTone.dark.forRole(.review), "38;2;255;214;10")
+        XCTAssertEqual(CliTone.dark.forRole(.keep), "38;2;48;209;88")
+    }
+
+    func testToneFollowsColorFgbg() {
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": "15;0"]), .dark)
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": "15;6"]), .dark)
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": "15;49"]), .dark)
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": "0;93"]), .light)
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": "0;100"]), .light)
+    }
+
+    /// 7 is "white" as an xterm palette index and "7 percent" as a
+    /// percentage, and a malformed value says nothing, so all of them fall
+    /// back to the pair that stays readable on a light background.
+    func testToneFallsBackToLightWhenTheBackgroundIsUnknown() {
+        XCTAssertEqual(cliTone(env: [:]), .light)
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": ""]), .light)
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": "15"]), .light)
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": "15;0;0"]), .light)
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": "15;7"]), .light)
+        XCTAssertEqual(cliTone(env: ["COLORFGBG": "15;dark"]), .light)
+    }
+}
