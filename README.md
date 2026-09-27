@@ -43,6 +43,8 @@ Useful flags: `--json FILE`, `--include-system`, `--fresh` (ignore the last-scan
 
 A flag that names the commands it belongs to (`--yes` on `update`, `--allocated` and `--all-file-systems` on `disk`, `--leftovers-only` and `--stale-only` on `report`, `--top` on `report`, `leftovers`, `disk`, `--category` on `report` and `leftovers`, `--include-system` on the scan commands and `config`, `--fresh` and `--dry-run` on the scan commands) is a usage error on every other command, so `appattic report --allocated`, `appattic disk --dry-run`, and `appattic stale --top 5` fail instead of printing output that ignored them. `--help` wins over a usage error anywhere on the line, so `appattic --nope --help` still prints the help; with several bad tokens, the first one is the error reported.
 
+`--` ends the options, so a `disk` path that starts with a dash is reachable: `appattic disk -- -backup`.
+
 `appattic config` scans nothing. It prints the settings file this machine resolved, whether it exists, every setting value with the layer it came from, and the paths the XDG variables resolved to. Use it to tell a wrong value from a wrong path, and `--json FILE` to diff two machines:
 
 ```bash

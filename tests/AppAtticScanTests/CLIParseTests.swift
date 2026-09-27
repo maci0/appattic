@@ -103,6 +103,32 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertEqual(parseCLIArguments(["disk", "/a", "/b"]).error, "unexpected argument: /b")
     }
 
+    /// `--` ends the options, so a folder whose name starts with a dash is
+    /// reachable. Without it the token reads as an unknown option and the run
+    /// exits 2, which is the one way a `disk PATH` cannot be named.
+    func testEndOfOptionsTerminator() {
+        let dashDir = parseCLIArguments(["disk", "--", "-backup"])
+        XCTAssertEqual(dashDir.command, "disk")
+        XCTAssertEqual(dashDir.diskPath, "-backup")
+        XCTAssertNil(dashDir.error)
+
+        let plain = parseCLIArguments(["disk", "--", "/var"])
+        XCTAssertEqual(plain.diskPath, "/var")
+        XCTAssertNil(plain.error)
+
+        let cmd = parseCLIArguments(["--", "leftovers"])
+        XCTAssertEqual(cmd.command, "leftovers")
+        XCTAssertNil(cmd.error)
+
+        // A flag before the terminator is still a flag; only what follows is
+        // positional, so a dash-prefixed token there is a bad command name,
+        // not a bad option.
+        XCTAssertNil(parseCLIArguments(["disk", "--"]).diskPath)
+        XCTAssertNil(parseCLIArguments(["disk", "--"]).error)
+        XCTAssertEqual(parseCLIArguments(["--", "--nope"]).parseError, .unknownCommand("--nope"))
+        XCTAssertTrue(cliHelpText.contains("`--` ends the options"), cliHelpText)
+    }
+
     func testPackagesCommand() {
         XCTAssertEqual(parseCLIArguments(["packages"]).command, "packages")
         XCTAssertTrue(cliHelpText.contains("packages"))

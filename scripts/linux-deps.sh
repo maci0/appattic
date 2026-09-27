@@ -78,8 +78,10 @@ for arg in "$@"; do
         --install-desktop-file-utils) INSTALL_DESKTOP_FILE_UTILS=1 ;;
         -h|--help) usage; exit 0 ;;
         *)
-            echo "unknown argument: $arg" >&2
-            usage >&2
+            echo "error: unknown argument: $arg" >&2
+            echo "Usage: $0 [--install] [--install-swift] [--install-wasmtime] [--install-zig]" >&2
+            echo "       [--install-shellcheck]" >&2
+            echo "       $0 --help" >&2
             exit 2
             ;;
     esac

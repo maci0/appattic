@@ -26,9 +26,13 @@ final class FuzzCLIArgumentsTests: XCTestCase {
         ["update", "-y", "--json", "/tmp/u.json"],
     ]
 
-    /// Tokens that must produce a usage error wherever they appear.
+    /// Tokens that must produce a usage error wherever they appear. `--` is
+    /// not among them: it ends the options, so it only reads as a bad command
+    /// name in what follows it. `CLIFlagTests.testEndOfOptionsTerminator` pins
+    /// that, and a token here is inserted at every position, where a
+    /// terminator would swallow the rest of the vector.
     private static let rejectedTokens = [
-        "", " ", "  \t ", "--", "-", "--nope", "-x", "--json", "--top", "--category",
+        "", " ", "  \t ", "-", "--nope", "-x", "--json", "--top", "--category",
         "--top=", "--top=-1", "--top=abc", "--top=99999999999999999999",
         "--json=", "--json=-out", "--category=", "--category=-x",
         String(repeating: "z", count: 4096),

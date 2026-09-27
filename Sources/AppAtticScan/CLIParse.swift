@@ -224,6 +224,8 @@ commands:
   disk [PATH]   folder sizes (like Disk Usage Analyzer). Optional PATH, default home
   update        named package upgrades (prompts on a TTY; --dry-run prints the script). Not a full distro upgrade
 
+  `--` ends the options: `appattic disk -- -backup` reads `-backup` as the PATH.
+
 options:
   --json FILE         also write full results as JSON to FILE
   --include-system    on report, leftovers, stale, outdated, packages, update, config:
@@ -348,6 +350,13 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     // reports both problems. The first error is the one the user must fix.
     while i < args.count {
         let a = args[i]
+        if a == "--" {
+            // End of options, the POSIX `--`: everything after it is a
+            // positional, so `appattic disk -- -weird` names a directory that
+            // starts with a dash instead of reading as an unknown option.
+            positional.append(contentsOf: args[(i + 1)...])
+            break
+        }
         if let flag = cliBooleanFlags.first(where: { $0.name == a }) {
             opts[keyPath: flag.key] = true
             i += 1

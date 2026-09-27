@@ -26,6 +26,7 @@ Usage: bash scripts/linux-flatpak.sh
   Needs Linux, flatpak-builder, and org.kde.Platform/Sdk (default 6.10).
   Installs the SDK from Flathub if it is missing.
   Writes dist/AppAttic.flatpak and runs --smoke inside the sandbox.
+  Exit 3 on non-Linux. Flatpak is a Linux package.
 EOF
             exit 0
             ;;

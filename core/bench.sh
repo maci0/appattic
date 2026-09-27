@@ -7,6 +7,20 @@ set -euo pipefail
 export LC_ALL=C
 export LANG=C
 export TZ=UTC
+case "${1:-}" in
+    -h|--help)
+        cat <<'EOF'
+Usage: bash core/bench.sh [filter-substr]
+
+  (no filter)  run every benchmark in core/bench
+  filter-substr  run only the benchmark lines containing this substring
+
+Needs Linux and the .zig-version toolchain. Output is one line per
+benchmark: "<name> <iters> <ns/op> <checksum>", then a final "sink=<n>".
+EOF
+        exit 0
+        ;;
+esac
 if [[ "$(uname -s)" != Linux ]]; then
     echo "core/bench.sh needs Linux (std.os.linux timer)" >&2
     exit 2
