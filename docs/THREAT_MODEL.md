@@ -1,6 +1,6 @@
 # Threat model: AppAttic
 
-Last reviewed: 2026-09-05.
+Last reviewed: 2026-09-27.
 
 No owner or review cadence is published. This file is the living model of the attack surface. Point fixes belong in application code reviews, not here.
 
@@ -11,9 +11,9 @@ AppAttic is a local cleanup utility (CLI `appattic`, macOS AppKit UI, Linux Qt 6
 | Rank | Risk | Boundary | Impact | Existing control | Gap |
 |---|---|---|---|---|---|
 | 1 | A generated `/bin/sh` script runs `rm -rf`, `brew uninstall`, `flatpak uninstall -y`, `snap remove`, or distro `purge`/`-Rns` against scan results | User → app (script execution) | Permanent loss of apps, leftover data, or packages | UI confirm dialog when `confirmDelete` is true; interactive CLI `update` prompt; `shellQuote`; KEEP/system leftovers excluded from default CLI dry-run | Non-interactive CLI `update` deliberately proceeds without a prompt. UI confirm can be turned off. Scripts are the only gate between a bad finding and a destructive argv. |
-| 2 | Scan cache or WASM plugin JSON is treated as a trusted finding list and becomes cleanup commands | Build/runtime plugins; cache file → app | Attacker-chosen paths or package names in the script the user is asked to run | Cache fingerprint + 24h age (`Cache.swift`). WASM `host.exec` query allowlist (`hostexec.c`). Qt drops some `rm` of `/usr/` (`finding.cpp`) | Cache has no MAC. Plugin `.wasm` is unsigned. Qt uses plugin-supplied `command` almost verbatim. Swift leftover `rm` has no `/usr` deny. |
+| 2 | Scan cache or WASM plugin JSON is treated as a trusted finding list and becomes cleanup commands | Build/runtime plugins; cache file → app | Attacker-chosen paths or package names in the script the user is asked to run | Cache fingerprint + 24h age and owner-only mode (`Cache.swift`). WASM `host.exec` query allowlist (`hostexec.c`). Qt drops `rm` of `/usr`, `/etc`, `/System`, and friends (`finding.cpp` `commandRemovesProtectedPath`). Cache and settings are owner-only, so a cache edit needs the same user. | Cache has no MAC. Plugin `.wasm` is unsigned, and the plugin list is a `*.wasm` glob of the core-out directory, so any file dropped there is loaded. Qt uses plugin-supplied `command` almost verbatim. Swift leftover `rm` has no `/usr` deny. |
 | 3 | Leftover classifier lists a credential or config tree as orphaned (`rm -rf ~/.aws` and similar) | Filesystem → leftover model | Secret loss (cloud keys, Docker config) | `linuxSystemNames` / `appleServiceNames` mark `.ssh`, `.gnupg`, and many OS dirs `system` (`Leftovers.swift`) | `.aws` is scanned as a home leaf and is not in the system-name set. Misclassification is a recurring class. |
-| 4 | `host.exec` is the only host import; a bug there is WASM breakout to process spawn | WASM guest → host | Arbitrary subprocess if allowlist fails | Allowlist + metacharacter reject + destructive-token deny (`hostexec.c`). No WASI filesystem. | No Wasmtime fuel/epoch. `APPATTIC_CORE_OUT` loads whatever `.wasm` files are there. Live `execvp` on Linux unless `APPATTIC_HOST_EXEC_FIXTURE`. |
+| 4 | `host.exec` is the only host import; a bug there is WASM breakout to process spawn | WASM guest → host | Arbitrary subprocess if allowlist fails | Allowlist + metacharacter reject + destructive-token deny (`hostexec.c`). No WASI filesystem. 60s cap per spawn, own process group, SIGTERM then SIGKILL to the group (`hostexec.c` `reap_child`). | No Wasmtime fuel/epoch, so a spinning guest is bounded only by the operator cancelling. `APPATTIC_CORE_OUT` loads whatever `.wasm` files are there. Live `execvp` on Linux unless `APPATTIC_HOST_EXEC_FIXTURE`. |
 | 5 | Outdated / brew / Flatpak talk to the network; answers are parsed as versions and names | App → internet | Wrong upgrade target; attacker who owns the tap/index influences `brew upgrade` / `flatpak update` | Untrusted Homebrew casks listed, not updated (`BrewInfo.swift`, `Outdated.swift`). Named distro upgrades run only after confirm as `/bin/sh`, never via `host.exec`. App Store stays report-only. `HOMEBREW_NO_AUTO_UPDATE=1`. | iTunes lookup is HTTPS with no pinning. Package-manager stdout is trusted JSON/text. |
 | 6 | Build scripts download toolchains | Build → runtime | Compromised zig/wasmtime/Swift/linuxdeploy becomes the binary you ship | SHA-256 pins in `scripts/dep-checksums.sha256` for Zig, Wasmtime, Swift, linuxdeploy, appimagetool. Dockerfiles copy that file and `verify-sha256.sh` next to `linux-deps.sh` before `--install`. `scripts/deps.sh check` runs in `scripts/lint.sh` and fails if a pin, a download URL, or a Flatpak `sha256:` drifts. | No GPG. `swift:5.10.1-jammy` and `archlinux:base-devel` are tag-pinned, not digest-pinned. |
 
@@ -53,14 +53,14 @@ No TCP/HTTP listener, webhook, or `serve` command. `parseCLIArguments(["serve"])
 | Homebrew / apt / pacman / paru / yay / dnf / yum / zypper / Flatpak / Snap / npm / pipx stdout | `Outdated.swift`, `Packages.swift`, `BrewInfo.swift`, WASM plugins | Treated as structured inventory. |
 | iTunes Lookup JSON | `Outdated.swift` `itunesRequest` | HTTPS `https://itunes.apple.com/lookup`, 12s timeout. Used for App Store version/title/description only (report-only). |
 | Desktop files, plists, XBEL, shell history | `Discover.swift`, `Leftovers.swift`, `Usage.swift` | Local FS. History capped at 500_000 lines. |
-| Plugin `.wasm` | `core/host/embed.c`, `ui/linux-qt/corehost.cpp` | Loaded if the file exists. ABI 1 required. Not signed. |
+| Plugin `.wasm` | `core/host/embed.c`, `ui/linux-qt/corehost.cpp` `pluginWasmFiles` | Loaded if the file exists. ABI 1 required (`embed.c` `plugin_abi_version`). The list is a `*.wasm` glob of the core-out directory minus `appattic_core.wasm`, not a fixed list, so a file dropped in that directory is a loaded plugin. Not signed. |
 
 ### Spawned processes
 
 | Spawn | Where | Notes |
 |---|---|---|
 | `Process` of package managers | `Util.swift` `runCommand` | argv array, stdin `/dev/null`, 60s timeout then SIGTERM/SIGKILL. Absolute path or `whichCommand`. |
-| `/bin/sh` on a temp `.sh` | `AppAtticCLI/main.swift` `runShellScript`; `Sources/AppAttic/Scanner.swift` `runTempScript`; `ui/linux-qt/main.cpp` `runScript` | This is the destructive path. CLI uses it for `update`. UIs use it for delete/update/mark-manual. |
+| `/bin/sh` on a temp `.sh` | `AppAtticCLI/main.swift` `runShellScript`; `Sources/AppAttic/Scanner.swift` `runTempScript`; `ui/linux-qt/main.cpp` `runScript` | This is the destructive path. CLI uses it for `update`. UIs use it for delete/update/mark-manual. Owner-only file; only the Qt path creates the file exclusively. No timeout on any of the three: `waitUntilExit` until the script ends. |
 | `host.exec` → `execvp` | `core/host/hostexec.c` | Query allowlist only. |
 | `/usr/bin/open -R` / `xdg-open` | `ContentView.swift` `revealPath` | Reveals a listed path. |
 | `QProcess` | `ui/linux-qt/main.cpp` | Same as `/bin/sh` script runner. |
@@ -103,7 +103,9 @@ Linux default: live `execvp` (`hostexec.c` `use_fixture`). Darwin default: fixtu
 
 ### 6. Secrets → code
 
-AppAttic does not store service credentials. It *reads* user files that may contain them (`.aws`, `.docker`, `.kube`, `.ssh` as scan targets; shell history for usage). `settings.json` and `last-scan.json` are written atomically but not mode 0600. Temp scripts live under the process temp dir; Qt sets owner rwx (`main.cpp`), Swift does not set an explicit mode.
+AppAttic does not store service credentials. It *reads* user files that may contain them (`.aws`, `.docker`, `.kube`, `.ssh` as scan targets; shell history for usage). `settings.json` and `last-scan.json` are written atomically and then owner-only: `restrictPrivateDataFile` sets `0600` and `0700` on a parent directory named `appattic` (`Util.swift`, `Settings.swift`, `Cache.swift`). Generated temp scripts are owner-only too: Swift writes them with `writeOwnerOnlyFile` (`Scanner.swift` `runTempScript`, `AppAtticCLI/main.swift` `runShellScript`), Qt with `QTemporaryFile`, which creates the file exclusively, then narrows it to `rwx` for the owner (`ui/linux-qt/main.cpp` `runScript`).
+
+The residual risk is the parent, not the file: `FileManager.default.temporaryDirectory` and `QDir::temp()` are the shared world-writable temp directory, so a name is visible to other local users between write and `/bin/sh` execution. The Qt path is closed against that (exclusive create); the Swift path is not, only the `0600` mode stands between it and a same-host account that can watch the directory. Mode bits are the whole control there.
 
 ### 7. Build → runtime
 
@@ -129,7 +131,7 @@ Impact is local and user-scoped, not a multi-tenant data breach. The concrete wo
 ### User → app
 
 - **Spoofing:** none at app layer; OS user is the principal.
-- **Tampering:** `settings.json` `confirmDelete: false` removes the UI stop. `ignoredLeftoverPaths` hides real leftovers (availability of the warning, not of the files).
+- **Tampering:** `settings.json` `confirmDelete: false` removes the UI stop. `ignoredLeftoverPaths` hides real leftovers (availability of the warning, not of the files). Both are `0600` files with no integrity check, so the trust boundary is the OS account, not the file.
 - **Repudiation:** no audit log of scripts that ran. Temp `.sh` is deleted after use (`Scanner.swift`, Qt `QFile::remove`).
 - **Disclosure:** `--json FILE` writes the full scan (paths, versions) to an operator-chosen path (`main.swift`). Cache holds the same.
 - **DoS:** `--top` is bounded; leftover measurement uses `pmap` workers and `duSize` timeouts (`Leftovers.swift`). Unbounded: size of cache JSON, number of leftover rows, history file up to 500k lines (`Usage.swift`).
@@ -150,8 +152,8 @@ Impact is local and user-scoped, not a multi-tenant data breach. The concrete wo
 ### WASM guest → host
 
 - **Elevation:** only if `appattic_host_exec_allowed` returns true for a dangerous argv. Current deny includes `rm`, `rmi`, `remove`, `purge`, `-y`, `install`, `upgrade`, pacman `-R*`, etc. (`hostexec.c` `destructive_token`). Metacharacters `;|&\`$<>` rejected in `parse_argv`.
-- **Tampering:** plugin JSON `command` is used by Qt `leftoverCleanupCommand` after a narrow `/usr` `rm` filter. A plugin can emit `rm -rf /home/user/.aws`.
-- **DoS:** `wasm_engine_new()` with no fuel (`embed.c`). Infinite loop in a plugin hangs the scan.
+- **Tampering:** plugin JSON `command` is used by Qt `leftoverCleanupCommand` after a `/usr`-rooted `rm` filter (`commandRemovesProtectedPath`). A plugin can emit `rm -rf /home/user/.aws`. Which plugins exist is a directory listing, not an allowlist (`pluginWasmFiles`).
+- **DoS:** `wasm_engine_new()` with no fuel (`embed.c`). A guest instruction loop that never calls `host.exec` runs until the operator cancels (`requestCoreWasmCancel` sets the flag the host checks between spawns, not a guest interrupt). An allowlisted spawn is capped at 60s and its process group is killed.
 - **Disclosure:** allowlisted `ls` / package queries return host inventory into guest memory, then into the UI.
 
 ### Build → runtime
@@ -167,17 +169,20 @@ Impact is local and user-scoped, not a multi-tenant data breach. The concrete wo
 | UI `confirmDelete` default true; CLI `confirmUpdate` on a TTY, `--yes` otherwise | `Settings.swift`, `ContentView.swift`, `ui/linux-qt/main.cpp`, `AppAtticCLI/main.swift` | Accidental click or interactive CLI update | Disabled UI setting; a caller that passes `--yes` on purpose |
 | `--dry-run` prints, does not run (except it short-circuits before `update` run) | `CLIParse.swift`, `main.swift` | Review of leftover/stale/package scripts | Operator pasting the script into a root shell |
 | `shellQuote` | `Util.swift` | Metacharacters in paths/names inside generated `sh` | A finding that should not have been listed at all |
+| `shellComment` flattens newlines in untrusted text used in `#` comments | `Util.swift`, `Cleanup.swift`, `Packages.swift`, `Scanner.swift` | A folder named `Game\nrm -rf ~` adding a command line to a generated script; `shellQuote` does not help because the value is unquoted in a comment | Comment text that is not a name or manager label |
 | KEEP / `system` / untrusted-cask / no full distro upgrade | `Recommend.swift`, `Leftovers.swift`, `Outdated.swift`, `Packages.swift` | Default CLI script omits KEEP and system leftovers; no `apt upgrade` / `-Syu`; named upgrades only after confirm | REVIEW-tier if the UI user opts in; `.aws`-class misses; plugin `command` |
 | Steam/CrossOver not deleted | `Cleanup.swift` `uninstallCommand` | Steam library `rm` | User running a hand-edited script |
 | Qt `/usr` rm filter and overlay-only delete | `ui/linux-qt/finding.cpp` `isProtectedPackagedPath`, `leftoverCleanupCommand` | `rm` of packaged `/usr` paths in the Qt UI | Swift leftover `rm`; Qt commands that are not `rm` |
 | `host.exec` allowlist | `core/host/hostexec.c`, `hostexec.h` | WASM spawn of destructive argv | Plugin-authored cleanup JSON; Swift `Process` path (separate, argv-array) |
+| `host.exec` 60s cap, own process group, SIGTERM then SIGKILL to the group | `core/host/hostexec.c` `HOST_EXEC_TIMEOUT_MS`, `reap_child` | A wedged or runaway allowlisted query, and the children it spawned | A guest that spins without calling `host.exec`; no fuel or epoch deadline |
 | No WASI | `core/host/embed.c` | Guest file I/O | `host.exec` and findings JSON |
 | Untrusted brew tap | `BrewInfo.swift` `refusedCasks`, `applyUntrustedCasks` | `brew upgrade --cask` of refused casks | Listing them; other managers |
 | `HOMEBREW_NO_AUTO_UPDATE` | `Util.swift` | Surprise brew self-update during scan | `update` script, which is `brew upgrade` |
 | Scan cache fingerprint + max age 24h | `Cache.swift` | Stale cache after installs | Forged cache with a copied live fingerprint |
-| Atomic settings/cache writes | `Settings.swift`, `Cache.swift` | Torn JSON | Permissions / MAC |
+| Atomic settings/cache writes, then owner-only mode (`0600`, `0700` on an `appattic` parent) | `Settings.swift`, `Cache.swift`, `Util.swift` `restrictPrivateDataFile` | Torn JSON; another local account reading or editing the state file | A MAC: nothing stops the same user rewriting the cache or turning `confirmDelete` off |
+| Generated scripts written owner-only; Qt creates them with `QTemporaryFile` (exclusive) | `Util.swift` `writeOwnerOnlyFile`, `Scanner.swift` `runTempScript`, `AppAtticCLI/main.swift` `runShellScript`, `ui/linux-qt/main.cpp` `runScript` | Another local account executing a script through a wider mode in the shared temp dir | The Swift path: the name is visible in a world-writable temp dir and only `0600` protects the content |
 | SHA-256 of build tools | `scripts/dep-checksums.sha256` | Zig, Wasmtime, linuxdeploy, appimagetool | Swift tarball |
-| `runCommand` timeout | `Util.swift` | Hung package-manager query | WASM fuel; UI script `waitUntilExit` with no timeout |
+| `runCommand` timeout | `Util.swift` | Hung package-manager query (SIGTERM, then SIGKILL to the child) | Wasmtime fuel; the UI and CLI script runners, which `waitUntilExit` with no timeout |
 
 ### Claim vs code
 
@@ -197,12 +202,13 @@ These are hostile-but-local scenarios. Evidence is the code path, not an exploit
 
 1. **Skip the confirm dialog.** Settings → `confirmDelete` false (`ContentView.swift` `confirmDeleteBinding`, Qt `m_confirmBox`). Delete/Update/Mark Manual run `runTempScript` / `runScript` on the first click.
 2. **Non-interactive CLI upgrade without review.** With stdin redirected, `appattic update --yes` → `confirmUpdate` returns true on the flag → `updateScript` → `runShellScript` (`main.swift`). Automation is a flag away, and the flag is the record that it was deliberate; without it the run stops at exit 2.
-3. **Poison `last-scan.json`.** Write a cache with the current fingerprint, `includeSystem` matching the next run, `scanned_at` within 24h, and an extra leftover path. `resolveScan` will use it (`Cache.swift`). The UI/CLI then offers that path in cleanup.
-4. **Swap WASM under `APPATTIC_CORE_OUT`.** Qt loads `appattic_core.wasm` and a fixed plugin filename list (`corehost.cpp`). A replaced plugin can return findings whose `command` is copied into the script (`finding.cpp`). `host.exec` still cannot `rm`, but the *script the user confirms* can.
-5. **PATH hijack.** Put a fake `brew` on `PATH`. Scan and `update` invoke it (`whichCommand`, `updateCommand`).
+3. **Poison `last-scan.json`.** Write a cache with the current fingerprint, `includeSystem` matching the next run, `scanned_at` within 24h, and an extra leftover path. `resolveScan` will use it (`Cache.swift`). The UI/CLI then offers that path in cleanup. The file is `0600`, so this is the same user, not another account.
+4. **Drop a plugin into the core-out directory.** `pluginWasmFiles` globs `*.wasm` in `APPATTIC_CORE_OUT` (or the `../share/appattic` next to the binary) and loads every one that exports `plugin_abi_version` 1 (`corehost.cpp`, `embed.c`). No allowlist of names, no signature, no digest: a new file is a loaded plugin. It can return findings whose `command` is copied into the script (`finding.cpp`). `host.exec` still cannot `rm`, but the *script the user confirms* can.
+5. **PATH hijack.** Put a fake `brew` on `PATH`. Scan and `update` invoke it (`whichCommand`, `updateCommand`). `whichCommand` searches user bin dirs (`~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin`, and the rest of the list in `Util.swift`) *before* `/usr/bin`, so those win even when `PATH` does not list them early.
 6. **Classifier miss.** If AWS CLI is not discovered as installed software, `.aws` classifies as `orphaned` (`homeDotData` + `classify` fallthrough). Default leftover dry-run emits `rm -rf` of that path (`leftoverRemoveCommand`).
-7. **`--json` overwrite.** `--json FILE` writes scan JSON to `FILE` with no directory jail (`main.swift`). Same user, arbitrary path they can write.
+7. **`--json` overwrite.** `--json FILE` writes scan JSON to `FILE` with no directory jail (`main.swift`). Same user, arbitrary path they can write; the file is created `0600` (`writeOwnerOnlyFile`).
 8. **Disable confirm via settings file.** Directly edit `settings.json` (no integrity). Same as (1).
+9. **Race the generated script in the shared temp dir.** The CLI and macOS UI write `appattic-*.sh` into the world-writable temp directory under a UUID name, `0600`, and hand the path to `/bin/sh`. Another local account can watch that directory and win the moment before execution; only the mode stands in the way, and the Qt path is not exposed because `QTemporaryFile` creates exclusively (`runTempScript`, `runShellScript`, `ui/linux-qt/main.cpp` `runScript`).
 
 Client-side enforcement: the ignore list and confirm toggle are local files, not a server policy. There is no server.
 
@@ -213,4 +219,4 @@ Client-side enforcement: the ignore list and confirm toggle are local files, not
 
 ## How to re-verify this file
 
-Re-walk: `CLIParse.swift`, `AppAtticCLI/main.swift`, `Cleanup.swift`, `Packages.swift`, `Outdated.swift`, `Settings.swift`, `Cache.swift`, `Leftovers.swift` (`homeDotData`, `linuxSystemNames`, `classify`), `Util.swift` (`runCommand`, `shellQuote`, `whichCommand`), `Scanner.swift` `runTempScript`, `ui/linux-qt/main.cpp` `runScript`, `ui/linux-qt/finding.cpp`, `ui/linux-qt/corehost.cpp`, `core/host/embed.c`, `core/host/hostexec.c`, `scripts/linux-deps.sh`, `scripts/dep-checksums.sha256`. If an entry point, allowlist, or confirm path changes, update the matching row here in the same change.
+Re-walk: `CLIParse.swift`, `AppAtticCLI/main.swift`, `Cleanup.swift`, `Packages.swift`, `Outdated.swift`, `Settings.swift`, `Cache.swift`, `Leftovers.swift` (`homeDotData`, `linuxSystemNames`, `classify`), `Util.swift` (`runCommand`, `shellQuote`, `shellComment`, `writeOwnerOnlyFile`, `restrictPrivateDataFile`, `whichCommand`), `Scanner.swift` `runTempScript`, `ui/linux-qt/main.cpp` `runScript`, `ui/linux-qt/finding.cpp`, `ui/linux-qt/corehost.cpp` (`pluginWasmFiles`), `core/host/embed.c`, `core/host/hostexec.c` (`destructive_token`, `reap_child`, `HOST_EXEC_TIMEOUT_MS`), `scripts/linux-deps.sh`, `scripts/dep-checksums.sha256`. If an entry point, allowlist, or confirm path changes, update the matching row here in the same change.
