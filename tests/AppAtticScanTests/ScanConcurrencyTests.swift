@@ -10,21 +10,32 @@ import XCTest
 /// Run under `swift test --sanitize=thread` to get the memory-ordering evidence;
 /// the assertions below catch the behavioural half.
 final class ScanConcurrencyTests: XCTestCase {
-    /// Detects two callbacks in flight at the same time. The counters are
-    /// deliberately unsynchronised: the callback runs on one thread by
-    /// contract, so they need no lock and any overlap shows up as a peak above
-    /// one.
+    /// Detects two callbacks in flight at the same time. The counters take the
+    /// same lock the callback under test does, so a sanitizer run reports no
+    /// race in the instrument itself; an overlap still shows up as a peak above
+    /// one because `enter` and `leave` are not adjacent.
     private final class OverlapDetector {
-        private(set) var peak = 0
-        private var inFlight = 0
+        private let lock = NSLock()
+        private var _peak = 0
+        private var _inFlight = 0
+
+        var peak: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return _peak
+        }
 
         func enter() {
-            inFlight += 1
-            if inFlight > peak { peak = inFlight }
+            lock.lock()
+            _inFlight += 1
+            if _inFlight > _peak { _peak = _inFlight }
+            lock.unlock()
         }
 
         func leave() {
-            inFlight -= 1
+            lock.lock()
+            _inFlight -= 1
+            lock.unlock()
         }
     }
 
@@ -78,6 +89,23 @@ final class ScanConcurrencyTests: XCTestCase {
             "progress ran on \(detector.peak) threads at once; pmap workers reach the callback directly"
         )
         XCTAssertTrue(result.orphanedItems.contains { $0.name == "DeadApp0" })
+    }
+
+    /// `peak == 1` above is only evidence if the detector can report anything
+    /// else. Feeding the same instrument genuine overlap pins that, so a scan
+    /// that silently stopped fanning out cannot pass by emitting one message.
+    func testOverlapDetectorReportsConcurrentCallbacks() {
+        let detector = OverlapDetector()
+        let lanes = 8
+        DispatchQueue.concurrentPerform(iterations: lanes) { _ in
+            detector.enter()
+            Thread.sleep(forTimeInterval: 0.05)
+            detector.leave()
+        }
+        XCTAssertGreaterThan(
+            detector.peak, 1,
+            "the detector missed overlap, so `peak == 1` in the scan test proves nothing"
+        )
     }
 
     /// Two scans in one process share the failure set, which is reset at the

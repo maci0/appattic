@@ -20,7 +20,7 @@ final class PublicAPITests: XCTestCase {
         XCTAssertEqual(leftovers[0].shadows, "/usr/bin/python3")
 
         XCTAssertNotNil(parseCLIArguments(["--top", "-1"]).parseError)
-        XCTAssertGreaterThan(scanCacheMaxAge, 0)
+        XCTAssertEqual(scanCacheMaxAge, 24 * 3600)
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("appattic-public-api-\(UUID().uuidString).json")
@@ -33,11 +33,13 @@ final class PublicAPITests: XCTestCase {
     }
 
     func testRunFullScanAcceptsTrailingProgressClosure() {
-        // Referenced, not run: a live scan reads the real machine.
+        // Referenced, not run: a live scan reads the real machine. Binding the
+        // closure to the documented signature is the assertion; the type system
+        // rejects the test at build time if either label or arity drifts.
         let scan: (Bool, @escaping (String) -> Void) -> ScanData = { includeSystem, progress in
             runFullScan(includeSystem: includeSystem, progress: progress)
         }
-        XCTAssertNotNil(scan)
+        withExtendedLifetime(scan) {}
     }
 
     func testTypedAccessorsResolveWithoutTestableImport() {

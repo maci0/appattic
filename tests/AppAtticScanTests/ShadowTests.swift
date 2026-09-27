@@ -108,7 +108,6 @@ final class ShadowTests: XCTestCase {
         XCTAssertTrue(what.contains("/usr/bin/python3"), what)
         XCTAssertTrue(what.localizedCaseInsensitiveContains("hides the packaged"), what)
         XCTAssertFalse(what.localizedCaseInsensitiveContains("no longer installed"), what)
-        XCTAssertTrue(leftoverWhatLooksCurrent(what))
 
         let why = leftoverWhyText(
             rootLabel: ".local/bin",
@@ -118,7 +117,6 @@ final class ShadowTests: XCTestCase {
         XCTAssertTrue(why.contains("/usr/bin/python3"), why)
         XCTAssertTrue(why.localizedCaseInsensitiveContains("package-manager"), why)
         XCTAssertFalse(why.localizedCaseInsensitiveContains("the tool is gone"), why)
-        XCTAssertTrue(leftoverWhyLooksCurrent(why))
 
         let desktop = leftoverSummary(
             rootLabel: ".local/share/applications",
@@ -128,6 +126,68 @@ final class ShadowTests: XCTestCase {
         )
         XCTAssertTrue(desktop.localizedCaseInsensitiveContains("desktop overlay"), desktop)
         XCTAssertTrue(desktop.contains("/usr/share/applications/firefox.desktop"), desktop)
+    }
+
+    /// The stored-text predicates only exist to judge a summary carried over
+    /// from an older scan, so they are exercised against text the test did not
+    /// just generate: a stale summary must be rebuilt, a current one reused.
+    func testStoredLeftoverTextIsReusedOnlyWhileItStaysCurrent() {
+        let freshWhat = leftoverSummary(rootLabel: "Caches", kind: "dir", name: "Foo")
+        let freshWhy = orphanReason(rootLabel: "Caches", kind: "dir")
+        XCTAssertTrue(leftoverWhatLooksCurrent(freshWhat), freshWhat)
+        XCTAssertTrue(leftoverWhyLooksCurrent(freshWhy), freshWhy)
+
+        // Stored text that a rebuild would word differently, so equality can
+        // only come from the reuse branch.
+        let storedWhat = "Leftover cache written by an older scan."
+        let storedWhy = "Broken PATH command. 2 leftover names. The tool is gone."
+        XCTAssertNotEqual(storedWhat, freshWhat)
+        XCTAssertNotEqual(storedWhy, freshWhy)
+        XCTAssertTrue(leftoverWhatLooksCurrent(storedWhat), storedWhat)
+        XCTAssertTrue(leftoverWhyLooksCurrent(storedWhy), storedWhy)
+        XCTAssertEqual(
+            leftoverWhatText(rootLabel: "Caches", kind: "dir", name: "Foo", storedSummary: storedWhat),
+            storedWhat,
+            "a summary from an older scan should be kept verbatim"
+        )
+        XCTAssertEqual(
+            leftoverWhyText(rootLabel: "Caches", kind: "dir", storedReason: storedWhy),
+            storedWhy,
+            "a reason from an older scan should be kept verbatim"
+        )
+
+        let stale = "Left over from a tool AppAttic no longer recognises."
+        XCTAssertFalse(leftoverWhatLooksCurrent(stale), stale)
+        XCTAssertFalse(leftoverWhyLooksCurrent(stale), stale)
+        XCTAssertNotEqual(
+            leftoverWhatText(rootLabel: "Caches", kind: "dir", name: "Foo", storedSummary: stale),
+            stale,
+            "a stale summary must be rebuilt, not shown as if it were current"
+        )
+        XCTAssertNotEqual(
+            leftoverWhyText(rootLabel: "Caches", kind: "dir", storedReason: stale),
+            stale,
+            "a stale reason must be rebuilt, not shown as if it were current"
+        )
+
+        // A shadow item reuses its stored summary only while it still names the
+        // packaged tool, so the cached copy cannot outlive the shadow edge.
+        let shadowWhat = leftoverSummary(
+            rootLabel: ".local/bin",
+            kind: "file",
+            name: "python3",
+            shadows: "/usr/bin/python3"
+        )
+        XCTAssertEqual(
+            leftoverWhatText(
+                rootLabel: ".local/bin",
+                kind: "file",
+                name: "python3",
+                storedSummary: shadowWhat,
+                shadows: "/usr/bin/python3"
+            ),
+            shadowWhat
+        )
     }
 
     func testApplyOrphanReasonsKeepsShadowCopy() {

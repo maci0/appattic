@@ -413,7 +413,10 @@ final class CacheTests: XCTestCase {
             after: "a",
             to: blocked.appendingPathComponent("last-scan.json")
         )) { error in
-            XCTAssertTrue(error is AppAtticIOError, "a failed write must name the I/O failure, not look like a skip")
+            guard case .writeFailed(let path, _)? = error as? AppAtticIOError else {
+                return XCTFail("a failed write must be .writeFailed, got \(error)")
+            }
+            XCTAssertTrue(path.hasSuffix("last-scan.json"), path)
         }
     }
 
@@ -433,7 +436,42 @@ final class CacheTests: XCTestCase {
         XCTAssertFalse(resolved.fromCache)
         XCTAssertEqual(resolved.data.scanned_at, "2026-08-17T13:00:00Z")
         let failure = try XCTUnwrap(resolved.cacheWriteFailure)
-        XCTAssertFalse(failure.isEmpty)
+        XCTAssertTrue(failure.hasPrefix("Could not write "), failure)
+        XCTAssertTrue(failure.contains("last-scan.json"), failure)
+    }
+
+    /// The inventory changing while the scan ran is a different failure from a
+    /// write that never landed: the scan is complete and trustworthy, the cache
+    /// just cannot be stamped, so the caller is told why and nothing more.
+    func testResolveScanReportsAFingerprintThatMovedUnderIt() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-cache-moved-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let stamps = ["a", "b"]
+        var call = 0
+        let resolved = resolveScan(
+            includeSystem: false,
+            fresh: true,
+            forceLive: true,
+            cacheURL: url,
+            fingerprintFn: {
+                defer { call += 1 }
+                return stamps[min(call, stamps.count - 1)]
+            },
+            liveScan: { _ in sampleScanData(scannedAt: "2026-08-17T13:00:00Z") }
+        )
+
+        XCTAssertFalse(resolved.fromCache)
+        XCTAssertNotEqual(
+            resolved.data.incomplete, true,
+            "a completed scan is complete however the cache went"
+        )
+        XCTAssertEqual(
+            resolved.cacheWriteFailure,
+            "installed software changed while the scan was running"
+        )
+        XCTAssertNil(loadScanCache(from: url), "a moved fingerprint must not stamp the cache")
     }
 
     /// A regular file standing where the cache directory must be: creating the

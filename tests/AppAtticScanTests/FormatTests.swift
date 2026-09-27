@@ -24,21 +24,31 @@ final class FormatTests: XCTestCase {
 
 
     func testHumanDays() {
-        // The unit word and its plural form come from the locale, so a label is
-        // pinned as "a count with a unit", not as English text.
-        for days in [0.0, 0.5, 3.0, 21.0, 45.0, 400.0] {
-            let label = humanDays(days)
-            XCTAssertFalse(label.trimmingCharacters(in: .whitespaces).isEmpty, "\(days)")
-            XCTAssertTrue(label.contains { $0.isNumber }, "\(days) -> \(label)")
-        }
+        // The unit word and its plural form come from the locale, so a bucket is
+        // pinned by the count it renders and by staying distinct from the
+        // neighbouring buckets. A `/7` month, a 200-day app printed as "0 years",
+        // or two buckets collapsing onto one word all break this.
+        let hour = humanDays(0.5)     // 12 h
+        let day = humanDays(3.0)      // 3 d
+        let week = humanDays(20.0)    // 2 wk
+        let month = humanDays(45.0)   // 1 mo
+        let year = humanDays(400.0)   // 1 yr
+        XCTAssertTrue(hour.hasPrefix("12"), "0.5d -> \(hour)")
+        XCTAssertTrue(day.hasPrefix("3"), "3d -> \(day)")
+        XCTAssertTrue(week.hasPrefix("2"), "20d -> \(week)")
+        XCTAssertTrue(month.hasPrefix("1"), "45d -> \(month)")
+        XCTAssertTrue(year.hasPrefix("1"), "400d -> \(year)")
+        let buckets = [hour, day, week, month, year]
+        XCTAssertEqual(Set(buckets).count, buckets.count, "unit buckets collapsed: \(buckets)")
     }
 
     func testHumanDaysNeverPrintsAZeroCount() {
         // A future or sub-day timestamp clamps to a whole hour, so the label
         // never reads as zero of anything.
-        for days in [-3.0, 0.0, 0.04] {
-            let label = humanDays(days)
-            XCTAssertFalse(label.hasPrefix("0"), "\(days) -> \(label)")
+        let clamped = [-3.0, 0.0, 0.04].map { humanDays($0) }
+        for label in clamped {
+            XCTAssertTrue(label.hasPrefix("1"), "clamped label -> \(label)")
         }
+        XCTAssertEqual(Set(clamped).count, 1, "negative, zero, and sub-day must all clamp alike")
     }
 }

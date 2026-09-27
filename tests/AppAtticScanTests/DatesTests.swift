@@ -147,12 +147,48 @@ final class DatesTests: XCTestCase {
     func testTimestampFormatUsesARelativeLabelWithinTheWindow() throws {
         let cal = Calendar.current
         let now = Date()
+        var labels: [String] = []
         for daysAgo in [0, 1, 3, relativeDayLimit - 1] {
             let then = try XCTUnwrap(cal.date(byAdding: .day, value: -daysAgo, to: now))
             let label = TimestampFormat.string(from: then, now: now)
-            XCTAssertFalse(label.isEmpty)
-            XCTAssertNotEqual(label, TimestampFormat.date.string(from: then))
+            XCTAssertFalse(label.isEmpty, "\(daysAgo) days ago")
+            XCTAssertNotEqual(label, TimestampFormat.date.string(from: then), "\(daysAgo) days ago")
+            XCTAssertEqual(
+                TimestampFormat.string(from: then, now: now), label,
+                "\(daysAgo) days ago is not stable across calls"
+            )
+            labels.append(label)
         }
+        // Each age reads differently; a relative formatter stuck on one string
+        // would leave every assertion above green.
+        XCTAssertEqual(
+            Set(labels).count, labels.count,
+            "relative labels collapsed: \(labels)"
+        )
+    }
+
+    /// The last relative day is `relativeDayLimit - 1`; the day after it is the
+    /// first absolute one. Both sides of that exact edge are pinned, so moving
+    /// the limit does not silently gain or lose a day of the window.
+    func testTimestampFormatFlipsToTheDateExactlyAtTheRelativeLimit() throws {
+        let cal = Calendar.current
+        let now = Date()
+
+        let lastRelative = try XCTUnwrap(
+            cal.date(byAdding: .day, value: -(relativeDayLimit - 1), to: now)
+        )
+        XCTAssertNotEqual(
+            TimestampFormat.string(from: lastRelative, now: now),
+            TimestampFormat.date.string(from: lastRelative)
+        )
+
+        let firstAbsolute = try XCTUnwrap(
+            cal.date(byAdding: .day, value: -relativeDayLimit, to: now)
+        )
+        XCTAssertEqual(
+            TimestampFormat.string(from: firstAbsolute, now: now),
+            TimestampFormat.date.string(from: firstAbsolute)
+        )
     }
 
     /// Past the relative window the absolute date is shown, and it comes from

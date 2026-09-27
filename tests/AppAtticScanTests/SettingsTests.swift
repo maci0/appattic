@@ -12,10 +12,18 @@ final class SettingsTests: XCTestCase {
 
     func testSettingsURLSitsBesideScanCache() {
         // The directory is spelled out rather than read back from
-        // defaultScanCacheURL(), which would agree with any value it returns.
+        // defaultScanCacheURL() or xdgDataHome(), which would agree with any
+        // value they return: the XDG rule is restated here, so a base that
+        // moved away from `$XDG_DATA_HOME` or `~/.local/share` fails.
         let expectedDirectory: String
         if PlatformOverride.isLinux {
-            expectedDirectory = (xdgDataHome() as NSString).appendingPathComponent("appattic")
+            let env = ProcessInfo.processInfo.environment
+            let xdg = env["XDG_DATA_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let base = (xdg?.hasPrefix("/") ?? false)
+                ? xdg!
+                : (FileManager.default.homeDirectoryForCurrentUser.path as NSString)
+                    .appendingPathComponent(".local/share")
+            expectedDirectory = (base as NSString).appendingPathComponent("appattic")
         } else {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
                 ?? FileManager.default.homeDirectoryForCurrentUser
