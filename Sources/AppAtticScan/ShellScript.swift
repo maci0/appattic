@@ -8,6 +8,8 @@ func isSafeShellByte(_ c: UInt8) -> Bool {
         c == 0x3A || c == 0x2C || c == 0x2E || c == 0x2F || c == 0x2D
 }
 
+/// Quote a value for a POSIX shell word. An empty value becomes `''` and a
+/// value with no unsafe byte is passed through unquoted.
 public func shellQuote(_ value: String) -> String {
     if value.isEmpty { return "''" }
     // Byte scan: `CharacterSet.inverted` + `rangeOfCharacter` cost ~2.9 µs per

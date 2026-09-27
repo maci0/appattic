@@ -1,5 +1,8 @@
 import Foundation
 
+/// A usage error, as a case a caller can switch on. `description` is the line
+/// the CLI prints, and `unknownCommand` carries a "did you mean" suggestion
+/// when one command is close enough to the input.
 public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStringConvertible {
     case jsonRequiresPath
     case topRequiresNonNegativeInteger
@@ -41,6 +44,10 @@ public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStr
     public var errorDescription: String? { description }
 }
 
+/// A parsed command line. Every field is defaulted, so `CLIOptions()` is a
+/// `report` run with no flags. Parsing does not stop at a bad token, so `help`
+/// and the other flags are still read from the rest of the line;
+/// `parseError` holds the first error, and `error` is its text.
 public struct CLIOptions {
     public var command: String
     public var json: String?
@@ -199,6 +206,8 @@ func cliEditDistance(_ a: [Character], _ b: [Character]) -> Int {
     return previous[b.count]
 }
 
+/// The `--help` text, verbatim, so the CLI and a test read the same wording
+/// the user sees.
 public let cliHelpText = """
 usage: appattic [--version] [--help] [command] [options]
        appattic help [command]   same help; a command name after it is checked
@@ -269,6 +278,8 @@ settings.json (includeSystem, confirmDelete, ignored leftover paths):
   'appattic config' prints the values and paths this machine resolves.
 """
 
+/// The line the CLI prints after a usage error, separate from the error's own
+/// `description`.
 public let cliUsageHint = "Try 'appattic --help' for more information."
 
 /// Status colors, the same values the two windows use for the same three
@@ -325,6 +336,9 @@ public func cliColorEnabled(
     return stdoutIsTTY
 }
 
+/// Parse an argv array with the program name already dropped, the same way
+/// `CommandLine.arguments.dropFirst()` hands it to the CLI. `help` wins over
+/// `parseError`, so `--help` still prints on a line that also has a bad token.
 public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     var opts = CLIOptions()
     var i = 0

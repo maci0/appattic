@@ -12,6 +12,9 @@ public func xdgUserDir(
     return (home as NSString).appendingPathComponent(fallback)
 }
 
+/// `$XDG_DATA_HOME`, or `$HOME/.local/share` when it is unset, empty, or not
+/// absolute. `home` and `env` are parameters so a caller can resolve another
+/// account's paths, or a fixture's, without touching the process environment.
 public func xdgDataHome(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     env: [String: String] = ProcessInfo.processInfo.environment
@@ -19,6 +22,8 @@ public func xdgDataHome(
     xdgUserDir("XDG_DATA_HOME", fallback: ".local/share", home: home, env: env)
 }
 
+/// `$XDG_CONFIG_HOME`, or `$HOME/.config`, under the same rules as
+/// `xdgDataHome`.
 public func xdgConfigHome(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     env: [String: String] = ProcessInfo.processInfo.environment
@@ -26,6 +31,8 @@ public func xdgConfigHome(
     xdgUserDir("XDG_CONFIG_HOME", fallback: ".config", home: home, env: env)
 }
 
+/// `$XDG_CACHE_HOME`, or `$HOME/.cache`, under the same rules as
+/// `xdgDataHome`.
 public func xdgCacheHome(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     env: [String: String] = ProcessInfo.processInfo.environment
@@ -33,6 +40,8 @@ public func xdgCacheHome(
     xdgUserDir("XDG_CACHE_HOME", fallback: ".cache", home: home, env: env)
 }
 
+/// `$XDG_STATE_HOME`, or `$HOME/.local/state`, under the same rules as
+/// `xdgDataHome`.
 public func xdgStateHome(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     env: [String: String] = ProcessInfo.processInfo.environment

@@ -130,6 +130,24 @@ if let err = parseCLIArguments(["--top", "-1"]).parseError {
 }
 ```
 
+Entry points, in the order a caller reaches them:
+
+| Call | Gives you |
+|---|---|
+| `runFullScan(includeSystem:now:clock:progress:)` | `ScanData` from a live scan. `progress` is called with each status line. |
+| `resolveScan(includeSystem:fresh:forceLive:cacheURL:now:fingerprintFn:liveScan:)` | `ResolvedScan`: the last scan when it is still current, a live scan and a cache write when it is not. `cacheWriteFailure` says why a live scan was not kept. |
+| `scanResult(from:ignoringLeftovers:now:)` | `ScanResult`, the grouped and filtered view every report is built from. |
+| `exportedScanData(from:ignoringLeftovers:fromCache:now:)` | The `ScanData` a `--json` report prints, with totals recomputed from what is listed. |
+| `cleanupScript(from:ignoringLeftovers:now:)` / `updateScript(from:selectedIds:)` | The `sh` script for a cleanup or a named upgrade. Both are printed for review; nothing runs them. |
+| `validateDiskRoot(_:)` / `scanDiskUsage(root:oneFileSystem:cancel:)` / `formatDiskTree(_:allocatedSize:top:depth:)` | Disk usage. `validateDiskRoot` throws `DiskRootError` for a missing path or a file, so the failure is catchable before the walk starts. `cancel` is polled during the walk and a cancel returns the partial tree. |
+| `listDiskVolumes(home:mountsText:)` | `DiskVolume` rows for the volume list. |
+| `readScanCache(from:)` / `writeScanCache(_:to:)` / `commitScanCache(includeSystem:data:before:after:to:)` | The scan cache. `readScanCache` throws `AppAtticIOError`; `loadScanCache` is the same read with the error swallowed. `commitScanCache` returns `false` when the scan was deliberately not kept, and throws when the write itself failed. |
+| `isScanCacheStale(_:includeSystem:fingerprint:now:maxAge:)` | Whether a cached scan still describes this machine. `scanFingerprint()` is the stamp to compare it against. |
+| `loadSettings(from:)` / `saveSettings(_:to:)` / `effectiveIncludeSystem(cliFlag:settings:)` | `AppAtticSettings`, from `settings.json` next to the cache. A malformed file throws `SettingsError`; it is never silently replaced by the defaults. |
+| `parseCLIArguments(_:)` | `CLIOptions` for an argv array without the leading program name. `parseError` carries the usage error, `error` its text, and `cliHelpText` / `cliUsageHint` the wording the CLI prints. |
+
+`AppAtticIOError` (cache), `SettingsError` (settings), and `DiskRootError` (disk root) are the library's own error types, each an `Error` with cases a caller can switch on instead of matching a message. `runAndWait` is the exception: it rethrows whatever Foundation's `Process.run()` raises, so wrap it for that one.
+
 Wire strings stay on the JSON models (`status`, `tier`, `manager`) so a cache from a newer AppAttic still decodes. Read them through the typed accessors instead of comparing raw strings: `LeftoverItem.leftoverStatus` and `DataItem.leftoverStatus` (`LeftoverStatus`), `SoftwareItem.tierKind` and `Verdict.tierKind` (`StaleTier`), `OutdatedEntry.upgradableManager` (`UpgradableManager`). `StaleTier.selectable` is the REVIEW + REMOVE set behind `selectableCleanupTiers`; `outdatedIsUpdatable` and `PackageEntry.canMarkManual` are the same answers in function form. Each accessor returns an optional when the stored value is not one this build knows, so an unknown tier is not mistaken for `keep`.
 
 Tests (same flags as `.github/workflows/linux.yml`):

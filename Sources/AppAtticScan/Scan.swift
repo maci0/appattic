@@ -1,5 +1,9 @@
 import Foundation
 
+/// The live scan, kept as the objects the collectors produced. `runFullScan`
+/// hands back the `ScanData` form of this; a caller that wants the leftover,
+/// software, and verdict objects without a round trip through JSON builds it
+/// from `ScanResult.toScanData()` or asks for the result directly.
 public final class ScanResult {
     public var scannedAt: Date
     public var durationS: Double
@@ -130,6 +134,10 @@ public final class ScanResult {
     }
 }
 
+/// Give an app with no last-used evidence the mtime of its own preferences
+/// file, tagged `"prefs-mtime"`. Apps that already have a `lastUsed` are left
+/// alone, and a preferences mtime within `indexWindowS` of the install date is
+/// discarded by `effectiveLastUsed` rather than reported as use.
 public func applyPrefsFallback(_ apps: inout [AppRecord], items: [DataItem]) {
     var prefs: [String: Date] = [:]
     for i in items where i.rootLabel == "Preferences" {
@@ -178,7 +186,19 @@ private final class SerialProgress: @unchecked Sendable {
     }
 }
 
-/// Full scan. Optional collectors are for tests; omit them to hit the live system.
+/// Full scan, returning the live objects instead of the `ScanData` form.
+///
+/// The `apps`, `brew`, `leftoverItems`, `leftoverAgents`, `leftoverRoots`,
+/// `linuxOutdated`, `appStoreOutdated`, `packages`, and `history` parameters
+/// are the collectors: leave one nil to run it against the system, pass a value
+/// to supply it. That is the seam a consumer's tests use, so a scan can run
+/// from fixtures with no live package manager, Spotlight, or home directory.
+/// `which` and `run` replace every subprocess. `skipLiveUsage` leaves the
+/// usage probes out, and `clock` replaces the monotonic clock that times the
+/// scan, so both are testable.
+///
+/// The same one-scan-at-a-time rule as `runFullScan` applies: the lock is not
+/// reentrant, and a `progress` callback must not start another scan.
 public func performScan(
     includeSystem: Bool = false,
     apps: [AppRecord]? = nil,
@@ -286,6 +306,13 @@ public func performScan(
 }
 
 /// Live scan of leftovers, stale software, outdated packages, and unused distro/language packages.
+///
+/// One scan at a time per process. A scan resets and reads a process-global
+/// failed-check set, so two overlapping scans attribute each other's failures.
+/// The wait is not reentrant: a `progress` callback must not start a scan, or
+/// it blocks on the scan already in flight. The callback runs on collector
+/// worker threads, serialized but not moved to your thread, so anything it
+/// touches needs its own lock.
 public func runFullScan(
     includeSystem: Bool = false,
     now: Date = Date(),

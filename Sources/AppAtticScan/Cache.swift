@@ -369,6 +369,12 @@ public struct ResolvedScan: Sendable {
 
 /// Return the last scan if it is still current, otherwise scan live and save the cache.
 /// `fresh` ignores the cache. `forceLive` always scans (CLI `update`).
+///
+/// The live scan goes through `runFullScan` unless `liveScan` replaces it, so
+/// the one-scan-at-a-time rule there applies here too. The default
+/// `fingerprintFn` shells out to the package managers twice per call, once
+/// before the scan and once after, which is what makes a mid-scan change to
+/// the inventory drop the snapshot instead of caching a mixture.
 public func resolveScan(
     includeSystem: Bool,
     fresh: Bool,

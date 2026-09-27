@@ -7,6 +7,11 @@ public let staleDays = 180
 /// Owned user data at or above this size blocks REMOVE (REVIEW instead).
 public let dataKeepThreshold = 50 * 1024 * 1024
 
+/// One installed app, formula, cask, or tool the scan found, with everything
+/// later stages need to judge it. The live counterpart of the JSON
+/// `SoftwareItem`: `sizeBytes` is the app, `dataBytes` its matched user data,
+/// and `sizeMeasured` / `dataMeasured` say whether each number was measured or
+/// could not be.
 public final class Software {
     public var name: String
     public var kind: String
@@ -89,6 +94,9 @@ public final class Software {
     }
 }
 
+/// One software row's tier and the reason behind it. `tier` is the wire string;
+/// `tierKind` is the typed read, and `reason` is the sentence the report shows,
+/// so a caller never has to re-derive why a row landed where it did.
 public struct Verdict {
     public var software: Software
     public var tier: String
@@ -152,6 +160,9 @@ func attachOwnedData(_ sw: Software, name: String, bundleId: String?, items: [Da
     sw.dataMeasured = matched.allSatisfy(\.sizeMeasured)
 }
 
+/// App size plus its matched data size, `"n/a"` for a part that was not
+/// measured. `dataBytes` is dropped when it is zero, so a row with no data
+/// reads as the app size alone.
 public func staleSizeText(sizeBytes: Int, sizeMeasured: Bool, dataBytes: Int) -> String {
     let app = sizeMeasured ? humanSize(sizeBytes) : "n/a"
     if dataBytes > 0 {
@@ -166,6 +177,9 @@ public func staleReclaimableBytes(_ items: [SoftwareItem]) -> Int {
         .reduce(0) { addBytes($0, $1.totalBytes) }
 }
 
+/// The Overview stale total: a count, with a size behind it once there is
+/// one. Call it with `staleReclaimableBytes`, which counts REVIEW and REMOVE
+/// rows only, so the number matches what cleanup can actually reclaim.
 public func overviewStaleTotalLabel(count: Int, bytes: Int) -> String {
     if bytes > 0 {
         return "\(count) · \(humanSize(bytes))"
@@ -231,6 +245,15 @@ func brewHistoryKeep(_ brew: BrewSnapshot) -> Set<String> {
     return keep
 }
 
+/// Turn discovered apps and a Homebrew snapshot into `Software` rows, matching
+/// each app's user data so the rows carry `dataBytes` and `dataPaths`.
+///
+/// `history` is the shell-history index; leaving it nil reads the history of
+/// the current user, which is slow, so a caller that already has one passes
+/// it in. `du` is the `(bytes, measured)` size function; leaving it nil measures
+/// with `duSizes`, one `du` per path. `includeDarwinNonApp` and `nonAppPaths`
+/// are the non-`.app` inclusions the macOS UI opts into; `includeDarwinNonApp`
+/// defaults to whether this is a Darwin host.
 public func buildSoftware(
     apps: [AppRecord],
     brew: BrewSnapshot,
@@ -534,6 +557,8 @@ public func evaluate(_ sw: Software, now: Date = Date()) -> Verdict {
     )
 }
 
+/// How hard a row is to bring back, or nil when the source says nothing about
+/// reinstalling it.
 public func reinstallHint(_ source: String) -> String? {
     switch source {
     case "brew-cask", "brew-formula":
@@ -564,10 +589,16 @@ public func displayStaleReason(_ reason: String) -> String {
     return reason
 }
 
+/// One verdict per software row, in the order given. `now` is the instant the
+/// idle windows are measured against, so a caller that scans over a long enough
+/// run to want a single reference point should pass the same one to every call.
 public func evaluateAll(_ software: [Software], now: Date = Date()) -> [Verdict] {
     software.map { evaluate($0, now: now) }
 }
 
+/// The one-line label a software row shows. A store description is used when it
+/// says something; a junk blur or a too-short Steam blurb falls back to the
+/// kind, so the row never reads as an empty description.
 public func softwareDisplaySummary(_ sw: Software) -> String {
     softwareDisplaySummary(
         summary: sw.summary,

@@ -5,6 +5,11 @@ import Darwin
 import Glibc
 #endif
 
+/// One entry in the disk tree. `apparent` is the logical byte sum, `allocated`
+/// what the file system actually reserved, and `metric(allocatedSize:)` picks
+/// between them. `unreadable` marks a subtree the walk could not enter, and
+/// `mountPoint` a child on another device, so a listing can say so rather than
+/// read as a complete total.
 public final class DiskUsageNode {
     public var name: String
     public var path: String
@@ -60,6 +65,8 @@ public final class DiskUsageNode {
     }
 }
 
+/// One mounted volume as the volume list shows it: its name, where it is
+/// mounted, the device behind it, and the space figures.
 public struct DiskVolume: Equatable, Sendable {
     public var name: String
     public var rootPath: String
@@ -181,6 +188,8 @@ public enum DiskRootError: Error, Equatable, CustomStringConvertible, LocalizedE
 
 /// `disk PATH` must name a directory. A typo would otherwise print a one-line
 /// "unreadable" tree and exit 0, which reads as an empty disk.
+/// Throw unless `path` is a directory that exists, so a bad root is reported
+/// before a walk starts rather than as an unreadable node in the tree.
 public func validateDiskRoot(_ path: String) throws {
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
@@ -321,6 +330,9 @@ private func walkDiskFd(
     }
 }
 
+/// Render a tree as indented text, one line per entry. `top` keeps only the
+/// largest children of each level; pair it with `diskTreeHiddenEntries` so the
+/// cut is visible.
 public func formatDiskTree(
     _ node: DiskUsageNode,
     allocatedSize: Bool = true,
@@ -501,6 +513,8 @@ func unescapeProcMountField(_ field: String) -> String {
     return out + rest
 }
 
+/// The volumes to list, largest first. `mountsText` replaces the platform's
+/// mount table, so a caller can parse a captured one on either platform.
 public func listDiskVolumes(
     home: String = FileManager.default.homeDirectoryForCurrentUser.path,
     mountsText: String? = nil

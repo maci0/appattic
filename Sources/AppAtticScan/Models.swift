@@ -9,6 +9,8 @@ public enum LeftoverStatus: String, Codable, Sendable, Hashable, CaseIterable {
     case active
 }
 
+/// Byte and row counts a report shows. `outdated_apps` is nil when no outdated
+/// check ran, which is different from a check that ran and found nothing.
 public struct ScanTotals: Codable, Sendable {
     public let apps_installed: Int
     public let orphaned_items: Int
@@ -37,6 +39,10 @@ public struct ScanTotals: Codable, Sendable {
     }
 }
 
+/// One leftover row as it appears in JSON: a `Codable` mirror of `DataItem`,
+/// so a scan result and its cached form carry the same fields. Wire names are
+/// the field names here (`size_bytes`, `extra_paths`); read the typed values
+/// through `leftoverStatus`, `isListedLeftover`, and `totalBytes`.
 public struct LeftoverItem: Codable, Identifiable, Hashable, Sendable {
     public let name: String
     public let path: String
@@ -138,6 +144,9 @@ public func isListedLeftoverStatus(_ status: LeftoverStatus) -> Bool {
     status == .orphaned || status == .shadow
 }
 
+/// The listed-leftover test for a raw `status` string. A value this build does
+/// not know is not listed, so a newer build's status cannot show up as a row
+/// with no reason behind it.
 public func isListedLeftoverStatus(_ status: String) -> Bool {
     guard let parsed = LeftoverStatus(rawValue: status) else { return false }
     return isListedLeftoverStatus(parsed)
@@ -152,6 +161,9 @@ public func visibleOrphanedLeftovers(_ leftovers: [LeftoverItem], ignoring: Set<
     }
 }
 
+/// One installed-software row as it appears in JSON: a `Codable` mirror of
+/// `Software`. `tier` is a wire string; read it as a tier through `tierKind`,
+/// and the combined app-plus-data size through `totalBytes`.
 public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
     public let name: String
     public let kind: String
@@ -235,6 +247,10 @@ public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// One outdated row as it appears in JSON. `manager` and `kind` are wire
+/// strings; `upgradableManager` and `updatable` are the typed answers, and
+/// `displayName` is the title when the store supplied one and the name when it
+/// did not.
 public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
     public let name: String
     public let manager: String
@@ -280,6 +296,9 @@ public struct OutdatedEntry: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// True when the row has a named upgrade command. `kind` is the cask trust
+/// mark: `"untrusted"` wins over the manager, so a cask this build would not
+/// trust is report-only even though Homebrew is not.
 public func outdatedIsUpdatable(manager: String, kind: String?) -> Bool {
     if kind == "untrusted" { return false }
     return UpgradableManager(rawValue: manager) != nil
@@ -292,6 +311,9 @@ public func outdatedUpgradableManager(manager: String, kind: String?) -> Upgrada
     kind == "untrusted" ? nil : UpgradableManager(rawValue: manager)
 }
 
+/// One row from the Packages page: a distro orphan, a language global, or a
+/// container leftover. `kind` distinguishes them, and `canMarkManual` is the
+/// typed answer for whether a row can be marked manual at all.
 public struct PackageEntry: Codable, Identifiable, Hashable, Sendable {
     public let name: String
     public let manager: String
@@ -330,6 +352,10 @@ public struct PackageEntry: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// A whole scan, and the only shape a scan cache or a `--json` report carries.
+/// `outdated` and `packages` are nil when their check did not run, which is not
+/// the same as having found nothing; `incomplete` marks a scan where a check
+/// ran and failed, and such a scan is never cached.
 public struct ScanData: Codable, Sendable {
     public let scanned_at: String
     public let duration_s: Double
