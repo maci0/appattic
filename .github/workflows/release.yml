@@ -74,6 +74,15 @@ jobs:
       - name: Check the tag matches the declared version, and is not already released
         if: startsWith(github.ref, 'refs/tags/')
         run: bash scripts/check-version.sh --tag "$GITHUB_REF_NAME"
+      # The AppStream <description> is the release note. The GitHub release
+      # page is where a user reads before downloading, so it gets the same
+      # text rather than the generated commit list action-gh-release builds by
+      # default: that list is a second changelog, and it says nothing about
+      # what a caller has to change. The script exits 1 on an empty note, so a
+      # release cannot be published with a blank body.
+      - name: Take the release notes from the AppStream metainfo
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
       - name: Build AppImage
         env:
           VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
@@ -88,7 +97,7 @@ jobs:
             dist/AppAttic-x86_64.AppImage.buildinfo
             dist/AppAttic-x86_64.AppImage.sbom.json
           fail_on_unmatched_files: true
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
 
   macos-ui:
     if: false  # optional; re-enable when AppAtticUI CI build is stable

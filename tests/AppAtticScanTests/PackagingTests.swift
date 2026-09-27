@@ -470,6 +470,13 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(release.contains("linux-appimage.sh"), release)
         XCTAssertTrue(release.contains("fail_on_unmatched_files: true"), release)
         XCTAssertTrue(release.contains("concurrency:"), release)
+        // The release page carries the AppStream <description>, the one note a
+        // user gets. generate_release_notes would replace it with a commit
+        // list, which is a second changelog that never says what a caller has
+        // to change.
+        XCTAssertTrue(release.contains("body_path:"), release)
+        XCTAssertTrue(release.contains("scripts/release-notes.sh"), release)
+        XCTAssertFalse(release.contains("generate_release_notes"), release)
 
         // The Info.plist copy of the version is only safe to leave ungated
         // until it is actually gated.
@@ -483,6 +490,63 @@ final class PackagingTests: XCTestCase {
         let lint = try String(contentsOf: root.appendingPathComponent("scripts/lint.sh"), encoding: .utf8)
         XCTAssertTrue(lint.contains("check-version.sh"), lint)
         XCTAssertTrue(release.contains("check-version.sh --tag"), release)
+    }
+
+    /// The GitHub release body is the AppStream <description> of the tag, so
+    /// the script that extracts it has to print that release's notes and
+    /// nothing else: a body carrying the wrong version's migration text sends
+    /// a 1.x reader through 2.0.0 changes that do not touch them.
+    func testReleaseNotesScriptPrintsTheTaggedReleaseDescription() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let script = root.appendingPathComponent("scripts/release-notes.sh")
+
+        @discardableResult
+        func run(_ arguments: [String]) throws -> (status: Int32, out: String, err: String) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = [script.path] + arguments
+            let out = Pipe()
+            let err = Pipe()
+            process.standardOutput = out
+            process.standardError = err
+            try process.run()
+            let outData = out.fileHandleForReading.readDataToEndOfFile()
+            let errData = err.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (
+                process.terminationStatus,
+                String(data: outData, encoding: .utf8) ?? "",
+                String(data: errData, encoding: .utf8) ?? ""
+            )
+        }
+
+        // No argument: the declared version, which check-version.sh reads.
+        let current = try run([])
+        XCTAssertEqual(current.status, 0, current.err)
+        XCTAssertTrue(current.out.hasPrefix("<p>"), current.out)
+        XCTAssertTrue(current.out.contains("</p>"), current.out)
+        XCTAssertFalse(current.out.contains("<description>"), current.out)
+        XCTAssertFalse(current.out.contains("<release "), current.out)
+
+        // A named release, with or without the v the tag carries.
+        for argument in ["1.3.4", "v1.3.4"] {
+            let older = try run([argument])
+            XCTAssertEqual(older.status, 0, older.err)
+            XCTAssertTrue(older.out.contains("bundled wasmtime"), older.out)
+            // 2.0.0's flag move, so the two releases cannot be swapped.
+            XCTAssertFalse(older.out.contains("is now a usage error"), older.out)
+            XCTAssertFalse(older.out.contains("<description>"), older.out)
+        }
+
+        // A release with no note is a silent release, so the script fails
+        // rather than publishing an empty body.
+        let missing = try run(["9.9.9"])
+        XCTAssertEqual(missing.status, 1, missing.out + missing.err)
+        XCTAssertEqual(missing.out, "", missing.out)
+        XCTAssertTrue(missing.err.contains("no <description>"), missing.err)
     }
 
     func testLinuxQtLinkScriptRefusesDarwin() throws {

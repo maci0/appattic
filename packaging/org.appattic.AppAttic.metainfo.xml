@@ -48,6 +48,7 @@
         <p>A folder size could read smaller than it is: <code>du</code> exits non-zero when a path it was asked about failed, and a batched run counted the partial total it still printed as a real measurement. A bind mount that loops back into its own tree also spun the walk out to its deadline instead of finishing. Both are fixed, and Java, Gradle, Maven, and <code>.m2</code> are recognized as system paths, so they are no longer offered as leftovers. Disk usage ranks the entries in each folder by the size it prints, by apparent size unless <code>--allocated</code> asked for allocated blocks, so <code>--top N</code> no longer cuts the wrong rows.</p>
         <p>A PPA entry whose name was not a plain file name could put a path outside <code>/etc/apt/sources.list.d</code> into a generated cleanup script. Such a name is refused now, alongside the newline-injection fix above.</p>
         <p>The Linux window ships a man page: <code>man appattic-qt</code>.</p>
+        <p>The AppImage carries update information pointing at the <code>.zsync</code> published beside it, so a downloaded copy can check for a newer release with AppImageUpdate. The Flatpak did not build at all: the wasmtime headers and the zig toolchain were removed from the build before the app window needed them, and the icon and the desktop entry were renamed on top of the ids the package already had. Both build now, under one desktop id and its own icon.</p>
       </description>
     </release>
     <release version="1.3.4" date="2026-09-17">
