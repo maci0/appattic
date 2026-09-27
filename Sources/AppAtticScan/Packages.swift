@@ -751,7 +751,9 @@ func listDenoGlobals() -> [PackageEntry] {
     guard let names = try? FileManager.default.contentsOfDirectory(atPath: bin.path) else {
         return []
     }
-    return names.compactMap { name -> PackageEntry? in
+    // Sorted: readdir order varies per process, and the list is reported and
+    // written to the cache in the order it is built.
+    return names.sorted().compactMap { name -> PackageEntry? in
         if name.isEmpty || name.hasPrefix(".") || name == "deno" || name == "deno.exe" { return nil }
         return makePackage(name: name, manager: "deno", kind: "global")
     }

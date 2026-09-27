@@ -567,6 +567,9 @@ public func listDiskVolumes(
             ))
         }
     }
-    return out
+    // Sorted by mount point, the way the mount table above is read: the URL
+    // list is in readdir order, so the rows and the JSON written from them
+    // would come out in a different order on every run.
+    return out.sorted { $0.rootPath < $1.rootPath }
     #endif
 }
