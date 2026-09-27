@@ -54,7 +54,8 @@ if ! command -v yamllint >/dev/null 2>&1; then
     echo "install: uv tool install \"yamllint==$yl\"" >&2
     exit 1
 fi
-yamllint -c "$ROOT/.yamllint" "$ROOT"/.github/workflows/*.yml "$ROOT"/packaging/flatpak/*.yml
+yamllint -c "$ROOT/.yamllint" "$ROOT"/.github/*.yml "$ROOT"/.github/workflows/*.yml \
+    "$ROOT"/packaging/flatpak/*.yml
 
 echo "== dependency pins =="
 bash "$ROOT/scripts/deps.sh" check

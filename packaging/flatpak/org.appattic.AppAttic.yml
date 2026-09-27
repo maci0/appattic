@@ -87,6 +87,7 @@ modules:
           - .build
           - .deps
           - .gauntlet
+          - .scratch
           - .tmp-shots
           - .zig-cache
           - .zig-cache-local

@@ -10,6 +10,7 @@ ui/linux-qt/build-release
 .deps
 .zig-cache
 .zig-cache-local
+.scratch
 dist
 __pycache__
 *.pyc

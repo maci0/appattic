@@ -1,0 +1,9 @@
+# The workflows pin every action to a commit SHA with a `# vX.Y.Z` comment.
+# Dependabot reads both, so the pins have somewhere to come from: without this
+# a SHA rot in silence until the pinned action starts failing.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

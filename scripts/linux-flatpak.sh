@@ -61,7 +61,6 @@ if [[ -z "$ZIG_VER" ]]; then
     exit 1
 fi
 MANIFEST="$ROOT/packaging/flatpak/${APP_ID}.yml"
-BUILT_MANIFEST="$WORK/packaging/flatpak/${APP_ID}.yml"
 DIST="$ROOT/dist"
 WORK="$DIST/flatpak-work"
 STATE="$DIST/flatpak-state"
@@ -157,6 +156,7 @@ rsync -a \
     --exclude '.git/' \
     --exclude '.build/' \
     --exclude '.deps/' \
+    --exclude '.scratch/' \
     --exclude '.tmp-shots/' \
     --exclude 'AppAttic.app/' \
     --exclude 'core/out/' \
