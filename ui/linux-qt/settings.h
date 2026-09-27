@@ -14,6 +14,12 @@ struct AppSettings {
 
 QString settingsFilePath();
 
+/// The scan snapshot the CLI and the macOS UI reuse, under the same data
+/// directory. This UI does not read or write it, but it deletes what the
+/// snapshot describes, so it has to drop it.
+QString scanCacheFilePath();
+bool removeScanCacheFile(const QString &path);
+
 /// Read a boolean out of a legacy QSettings value. A value that is not a
 /// boolean sets `*readable` to false and leaves the answer at `fallback`; the
 /// caller reports it instead of writing the fallback back as the user's

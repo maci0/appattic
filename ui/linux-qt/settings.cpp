@@ -1,6 +1,7 @@
 #include "settings.h"
 
 #include <QDir>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -15,6 +16,23 @@
 QString settingsFilePath() {
     return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
         .filePath(QStringLiteral("appattic/settings.json"));
+}
+
+QString scanCacheFilePath() {
+    return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
+        .filePath(QStringLiteral("appattic/last-scan.json"));
+}
+
+/// Drop the scan snapshot the CLI and the macOS UI reuse. This UI scans live and
+/// keeps no snapshot of its own, but the two are the same file, so a cleanup
+/// that removes files or changes package state has to invalidate it here too:
+/// the fingerprint in it does not move when a file inside a scanned directory
+/// is deleted, so the next CLI run would otherwise serve rows for items that
+/// are already gone. Absent is the wanted state, so a file that is not there is
+/// not a failure.
+bool removeScanCacheFile(const QString &path) {
+    if (path.isEmpty() || !QFile::exists(path)) return true;
+    return QFile::remove(path);
 }
 
 bool legacyBoolValue(const QVariant &value, bool fallback, bool *readable) {

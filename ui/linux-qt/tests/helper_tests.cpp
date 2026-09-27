@@ -1073,6 +1073,42 @@ static int checkDiskUsage() {
     return 0;
 }
 
+static int checkScanCache() {
+    /* The path has to be the one the CLI and the macOS UI write, or dropping
+       it here leaves their snapshot in place. */
+    const QString path = scanCacheFilePath();
+    if (!path.endsWith(QLatin1String("appattic/last-scan.json"))) {
+        std::fprintf(stderr, "scan cache: unexpected path (%s)\n", qPrintable(path));
+        return 1;
+    }
+    if (QFileInfo(path).dir() != QFileInfo(settingsFilePath()).dir()) {
+        std::fprintf(stderr, "scan cache: not beside the settings file\n");
+        return 1;
+    }
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "scan cache: temp dir failed\n");
+        return 1;
+    }
+    const QString file = tmp.filePath(QStringLiteral("last-scan.json"));
+    /* A snapshot that is not there is the state a cleanup wants, so removing
+       one that was never written cannot report failure. */
+    if (!removeScanCacheFile(file)) {
+        std::fprintf(stderr, "scan cache: removing a missing file failed\n");
+        return 1;
+    }
+    if (writeFile(file, QByteArray("{}"))) {
+        std::fprintf(stderr, "scan cache: write failed\n");
+        return 1;
+    }
+    if (!removeScanCacheFile(file) || QFile::exists(file)) {
+        std::fprintf(stderr, "scan cache: file survived removal\n");
+        return 1;
+    }
+    std::fprintf(stdout, "scan cache: ok\n");
+    return 0;
+}
+
 static int checkSettings() {
     // A legacy value that is not a boolean must not become the default: the
     // migration would write that default back as the user's setting.
@@ -1131,7 +1167,7 @@ static int checkSettings() {
 int main() {
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
-        checkDiskUsage(), checkSettings(),
+        checkDiskUsage(), checkScanCache(), checkSettings(),
     };
     for (const int rc : checks) {
         if (rc != 0) return rc;

@@ -2968,6 +2968,13 @@ private:
             m_scanning = false;
             m_rescan->setEnabled(true);
             if (m_scanBar) m_scanBar->hide();
+            /* The script removed files, upgraded packages, or changed install
+               state, on every outcome: a failure part-way through ran the lines
+               before it. The CLI and the macOS UI reuse one scan snapshot, and
+               its inventory stamp does not move for a file deleted inside a
+               scanned directory, so it is dropped here rather than left to serve
+               rows for what the script just removed. */
+            removeScanCacheFile(scanCacheFilePath());
             if (code != 0) {
                 appendScriptOutput(proc->readAll());
                 QString err = redactHomePaths(QString::fromUtf8(m_scriptOutput).trimmed());
