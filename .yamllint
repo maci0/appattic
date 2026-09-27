@@ -7,6 +7,16 @@ rules:
   # `on:` is the correct key in a GitHub workflow, not a boolean typo.
   truthy:
     check-keys: false
+  # A duplicated mapping key is not a syntax error: yamllint's parser and
+  # GitHub both take the last one and drop the first, so a workflow that sets
+  # `permissions` twice, or an `on:` branch written after a second `on:`, reads
+  # as a merge that silently narrowed or widened itself. The default set leaves
+  # the rule off, so it is enabled here.
+  key-duplicates: enable
+  # YAML 1.1 reads a leading-zero integer as octal, so `port: 0755` is 493.
+  # The default set leaves the rule off and nothing else in this tree would
+  # notice the difference.
+  octal-values: enable
   comments:
     min-spaces-from-content: 1
   document-start: disable

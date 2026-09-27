@@ -38,6 +38,8 @@ EOF
             echo "Usage: bash scripts/verify-qt-link.sh [release|debug|path/to/LINUX_QT_LINK.txt]" >&2
             exit 2
             ;;
+        # A bare word names the proof, resolved above.
+        *) ;;
     esac
 done
 

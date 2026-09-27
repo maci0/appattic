@@ -56,12 +56,11 @@ fi
 # The optional checks are off unless named, and --enable=optional does not name
 # them: shellcheck lists each by name, and the group keyword is not a list of
 # them. So the ones the tree passes are named one by one below. The rest stay
-# off because the tree does not pass them: the default case arm (SC2249, 8
-# findings) wants a branch in every case statement, masked return (SC2312) and
-# suppressed set -e (SC2310) want 106 and 79 rewrites, and ${var} braces
+# off because the tree does not pass them: masked return (SC2312) and
+# suppressed set -e (SC2310) want 115 and 79 rewrites, and ${var} braces
 # (SC2250) and [[ ]] (SC2292) are the two style rewrites, at 1390 and 29.
 shellcheck -x -P SCRIPTDIR \
-    --enable=avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat \
+    --enable=add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat \
     "${shell_files[@]}"
 
 # One declared version, three copies to keep in step (AppStream release,

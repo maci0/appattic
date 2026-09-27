@@ -105,6 +105,7 @@ exec_name="$(desktop_value Exec)"
 [[ -n "$exec_name" ]] || fail "$DESKTOP has no Exec="
 case "$exec_name" in
     */*) fail "$DESKTOP Exec=$exec_name is a path; a desktop entry names a binary on PATH" ;;
+    *) ;;  # a bare name, checked against the install rules below
 esac
 grep -qE "install\(TARGETS[[:space:]]+${exec_name}[[:space:]]" "$CMAKE" \
     || fail "$DESKTOP runs $exec_name, which $CMAKE does not install"

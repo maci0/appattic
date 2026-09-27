@@ -52,6 +52,8 @@ EOF
         echo "       bash scripts/release-notes.sh --help" >&2
         exit 2
         ;;
+    # A bare word is the release to report, read below.
+    *) ;;
 esac
 
 version="${1:-$(bash "$_script_dir/check-version.sh")}"

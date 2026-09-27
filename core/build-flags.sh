@@ -35,6 +35,10 @@ appattic_host_flags() {
                 aarch64|arm64)
                     cc_cflags+=(-mbranch-protection=standard)
                     ;;
+                *)
+                    # An architecture with no branch-protection flag named for
+                    # it still gets -fstack-clash-protection and the rest.
+                    ;;
             esac
             ;;
         Darwin)

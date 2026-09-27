@@ -353,6 +353,20 @@ check_version_anchors() {
                 [[ "$version" == "$swift_version" ]] \
                     || fail "$name pins $version, .swift-version says $swift_version"
                 ;;
+            wasmtime-*.tar.xz)
+                # Wasmtime has no version file in the tree. Its anchor is the
+                # table's own last column, checked by the version-in-tree
+                # scan below and by the checksum file.
+                ;;
+            *)
+                # A family with no version file is pinned by the shell
+                # assignment in the last column, and that assignment is what
+                # a script or workflow fetching the artifact reads. An empty
+                # one means nothing states where this version comes from, and
+                # a new family would reach this loop with no arm at all.
+                [[ -n "$anchor" ]] \
+                    || fail "$name is in the artifact table with an empty version anchor; give it one or name a version file"
+                ;;
         esac
     done <<<"$ARTIFACTS"
 }
@@ -388,6 +402,11 @@ check_artifact_versions_in_tree() {
                     name_version="${name_version%%-*}"
                     [[ "$name_version" == "$wasmtime" ]] \
                         || fail "${manifest#"$ROOT"/}: $found, the table pins $wasmtime"
+                    ;;
+                *)
+                    # A pinned name this scan cannot read a version out of, so
+                    # a stale repeat of it would pass unnoticed.
+                    fail "${manifest#"$ROOT"/}: $found matches no artifact name in the table; the scan cannot read a version from it"
                     ;;
             esac
         done < <(grep -rhoE '(zig|wasmtime)[a-zA-Z0-9._-]*\.tar\.xz' "$manifest" || true)

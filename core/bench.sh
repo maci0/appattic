@@ -26,6 +26,9 @@ EOF
         echo "       $0 --help" >&2
         exit 2
         ;;
+    *)
+        # A bare word is the benchmark filter, read below.
+        ;;
 esac
 # Only the first argument is the filter; a second one used to be dropped in
 # silence, so a mistyped pair of filters ran every benchmark.

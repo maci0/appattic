@@ -157,6 +157,8 @@ detect_jobs() {
     fi
     case "$n" in
         ''|*[!0-9]*) n=1 ;;
+        # A plain count: nproc's own answer, or APPATTIC_BUILD_JOBS.
+        *) ;;
     esac
     if [ "$n" -gt 2 ]; then
         printf '%s\n' "$((n - 1))"
@@ -301,6 +303,8 @@ fi
 # hostexec_test is proof-only; Linux needs fixtures (Darwin defaults in hostexec.c).
 case "$(uname -s)" in
     Linux) export APPATTIC_HOST_EXEC_FIXTURE=1 ;;
+    # Elsewhere hostexec.c picks the fixture default itself.
+    *) ;;
 esac
 
 # The C host flags, resolved against the tree being built.
