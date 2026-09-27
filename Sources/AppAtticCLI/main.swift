@@ -392,15 +392,7 @@ func runShellScript(_ script: String) -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [url.path]
-        var env = ProcessInfo.processInfo.environment
-        let extras = cleanupPathDirectories()
-        var seen = Set<String>()
-        var parts: [String] = []
-        for dir in extras + (env["PATH"] ?? "").split(separator: ":").map(String.init) {
-            if !dir.isEmpty, seen.insert(dir).inserted { parts.append(dir) }
-        }
-        env["PATH"] = parts.joined(separator: ":")
-        process.environment = env
+        process.environment = augmentedProcessEnvironment()
         try process.run()
         process.waitUntilExit()
         return process.terminationStatus

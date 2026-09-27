@@ -787,6 +787,23 @@ public func cleanupPathDirectories(home: String = FileManager.default.homeDirect
     ]
 }
 
+/// Process environment with `cleanupPathDirectories()` prepended to PATH,
+/// de-duplicated and first-wins.
+public func augmentedProcessEnvironment(
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> [String: String] {
+    var out = env
+    var seen = Set<String>()
+    var parts: [String] = []
+    for dir in cleanupPathDirectories() + (env["PATH"] ?? "").split(separator: ":").map(String.init) {
+        if !dir.isEmpty, seen.insert(dir).inserted {
+            parts.append(dir)
+        }
+    }
+    out["PATH"] = parts.joined(separator: ":")
+    return out
+}
+
 /// ASCII substring search without bridging to CFStringFind (`String.contains`
 /// costs ~1 µs via ICU + retain churn; this is ~20 ns). Exact: the fast path
 /// runs only when BOTH sides are fully ASCII (ICU literal search is byte-exact

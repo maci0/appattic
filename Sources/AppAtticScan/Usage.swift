@@ -63,16 +63,21 @@ public func flatpakVarAppPath() -> String {
     (FileManager.default.homeDirectoryForCurrentUser.path as NSString).appendingPathComponent(".var/app")
 }
 
+/// Keeps the newest timestamp seen for a lowercased, trimmed key.
+func recordNewest(_ key: String, _ dt: Date, into hits: inout [String: Date]) {
+    let k = posixLowercased(key.trimmingCharacters(in: .whitespaces))
+    if k.isEmpty { return }
+    if let prev = hits[k], prev >= dt { return }
+    hits[k] = dt
+}
+
 final class XbelSink: NSObject, XMLParserDelegate {
     var hits: [String: Date] = [:]
     var bookmarkDate: Date?
 
     func record(_ key: String?, _ dt: Date?) {
         guard let key, let dt else { return }
-        let k = posixLowercased(key.trimmingCharacters(in: .whitespaces))
-        if k.isEmpty { return }
-        if let prev = hits[k], prev >= dt { return }
-        hits[k] = dt
+        recordNewest(key, dt, into: &hits)
     }
 
     func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?, qualifiedName qName: String?, attributes: [String: String] = [:]) {
@@ -106,10 +111,7 @@ final class GnomeStateSink: NSObject, XMLParserDelegate {
     var hits: [String: Date] = [:]
 
     func record(_ key: String, _ dt: Date) {
-        let k = posixLowercased(key.trimmingCharacters(in: .whitespaces))
-        if k.isEmpty { return }
-        if let prev = hits[k], prev >= dt { return }
-        hits[k] = dt
+        recordNewest(key, dt, into: &hits)
     }
 
     func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?, qualifiedName qName: String?, attributes: [String: String] = [:]) {

@@ -174,7 +174,7 @@ public func applyUntrustedCasks(_ pkgs: [OutdatedPkg], refused: [UntrustedCask])
         if let existing = out.first(where: { $0.manager == "brew-cask" && $0.name.lowercased() == key }) {
             existing.kind = "untrusted"
             existing.reason = untrustedCaskReason(u)
-            if existing.summary == nil || existing.summary?.isEmpty == true {
+            if existing.summary?.isEmpty ?? true {
                 existing.summary = untrustedCaskSummary(u)
             }
         } else {
@@ -337,11 +337,11 @@ public func attachSummaries(
     titles: [String: String] = [:]
 ) {
     for p in pkgs {
-        if p.summary == nil || p.summary?.isEmpty == true {
+        if p.summary?.isEmpty ?? true {
             let text = (summaries[p.name] ?? "").trimmingCharacters(in: .whitespaces)
             if !text.isEmpty { p.summary = text }
         }
-        if p.title == nil || p.title?.isEmpty == true {
+        if p.title?.isEmpty ?? true {
             let text = (titles[p.name] ?? "").trimmingCharacters(in: .whitespaces)
             if !text.isEmpty, text.lowercased() != p.name.lowercased() {
                 p.title = text

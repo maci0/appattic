@@ -423,6 +423,18 @@ pub fn run(cmd: []const u8, out: []u8) i32 {
     return nativeRun(cmd, out);
 }
 
+/// Run the first of `cmds` the host answers, reporting which one ran.
+pub fn runFirst(buf: []u8, cmds: []const []const u8, used: *[]const u8) i32 {
+    for (cmds) |cmd| {
+        const n = run(cmd, buf);
+        if (n >= 0) {
+            used.* = cmd;
+            return n;
+        }
+    }
+    return fail;
+}
+
 test "native fixture routes apt pacman snap ls dnf zypper flatpak npm pnpm bun pipx pip uv brew gem composer docker" {
     var buf: [2048]u8 = undefined;
     const a = run("apt-get -s autoremove", &buf);

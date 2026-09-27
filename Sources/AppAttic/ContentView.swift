@@ -515,17 +515,8 @@ struct ContentView: View {
             ) {
                 ForEach(rows, id: \.path) { item in
                     let on = selectedPath == item.path
-                    VStack(spacing: 0) {
+                    selectableRow(selected: on, onTap: { leftoverSel = item.path }) {
                         compactLeftoverRow(item, selected: on)
-                            .padding(.horizontal, 12)
-                            .frame(height: 28)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(on ? Color.appBlue : Color.clear)
-                        HRule()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .onTapGesture {
-                        leftoverSel = item.path
                     }
                 }
             }
@@ -560,17 +551,8 @@ struct ContentView: View {
             ) {
                 ForEach(rows, id: \.path) { item in
                     let on = selectedPath == item.path
-                    VStack(spacing: 0) {
+                    selectableRow(selected: on, onTap: { staleSel = item.path }) {
                         compactStaleRow(item, selected: on)
-                            .padding(.horizontal, 12)
-                            .frame(height: 28)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(on ? Color.appBlue : Color.clear)
-                        HRule()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .onTapGesture {
-                        staleSel = item.path
                     }
                 }
             }
@@ -603,17 +585,8 @@ struct ContentView: View {
             ) {
                 ForEach(rows, id: \.id) { item in
                     let on = selectedId == item.id
-                    VStack(spacing: 0) {
+                    selectableRow(selected: on, onTap: { outdatedSel = item.id }) {
                         compactOutdatedRow(item, selected: on)
-                            .padding(.horizontal, 12)
-                            .frame(height: 28)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(on ? Color.appBlue : Color.clear)
-                        HRule()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .onTapGesture {
-                        outdatedSel = item.id
                     }
                 }
             }
@@ -667,17 +640,8 @@ struct ContentView: View {
             ) {
                 ForEach(rows, id: \.id) { item in
                     let on = selectedId == item.id
-                    VStack(spacing: 0) {
+                    selectableRow(selected: on, onTap: { packageSel = item.id }) {
                         compactPackageRow(item, selected: on)
-                            .padding(.horizontal, 12)
-                            .frame(height: 28)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(on ? Color.appBlue : Color.clear)
-                        HRule()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .onTapGesture {
-                        packageSel = item.id
                     }
                 }
             }
@@ -708,6 +672,23 @@ struct ContentView: View {
         case .all:
             return "No distro orphans or language globals. Missing package managers simply have nothing to list."
         }
+    }
+
+    func selectableRow<Row: View>(
+        selected: Bool,
+        onTap: @escaping () -> Void,
+        @ViewBuilder row: () -> Row
+    ) -> some View {
+        VStack(spacing: 0) {
+            row()
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(selected ? Color.appBlue : Color.clear)
+            HRule()
+        }
+        .frame(maxWidth: .infinity)
+        .onTapGesture(perform: onTap)
     }
 
     func listPane<Header: View, Rows: View>(
@@ -828,13 +809,17 @@ struct ContentView: View {
         .frame(height: 40)
     }
 
+    func rowMarkCell(_ marked: Bool, selected: Bool) -> some View {
+        Text(marked ? "in" : "")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(selected ? Color.appOnAccent : Color.appBlue)
+            .frame(width: Col.mark, alignment: .leading)
+    }
+
     func compactLeftoverRow(_ item: LeftoverItem, selected: Bool) -> some View {
         let marked = vm.selectedLeftovers.contains(item.path)
         return HStack(spacing: 8) {
-            Text(marked ? "in" : "")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(selected ? Color.appOnAccent : Color.appBlue)
-                .frame(width: Col.mark, alignment: .leading)
+            rowMarkCell(marked, selected: selected)
             Text(leftoverName(item))
                 .font(.system(size: 13))
                 .foregroundColor(selected ? Color.appOnAccent : leftoverNameColor(item))
@@ -860,10 +845,7 @@ struct ContentView: View {
         let marked = selectable && vm.selectedApps.contains(item.path)
         let status = item.outdated == true ? "\(displayTier(item.tier)) · out" : displayTier(item.tier)
         return HStack(spacing: 8) {
-            Text(marked ? "in" : "")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(selected ? Color.appOnAccent : Color.appBlue)
-                .frame(width: Col.mark, alignment: .leading)
+            rowMarkCell(marked, selected: selected)
             Text(item.name)
                 .font(.system(size: 13))
                 .foregroundColor(rowPrimary(selected))
@@ -893,10 +875,7 @@ struct ContentView: View {
             ver = "\(item.current_version ?? "-") → \(item.latest_version ?? "?")"
         }
         return HStack(spacing: 8) {
-            Text(marked ? "in" : "")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(selected ? Color.appOnAccent : Color.appBlue)
-                .frame(width: Col.mark, alignment: .leading)
+            rowMarkCell(marked, selected: selected)
             Text(item.displayName)
                 .font(.system(size: 13))
                 .foregroundColor(rowPrimary(selected))
@@ -918,10 +897,7 @@ struct ContentView: View {
         let kind = item.kind == "global" ? "Global" : "Orphan"
         let kindColor = item.kind == "global" ? Color.appYellow : Color.appRed
         return HStack(spacing: 8) {
-            Text(marked ? "in" : "")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(selected ? Color.appOnAccent : Color.appBlue)
-                .frame(width: Col.mark, alignment: .leading)
+            rowMarkCell(marked, selected: selected)
             Text(item.name)
                 .font(.system(size: 13))
                 .foregroundColor(rowPrimary(selected))

@@ -169,18 +169,6 @@ fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager:
     return true;
 }
 
-fn runQuery(buf: []u8, cmds: []const []const u8, used: *[]const u8) i32 {
-    for (cmds) |cmd| {
-        const n = host_exec.run(cmd, buf);
-        note.add(cmd, n);
-        if (n >= 0) {
-            used.* = cmd;
-            return n;
-        }
-    }
-    return host_exec.fail;
-}
-
 fn query_impl(present: i32) i32 {
     note = .{};
     if (present == 0) {
@@ -191,13 +179,13 @@ fn query_impl(present: i32) i32 {
     var orphans: [128]DnfOrphan = undefined;
     var n_orph: usize = 0;
     var used_q: []const u8 = query_cmds[0];
-    const nexec = runQuery(&exec_buf, &query_cmds, &used_q);
+    const nexec = host_exec.runFirst(&exec_buf, &query_cmds, &used_q);
     if (nexec >= 0) n_orph = parseDnfUnneeded(exec_buf[0..@intCast(nexec)], &orphans);
 
     var outdated: [128]DnfOutdated = undefined;
     var n_out: usize = 0;
     var used_u: []const u8 = outdated_cmds[0];
-    const nq = runQuery(&exec_up_buf, &outdated_cmds, &used_u);
+    const nq = host_exec.runFirst(&exec_up_buf, &outdated_cmds, &used_u);
     if (nq >= 0) n_out = parseDnfUpgrades(exec_up_buf[0..@intCast(nq)], &outdated);
 
     const mgr = if (nexec >= 0) managerFromCmd(used_q) else managerFromCmd(used_u);

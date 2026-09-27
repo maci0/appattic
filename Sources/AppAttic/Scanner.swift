@@ -461,7 +461,7 @@ final class ScannerViewModel {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/sh")
                 process.arguments = [url.path]
-                process.environment = Self.augmentedEnvironment()
+                process.environment = augmentedProcessEnvironment()
                 process.standardOutput = FileHandle.nullDevice
                 process.standardError = errHandle
                 process.standardInput = FileHandle.nullDevice
@@ -504,19 +504,5 @@ final class ScannerViewModel {
                 }
             }
         }
-    }
-
-    nonisolated private static func augmentedEnvironment() -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
-        let extras = cleanupPathDirectories()
-        var seen = Set<String>()
-        var parts: [String] = []
-        for dir in extras + (env["PATH"] ?? "").split(separator: ":").map(String.init) {
-            if !dir.isEmpty, seen.insert(dir).inserted {
-                parts.append(dir)
-            }
-        }
-        env["PATH"] = parts.joined(separator: ":")
-        return env
     }
 }

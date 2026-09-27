@@ -77,18 +77,6 @@ fn renderAur(outdated: []const AurOutdated, helper: []const u8) bool {
     return true;
 }
 
-fn runQuery(buf: []u8, cmds: []const []const u8, used: *[]const u8) i32 {
-    for (cmds) |cmd| {
-        const n = host_exec.run(cmd, buf);
-        note.add(cmd, n);
-        if (n >= 0) {
-            used.* = cmd;
-            return n;
-        }
-    }
-    return host_exec.fail;
-}
-
 fn query_impl(present: i32) i32 {
     note = .{};
     if (present == 0) {
@@ -99,7 +87,7 @@ fn query_impl(present: i32) i32 {
     var outdated: [128]AurOutdated = undefined;
     var used: []const u8 = outdated_cmds[0];
     var n_out: usize = 0;
-    const nq = runQuery(&exec_up_buf, &outdated_cmds, &used);
+    const nq = host_exec.runFirst(&exec_up_buf, &outdated_cmds, &used);
     if (nq >= 0) n_out = parseAurQua(exec_up_buf[0..@intCast(nq)], &outdated);
     while (true) {
         if (renderAur(outdated[0..n_out], helperFromCmd(used))) return 0;

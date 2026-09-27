@@ -529,6 +529,21 @@ public func parseDesktopFile(_ path: String, sourceDir: String = "") -> AppRecor
     )
 }
 
+private func finishAppDiscovery(_ apps: inout [AppRecord], seen: inout Set<String>, progress: (String) -> Void) {
+    progress("  · discovering Steam games…")
+    appendSteamApps(&apps, seen: &seen)
+    appendCrossOverBottles(&apps, seen: &seen)
+    progress("  · measuring sizes for \(apps.count) apps…")
+    let sizes = duSizes(apps.filter { !skipLiveDu($0) }.map(\.path))
+    for i in apps.indices {
+        if skipLiveDu(apps[i]) { continue }
+        let pair = sizes[apps[i].path] ?? (0, false)
+        apps[i].sizeBytes = pair.0
+        apps[i].sizeMeasured = pair.1
+    }
+    apps.sort { $0.displayName.lowercased() < $1.displayName.lowercased() }
+}
+
 public func findApps(progress: (String) -> Void = { _ in }) -> [AppRecord] {
     if PlatformOverride.isLinux {
         return findLinuxApps(progress: progress)
@@ -552,19 +567,7 @@ func findLinuxApps(progress: (String) -> Void, desktopDirs: [String]? = nil) -> 
             if seen.insert(key).inserted { apps.append(app) }
         }
     }
-    progress("  · discovering Steam games…")
-    appendSteamApps(&apps, seen: &seen)
-    appendCrossOverBottles(&apps, seen: &seen)
-    progress("  · measuring sizes for \(apps.count) apps…")
-    let needSizes = apps.filter { !skipLiveDu($0) }.map(\.path)
-    let sizes = duSizes(needSizes)
-    for i in apps.indices {
-        if skipLiveDu(apps[i]) { continue }
-        let pair = sizes[apps[i].path] ?? (0, false)
-        apps[i].sizeBytes = pair.0
-        apps[i].sizeMeasured = pair.1
-    }
-    apps.sort { $0.displayName.lowercased() < $1.displayName.lowercased() }
+    finishAppDiscovery(&apps, seen: &seen, progress: progress)
     return apps
 }
 
@@ -603,19 +606,7 @@ func findMacApps(progress: (String) -> Void) -> [AppRecord] {
         if seen.insert(p).inserted { paths.append(p) }
     }
     var apps = pmap(paths, workers: 16) { makeApp(from: $0) }.compactMap { $0 }
-    progress("  · discovering Steam games…")
-    appendSteamApps(&apps, seen: &seen)
-    appendCrossOverBottles(&apps, seen: &seen)
-    progress("  · measuring sizes for \(apps.count) apps…")
-    let needSizes = apps.filter { !skipLiveDu($0) }.map(\.path)
-    let sizes = duSizes(needSizes)
-    for i in apps.indices {
-        if skipLiveDu(apps[i]) { continue }
-        let pair = sizes[apps[i].path] ?? (0, false)
-        apps[i].sizeBytes = pair.0
-        apps[i].sizeMeasured = pair.1
-    }
-    apps.sort { $0.displayName.lowercased() < $1.displayName.lowercased() }
+    finishAppDiscovery(&apps, seen: &seen, progress: progress)
     return apps
 }
 

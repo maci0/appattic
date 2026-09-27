@@ -1668,10 +1668,9 @@ func enclosingAppBundle(_ path: String) -> String? {
     return nil
 }
 
-public func appsFromPathBinaries(dirs: [String]? = nil) -> [AppRecord] {
+private func executableToolEntries(in dirs: [String]?) -> [(name: String, path: String)] {
     let fm = FileManager.default
-    var out: [AppRecord] = []
-    var seen = Set<String>()
+    var out: [(name: String, path: String)] = []
     for dir in dirs ?? defaultUserToolDirs() {
         guard let names = try? fm.contentsOfDirectory(atPath: dir) else { continue }
         for name in names where !name.hasPrefix(".") {
@@ -1679,10 +1678,19 @@ public func appsFromPathBinaries(dirs: [String]? = nil) -> [AppRecord] {
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { continue }
             guard fm.isExecutableFile(atPath: path) else { continue }
-            let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-            guard let bundle = enclosingAppBundle(real), seen.insert(bundle).inserted else { continue }
-            if let app = makeApp(from: bundle) { out.append(app) }
+            out.append((name, path))
         }
+    }
+    return out
+}
+
+public func appsFromPathBinaries(dirs: [String]? = nil) -> [AppRecord] {
+    var out: [AppRecord] = []
+    var seen = Set<String>()
+    for entry in executableToolEntries(in: dirs) {
+        let real = URL(fileURLWithPath: entry.path).resolvingSymlinksInPath().path
+        guard let bundle = enclosingAppBundle(real), seen.insert(bundle).inserted else { continue }
+        if let app = makeApp(from: bundle) { out.append(app) }
     }
     return out
 }
@@ -1692,18 +1700,10 @@ public func listUserToolNames(
     which: WhichFn = whichCommand,
     sdkDirs: [String]? = nil
 ) -> [String] {
-    let fm = FileManager.default
     var out: [String] = []
     var seen = Set<String>()
-    for dir in dirs ?? defaultUserToolDirs() {
-        guard let names = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-        for name in names where !name.hasPrefix(".") {
-            let path = (dir as NSString).appendingPathComponent(name)
-            var isDir: ObjCBool = false
-            if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { continue }
-            guard fm.isExecutableFile(atPath: path) else { continue }
-            if seen.insert(name).inserted { out.append(name) }
-        }
+    for entry in executableToolEntries(in: dirs) where seen.insert(entry.name).inserted {
+        out.append(entry.name)
     }
     for extra in ["wine", "docker"] {
         if which(extra) != nil, seen.insert(extra).inserted { out.append(extra) }
