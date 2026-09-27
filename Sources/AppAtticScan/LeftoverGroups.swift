@@ -29,8 +29,13 @@ public func groupOrphanedLeftovers(_ items: [DataItem]) -> [DataItem] {
     for item in items {
         let id = ObjectIdentifier(item)
         if consumed.contains(id) { continue }
-        let key = ownerOf[id] ?? leftoverGroupKey(item.name)
-        if item.leftoverStatus == .orphaned, item.rootLabel != "LaunchAgents", mergeKeys.contains(key),
+        // The key is only ever read on the branch that merges a bucket, so an
+        // item that cannot join one (owned, system, LaunchAgent) does not
+        // re-derive a group key it would discard: `leftoverGroupKey` runs
+        // `entryLabel` and `norm` per call, and most rows of a real list are
+        // not orphaned.
+        if item.leftoverStatus == .orphaned, item.rootLabel != "LaunchAgents",
+           let key = ownerOf[id] ?? leftoverGroupKey(item.name), mergeKeys.contains(key),
            let group = buckets[key]
         {
             out.append(mergeOrphanGroup(group))

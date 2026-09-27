@@ -496,13 +496,16 @@ public final class Identity {
         {
             return ("system", nil)
         }
-        if let vendor = vendorFromBid(b),
+        // One `vendorFromBid` for both tests: it lowercases, splits and folds
+        // the whole id, and this runs once per bundle id in a leftover root.
+        let vendor = vendorFromBid(b)
+        if let vendor,
            affinity.contains(vendor) || names.contains(vendor) || stems.contains(vendor) || brewNames.contains(vendor) {
             return ("owned", nil)
         }
         let last = labels.last ?? ""
         let lastN = norm(last)
-        if vendorFromBid(b) == nil, !isGenericOwnerToken(last) {
+        if vendor == nil, !isGenericOwnerToken(last) {
             if shortIds.contains(last) || bundleIds.contains(last) {
                 return ("owned", appByBid[last] ?? appByBid[b])
             }
