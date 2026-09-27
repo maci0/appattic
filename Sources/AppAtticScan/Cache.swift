@@ -77,18 +77,25 @@ public func readScanCache(
     }
     // JSONSerialization first, the way `readSettings` reads the settings file.
     // The Swift `JSONDecoder` some Foundation versions ship unwraps every
-    // object key with `try!` — "Failing to unwrap a string here is impossible,
-    // as scanning already guarantees that dictionary keys are strings" — while
-    // the scanner leaves two checks to that unwrap: an unescaped control
-    // character in a string, and a string region that is not valid UTF-8. A key
+    // string with `try!` — "Failing to unwrap a string here is impossible, as
+    // scanning already guarantees that dictionary keys are strings" — while the
+    // scanner leaves two checks to that unwrap: an unescaped control character
+    // in a string, and a string region that is not valid UTF-8. A string
     // holding either one aborts the process instead of throwing, and the cache
     // is a file anything running as the account can write. The serialization
-    // reports malformed input as an error, so the decoder below only ever sees
-    // a document whose failures it can throw.
+    // reports malformed input as an error, and where it does not — a raw
+    // control character in a *value* is one it hands back as it found it — the
+    // scan below does, so the decoder only ever sees a document whose failures
+    // it can throw.
     do {
         _ = try JSONSerialization.jsonObject(with: raw)
     } catch {
         throw AppAtticIOError.decodeFailed(path: url.path, message: "not valid JSON")
+    }
+    guard jsonHasNoControlCharacterInString(raw) else {
+        throw AppAtticIOError.decodeFailed(
+            path: url.path, message: "not valid JSON: control character in a string"
+        )
     }
     do {
         return try JSONDecoder().decode(ScanCacheFile.self, from: raw)

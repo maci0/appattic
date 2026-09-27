@@ -117,17 +117,19 @@ final class CacheTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
-    /// The two malformed strings the Swift `JSONDecoder` some Foundation
-    /// versions ship trap on rather than throw for: its keyed container
-    /// unwraps each object key with `try!` and the scanner leaves the
-    /// unescaped-control-character and invalid-UTF-8 checks to that unwrap. A
-    /// cache is a file anything running as the account can write, so a key
-    /// holding either one has to come back as a dropped file and not as a dead
-    /// process.
-    func testCacheKeyTheDecoderWouldTrapOnIsDropped() throws {
+    /// The malformed strings the Swift `JSONDecoder` some Foundation versions
+    /// ship trap on rather than throw for: its string unwrap is a `try!` and the
+    /// scanner leaves the unescaped-control-character and invalid-UTF-8 checks
+    /// to it. A cache is a file anything running as the account can write, so a
+    /// key *or a value* holding either one has to come back as a dropped file
+    /// and not as a dead process — `JSONSerialization` reports the key spellings
+    /// itself and on macOS hands the value spelling straight back.
+    func testCacheStringsTheDecoderWouldTrapOnAreDropped() throws {
         let inputs: [(what: String, bytes: Data)] = [
             ("a raw newline in a key", Data("{\"fingerpr\nnt\":1}".utf8)),
             ("invalid UTF-8 in a key", Data([0x7B, 0x22, 0x66, 0xFF, 0x22, 0x3A, 0x31, 0x7D])),
+            ("a raw newline in a value", Data("{\"fingerprint\":\"ver:1.0.0\neval:20\"}".utf8)),
+            ("a raw tab in a value", Data("{\"fingerprint\":\"ver:1.0.0\teval:20\"}".utf8)),
         ]
         for (what, bytes) in inputs {
             let url = FileManager.default.temporaryDirectory

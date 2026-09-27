@@ -282,6 +282,13 @@ public func loadSettings(from url: URL = defaultSettingsURL()) throws -> AppAtti
     } catch {
         throw SettingsError.invalid(path: path, reason: "not valid JSON")
     }
+    // The decoder's string unwrap is a `try!` for the control characters
+    // scanning leaves it, and the serialization above hands a *value* holding
+    // one back as it found it. The settings file is written by hand, so this is
+    // the reader most likely to meet one. See `jsonHasNoControlCharacterInString`.
+    guard jsonHasNoControlCharacterInString(raw) else {
+        throw SettingsError.invalid(path: path, reason: "not valid JSON: control character in a string")
+    }
     guard let dict = obj as? [String: Any] else {
         throw SettingsError.invalid(path: path, reason: "root must be a JSON object")
     }
