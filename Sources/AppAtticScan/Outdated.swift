@@ -423,7 +423,13 @@ private func flatpakRows(_ text: String) -> [String: (String?, String?, String?)
                 return tokSub(raw, u, (ts, te))
             }
             let key = sub(bounds[0])
-            guard !key.isEmpty else { return nil }
+            // The first field is an application id, and an id carries no
+            // whitespace. A line whose id does (the tab in front of it was
+            // deleted, or the line was not a table row at all) is refused
+            // rather than indexed: the key reaches the report and the
+            // `flatpak update` command, where a carriage return rewrites the
+            // line it is printed on.
+            guard !key.isEmpty, !key.utf8.contains(where: hxSpace) else { return nil }
             // Extra fields fold into the summary: the old code joined the
             // (empty-dropped, untrimmed) parts[3...] with "\t", then trimmed.
             // Non-nil whenever a 4th field exists, even if it trims to "".
