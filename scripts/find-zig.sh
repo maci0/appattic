@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# shellcheck disable=SC2154  # ROOT is set by every script that sources this one
 # Sourced by core/build.sh, core/bench.sh, scripts/lint.sh, scripts/check.sh,
 # scripts/linux-qt-link.sh and scripts/linux-appimage.sh. Requires ROOT.
 

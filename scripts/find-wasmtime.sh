@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# shellcheck disable=SC2154  # ROOT is set by every script that sources this one
 # Sourced by scripts/linux-appimage.sh and scripts/linux-qt-link.sh. Requires ROOT.
 # Sets WASMTIME_DIR; the caller reports the failure so its own message names
 # the flag that installs the missing headers.

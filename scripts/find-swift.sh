@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# shellcheck disable=SC2154  # ROOT is set by every script that sources this one
 # Sourced by build.sh and scripts/check.sh. Requires ROOT.
 
 appattic_find_swift() {

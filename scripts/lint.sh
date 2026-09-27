@@ -53,10 +53,16 @@ if [[ "${#shell_files[@]}" -eq 0 ]]; then
     echo "error: no shell script found to check" >&2
     exit 1
 fi
-# --enable=optional: the optional checks (quoting of expansions inside strings,
-# ${var} braces, extra masked returns, nullary conditions) run only when named,
-# so the default run is silent about them. Every script in the tree passes them.
-shellcheck -x -P SCRIPTDIR --enable=optional "${shell_files[@]}"
+# The optional checks are off unless named, and --enable=optional does not name
+# them: shellcheck lists each by name, and the group keyword is not a list of
+# them. So the ones the tree passes are named one by one below. The rest stay
+# off because the tree does not pass them: the default case arm (SC2249, 8
+# findings) wants a branch in every case statement, masked return (SC2312) and
+# suppressed set -e (SC2310) want 106 and 79 rewrites, and ${var} braces
+# (SC2250) and [[ ]] (SC2292) are the two style rewrites, at 1390 and 29.
+shellcheck -x -P SCRIPTDIR \
+    --enable=avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat \
+    "${shell_files[@]}"
 
 # One declared version, three copies to keep in step (AppStream release,
 # Info.plist, the qt man page), plus a CFBundleVersion that is a rising build
