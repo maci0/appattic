@@ -171,9 +171,13 @@ final class ScannerViewModel {
             // inside the documented tolerance. Age is checked here because the
             // inventory stamp that `refreshIfStale` computes is too slow to
             // gate a launch on; the fingerprint check still runs behind it.
+            // Past the retention bound the snapshot is deleted rather than
+            // left holding the account's paths for a rescan that overwrites it.
+            let expired = isScanCacheExpired(cache)
+            if expired { clearScanCache() }
             if cache.includeSystem != includeSystem
                 || cache.data.incomplete == true
-                || isScanCacheExpired(cache) {
+                || expired {
                 scan(includeSystem: includeSystem)
                 return
             }

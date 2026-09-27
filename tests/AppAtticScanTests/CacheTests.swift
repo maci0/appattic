@@ -457,4 +457,54 @@ final class CacheTests: XCTestCase {
         XCTAssertNil(loadScanCache(from: url))
         clearScanCache(at: url)
     }
+
+    /// The cache is a full inventory of the account's paths, so a snapshot past
+    /// the retention bound is deleted instead of kept, and a fresh one is not.
+    func testDeleteExpiredScanCacheRemovesOnlyPastTheRetentionBound() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-expire-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let now = parseISODate("2026-08-17T12:30:00Z")!
+        let cache = ScanCacheFile(fingerprint: "a", includeSystem: false, data: sampleScanData())
+
+        try writeScanCache(cache, to: url)
+        XCTAssertFalse(deleteExpiredScanCache(cache, now: now, maxAge: 3600, at: url))
+        XCTAssertNotNil(loadScanCache(from: url))
+
+        // A fingerprint mismatch is not a retention reason: the snapshot is one
+        // rescan away from usable, and it is the only copy when a scan races an
+        // install and `commitScanCache` refuses to write over it.
+        XCTAssertFalse(isScanCacheStale(cache, includeSystem: false, fingerprint: "b", now: now, maxAge: 3600))
+        XCTAssertFalse(deleteExpiredScanCache(cache, now: now, maxAge: 3600, at: url))
+        XCTAssertNotNil(loadScanCache(from: url))
+
+        let later = parseISODate("2026-08-20T12:30:00Z")!
+        XCTAssertTrue(deleteExpiredScanCache(cache, now: later, maxAge: 3600, at: url))
+        XCTAssertNil(loadScanCache(from: url))
+    }
+
+    /// A scan that finds a snapshot past the retention bound rescans live and
+    /// leaves the fresh one, not the expired inventory, on disk.
+    func testResolveScanReplacesExpiredCacheWithTheLiveScan() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-resolve-expired-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let now = parseISODate("2026-08-20T12:30:00Z")!
+        try writeScanCache(
+            ScanCacheFile(fingerprint: "old", includeSystem: false, data: sampleScanData()),
+            to: url
+        )
+        let live = sampleScanData(scannedAt: "2026-08-20T12:29:00Z")
+        let result = resolveScan(
+            includeSystem: false,
+            fresh: false,
+            forceLive: false,
+            cacheURL: url,
+            now: now,
+            fingerprintFn: { "old" },
+            liveScan: { _ in live }
+        )
+        XCTAssertFalse(result.fromCache)
+        XCTAssertEqual(result.data.scanned_at, live.scanned_at)
+        let saved = try XCTUnwrap(loadScanCache(from: url))
+        XCTAssertEqual(saved.data.scanned_at, live.scanned_at)
+    }
 }

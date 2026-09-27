@@ -427,9 +427,13 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         updateChrome();
     });
     connect(d->worker, &DiskScanWorker::progress, this, [this](qint64 dirs, const QString &path) {
+        // The scanned path is under the account home, so it carries the
+        // account name. The status text is what leaves the window (status bar,
+        // screenshot), so it names the folder as `~/...`; the tree keeps the
+        // full path where the user asked for it.
         const QString label = localeCount(dirs)
             + QStringLiteral(" folders · ")
-            + path;
+            + redactHomePaths(path);
         d->progressLabel->setText(label);
         d->status->setText(label);
         emit statusMessage(QStringLiteral("Scanning disk usage · ") + label);
@@ -639,8 +643,8 @@ void DiskPage::startScan(const QString &path) {
     showScan();
     d->progress->show();
     d->progressLabel->show();
-    d->progressLabel->setText(path);
-    d->status->setText(QStringLiteral("Scanning ") + path);
+    d->progressLabel->setText(redactHomePaths(path));
+    d->status->setText(QStringLiteral("Scanning ") + redactHomePaths(path));
     d->chart->setRoot(nullptr);
     d->tree->clear();
     d->selected = nullptr;
@@ -656,7 +660,7 @@ void DiskPage::startScan(const QString &path) {
         Q_ARG(bool, one),
         Q_ARG(int, d->scanToken)
     );
-    emit statusMessage(QStringLiteral("Scanning disk usage · ") + path);
+    emit statusMessage(QStringLiteral("Scanning disk usage · ") + redactHomePaths(path));
 }
 
 void DiskPage::stopScan() {

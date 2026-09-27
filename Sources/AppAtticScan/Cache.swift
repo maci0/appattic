@@ -108,6 +108,26 @@ public func clearScanCache(at url: URL = defaultScanCacheURL()) {
     try? FileManager.default.removeItem(at: url)
 }
 
+/// Delete a snapshot past the retention bound, and report whether it did.
+///
+/// The file is a full inventory of the account: every app path, every leftover
+/// path under the home directory. Past `maxAge` no run serves it, so leaving it
+/// on disk keeps the account's own paths around for a snapshot that is never
+/// read again. Only age is a reason: a snapshot whose fingerprint no longer
+/// matches is one rescan from usable, and it is the only copy left when a scan
+/// races an install and `commitScanCache` refuses to write over it.
+@discardableResult
+public func deleteExpiredScanCache(
+    _ cache: ScanCacheFile,
+    now: Date = Date(),
+    maxAge: TimeInterval = scanCacheMaxAge,
+    at url: URL = defaultScanCacheURL()
+) -> Bool {
+    guard isScanCacheExpired(cache, now: now, maxAge: maxAge) else { return false }
+    clearScanCache(at: url)
+    return true
+}
+
 /// Save only when the inventory stamp is unchanged across the scan and the
 /// result is complete. Otherwise a later hit would serve a mixed snapshot.
 /// `false` means the scan was dropped on purpose; a write that failed throws,
@@ -365,6 +385,7 @@ public func resolveScan(
             data.from_cache = true
             return ResolvedScan(data: data, fromCache: true)
         }
+        deleteExpiredScanCache(cache, now: now, at: cacheURL)
     }
     let data = (liveScan ?? { runFullScan(includeSystem: $0, now: now) })(includeSystem)
     let after = fingerprintFn()

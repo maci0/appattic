@@ -104,7 +104,7 @@ Environment:
 
 Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used.
 
-`report`, `leftovers`, `stale`, `outdated`, and `packages` reuse the last scan when it is still current. Pass `--fresh` to scan now. `update` always scans live and drops the last-scan cache after a successful upgrade. A scan in which an update or package-listing check ran and failed is not saved, so a failed check is retried on the next run instead of being served as "up to date" or "no unused packages" for a day.
+`report`, `leftovers`, `stale`, `outdated`, and `packages` reuse the last scan when it is still current. Pass `--fresh` to scan now. `update` always scans live and drops the last-scan cache after a successful upgrade. A scan in which an update or package-listing check ran and failed is not saved, so a failed check is retried on the next run instead of being served as "up to date" or "no unused packages" for a day. The cache is a full inventory of the account's app and leftover paths, so a snapshot past the 24h reuse bound is deleted by the next run instead of being kept once no run would serve it.
 
 Linux CLI does not need Qt. Headless `report` works without a display.
 
