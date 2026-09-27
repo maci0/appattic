@@ -49,16 +49,38 @@ public func xdgStateHome(
     xdgUserDir("XDG_STATE_HOME", fallback: ".local/state", home: home, env: env)
 }
 
-/// The spec default for an unset or empty `XDG_DATA_DIRS`.
-private let defaultXDGDataDirs = "/usr/local/share:/usr/share"
+/// The spec default for an unset or empty `XDG_DATA_DIRS`, and for one that
+/// names no absolute entry to search.
+private let defaultXDGDataDirs = ["/usr/local/share", "/usr/share"]
 
-/// XDG Base Directory: an unset or empty `XDG_DATA_DIRS` uses the spec default.
-/// An empty variable is not the same as a variable listing no system dirs.
+/// The system data roots a scan searches, as the spec defines them: unset,
+/// empty, or a variable whose entries are all relative uses the spec default,
+/// and a relative entry in a longer list is dropped.
+///
+/// Filtering here rather than at each caller is what makes `appattic config`
+/// honest. The report printed the variable as written, so a
+/// `XDG_DATA_DIRS=relative:/opt/share` named a root the scan never looked in.
+/// A variable that names no usable root is read as unset, not as a request to
+/// search nothing: `linuxDesktopDirs` searches both spec roots either way, so
+/// the fallback changes no result.
+public func xdgSystemDirList(
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> [String] {
+    let raw = env["XDG_DATA_DIRS"] ?? ""
+    var out: [String] = []
+    for entry in raw.split(separator: ":", omittingEmptySubsequences: false) {
+        let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("/") { out.append(trimmed) }
+    }
+    return out.isEmpty ? defaultXDGDataDirs : out
+}
+
+/// The same roots as `xdgSystemDirList`, joined the way the variable spells
+/// them, for the `XDG_DATA_DIRS:` line of `appattic config`.
 public func xdgSystemDirs(
     env: [String: String] = ProcessInfo.processInfo.environment
 ) -> String {
-    let raw = env["XDG_DATA_DIRS"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    return raw.isEmpty ? defaultXDGDataDirs : raw
+    xdgSystemDirList(env: env).joined(separator: ":")
 }
 
 /// Fold one scalar the way `norm` does: NFD -> case+diacritic fold -> keep

@@ -63,9 +63,17 @@ XDG_CONFIG_HOME: /home/u/.config
 XDG_CACHE_HOME: /home/u/.cache
 XDG_STATE_HOME: /home/u/.local/state
 XDG_DATA_DIRS: /usr/local/share:/usr/share
+NO_COLOR: unset [colors on a tty]
+TERM: unset [not set]
+COLORFGBG: unset [light status colors]
+APPATTIC_PAGE: unset [overview]
+FLATPAK_ID: unset [host run]
+APPATTIC_HOST_EXEC_LIVE: unset [off: fixtures unless the platform forces them]
+APPATTIC_HOST_EXEC_FIXTURE: unset [off: live package queries]
+APPATTIC_CORE_OUT: unset [searched next to the binary]
 ```
 
-Each ignored path is listed under its count, one per line, so a wrong entry is visible rather than a leftover that quietly never hides.
+Each ignored path is listed under its count, one per line, so a wrong entry is visible rather than a leftover that quietly never hides. The environment switches a run reads are listed the same way, each with the effect its value has and `unset` when it is not set, so a diff of two machines shows an override that is set as well as one that is not.
 
 `appattic update` asks for confirmation on a terminal. With stdin redirected (cron, CI, a pipeline) it stops with exit 2 unless you pass `--yes`, so an unattended upgrade is always something you asked for:
 
@@ -99,13 +107,14 @@ Environment:
 | `APPATTIC_HOST_EXEC_LIVE` | Linux Qt | `1` runs the core's allowlisted package queries against the real binaries instead of the built-in fixtures. Off by default, and read as off for any value other than `1`, `true`, `yes`, or `on`. |
 | `APPATTIC_HOST_EXEC_FIXTURE` | Linux Qt | `1` serves the built-in fixtures on non-macOS hosts. Same accepted values as above. macOS uses fixtures either way. |
 | `APPATTIC_PAGE` | UI | Initial sidebar: `overview` (default), `leftovers`, `stale`, `outdated`, `packages`, `disk`, `settings`. An unset or empty value opens the overview; an unknown name is reported on stderr and also opens the overview. |
-| `NO_COLOR` | CLI | Disable ANSI color when set to a non-empty value. Also `--no-color` or `TERM=dumb`. |
+| `NO_COLOR` | CLI | Disable ANSI color when set to a non-empty value. Set but empty is not a disable. |
+| `TERM` | CLI | `dumb` disables ANSI color, the same as `NO_COLOR` and `--no-color`. Any other value changes nothing. |
 | `COLORFGBG` | CLI | Terminal background as `fg;bg`. Picks the light or dark status colors; unset uses the light set, which is the readable one on a white background. |
 | `XDG_DATA_HOME` | Linux | Absolute data root; parent of `appattic/settings.json`, `last-scan.json`, and user desktop entries. |
 | `XDG_CONFIG_HOME` | Linux | Absolute configuration root scanned for leftovers and usage history. |
 | `XDG_CACHE_HOME` | Linux | Absolute cache root scanned for leftovers. |
 | `XDG_STATE_HOME` | Linux | Absolute state root scanned for leftovers. |
-| `XDG_DATA_DIRS` | Linux | Colon-separated absolute data roots searched for desktop entries. Unset or empty uses `/usr/local/share:/usr/share`; relative entries are skipped. |
+| `XDG_DATA_DIRS` | Linux | Colon-separated absolute data roots searched for desktop entries. Unset, empty, or a list whose entries are all relative uses `/usr/local/share:/usr/share`; relative entries in a longer list are dropped, and `appattic config` prints the list that survives. |
 | `FLATPAK_ID` | Linux Qt and the core host | Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags and package-manager queries go through `/run/host` and `flatpak-spawn --host`. Unset or empty is a normal host run. |
 
 Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used.

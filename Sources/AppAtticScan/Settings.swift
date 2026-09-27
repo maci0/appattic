@@ -92,10 +92,11 @@ public func effectiveIncludeSystem(cliFlag: Bool, settings: AppAtticSettings) ->
 }
 
 /// The configuration one run actually uses, with every layer named: the
-/// settings file, the file values, the flag that overrides them, and the
-/// environment roots the paths resolved to. `appattic config` prints it so two
-/// machines can be diffed, which is the only way to tell a wrong value from a
-/// wrong path. Encodable only: nothing reads configuration back out of a report.
+/// settings file, the file values, the flag that overrides them, the
+/// environment roots the paths resolved to, and the environment switches that
+/// change what the run does. `appattic config` prints it so two machines can
+/// be diffed, which is the only way to tell a wrong value from a wrong path.
+/// Encodable only: nothing reads configuration back out of a report.
 public struct EffectiveConfig: Encodable, Equatable, Sendable {
     public let settingsPath: String
     public let settingsFileExists: Bool
@@ -109,6 +110,17 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
     public let cacheHome: String
     public let stateHome: String
     public let dataDirs: String
+    public let environment: [ConfigEnvEntry]
+
+    /// One environment switch, its raw value, and what that value resolves to.
+    public struct ConfigEnvEntry: Encodable, Equatable, Sendable {
+        public let name: String
+        public let value: String
+        public let isSet: Bool
+        /// The effect, in the words a reader needs to tell a wrong value from
+        /// a right one. Never empty: a switch that is not set says so.
+        public let effect: String
+    }
 
     /// The merged value the scan and the report use.
     public var includeSystem: Bool { includeSystemFlag || includeSystemFile }
@@ -118,6 +130,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         case includeSystem, includeSystemFile, includeSystemFlag
         case confirmDelete, ignoredLeftoverPaths, scanCachePath
         case dataHome, configHome, cacheHome, stateHome, dataDirs
+        case environment
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -135,6 +148,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         try c.encode(cacheHome, forKey: .cacheHome)
         try c.encode(stateHome, forKey: .stateHome)
         try c.encode(dataDirs, forKey: .dataDirs)
+        try c.encode(environment, forKey: .environment)
     }
 
     public init(
@@ -155,6 +169,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         self.cacheHome = xdgCacheHome(env: env)
         self.stateHome = xdgStateHome(env: env)
         self.dataDirs = xdgSystemDirs(env: env)
+        self.environment = configEnvEntries(env: env)
     }
 
     /// One `key: value` line per setting, in the order a reader meets them,
@@ -185,8 +200,79 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
             "XDG_STATE_HOME: \(stateHome)",
             "XDG_DATA_DIRS: \(dataDirs)",
         ])
+        // The switches last, and only the ones the process actually reads, so
+        // the block stays the diff surface: a value that is unset says `unset`
+        // rather than being absent, which is the difference between "no
+        // override" and "an override I forgot".
+        lines.append(contentsOf: environment.map { entry in
+            let shown = entry.isSet ? "\"\(entry.value)\"" : "unset"
+            return "\(entry.name): \(shown) [\(entry.effect)]"
+        })
         return lines
     }
+}
+
+/// The environment switches the app reads, with the effect each value has.
+///
+/// A switch the process does not read is not listed, so the block cannot grow
+/// into a copy of the environment: these are the names in the README's
+/// environment table that a scan or a window run can be changed by. The two
+/// host-exec switches are read by the C core host and the Qt shell rather than
+/// by this process, and they are listed because a Linux run's package results
+/// come from them and a diff of two machines has to show that.
+public func configEnvEntries(
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> [EffectiveConfig.ConfigEnvEntry] {
+    func entry(
+        _ name: String,
+        unsetEffect: String,
+        effect: (String) -> String
+    ) -> EffectiveConfig.ConfigEnvEntry {
+        let raw = env[name]
+        return EffectiveConfig.ConfigEnvEntry(
+            name: name,
+            value: raw ?? "",
+            isSet: raw != nil,
+            effect: raw.map(effect) ?? unsetEffect
+        )
+    }
+    return [
+        entry("NO_COLOR", unsetEffect: "colors on a tty") { raw in
+            raw.isEmpty ? "set but empty, which is not a disable" : "colors off"
+        },
+        entry("TERM", unsetEffect: "not set") { raw in
+            raw == "dumb" ? "colors off (dumb terminal)" : raw
+        },
+        entry("COLORFGBG", unsetEffect: "light status colors") { _ in
+            cliTone(env: env) == .dark ? "dark status colors" : "light status colors"
+        },
+        entry("APPATTIC_PAGE", unsetEffect: "overview") { raw in
+            let page = resolveStartPage(env: ["APPATTIC_PAGE": raw])
+            return page.unknownValue == nil ? page.page.rawValue : "unknown, opening overview"
+        },
+        entry("FLATPAK_ID", unsetEffect: "host run") { _ in
+            "sandboxed: package queries go through /run/host"
+        },
+        entry("APPATTIC_HOST_EXEC_LIVE", unsetEffect: "off: fixtures unless the platform forces them") { raw in
+            configBoolSwitch(raw) ? "on: package queries run the real binaries" : "off: read as off"
+        },
+        entry("APPATTIC_HOST_EXEC_FIXTURE", unsetEffect: "off: live package queries") { raw in
+            configBoolSwitch(raw) ? "on: built-in fixtures" : "off: live package queries"
+        },
+        entry("APPATTIC_CORE_OUT", unsetEffect: "searched next to the binary") { raw in
+            raw.isEmpty
+                ? "set but empty, so it is searched next to the binary"
+                : "WASM modules read from this directory"
+        },
+    ]
+}
+
+/// `1`/`true`/`yes`/`on` in any case, after trimming, and nothing else. The
+/// same rule `core/host/hostexec.c` applies to its two switches, so the report
+/// cannot call a value on that the core host then reads as off.
+func configBoolSwitch(_ raw: String) -> Bool {
+    let value = raw.trimmingCharacters(in: .whitespaces).lowercased()
+    return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 /// Load settings.json. A missing file is defaults. Empty JSON, unknown keys, wrong

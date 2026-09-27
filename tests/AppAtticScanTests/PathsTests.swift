@@ -93,6 +93,30 @@ final class PathsTests: XCTestCase {
         XCTAssertEqual(xdgSystemDirs(env: ["XDG_DATA_DIRS": "/opt/share"]), "/opt/share")
     }
 
+    /// The reported value is the searched value: a relative entry is dropped
+    /// where the scan drops it, so `appattic config` cannot name a root the run
+    /// never looked in.
+    func testXdgSystemDirsDropsRelativeEntries() {
+        XCTAssertEqual(
+            xdgSystemDirs(env: ["XDG_DATA_DIRS": "relative/share:/opt/share"]),
+            "/opt/share"
+        )
+        XCTAssertEqual(
+            xdgSystemDirs(env: ["XDG_DATA_DIRS": "  /opt/share  :  rel  "]),
+            "/opt/share"
+        )
+        // Every entry relative: the spec default, not an empty search list.
+        XCTAssertEqual(
+            xdgSystemDirList(env: ["XDG_DATA_DIRS": "relative/share:also/relative"]),
+            ["/usr/local/share", "/usr/share"]
+        )
+        // An empty entry between two real ones is not a root.
+        XCTAssertEqual(
+            xdgSystemDirList(env: ["XDG_DATA_DIRS": "/opt/share::/srv/share"]),
+            ["/opt/share", "/srv/share"]
+        )
+    }
+
 
     func testRedactHomePathsReplacesHomePrefixOnly() {
         XCTAssertEqual(

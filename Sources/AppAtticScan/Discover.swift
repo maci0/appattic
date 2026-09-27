@@ -132,12 +132,8 @@ public func linuxDesktopDirs(
     let xdgHome = xdgDataHome(home: home, env: env)
     add((xdgHome as NSString).appendingPathComponent("applications"))
     add(((xdgHome as NSString).appendingPathComponent("flatpak/exports/share") as NSString).appendingPathComponent("applications"))
-    let dataDirs = xdgSystemDirs(env: env)
-    for d in dataDirs.split(separator: ":") {
-        let trimmed = d.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("/") {
-            add((trimmed as NSString).appendingPathComponent("applications"))
-        }
+    for d in xdgSystemDirList(env: env) {
+        add((d as NSString).appendingPathComponent("applications"))
     }
     for d in [
         "/usr/share/applications",

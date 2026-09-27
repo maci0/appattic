@@ -50,10 +50,71 @@ exit 2 rather than opening the window.
 .SH ENVIRONMENT
 .TP
 .B APPATTIC_CORE_OUT
-Directory holding the compiled WASM modules.
+Directory holding the compiled WASM modules. Unset or empty searches
+.I ../share/appattic
+and the build output directories next to the binary.
+.TP
+.B APPATTIC_HOST_EXEC_LIVE
+.B 1
+runs the core's allowlisted package queries against the real binaries instead
+of the built-in fixtures. Off by default, and read as off for any value other
+than
+.BR 1 ,
+.BR true ,
+.BR yes ,
+or
+.BR on .
+.TP
+.B APPATTIC_HOST_EXEC_FIXTURE
+.B 1
+serves the built-in fixtures on non-macOS hosts. Same accepted values as
+.BR APPATTIC_HOST_EXEC_LIVE .
+macOS uses fixtures either way.
+.TP
+.B APPATTIC_PAGE
+Initial sidebar page:
+.BR overview ,
+.BR leftovers ,
+.BR stale ,
+.BR outdated ,
+.BR packages ,
+.BR disk ,
+or
+.BR settings .
+An unset or empty value opens the overview; an unknown name is reported on
+stderr and also opens the overview.
+.TP
+.B FLATPAK_ID
+Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags
+and package-manager queries go through
+.I /run/host
+and
+.BR flatpak-spawn --host .
+Unset or empty is a normal host run.
+.TP
+.B XDG_DATA_HOME
+Absolute data root. Parent of
+.I appattic/settings.json
+and
+.IR appattic/last-scan.json .
+.TP
+.B XDG_CONFIG_HOME
+Absolute configuration root scanned for leftovers and usage history.
+.TP
+.B XDG_CACHE_HOME
+Absolute cache root scanned for leftovers.
+.TP
+.B XDG_STATE_HOME
+Absolute state root scanned for leftovers.
 .TP
 .B WASMTIME_DIR
 Wasmtime C API prefix used at build time, not at run time.
+.PP
+Per the XDG Base Directory specification, an empty or relative XDG path is
+ignored and the standard user default is used. The accepted values and their
+effects are the same ones
+.B appattic config
+prints.
 .SH EXIT STATUS
 .TP
 .B 0
