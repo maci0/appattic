@@ -168,7 +168,7 @@ No dual-run of Python and Swift in production.
 - macOS: build UI, stage `AppAttic.app`, ad-hoc codesign. Do not copy Python.
 - Linux: always build `appattic` CLI. Build Qt UI via `scripts/linux-qt-link.sh` only if `pkg-config Qt6Widgets` succeeds. Do not fail the whole script for missing Qt when the user only needs CLI.
 
-`README.md` matches the above. Version at the port was `1.2.1`; `appAtticVersion` in `Sources/AppAtticScan/Util.swift` is the source of truth.
+`README.md` matches the above. Version at the port was `1.2.1`; `appAtticVersion` in `Sources/AppAtticScan/Version.swift` is the source of truth.
 
 ## Success
 
