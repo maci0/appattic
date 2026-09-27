@@ -224,7 +224,8 @@ public func configEnvEntries(
             raw.isEmpty ? "set but empty, which is not a disable" : "colors off"
         },
         entry("TERM", unsetEffect: "not set") { raw in
-            raw == "dumb" ? "colors off (dumb terminal)" : raw
+            if raw == "dumb" { return "colors off (dumb terminal)" }
+            return raw.isEmpty ? "set but empty, which is not a disable" : "colors on (only dumb disables)"
         },
         entry("COLORFGBG", unsetEffect: "light status colors") { _ in
             cliTone(env: env) == .dark ? "dark status colors" : "light status colors"

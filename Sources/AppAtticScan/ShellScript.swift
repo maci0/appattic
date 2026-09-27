@@ -66,7 +66,11 @@ public struct GuardedRemove: Equatable, Sendable {
 /// multi-line leftover removal, which is not a guard.
 public func parseGuardedRemove(_ cmd: String) -> GuardedRemove? {
     let t = cmd.trimmingCharacters(in: .whitespaces)
+    // The line has to end at the `; fi`: anything after it is a command the
+    // guard does not cover, and `withRootCmd` rebuilds the line from the two
+    // halves alone, so an unrecognised tail would be dropped instead of run.
     guard t.hasPrefix("if "),
+          t.hasSuffix("; fi"),
           let then = t.range(of: "; then "),
           let fi = t.range(of: "; fi", options: .backwards),
           then.upperBound < fi.lowerBound
