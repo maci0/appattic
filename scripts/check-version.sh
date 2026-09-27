@@ -96,13 +96,19 @@ plist_string() {
     # $1: label, $2: key, $3: file. The value is the <string> on the line after
     # the <key>, which is how a plist written one key per line spells a string.
     #
-    # `awk` and not the `sed -n "/<key>$2<\/key>/{n;s/.../p}"` this used to be.
-    # That form reads here and prints nothing under the sed macOS ships — the
-    # two do not agree on it — so check-version.sh found no version in the plist
-    # at all, and every release-notes call there failed with "no
-    # CFBundleShortVersionString string in Info.plist". `match` takes its
-    # pattern as a string, so the `/` in `</string>` needs no escape, and the
-    # key goes to `index` rather than to a regular expression.
+    # `awk` and not the `sed -n "/<key>$2<\/key>/{n;s/.*<string>\([^<]*\)<\/string>.*/\1/p}"`
+    # this used to be. The `}` after the `p` is GNU sed's way of ending a
+    # substitute: GNU sed stops the flags there, the BSD sed macOS ships does
+    # not — it ends them on a newline or a `;` and calls the brace a bad flag,
+    # "bad flag in substitute command: '}'" — and the `2>/dev/null` the value
+    # was read through threw that message away. The empty result then read as a
+    # plist with no version, so check-version.sh exited 1 with "no
+    # CFBundleShortVersionString string in Info.plist" and every release-notes
+    # call on macOS failed with it. The two seds disagree about the same
+    # expression, and only Linux was ever exercised.
+    #
+    # `match` takes its pattern as a string, so the `/` in `</string>` needs no
+    # escape, and the key goes to `index` rather than to a regular expression.
     local out
     out="$(awk -v key="$2" '
         seen {
