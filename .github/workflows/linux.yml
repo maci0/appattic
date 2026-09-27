@@ -130,6 +130,15 @@ jobs:
       - name: Build CLI
         run: swift build -c debug --product appattic --disable-automatic-resolution
         if: steps.swift_test.outcome == 'success'
+      - name: Reproducible artifacts
+        # The claim the AppImage release ships on: the same source built twice
+        # from differently named directories, under a different timezone and
+        # SOURCE_DATE_EPOCH, has to be byte-identical. scripts/check.sh runs it
+        # locally and check.sh --qt is documented as full CI parity, so a tree
+        # that stops being reproducible has to fail here rather than in a
+        # release. The job already has zig and cc on PATH, the two things it
+        # builds with; it builds into its own temp tree and touches no cache.
+        run: bash scripts/verify-reproducible.sh
       - name: Link Qt UI
         if: success() || failure()
         run: |
