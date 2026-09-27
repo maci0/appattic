@@ -150,6 +150,35 @@ public func applyPrefsFallback(_ apps: inout [AppRecord], items: [DataItem]) {
     }
 }
 
+/// A scan resets and reads the process-global `failedChecks` set, rewrites the
+/// host's process-global `PATH` override around every command, and stamps the
+/// single scan cache file. Two scans in one process interleave all three, so one
+/// scan's failures are attributed to the other and a cache commit can mix them.
+/// One scan at a time, enforced here rather than left to each caller. The lock
+/// is not recursive, so a `progress` callback must not start a scan: it would
+/// block forever on the scan already in flight.
+private let scanLock = NSLock()
+
+/// Serialises `progress`. Collectors emit from `pmap` worker threads, so
+/// without this the callback runs on up to four threads at once and any state
+/// behind it (a progress label, a counter) is read and written unsynchronised.
+/// The lock is held across the emit: a callback that called back into a
+/// collector would deadlock on it, which is why `emit` must not be reentrant.
+private final class SerialProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private let emit: @Sendable (String) -> Void
+
+    init(_ emit: @escaping @Sendable (String) -> Void) {
+        self.emit = emit
+    }
+
+    func callAsFunction(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        emit(message)
+    }
+}
+
 /// Full scan. Optional collectors are for tests; omit them to hit the live system.
 public func performScan(
     includeSystem: Bool = false,
@@ -167,8 +196,15 @@ public func performScan(
     skipLiveUsage: Bool = false,
     now: Date = Date(),
     clock: MonotonicFn = monotonicSeconds,
-    progress: @escaping (String) -> Void = { _ in }
+    progress: @escaping @Sendable (String) -> Void = { _ in }
 ) -> ScanResult {
+    scanLock.lock()
+    defer { scanLock.unlock() }
+    let serialProgress = SerialProgress(progress)
+    // Every collector below takes `(String) -> Void`, so shadowing the
+    // parameter here routes all of them, and their `pmap` workers, through the
+    // serialising wrapper.
+    let progress = serialProgress.callAsFunction
     let t0 = clock()
     let result = ScanResult(scannedAt: now)
     resetScanCheckFailures()
@@ -255,7 +291,7 @@ public func runFullScan(
     includeSystem: Bool = false,
     now: Date = Date(),
     clock: MonotonicFn = monotonicSeconds,
-    progress: @escaping (String) -> Void = { _ in }
+    progress: @escaping @Sendable (String) -> Void = { _ in }
 ) -> ScanData {
     performScan(includeSystem: includeSystem, now: now, clock: clock, progress: progress).toScanData()
 }

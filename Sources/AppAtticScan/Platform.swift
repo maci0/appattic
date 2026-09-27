@@ -1,6 +1,25 @@
 import Foundation
 public enum PlatformOverride {
-    nonisolated(unsafe) public static var linux: Bool?
+    // Read from every collector, including `pmap` worker threads, so a scan
+    // takes one snapshot here and the test hooks that set it take the same lock.
+    // A plain `static var` is a torn read under a concurrent set, which lets
+    // sibling workers of one scan take different platform branches.
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var storedLinux: Bool?
+
+    public static var linux: Bool? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedLinux
+        }
+        set {
+            lock.lock()
+            storedLinux = newValue
+            lock.unlock()
+        }
+    }
+
     public static var isLinux: Bool {
         if let linux { return linux }
         #if os(Linux)

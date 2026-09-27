@@ -602,17 +602,35 @@ static int precompile_locked(
         return 1;
     }
     const size_t n = image.size;
-    FILE *f = fopen(out_path, "wb");
+    /* `module_for_path` deserializes any `<module>.cwasm` whose mtime is not
+       older than the wasm, so writing the image in place would let a reader, or
+       a crash, see a truncated module. Write a sibling temp and rename: rename
+       is atomic within the directory, so a reader sees the old image or the new
+       one and never a partial one. */
+    char tmp_path[4096];
+    if (snprintf(tmp_path, sizeof tmp_path, "%s.tmp", out_path) >= (int)sizeof tmp_path) {
+        fail_msg(&e, "precompiled module path too long");
+        wasm_byte_vec_delete(&image);
+        return 1;
+    }
+    FILE *f = fopen(tmp_path, "wb");
     if (!f) {
         fail_msg(&e, "cannot write precompiled module");
         wasm_byte_vec_delete(&image);
         return 1;
     }
     const size_t wrote = fwrite(image.data, 1, n, f);
+    if (wrote == n && fflush(f) == 0) fsync(fileno(f));
     fclose(f);
     wasm_byte_vec_delete(&image);
     if (wrote != n) {
+        unlink(tmp_path);
         fail_msg(&e, "short write");
+        return 1;
+    }
+    if (rename(tmp_path, out_path) != 0) {
+        unlink(tmp_path);
+        fail_msg(&e, "cannot replace precompiled module");
         return 1;
     }
     return 0;
