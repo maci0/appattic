@@ -253,7 +253,7 @@ public func parseHistoryFile(_ path: String, index: inout HistoryIndex, keep: Se
 /// caller can fall back to the Unicode path.
 func historyBytesAreASCII(_ bytes: [UInt8]) -> Bool {
     let n = bytes.count
-    let ascii = bytes.withUnsafeBytes { raw -> Bool in
+    return bytes.withUnsafeBytes { raw -> Bool in
         let words = n / 8
         var i = 0
         while i < words {
@@ -269,7 +269,6 @@ func historyBytesAreASCII(_ bytes: [UInt8]) -> Bool {
         }
         return true
     }
-    return ascii
 }
 
 @inline(__always) func hxDigit(_ b: UInt8) -> Bool { b >= 0x30 && b <= 0x39 }

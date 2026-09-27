@@ -155,11 +155,11 @@ public func scriptHasActionableCommands(_ script: String) -> Bool {
 }
 
 /// True when a script body calls `rootcmd`, in either the bare or the guarded
-/// spelling `if q; then rootcmd action; fi`.
+/// spelling `if q; then rootcmd action; fi`. The body is previewed, untrusted
+/// text, so a line can be indented; `callsRootHelper` sees a wrapped line.
 private func bodyNeedsRootHelper(_ script: String) -> Bool {
-    script.split(whereSeparator: \.isNewline).contains { line in
-        let t = line.trimmingCharacters(in: .whitespaces)
-        return t.hasPrefix("rootcmd ") || t.contains("; then rootcmd ")
+    script.split(whereSeparator: \.isNewline).contains {
+        callsRootHelper($0.trimmingCharacters(in: .whitespaces))
     }
 }
 
@@ -490,6 +490,18 @@ func appendRemoveVerdicts(_ lines: inout [String], result: ScanResult) {
     }
 }
 
+/// Preamble every generated script opens with: the same shell, the same safety
+/// line, and a title naming what the script does. `isGeneratedScript` matches
+/// on the second and fourth lines, so they are fixed.
+func scriptHeader(_ kind: String, scannedAt: Date) -> [String] {
+    [
+        "#!/bin/sh",
+        "set -e",
+        "# AppAttic \(kind) script generated \(scriptStamp(scannedAt))",
+        "# Review every path before running. Nothing here is deleted automatically.",
+    ]
+}
+
 /// Header plus body, with the `rootcmd` helper when a body line escalates.
 /// A `rootcmd` call with no helper defined is `sh: rootcmd: not found`, and
 /// under `set -e` that stops the script, so the helper is part of emitting the
@@ -504,12 +516,7 @@ public func scriptWithHeader(_ header: [String], _ body: [String]) -> String {
 }
 
 func leftoverCleanupScript(_ items: [DataItem], scannedAt: Date) -> String {
-    let header = [
-        "#!/bin/sh",
-        "set -e",
-        "# AppAttic leftover cleanup script generated \(scriptStamp(scannedAt))",
-        "# Review every path before running. Nothing here is deleted automatically.",
-    ]
+    let header = scriptHeader("leftover cleanup", scannedAt: scannedAt)
     var body: [String] = []
     if items.isEmpty {
         body.append("")
@@ -521,12 +528,7 @@ func leftoverCleanupScript(_ items: [DataItem], scannedAt: Date) -> String {
 }
 
 func staleCleanupScript(_ result: ScanResult) -> String {
-    let header = [
-        "#!/bin/sh",
-        "set -e",
-        "# AppAttic stale uninstall script generated \(scriptStamp(result.scannedAt))",
-        "# Review every path before running. Nothing here is deleted automatically.",
-    ]
+    let header = scriptHeader("stale uninstall", scannedAt: result.scannedAt)
     var body: [String] = []
     appendRemoveVerdicts(&body, result: result)
     if body.isEmpty {
@@ -575,12 +577,7 @@ public func dryRunScript(
 }
 
 public func cleanupScript(_ result: ScanResult, category: [String] = [], top: Int? = nil) -> String {
-    let header = [
-        "#!/bin/sh",
-        "set -e",
-        "# AppAttic cleanup script generated \(scriptStamp(result.scannedAt))",
-        "# Review every path before running. Nothing here is deleted automatically.",
-    ]
+    let header = scriptHeader("cleanup", scannedAt: result.scannedAt)
     var body: [String] = []
     appendLeftoverCommands(&body, items: leftoverDryRunItems(result, category: category, top: top))
     appendRemoveVerdicts(&body, result: result)

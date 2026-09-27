@@ -70,22 +70,15 @@ enum AppAtticCLI {
         let ignored = Set(settings.ignoredLeftoverPaths)
         let result = scanResult(from: resolved.data, ignoringLeftovers: ignored, now: now)
         if let jsonPath = opts.json {
-            do {
-                let payload = exportedScanData(
+            writeJSONFile(
+                exportedScanData(
                     from: resolved.data,
                     ignoringLeftovers: ignored,
                     fromCache: resolved.fromCache,
                     now: now
-                )
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                let pretty = try encoder.encode(payload)
-                try writeOwnerOnlyFile(pretty, to: URL(fileURLWithPath: jsonPath))
-                fputs("JSON written to \(redactHomePaths(jsonPath))\n", stderr)
-            } catch {
-                fputs("error writing JSON: \(redactHomePaths(error.localizedDescription))\n", stderr)
-                Foundation.exit(1)
-            }
+                ),
+                to: jsonPath
+            )
         }
         if opts.dryRun {
             print(
@@ -154,16 +147,7 @@ func runConfigCommand(_ opts: CLIOptions, settings: AppAtticSettings) {
         print(line)
     }
     if let jsonPath = opts.json {
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let payload = try encoder.encode(config)
-            try writeOwnerOnlyFile(payload, to: URL(fileURLWithPath: jsonPath))
-            fputs("JSON written to \(redactHomePaths(jsonPath))\n", stderr)
-        } catch {
-            fputs("error writing JSON: \(redactHomePaths(error.localizedDescription))\n", stderr)
-            Foundation.exit(1)
-        }
+        writeJSONFile(config, to: jsonPath)
     }
 }
 
@@ -190,14 +174,38 @@ func runDiskCommand(_ opts: CLIOptions) {
     }
     if let jsonPath = opts.json {
         do {
-            let data = try diskUsageJSON(tree)
-            try writeOwnerOnlyFile(data, to: URL(fileURLWithPath: jsonPath))
-            fputs("JSON written to \(redactHomePaths(jsonPath))\n", stderr)
+            try writeJSONFile(try diskUsageJSON(tree), to: jsonPath)
         } catch {
-            fputs("error writing JSON: \(redactHomePaths(error.localizedDescription))\n", stderr)
-            Foundation.exit(1)
+            failJSONWrite(error)
         }
     }
+}
+
+/// Write a `--json` payload and report where it landed. A failed write ends
+/// the run: the flag was the point of the command, so a missing file would
+/// read as an empty result.
+func writeJSONFile(_ data: Data, to path: String) {
+    do {
+        try writeOwnerOnlyFile(data, to: URL(fileURLWithPath: path))
+    } catch {
+        failJSONWrite(error)
+    }
+    fputs("JSON written to \(redactHomePaths(path))\n", stderr)
+}
+
+func writeJSONFile<T: Encodable>(_ value: T, to path: String) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    do {
+        try writeJSONFile(try encoder.encode(value), to: path)
+    } catch {
+        failJSONWrite(error)
+    }
+}
+
+func failJSONWrite(_ error: Error) -> Never {
+    fputs("error writing JSON: \(redactHomePaths(error.localizedDescription))\n", stderr)
+    Foundation.exit(1)
 }
 
 func failUsage(_ message: String) -> Never {

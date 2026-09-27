@@ -1,4 +1,3 @@
-const std = @import("std");
 const listing = @import("path_listing.zig");
 
 /// The plugin is its spec: roots and filtering live in listing.spec_table.
@@ -9,6 +8,5 @@ comptime {
 }
 
 test {
-    std.testing.refAllDecls(@This());
     try listing.expectSpecBinds(spec);
 }
