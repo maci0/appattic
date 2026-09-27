@@ -41,9 +41,12 @@ jobs:
         run: |
           echo /opt/zig >> "$GITHUB_PATH"
           echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
+      - name: Check the tag matches the declared version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash scripts/check-version.sh --tag "$GITHUB_REF_NAME"
       - name: Build AppImage
         env:
-          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '1.2.1' }}
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: bash scripts/linux-appimage.sh
       - name: Publish AppImage
         if: startsWith(github.ref, 'refs/tags/')

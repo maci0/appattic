@@ -37,14 +37,14 @@ if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
     SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct 2>/dev/null || printf '0')"
     export SOURCE_DATE_EPOCH
 fi
-# Last released version; used when the tree is untagged or has no git metadata.
-FALLBACK_VERSION="1.2.1"
 if [[ -z "${VERSION:-}" ]]; then
     VERSION="$(git describe --tags --exact-match 2>/dev/null || true)"
 fi
 VERSION="${VERSION#v}"
+# An untagged checkout still names the version it is, so the artifact never
+# carries a stale literal from whenever this script was last edited.
 if [[ -z "$VERSION" ]]; then
-    VERSION="$FALLBACK_VERSION"
+    VERSION="$(bash "$_script_dir/check-version.sh")"
 fi
 export VERSION
 

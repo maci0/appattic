@@ -32,13 +32,48 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="1.3.4" date="2026-09-17"/>
-    <release version="1.3.3" date="2026-09-17"/>
-    <release version="1.3.2" date="2026-09-17"/>
-    <release version="1.3.1" date="2026-09-16"/>
-    <release version="1.3.0" date="2026-09-15"/>
-    <release version="1.2.1" date="2026-09-11"/>
-    <release version="1.2.0" date="2026-09-11"/>
-    <release version="1.1.3" date="2026-09-07"/>
+    <release version="1.3.4" date="2026-09-17">
+      <description>
+        <p>The AppImage ran only on the machine that built it: the bundled wasmtime recorded an absolute build path as its dependency, so a downloaded AppImage failed to start anywhere else.</p>
+      </description>
+    </release>
+    <release version="1.3.3" date="2026-09-17">
+      <description>
+        <p>Findings, disk folders, and the disk ring now appear as each plugin reports instead of after the whole scan finishes.</p>
+        <p>A date or version that cannot be read shows as unknown rather than an empty value.</p>
+      </description>
+    </release>
+    <release version="1.3.2" date="2026-09-17">
+      <description>
+        <p>The findings table is painted from a model rather than rebuilt, a rescan that returns the same findings no longer rebuilds it, and column widths are sampled instead of measured for every row.</p>
+      </description>
+    </release>
+    <release version="1.3.1" date="2026-09-16">
+      <description>
+        <p>Scans reuse the compiled WASM module and the wasmtime compilation cache across runs, a first scan starts faster, and a rescan saves about 60 ms.</p>
+        <p>The results table fills in roughly half the time, and search and filter toggles show or hide rows instead of rebuilding them.</p>
+      </description>
+    </release>
+    <release version="1.3.0" date="2026-09-15">
+      <description>
+        <p>Package-manager queries run in parallel, the byte-scan parsers were rewritten, and the grouping and probe fixes land with search debounce and the audit cleanups.</p>
+      </description>
+    </release>
+    <release version="1.2.1" date="2026-09-11">
+      <description>
+        <p>Disk usage builds on macOS again.</p>
+      </description>
+    </release>
+    <release version="1.2.0" date="2026-09-11">
+      <description>
+        <p>Disk usage, Linux distro cleanup, and portable package support.</p>
+        <p>The cache is invalidated after a same-name app update or a clock rollback, Homebrew cleanup is safe to rerun, and home paths no longer leak into generated scripts.</p>
+      </description>
+    </release>
+    <release version="1.1.3" date="2026-09-07">
+      <description>
+        <p>The offscreen Qt platform plugin is now shipped inside the AppImage, so every page renders without a display server.</p>
+      </description>
+    </release>
   </releases>
 </component>

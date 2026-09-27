@@ -153,7 +153,7 @@ bash scripts/linux-appimage.sh
 # dist/AppAttic-x86_64.AppImage  (or aarch64 on arm64 hosts)
 ```
 
-`VERSION` is the current git tag without a leading `v`, or `1.2.1` if untagged. The release workflow sets it from the `v*` tag. The script then runs `--smoke` on the AppImage and fails if that does not print `SMOKE=ok`. Debug builds additionally take `--dev-check <table|stream|disk|shot>`: the CI gates and the offscreen page renders (`shot <dir>`), all compiled out with `NDEBUG`.
+`VERSION` is the current git tag without a leading `v`, or the version declared in `Sources/AppAtticScan/Util.swift` if untagged (`bash scripts/check-version.sh` prints it). The release workflow sets it from the `v*` tag and fails the build when the tag disagrees with that declaration. The script then runs `--smoke` on the AppImage and fails if that does not print `SMOKE=ok`. Debug builds additionally take `--dev-check <table|stream|disk|shot>`: the CI gates and the offscreen page renders (`shot <dir>`), all compiled out with `NDEBUG`.
 
 Requires Qt 6 dev headers, zig, and wasmtime on the build host. The script downloads pinned linuxdeploy, linuxdeploy-plugin-qt, and appimagetool into `dist/.appimage-tools/` and checks SHA-256. WASM modules ship under `usr/share/appattic/`; `libwasmtime.so` sits next to the binary. It also writes `dist/AppAttic-<arch>.AppImage.sbom.json`, a CycloneDX 1.5 inventory of every pinned third-party artifact that went into the image. Regenerate it or check the pins yourself:
 
