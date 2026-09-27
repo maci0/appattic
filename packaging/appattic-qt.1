@@ -1,0 +1,63 @@
+.TH APPATTIC\-QT 1 "2026-09-27" "appattic-qt 1.3.4" "User Commands"
+.SH NAME
+appattic\-qt \- Qt 6 window for leftover, stale app, package and disk scans
+.SH SYNOPSIS
+.B appattic-qt
+.RB [ --version ]
+.RB [ --help ]
+.RB [ --smoke ]
+.SH DESCRIPTION
+.B appattic\-qt
+is the Linux window of AppAttic. It shows leftovers from uninstalled apps,
+stale installed apps, outdated versions, unused distro and language packages,
+and disk usage. Nothing is deleted until a script is reviewed in the window
+or the move is confirmed.
+.PP
+Package-manager queries run on the host. As a Flatpak they are spawned with
+.B flatpak-spawn --host
+and plugin tags are read from
+.IR /run/host ;
+installed as a plain CMake or AppImage package they run directly. Scan plugins
+cannot delete files or run a distro upgrade.
+.PP
+The WASM modules are read from
+.IR $APPATTIC_CORE_OUT ,
+or from
+.I ../share/appattic
+next to the binary.
+.SH OPTIONS
+.TP
+.B --version
+Print the version and exit.
+.TP
+.BR --help ", " \-h
+Print a usage summary and exit.
+.TP
+.B --smoke
+Run the headless smoke test and exit. Prints
+.B SMOKE=ok
+on success. Useful with
+.B QT_QPA_PLATFORM=offscreen
+on a host with no display server.
+.SH ENVIRONMENT
+.TP
+.B APPATTIC_CORE_OUT
+Directory holding the compiled WASM modules.
+.TP
+.B WASMTIME_DIR
+Wasmtime C API prefix used at build time, not at run time.
+.SH EXIT STATUS
+.TP
+.B 0
+The window closed normally, or the requested option completed.
+.TP
+.B 1
+The scan failed, or the smoke test failed.
+.SH FILES
+.TP
+.I ~/.local/share/appattic/settings.json
+Confirm-before-running, include-system-apps, and ignored leftover paths.
+.SH SEE ALSO
+The project README and
+.I https://github.com/maci0/appattic
+for the full scan description.

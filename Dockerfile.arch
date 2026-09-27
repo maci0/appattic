@@ -5,6 +5,12 @@ ENV LANG=C
 ENV TZ=UTC
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 
+LABEL org.opencontainers.image.title="AppAttic" \
+      org.opencontainers.image.description="Build image for AppAttic on Arch: installs Qt 6 and links the Qt window." \
+      org.opencontainers.image.source="https://github.com/maci0/appattic" \
+      org.opencontainers.image.url="https://github.com/maci0/appattic" \
+      org.opencontainers.image.licenses="LicenseRef-proprietary"
+
 # Qt 6, cmake, ninja, pkgconf, clang, curl, xz and zig come from
 # linux-deps.sh --install below; this line only adds what it does not install.
 RUN pacman -Syu --noconfirm --needed \
@@ -16,7 +22,8 @@ COPY scripts/linux-deps.sh \
      scripts/dep-checksums.sha256 \
      /tmp/appattic/scripts/
 RUN bash /tmp/appattic/scripts/linux-deps.sh --install \
-    && bash /tmp/appattic/scripts/linux-deps.sh --install-wasmtime
+    && bash /tmp/appattic/scripts/linux-deps.sh --install-wasmtime \
+    && rm -rf /tmp/appattic
 ENV WASMTIME_DIR=/opt/wasmtime-c-api
 
 WORKDIR /src

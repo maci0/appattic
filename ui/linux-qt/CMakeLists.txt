@@ -232,3 +232,7 @@ if(EXISTS "${APPATTIC_ROOT}/packaging/org.appattic.AppAttic.metainfo.xml")
     install(FILES "${APPATTIC_ROOT}/packaging/org.appattic.AppAttic.metainfo.xml"
         DESTINATION share/metainfo)
 endif()
+if(EXISTS "${APPATTIC_ROOT}/packaging/appattic-qt.1")
+    install(FILES "${APPATTIC_ROOT}/packaging/appattic-qt.1"
+        DESTINATION share/man/man1)
+endif()

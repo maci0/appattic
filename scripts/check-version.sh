@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The release version has one declaration (appAtticVersion in Util.swift) and
-# two copies to keep in step (the newest AppStream release, and
-# CFBundleShortVersionString in the macOS Info.plist). CMakeLists.txt reads
-# the declaration, so this is the place that checks the copies and the derivation.
+# the packaging copies that have to keep in step: the newest AppStream
+# release, the macOS bundle Info.plist, and the appattic-qt man page.
+# CMakeLists.txt reads the declaration, so this is the place that checks the
+# copies and the derivation.
 # Usage: bash scripts/check-version.sh [--tag TAG]
 #   prints the declared version on stdout
 #   --tag  also requires TAG (a v* ref name or a bare version) to match it
@@ -15,6 +16,7 @@ UTIL="$ROOT/Sources/AppAtticScan/Util.swift"
 CMAKE="$ROOT/ui/linux-qt/CMakeLists.txt"
 METAINFO="$ROOT/packaging/org.appattic.AppAttic.metainfo.xml"
 PLIST="$ROOT/packaging/Info.plist"
+MANPAGE="$ROOT/packaging/appattic-qt.1"
 
 TAG=""
 while [[ $# -gt 0 ]]; do
@@ -31,9 +33,9 @@ while [[ $# -gt 0 ]]; do
             cat <<'EOF'
 Usage: bash scripts/check-version.sh [--tag TAG]
 
-  Checks that the newest AppStream release and the macOS Info.plist match
-  appAtticVersion, and that CMakeLists.txt still derives its version from
-  Util.swift.
+  Checks that the AppStream release, the macOS Info.plist, and the
+  appattic-qt man page match appAtticVersion, and that CMakeLists.txt still
+  derives its version from Util.swift.
   Prints the declared version. With --tag, the tag must match it too.
 EOF
             exit 0
@@ -79,6 +81,8 @@ if [[ -z "$meta_version" ]]; then
 fi
 plist_short="$(plist_string "Info.plist" CFBundleShortVersionString "$PLIST")"
 plist_build="$(plist_string "Info.plist" CFBundleVersion "$PLIST")"
+plist_version="$plist_short"
+man_version="$(extract "man page" "$MANPAGE" 's/^\.TH [^ ]* 1 "[^"]*" "[^ ]* \([^"]*\)" .*/\1/p')"
 
 # CMakeLists.txt has no version of its own: it reads appAtticVersion out of
 # $UTIL with string(REGEX MATCH). There is no copy of it to compare, so check
@@ -94,9 +98,21 @@ if ! grep -qF 'public let appAtticVersion' "$CMAKE" \
     exit 1
 fi
 
+# One declaration, three copies to keep in step. A stale copy ships a package
+# that reports the wrong version, so each one is compared here.
 if [[ "$meta_version" != "$swift_version" ]]; then
     echo "error: version mismatch: AppStream release is $meta_version, appAtticVersion is $swift_version" >&2
     echo "error: bump both in the same commit: $UTIL, $METAINFO" >&2
+    exit 1
+fi
+if [[ "$plist_version" != "$swift_version" ]]; then
+    echo "error: version mismatch: CFBundleShortVersionString is $plist_version, appAtticVersion is $swift_version" >&2
+    echo "error: bump both in the same commit: $UTIL, $PLIST" >&2
+    exit 1
+fi
+if [[ "$man_version" != "$swift_version" ]]; then
+    echo "error: version mismatch: appattic-qt.1 header is $man_version, appAtticVersion is $swift_version" >&2
+    echo "error: bump both in the same commit: $UTIL, $MANPAGE" >&2
     exit 1
 fi
 

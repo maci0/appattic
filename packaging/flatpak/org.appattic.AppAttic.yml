@@ -25,6 +25,10 @@ modules:
       - install -d "${FLATPAK_DEST}/lib" "${FLATPAK_DEST}/include"
       - cp -a lib/libwasmtime.so* "${FLATPAK_DEST}/lib/"
       - cp -a include/. "${FLATPAK_DEST}/include/"
+    # The headers only exist so the appattic module can compile against
+    # wasmtime.h; the runtime links lib/libwasmtime.so and never reads them.
+    cleanup:
+      - /include
     sources:
       - type: archive
         only-arches:

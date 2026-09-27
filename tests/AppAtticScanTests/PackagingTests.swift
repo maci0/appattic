@@ -18,6 +18,44 @@ final class PackagingTests: XCTestCase {
         return String(value)
     }
 
+    func testQtBinaryShipsAManPageForEveryFlag() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let manURL = root.appendingPathComponent("packaging/appattic-qt.1")
+        let man = try String(contentsOf: manURL, encoding: .utf8)
+        XCTAssertTrue(man.contains(".TH APPATTIC\\-QT 1"), man)
+        XCTAssertTrue(man.contains(".SH NAME"), man)
+
+        let main = try String(
+            contentsOf: root.appendingPathComponent("ui/linux-qt/main.cpp"),
+            encoding: .utf8
+        )
+        // Every flag --help prints has to be in the man page, or the two
+        // contradict each other.
+        for flag in ["--version", "--help", "-h", "--smoke"] {
+            XCTAssertTrue(man.contains(flag), "man page is missing \(flag)")
+            XCTAssertTrue(main.contains(flag), "runHelp is missing \(flag)")
+        }
+
+        let cmake = try String(
+            contentsOf: root.appendingPathComponent("ui/linux-qt/CMakeLists.txt"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(cmake.contains("packaging/appattic-qt.1"), cmake)
+        XCTAssertTrue(cmake.contains("share/man/man1"), cmake)
+
+        // One version declaration; the plist and the man page are copies that
+        // check-version.sh compares against it.
+        let checkVersion = try String(
+            contentsOf: root.appendingPathComponent("scripts/check-version.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(checkVersion.contains("CFBundleShortVersionString"), checkVersion)
+        XCTAssertTrue(checkVersion.contains("appattic-qt.1"), checkVersion)
+    }
+
     func testMacBundleSourcesMatchPlatformFloor() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
