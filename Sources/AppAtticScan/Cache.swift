@@ -237,17 +237,31 @@ public func linuxPkgStampPaths(
 }
 
 func stampEscape(_ s: String) -> String {
+    // Runs of ordinary characters are appended as slices; only the handful of
+    // separators are paid for individually. Appending every Character in turn
+    // rebuilt the string once per input character, over every formula and cask
+    // line of a `brew list` stamp.
     var out = ""
     out.reserveCapacity(s.count)
-    for ch in s {
-        switch ch {
-        case "\\": out += "\\\\"
-        case ",": out += "\\,"
-        case "\n": out += "\\n"
-        case "\r": out += "\\r"
-        default: out.append(ch)
+    var runStart = s.startIndex
+    var i = s.startIndex
+    while i < s.endIndex {
+        let escaped: String
+        switch s[i] {
+        case "\\": escaped = "\\\\"
+        case ",": escaped = "\\,"
+        case "\n": escaped = "\\n"
+        case "\r": escaped = "\\r"
+        default:
+            i = s.index(after: i)
+            continue
         }
+        if runStart < i { out += s[runStart..<i] }
+        out += escaped
+        i = s.index(after: i)
+        runStart = i
     }
+    if runStart < s.endIndex { out += s[runStart...] }
     return out
 }
 

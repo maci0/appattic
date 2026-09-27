@@ -617,6 +617,32 @@ func dirContainsAppBundle(_ path: String) -> Bool {
     return names.contains { $0.hasSuffix(".app") }
 }
 
+/// Drops leading and trailing `/` without allocating a `CharacterSet`.
+func trimmedSlashes(_ s: String) -> String {
+    var start = s.startIndex
+    var end = s.endIndex
+    while start < end, s[start] == "/" { start = s.index(after: start) }
+    while start < end, s[s.index(before: end)] == "/" { end = s.index(before: end) }
+    return String(s[start..<end])
+}
+
+/// Every directory that strictly contains one of `paths`, bare (no trailing
+/// slash), so a lookup is a single `Set` probe instead of a prefix comparison
+/// against every path. Cost is O(paths x depth) rather than O(paths x entries).
+/// `""` and `"/"` are members because both spell the filesystem root, which
+/// contains every path.
+func strictAncestorDirs(of paths: [String]) -> Set<String> {
+    var out: Set<String> = ["", "/"]
+    for path in paths {
+        var dir = (path as NSString).deletingLastPathComponent
+        while dir != "/", !dir.isEmpty {
+            out.insert(dir)
+            dir = (dir as NSString).deletingLastPathComponent
+        }
+    }
+    return out
+}
+
 public func nonAppEntriesIn(_ root: String) -> [String] {
     let skip: Set<String> = ["utilities"]
     var out: [String] = []

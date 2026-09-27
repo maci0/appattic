@@ -328,7 +328,11 @@ public func buildSoftware(
         let formulaNames = Set(brew.formulas.map { $0.name.posixLowercased() })
         let caskNames = Dictionary(brew.casks.map { ($0.name.posixLowercased(), $0.name) }, uniquingKeysWith: { _, last in last })
         let paths = nonAppPaths ?? nonAppEntriesIn("/Applications")
-        let measure = du ?? { p in
+        // A non-app entry is skipped when it holds an app, which the old
+        // `apps.contains(where:)` scan answered in O(entries x apps) and
+        // re-trimmed the entry per app. Inverted: index the strict ancestor
+        // directories of every app once, then probe.
+        let appAncestorDirs = strictAncestorDirs(of: apps.map(\.path))        let measure = du ?? { p in
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: p, isDirectory: &isDir), isDir.boolValue {
                 return duSize(p)
@@ -336,9 +340,7 @@ public func buildSoftware(
             return (fileSize(p), true)
         }
         for path in paths {
-            if apps.contains(where: { $0.path.hasPrefix(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/") || $0.path.hasPrefix(path + "/") }) {
-                continue
-            }
+            if appAncestorDirs.contains(trimmedSlashes(path)) { continue }
             let name = URL(fileURLWithPath: path).lastPathComponent
             let key = name.posixLowercased()
             if formulaNames.contains(key) { continue }

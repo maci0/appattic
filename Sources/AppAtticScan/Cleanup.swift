@@ -592,8 +592,9 @@ public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [],
     result.incomplete = data.incomplete == true
     result.appsInstalled = data.totals.apps_installed
     let ignoredKeys = Set(ignoringLeftovers.map(pathIdentityKey))
+    let filterIgnored = !ignoredKeys.isEmpty
     result.dataItems = data.leftovers.compactMap { item in
-        if leftoverIgnorePaths(item).contains(where: { ignoredKeys.contains(pathIdentityKey($0)) }) { return nil }
+        if filterIgnored, leftoverIgnorePaths(item).contains(where: { ignoredKeys.contains(pathIdentityKey($0)) }) { return nil }
         return DataItem(
             path: item.path,
             name: item.name,

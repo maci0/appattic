@@ -153,6 +153,13 @@ private let managerLabel: [String: String] = [
     "zypper": "zypper",
 ]
 
+/// Same guard as `packageLabel` in Packages.swift: a manager carrying no `-`
+/// skips the Foundation replace instead of copying the string to find nothing.
+private func outdatedManagerLabel(_ manager: String) -> String {
+    if let known = managerLabel[manager] { return known }
+    return manager.contains("-") ? manager.replacingOccurrences(of: "-", with: " ") : manager
+}
+
 public let outdatedSkippedManagersNote =
     "Untrusted casks, App Store, and Snap are skipped."
 
@@ -189,7 +196,7 @@ private func outdatedReason(
     page: String
 ) -> String {
     if let reason, !reason.isEmpty { return reason }
-    let mgr = managerLabel[manager] ?? manager.replacingOccurrences(of: "-", with: " ")
+    let mgr = outdatedManagerLabel(manager)
     let cur = currentVersion ?? "the installed version"
     let latest = latestVersion ?? "a newer version"
     if updatable {
@@ -307,7 +314,7 @@ public func outdatedSummaryFallback(_ entry: OutdatedEntry) -> String {
 
 private func outdatedSummaryFallback(summary: String?, manager: String) -> String {
     if let summary, !summary.isEmpty { return summary }
-    let mgr = managerLabel[manager] ?? manager.replacingOccurrences(of: "-", with: " ")
+    let mgr = outdatedManagerLabel(manager)
     return "Package managed by \(mgr)"
 }
 

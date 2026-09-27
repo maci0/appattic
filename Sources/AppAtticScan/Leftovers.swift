@@ -1722,9 +1722,12 @@ func enclosingAppBundle(_ path: String) -> String? {
     return nil
 }
 
-private func executableToolEntries(in dirs: [String]?) -> [(name: String, path: String)] {
+/// One executable found while walking the user tool directories.
+public typealias ToolEntry = (name: String, path: String)
+
+func executableToolEntries(in dirs: [String]?) -> [ToolEntry] {
     let fm = FileManager.default
-    var out: [(name: String, path: String)] = []
+    var out: [ToolEntry] = []
     for dir in dirs ?? defaultUserToolDirs() {
         guard let names = try? fm.contentsOfDirectory(atPath: dir) else { continue }
         // `contentsOfDirectory` hands back readdir order, which the filesystem
@@ -1742,10 +1745,10 @@ private func executableToolEntries(in dirs: [String]?) -> [(name: String, path: 
     return out
 }
 
-public func appsFromPathBinaries(dirs: [String]? = nil) -> [AppRecord] {
+public func appsFromPathBinaries(dirs: [String]? = nil, entries: [ToolEntry]? = nil) -> [AppRecord] {
     var out: [AppRecord] = []
     var seen = Set<String>()
-    for entry in executableToolEntries(in: dirs) {
+    for entry in entries ?? executableToolEntries(in: dirs) {
         let real = URL(fileURLWithPath: entry.path).resolvingSymlinksInPath().path
         guard let bundle = enclosingAppBundle(real), seen.insert(bundle).inserted else { continue }
         if let app = makeApp(from: bundle) { out.append(app) }
@@ -1756,11 +1759,12 @@ public func appsFromPathBinaries(dirs: [String]? = nil) -> [AppRecord] {
 public func listUserToolNames(
     dirs: [String]? = nil,
     which: WhichFn = whichCommand,
-    sdkDirs: [String]? = nil
+    sdkDirs: [String]? = nil,
+    entries: [ToolEntry]? = nil
 ) -> [String] {
     var out: [String] = []
     var seen = Set<String>()
-    for entry in executableToolEntries(in: dirs) where seen.insert(entry.name).inserted {
+    for entry in entries ?? executableToolEntries(in: dirs) where seen.insert(entry.name).inserted {
         out.append(entry.name)
     }
     for extra in ["wine", "docker"] {
@@ -1812,7 +1816,14 @@ public func scanLeftovers(
     clock: MonotonicFn = monotonicSeconds,
     run: CommandRun = runCommand
 ) -> ([DataItem], [OrphanAgent]) {
-    let ident = Identity(apps: apps + appsFromPathBinaries(), brew: brew, toolNames: listUserToolNames())
+    // One walk of the tool directories feeds both halves of Identity; they
+    // used to enumerate and stat the same directories independently.
+    let toolEntries = executableToolEntries(in: nil)
+    let ident = Identity(
+        apps: apps + appsFromPathBinaries(entries: toolEntries),
+        brew: brew,
+        toolNames: listUserToolNames(entries: toolEntries)
+    )
     var allRoots = roots ?? scanRootsForPlatform()
     if roots == nil {
         for (path, kind) in homeDataLeaves() {

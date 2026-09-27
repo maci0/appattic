@@ -15,6 +15,29 @@ public func whichCommand(_ name: String) -> String? {
     if name.contains("/") {
         return FileManager.default.isExecutableFile(atPath: name) ? name : nil
     }
+    for dir in whichSearchDirectories() {
+        let candidate = (dir as NSString).appendingPathComponent(name)
+        if FileManager.default.isExecutableFile(atPath: candidate) {
+            return candidate
+        }
+    }
+    return nil
+}
+
+/// The directories `whichCommand` walks, de-duplicated, first-wins.
+///
+/// Assembled once: it costs a `homeDirectoryForCurrentUser` lookup, a
+/// full `environment` copy, a PATH split and a readdir of every installed nvm
+/// version, and `runCommand` calls `whichCommand` once per subprocess it
+/// spawns (a scan runs hundreds). Only the directory list is cached, never a
+/// name-to-path result, so a tool installed while the app runs is still found.
+private let whichDirectoriesLock = NSLock()
+nonisolated(unsafe) private var cachedWhichDirectories: [String]? = nil
+
+private func whichSearchDirectories() -> [String] {
+    whichDirectoriesLock.lock()
+    defer { whichDirectoriesLock.unlock() }
+    if let cached = cachedWhichDirectories { return cached }
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     var extras = [
         home + "/.local/bin",
@@ -45,14 +68,9 @@ public func whichCommand(_ name: String) -> String? {
         .map(String.init)
         .filter { !$0.isEmpty }
     var seen = Set<String>()
-    for dir in extras + pathDirs {
-        if !seen.insert(dir).inserted { continue }
-        let candidate = (dir as NSString).appendingPathComponent(name)
-        if FileManager.default.isExecutableFile(atPath: candidate) {
-            return candidate
-        }
-    }
-    return nil
+    let resolved = (extras + pathDirs).filter { !$0.isEmpty && seen.insert($0).inserted }
+    cachedWhichDirectories = resolved
+    return resolved
 }
 
 /// Cached process username: environment copy + trims + folds per call cost

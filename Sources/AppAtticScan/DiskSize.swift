@@ -29,12 +29,13 @@ public func fileSize(_ path: String) -> Int {
 }
 
 public func duSize(_ path: String, timeout: TimeInterval = 8, run: CommandRun = runCommand) -> (Int, Bool) {
-    var isDir: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+    // One `attributesOfItem` answers both "does it exist" and "is it a
+    // directory"; the previous `fileExists` + `fileSize` pair stat'ed twice.
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else {
         return (0, false)
     }
-    if !isDir.boolValue {
-        return (fileSize(path), true)
+    if (attrs[.type] as? FileAttributeType) != .typeDirectory {
+        return (intFromSizeAttribute(attrs[.size]), true)
     }
     if path.hasSuffix(".app"), let bytes = spotlightFSSize(path, run: run) {
         return (bytes, true)
@@ -83,13 +84,14 @@ public func duSizes(
     var out: [String: (Int, Bool)] = [:]
     var dirs: [String] = []
     for path in paths {
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+        // One attribute read per path instead of `fileExists` + `fileSize`,
+        // which stat'ed every path in the batch twice.
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else {
             out[path] = (0, false)
             continue
         }
-        if !isDir.boolValue {
-            out[path] = (fileSize(path), true)
+        if (attrs[.type] as? FileAttributeType) != .typeDirectory {
+            out[path] = (intFromSizeAttribute(attrs[.size]), true)
             continue
         }
         dirs.append(path)
