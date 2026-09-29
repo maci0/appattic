@@ -19,8 +19,7 @@ final class FilePermissionsTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("owner-only-\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: url) }
         try writeOwnerOnlyFile(Data("secret".utf8), to: url)
-        let mode = (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as! NSNumber).intValue
-        XCTAssertEqual(mode & 0o777, 0o600)
+        XCTAssertEqual(try mode(of: url) & 0o777, 0o600)
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "secret")
     }
 
@@ -80,7 +79,7 @@ final class FilePermissionsTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
         defer { try? FileManager.default.removeItem(at: url) }
         try writeOwnerOnlyFile(Data("new".utf8), to: url)
-        let mode = (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as! NSNumber).intValue
+        let mode = try mode(of: url)
         XCTAssertEqual(mode & 0o777, 0o600)
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "new")
     }

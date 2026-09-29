@@ -45,9 +45,11 @@ final class DiskSizeTests: XCTestCase {
     /// The partial total is evidence only if it is pinned to a number. A real
     /// deadline either overruns before the first read or not at all, so the
     /// old `timeout: -1` call always reported 0 and every bound below it held
-    /// for free. The clock is injected instead: the walk reads it on entry and
-    /// after each entry it accepts, and `.`/`..` skip that check, so letting the
-    /// fourth read pass the deadline stops the walk with exactly three 1 KiB
+    /// for free. The clock is injected instead, and the read sequence is
+    /// counted rather than guessed: one read builds the deadline, one more is
+    /// taken on entering the walk, and one follows each entry the walk accepts
+    /// (`.` and `..` are skipped before that check). Letting the fifth read
+    /// pass the deadline therefore stops the walk with exactly three 1 KiB
     /// files counted, whatever order `readdir` hands them over in.
     func testDirectoryByteSizeKeepsPartialTotalOnTimeout() throws {
         let root = FileManager.default.temporaryDirectory
@@ -60,7 +62,7 @@ final class DiskSizeTests: XCTestCase {
         var reads = 0
         let clock: MonotonicFn = {
             reads += 1
-            return reads <= 3 ? 0 : 100
+            return reads <= 4 ? 0 : 100
         }
         let (partialBytes, partialOK) = directoryByteSize(root.path, timeout: 10, clock: clock)
         XCTAssertFalse(partialOK, "a deadline overrun is a partial measurement")

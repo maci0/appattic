@@ -139,7 +139,7 @@ final class TextTests: XCTestCase {
         XCTAssertFalse(collatedBefore("Zoom", "Zoom", tieBreak: "/Users/x/Zoom.app", "/Applications/Zoom.app"))
     }
 
-    func testReadUTF8FileTailReadsWholeSmallFileAndCutsBigOnes() {
+    func testReadUTF8FileTailReadsWholeSmallFileAndCutsBigOnes() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("tail-\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: url) }

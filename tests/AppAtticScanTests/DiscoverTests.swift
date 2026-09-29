@@ -340,7 +340,16 @@ final class DiscoverTests: XCTestCase {
         Exec=/usr/bin/true
         """
         try body.write(to: appsDir.appendingPathComponent("tempscanapp.desktop"), atomically: true, encoding: .utf8)
-        let found = findLinuxApps(progress: { _ in }, desktopDirs: [appsDir.path])
+        // The empty library roots are the point: `findLinuxApps` also reads the
+        // Steam libraries of the machine it runs on, and a developer with games
+        // installed would otherwise see them here and fail a test that says
+        // nothing about them.
+        let found = findLinuxApps(
+            progress: { _ in },
+            desktopDirs: [appsDir.path],
+            steamLibraryRoots: [],
+            bottlesDir: td.appendingPathComponent("no-bottles").path
+        )
         // The whole result, not a display-name probe: an extra entry fails
         // here, and the path has to come from the directory that was scanned
         // rather than a macOS location the Linux path must never produce.
@@ -376,7 +385,12 @@ final class DiscoverTests: XCTestCase {
                 encoding: .utf8
             )
         }
-        let found = findLinuxApps(progress: { _ in }, desktopDirs: [appsDir.path])
+        let found = findLinuxApps(
+            progress: { _ in },
+            desktopDirs: [appsDir.path],
+            steamLibraryRoots: [],
+            bottlesDir: td.appendingPathComponent("no-bottles").path
+        )
         XCTAssertEqual(found.map(\.displayName), ["Calculator", "Firefox"])
     }
 

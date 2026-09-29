@@ -590,10 +590,21 @@ public func parseDesktopFile(_ path: String, sourceDir: String = "") -> AppRecor
     )
 }
 
-private func finishAppDiscovery(_ apps: inout [AppRecord], seen: inout Set<String>, progress: (String) -> Void) {
+/// `steamLibraryRoots` and `bottlesDir` are the same injection points
+/// `appendSteamApps` and `appendCrossOverBottles` already take, forwarded so a
+/// caller that scopes the desktop directories can scope the game libraries too:
+/// otherwise the games installed on the machine running the caller land in a
+/// result that was asked to describe one directory.
+private func finishAppDiscovery(
+    _ apps: inout [AppRecord],
+    seen: inout Set<String>,
+    progress: (String) -> Void,
+    steamLibraryRoots: [String]? = nil,
+    bottlesDir: String? = nil
+) {
     progress("  · discovering Steam games…")
-    appendSteamApps(&apps, seen: &seen)
-    appendCrossOverBottles(&apps, seen: &seen)
+    appendSteamApps(&apps, seen: &seen, libraryRoots: steamLibraryRoots)
+    appendCrossOverBottles(&apps, seen: &seen, bottlesDir: bottlesDir)
     progress("  · measuring sizes for \(apps.count) apps…")
     let sizes = duSizes(apps.filter { !skipLiveDu($0) }.map(\.path))
     for i in apps.indices {
@@ -614,7 +625,12 @@ public func findApps(progress: (String) -> Void = { _ in }) -> [AppRecord] {
     return findMacApps(progress: progress)
 }
 
-func findLinuxApps(progress: (String) -> Void, desktopDirs: [String]? = nil) -> [AppRecord] {
+func findLinuxApps(
+    progress: (String) -> Void,
+    desktopDirs: [String]? = nil,
+    steamLibraryRoots: [String]? = nil,
+    bottlesDir: String? = nil
+) -> [AppRecord] {
     progress("  · discovering .desktop applications…")
     var apps: [AppRecord] = []
     var seen = Set<String>()
@@ -630,7 +646,13 @@ func findLinuxApps(progress: (String) -> Void, desktopDirs: [String]? = nil) -> 
             if seen.insert(key).inserted { apps.append(app) }
         }
     }
-    finishAppDiscovery(&apps, seen: &seen, progress: progress)
+    finishAppDiscovery(
+        &apps,
+        seen: &seen,
+        progress: progress,
+        steamLibraryRoots: steamLibraryRoots,
+        bottlesDir: bottlesDir
+    )
     return apps
 }
 
