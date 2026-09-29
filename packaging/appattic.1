@@ -34,8 +34,9 @@ shows ten rows and no status lines.
 .SH COMMANDS
 .TP
 .B config
-Print the settings file, its values, and the XDG paths this machine resolves,
-then exit. Nothing is scanned, so it is safe to run anywhere.
+Print the settings file, its values, the path of the settings backup and
+whether it is there, and the XDG paths this machine resolves, then exit.
+Nothing is scanned, so it is safe to run anywhere.
 .TP
 .B report
 Leftovers, stale software, outdated packages, and packages. The default.
@@ -206,6 +207,14 @@ prints.
 .IR includeSystem ", " confirmDelete ", and the ignored leftover paths, which
 must each be the full path a report prints. A missing file uses the defaults. A
 malformed file is an error, and the run exits 2 without overwriting it.
+.TP
+.I ~/.local/share/appattic/settings.json.bak
+The settings file as it was before the last change, kept so an emptied or
+mangled
+.I settings.json
+can be put back with a
+.BR "cp" .
+Nothing reads it while AppAttic runs.
 .TP
 .I ~/.local/share/appattic/last-scan.json
 The scan cache, a full list of the app and leftover paths the last scan found

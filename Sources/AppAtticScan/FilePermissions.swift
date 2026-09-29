@@ -115,4 +115,22 @@ public func writeOwnerOnlyFile(_ data: Data, to url: URL) throws {
         unlink(finalName)
         throw AppAtticIOError.writeFailed(path: url.path, message: message)
     }
+    // The rename is its own commit point: the directory entry that names the
+    // new file is in the page cache until the directory itself is written out.
+    // A crash after the fsync above and before this one can leave the
+    // destination as it was before the write, or with no entry at all, which
+    // for `settings.json` is the only copy of the ignore list gone.
+    //
+    // A failure here is not the file's failure to write: the bytes are on disk
+    // and the name resolves, so the caller has what it wrote. Reporting it
+    // would make a durable write look like a failed one and lose the
+    // distinction the caller acts on, so it is not reported. `open` on a
+    // directory with `O_RDONLY` fails on a filesystem that cannot fsync one
+    // (some network mounts), and there the rename is as durable as that
+    // filesystem can make it.
+    let dirFD = open(dir.path, O_RDONLY)
+    if dirFD >= 0 {
+        _ = fsync(dirFD)
+        close(dirFD)
+    }
 }

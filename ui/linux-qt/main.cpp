@@ -3180,6 +3180,11 @@ private:
         if (QFileInfo(fi.absolutePath()).fileName().compare(QStringLiteral("appattic"), Qt::CaseInsensitive) == 0) {
             restrictOwnerOnlyDir(fi.absolutePath());
         }
+        /* Keep the file being replaced as settings.json.bak first. The ignore
+           list is the user's own choices and a scan cannot rebuild it, so the
+           state before this write has to outlive it. A backup that does not
+           land is not a reason to refuse the save the user asked for. */
+        keepSettingsBackup(path);
         QSaveFile f(path);
         if (!f.open(QIODevice::WriteOnly)) {
             showError(settingsUnwritableMessage(path));

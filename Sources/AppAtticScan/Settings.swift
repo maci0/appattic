@@ -89,6 +89,19 @@ public func defaultSettingsURL() -> URL {
     defaultScanCacheURL().deletingLastPathComponent().appendingPathComponent("settings.json")
 }
 
+/// The last settings file the app wrote, kept beside it as `settings.json.bak`.
+///
+/// `settings.json` is the only thing the app writes that a scan cannot rebuild:
+/// the ignore list is the user's own choices, and a file that has been emptied,
+/// truncated by a full disk, or hand-mangled into invalid JSON is refused by
+/// `loadSettings` and never repaired. `saveSettings` copies the file it is
+/// about to replace here first, so the last state the app itself wrote is
+/// always one `cp` away. Nothing reads this file at run time: it is recovery
+/// material, and `docs/runbooks/state-recovery.md` is what says so to a user.
+public func settingsBackupURL(_ url: URL = defaultSettingsURL()) -> URL {
+    url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + ".bak")
+}
+
 /// CLI `--include-system` ORs with the file. A true file value cannot be turned off from the CLI.
 public func effectiveIncludeSystem(cliFlag: Bool, settings: AppAtticSettings) -> Bool {
     cliFlag || settings.includeSystem
@@ -103,6 +116,11 @@ public func effectiveIncludeSystem(cliFlag: Bool, settings: AppAtticSettings) ->
 public struct EffectiveConfig: Encodable, Equatable, Sendable {
     public let settingsPath: String
     public let settingsFileExists: Bool
+    /// The last settings file the app wrote, and whether it is there. A
+    /// missing backup next to an existing `settings.json` is the one state
+    /// case a user cannot act on alone, so the config output names it.
+    public let settingsBackupPath: String
+    public let settingsBackupExists: Bool
     public let includeSystemFile: Bool
     public let includeSystemFlag: Bool
     public let confirmDelete: Bool
@@ -139,6 +157,8 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
     ) {
         self.settingsPath = settingsURL.path
         self.settingsFileExists = FileManager.default.fileExists(atPath: settingsURL.path)
+        self.settingsBackupPath = settingsBackupURL(settingsURL).path
+        self.settingsBackupExists = FileManager.default.fileExists(atPath: settingsBackupURL(settingsURL).path)
         self.includeSystemFile = settings.includeSystem
         self.includeSystemFlag = includeSystemFlag
         self.includeSystem = effectiveIncludeSystem(
@@ -176,6 +196,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         lines.append(contentsOf: ignoredLeftoverPaths.map { "  \($0)" })
         lines.append(contentsOf: [
             "scan cache: \(scanCachePath)",
+            "settings backup: \(settingsBackupPath)\(settingsBackupExists ? "" : " (missing)")",
             "XDG_DATA_HOME: \(dataHome)",
             "XDG_CONFIG_HOME: \(configHome)",
             "XDG_CACHE_HOME: \(cacheHome)",
@@ -358,8 +379,22 @@ public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSett
         // app's own state directory, and a caller-supplied `to:` can name any
         // other parent. mkstemp creates at `0600`, so there is no window at any
         // destination.
+        try? keepSettingsBackup(at: url)
         try writeOwnerOnlyFile(raw, to: url)
     } catch {
         throw SettingsError.unwritable(path: url.path, reason: error.localizedDescription)
     }
+}
+
+/// Copy the settings file that is about to be replaced to `settings.json.bak`,
+/// so the last state the app wrote survives the write that replaces it.
+///
+/// A backup that does not land does not stop the save. The file being replaced
+/// is either readable and the copy is worth having, or unreadable and there is
+/// nothing to copy; either way the write the caller asked for has to be the one
+/// that happens, and the older backup, if there is one, is still the last
+/// state the app wrote.
+private func keepSettingsBackup(at url: URL) throws {
+    guard let previous = try? Data(contentsOf: url), !previous.isEmpty else { return }
+    try writeOwnerOnlyFile(previous, to: settingsBackupURL(url))
 }

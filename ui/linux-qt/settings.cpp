@@ -10,6 +10,7 @@
 #include <QJsonParseError>
 #include <QJsonValue>
 #include <QMetaType>
+#include <QSaveFile>
 #include <QSet>
 #include <QSettings>
 #include <QStandardPaths>
@@ -175,6 +176,24 @@ bool parseSettingsJson(const QByteArray &raw, AppSettings *out, QString *err) {
         }
     }
     if (out) *out = s;
+    return true;
+}
+
+QString settingsBackupPath(const QString &settingsPath) {
+    return settingsPath + QStringLiteral(".bak");
+}
+
+bool keepSettingsBackup(const QString &settingsPath) {
+    if (settingsPath.isEmpty() || !QFile::exists(settingsPath)) return true;
+    QFile in(settingsPath);
+    if (!in.open(QIODevice::ReadOnly)) return false;
+    const QByteArray raw = in.readAll();
+    in.close();
+    if (raw.isEmpty()) return true;
+    QSaveFile out(settingsBackupPath(settingsPath));
+    if (!out.open(QIODevice::WriteOnly)) return false;
+    if (out.write(raw) != raw.size() || !out.commit()) return false;
+    restrictPrivateDataFile(settingsBackupPath(settingsPath));
     return true;
 }
 

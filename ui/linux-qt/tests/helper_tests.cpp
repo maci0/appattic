@@ -1566,10 +1566,59 @@ static int checkSettings() {
     return 0;
 }
 
+/// The state before a settings write has to outlive it: the ignore list is
+/// the user's own choices and a scan cannot rebuild them, so replacing
+/// settings.json keeps the file it replaced as settings.json.bak, as private
+/// as the file it was copied from.
+static int checkSettingsBackup() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "settings backup: temp dir failed\n");
+        return 1;
+    }
+    const QString path = tmp.filePath(QStringLiteral("settings.json"));
+    if (writeFile(path, encodeSettingsJson(AppSettings()))) {
+        std::fprintf(stderr, "settings backup: write failed\n");
+        return 1;
+    }
+    if (QFile::exists(settingsBackupPath(path))) {
+        std::fprintf(stderr, "settings backup: nothing to keep, and a backup appeared\n");
+        return 1;
+    }
+    AppSettings ignored;
+    ignored.ignoredLeftoverPaths = QStringList{QStringLiteral("/a")};
+    if (writeFile(path, encodeSettingsJson(ignored))) {
+        std::fprintf(stderr, "settings backup: second write failed\n");
+        return 1;
+    }
+    if (!keepSettingsBackup(path)) {
+        std::fprintf(stderr, "settings backup: copy did not land\n");
+        return 1;
+    }
+    QFile backupFile(settingsBackupPath(path));
+    AppSettings kept;
+    QString err;
+    if (!backupFile.open(QIODevice::ReadOnly)
+        || !parseSettingsJson(backupFile.readAll(), &kept, &err)
+        || kept.ignoredLeftoverPaths != QStringList{}) {
+        std::fprintf(stderr, "settings backup: the backup is not the file it replaced (%s)\n", qPrintable(err));
+        return 1;
+    }
+    const QFile::Permissions perms = QFileInfo(settingsBackupPath(path)).permissions();
+    if (perms & (QFileDevice::ReadGroup | QFileDevice::ReadOther
+            | QFileDevice::WriteGroup | QFileDevice::WriteOther)) {
+        std::fprintf(stderr, "settings backup: the backup is group/other readable\n");
+        return 1;
+    }
+    std::fprintf(stdout, "settings backup: ok\n");
+    return 0;
+}
+
 int main() {
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
+        checkSettingsBackup(),
         checkLocaleGrouping(),
         checkLegacySettingsMigration(),
     };

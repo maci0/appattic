@@ -44,6 +44,26 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(config.lines.contains { $0.contains("includeSystem: false [default]") }, "\(config.lines)")
     }
 
+    /// The backup is the only copy of the ignore list once `settings.json` is
+    /// gone or no longer loads, so `config` names it and says whether it is
+    /// there. A machine diff is where a missing backup is noticed.
+    func testConfigNamesTheSettingsBackupAndWhetherItIsThere() throws {
+        let url = try settingsFile(#"{"ignoredLeftoverPaths": ["/tmp/a"]}"#)
+        let missing = EffectiveConfig(settings: .default, settingsURL: url, env: [:])
+        XCTAssertEqual(missing.settingsBackupPath, settingsBackupURL(url).path)
+        XCTAssertFalse(missing.settingsBackupExists)
+        XCTAssertTrue(
+            missing.lines.contains { $0.contains("\(settingsBackupURL(url).path) (missing)") },
+            "\(missing.lines)"
+        )
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/a"]), to: url)
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/b"]), to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: settingsBackupURL(url)) }
+        let kept = EffectiveConfig(settings: .default, settingsURL: url, env: [:])
+        XCTAssertTrue(kept.settingsBackupExists)
+        XCTAssertTrue(kept.lines.contains { $0.contains(settingsBackupURL(url).path) }, "\(kept.lines)")
+    }
+
     func testLinesReportWhereIncludeSystemCameFrom() {
         var settings = AppAtticSettings.default
         settings.includeSystem = true

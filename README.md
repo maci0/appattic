@@ -63,6 +63,7 @@ includeSystem: false [default]
 confirmDelete: true
 ignoredLeftoverPaths: 0
 scan cache: /home/u/.local/share/appattic/last-scan.json
+settings backup: /home/u/.local/share/appattic/settings.json.bak (missing)
 XDG_DATA_HOME: /home/u/.local/share
 XDG_CONFIG_HOME: /home/u/.config
 XDG_CACHE_HOME: /home/u/.cache
@@ -297,6 +298,7 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 | `DESIGN.md` | Native UI visual rules |
 | `docs/specs/` | Requirement and architecture records (index: [`docs/specs/README.md`](docs/specs/README.md)). The Zig WASM core record is accepted and implemented; the Swift scan port record is implemented and superseded, kept in `archive/` |
 | `docs/privacy.md` | What a scan reads, what is stored and where, what reaches the network, and how to export or erase it |
+| `docs/runbooks/state-recovery.md` | What AppAttic keeps on disk, which of it is rebuildable, and how to get `settings.json` and the scan snapshot back |
 | `core/` | Zig `wasm32` scan core (loader + plugins + C Wasmtime embedder). The Linux window runs on it |
 | `scripts/` | Contributor gates: `check.sh` (fast local loop), `test.sh`, `lint.sh`, the tool finders, and the packaging, AppImage, Flatpak and release steps. Every script finds the project root itself, so run it by path from anywhere |
 | `packaging/` | Desktop entry, AppStream metainfo, man pages for `appattic` and `appattic-qt`, macOS `Info.plist` and icons, and the Flatpak manifest. `scripts/check-packaging.sh` is what keeps the copies in step |

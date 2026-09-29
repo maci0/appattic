@@ -279,6 +279,50 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(script.contains("rm -rf"), script)
     }
 
+    /// The ignore list is the user's own choices and a scan cannot rebuild
+    /// them, so the state before a replace is kept as `settings.json.bak`. A
+    /// `settings.json` that is emptied or mangled afterwards is refused by
+    /// `loadSettings` and never repaired, so the backup is the only copy of
+    /// what the user had.
+    func testSaveSettingsKeepsTheReplacedFileAsABackup() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-backup-\(UUID().uuidString).json")
+        let backup = settingsBackupURL(url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: backup)
+        }
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/First"]), to: url)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: backup.path),
+            "the first save has nothing to keep, and what it wrote is not a backup of itself"
+        )
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/Second"]), to: url)
+        XCTAssertEqual(try loadSettings(from: url).ignoredLeftoverPaths, ["/tmp/Second"])
+        XCTAssertEqual(try loadSettings(from: backup).ignoredLeftoverPaths, ["/tmp/First"])
+        // The backup carries the account's own paths, so it is as private as
+        // the file it was copied from.
+        let mode = (try FileManager.default.attributesOfItem(atPath: backup.path)[.posixPermissions] as! NSNumber).intValue
+        XCTAssertEqual(mode & 0o777, 0o600)
+    }
+
+    /// The recovery the backup exists for, end to end: a settings file that no
+    /// longer loads, and the backup put back in its place.
+    func testSettingsBackupRestoresAFileThatNoLongerLoads() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-restore-\(UUID().uuidString).json")
+        let backup = settingsBackupURL(url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: backup)
+        }
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/First"]), to: url)
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/Second"]), to: url)
+        try Data("{ \"ignoredLeftoverPaths\": ".utf8).write(to: url)
+        XCTAssertThrowsError(try loadSettings(from: url))
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.copyItem(at: backup, to: url)
+        XCTAssertEqual(try loadSettings(from: url).ignoredLeftoverPaths, ["/tmp/First"])
+    }
+
     func testClearIgnoredLeftovers() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-clear-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
