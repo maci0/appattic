@@ -5,6 +5,10 @@ const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const path_store = @import("path_store.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "deno";
 const query_cmd = "ls -1 " ++ path_store.home_sentinel ++ "/.deno/bin";
@@ -136,4 +140,60 @@ test "plugin_query missing is empty findings" {
     try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deno missing") != null);
+}
+
+// `ls -1 ~/.deno/bin` prints one entry per line, each a full path whose last
+// component becomes the name of a `deno uninstall --global <name>` command.
+// The seeds cover the runtime entry that must be skipped, a path with no
+// directory, trailing slashes and `..`, names the command guard rejects, and
+// the bytes (NUL, C0, invalid UTF-8) a directory name can hold on disk.
+const fuzz_deno_listing = packFuzzSlice(
+    \\deno
+    \\/home/user/.deno/bin/deployctl
+    \\/home/user/.deno/bin/file_server
+);
+const fuzz_deno_paths = packFuzzSlice(
+    \\/home/user/.deno/bin/
+    \\/home/user/.deno/bin/../escape
+    \\/home/user/.deno/bin/.hidden
+    \\trailing/slash/
+);
+const fuzz_deno_unsafe = packFuzzSlice(
+    \\/home/user/.deno/bin/foo;rm -rf /
+    \\/home/user/.deno/bin/-dash
+    \\/home/user/.deno/bin/$(id)
+    \\/home/user/.deno/bin/with space
+);
+const fuzz_deno_junk = packFuzzSlice("/home/user/.deno/bin/a\x00b\n\t\r\n/home/user/.deno/bin/\xff");
+const fuzz_deno_empty = packFuzzSlice("");
+
+test "fuzz parseDenoGlobalList" {
+    try std.testing.fuzz({}, fuzzDenoGlobalList, .{ .corpus = &.{
+        &fuzz_deno_listing,
+        &fuzz_deno_paths,
+        &fuzz_deno_unsafe,
+        &fuzz_deno_junk,
+        &fuzz_deno_empty,
+    } });
+}
+
+fn fuzzDenoGlobalList(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var buf: [32]DenoGlobal = undefined;
+    const n = parseDenoGlobalList(text, &buf);
+    try std.testing.expect(n <= buf.len);
+    for (buf[0..n]) |h| {
+        // The name reaches a shell command, so it must pass the ident guard
+        // and be a slice of this input, not a pointer past it.
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(h.name));
+        try std.testing.expect(sliceInside(text, h.name));
+        try std.testing.expect(h.name.len > 0);
+        // `basenameOf` keeps what follows the last separator, so no reported
+        // name carries a path, and the runtime never becomes a finding.
+        try std.testing.expect(std.mem.indexOfScalar(u8, h.name, '/') == null);
+        try std.testing.expect(!std.mem.eql(u8, h.name, "deno"));
+        try std.testing.expect(!std.mem.eql(u8, h.name, "deno.exe"));
+    }
 }

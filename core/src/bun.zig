@@ -4,6 +4,10 @@ const jsonbuf = @import("jsonbuf.zig");
 const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "bun";
 const query_cmd = "bun pm ls -g";
@@ -191,4 +195,69 @@ test "parseBunGlobalList skips the node_modules header with an at in the home" {
     try std.testing.expectEqualStrings("5.4.5", buf[0].version);
     try std.testing.expectEqualStrings("prettier", buf[1].name);
     try std.testing.expectEqualStrings("3.3.0", buf[1].version);
+}
+
+// `bun pm ls -g` rows arrive as a box-drawing tree under a `node_modules`
+// header line, so the parser has to tell a row from a path with an `@` in it
+// before it splits `name@version`. The seeds cover the header, a scoped row,
+// a row that stops before the `@`, a row with no version, and the byte
+// sequences (NUL, C0, an invalid UTF-8 lead) that break the tree prefix scan.
+const fuzz_bun_tree = packFuzzSlice(
+    \\/home/user/.bun/install/global/node_modules
+    \\├── typescript@5.4.5
+    \\└── @vue/cli@5.0.8
+);
+const fuzz_bun_at_home = packFuzzSlice(
+    \\/home/first.last@corp.example.com/.bun/install/global/node_modules
+    \\├── typescript@5.4.5
+);
+const fuzz_bun_truncated = packFuzzSlice(
+    \\├── typescript
+    \\├── typescript@
+    \\├── @scope/
+    \\├── @/pkg@1.0.0
+    \\├── @scope@1.0.0
+);
+const fuzz_bun_unsafe = packFuzzSlice(
+    \\├── typescript;rm -rf /@1.0.0
+    \\├── ../escape@1.0.0
+    \\├── -dashname@1.0.0
+    \\├── $(id)@1.0.0
+);
+const fuzz_bun_junk = packFuzzSlice("├── a@1\x00.0\n└� \t\r\n├@1.2.3");
+const fuzz_bun_empty = packFuzzSlice("");
+
+test "fuzz parseBunGlobalList" {
+    try std.testing.fuzz({}, fuzzBunGlobalList, .{ .corpus = &.{
+        &fuzz_bun_tree,
+        &fuzz_bun_at_home,
+        &fuzz_bun_truncated,
+        &fuzz_bun_unsafe,
+        &fuzz_bun_junk,
+        &fuzz_bun_empty,
+    } });
+}
+
+fn fuzzBunGlobalList(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var buf: [32]BunGlobal = undefined;
+    const n = parseBunGlobalList(text, &buf);
+    try std.testing.expect(n <= buf.len);
+    for (buf[0..n]) |h| {
+        // The name reaches `bun remove -g <name>`, so it must be one the
+        // guard accepts and a slice of this input, never a pointer past it.
+        try std.testing.expect(jsonbuf.isSafePkgName(h.name));
+        try std.testing.expect(sliceInside(text, h.name));
+        try std.testing.expect(sliceInside(text, h.version));
+        try std.testing.expect(h.version.len > 0);
+        // A version stops at the first blank, so whitespace in one means the
+        // split ran past the row.
+        try std.testing.expect(std.mem.indexOfAny(u8, h.version, " \t\r\n") == null);
+        // The split leaves the `@` with the version side; an empty name, or a
+        // name still carrying the separator, was never a package row.
+        try std.testing.expect(h.name.len > 0);
+        try std.testing.expect(h.name[0] != '@' or std.mem.indexOfScalar(u8, h.name, '@') == 0);
+    }
 }
