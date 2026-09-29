@@ -16,12 +16,15 @@ enum AppAtticCLI {
             print(cliHelpText)
             return
         }
-        if let err = opts.error {
-            failUsage(err)
-        }
+        // `--version` is checked with `--help`, before the usage error: the two
+        // ask a question and exit, so neither should be swallowed by a bad
+        // token elsewhere on the line.
         if opts.version {
             print("appattic \(appAtticVersion)")
             return
+        }
+        if let err = opts.error {
+            failUsage(err)
         }
         if opts.command == "disk" {
             runDiskCommand(opts)

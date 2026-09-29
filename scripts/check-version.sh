@@ -47,6 +47,7 @@ EOF
         *)
             echo "error: unknown argument: $1" >&2
             echo "Usage: bash scripts/check-version.sh [--tag TAG]" >&2
+            echo "       bash scripts/check-version.sh --help" >&2
             exit 2
             ;;
     esac

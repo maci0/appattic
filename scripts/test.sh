@@ -35,6 +35,7 @@ EOF
     -*) 
         echo "error: unknown argument: $1" >&2
         echo "Usage: $0 [<filter>]" >&2
+        echo "       $0 --help" >&2
         exit 2
         ;;
     *) FILTER="$1" ;;
@@ -42,6 +43,7 @@ esac
 if [[ $# -gt 1 ]]; then
     echo "error: expected at most one filter, got $#" >&2
     echo "Usage: $0 [<filter>]" >&2
+    echo "       $0 --help" >&2
     exit 2
 fi
 

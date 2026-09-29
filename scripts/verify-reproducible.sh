@@ -29,6 +29,7 @@ fi
 if [[ $# -ne 0 ]]; then
     echo "error: unknown argument: $1" >&2
     echo "Usage: $0" >&2
+    echo "       $0 --help" >&2
     exit 2
 fi
 

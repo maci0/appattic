@@ -41,6 +41,7 @@ EOF
         *)
             echo "error: unknown argument: $arg" >&2
             echo "Usage: scripts/linux-qt-link.sh [--smoke] [release|debug]" >&2
+            echo "       scripts/linux-qt-link.sh --help" >&2
             exit 2
             ;;
     esac

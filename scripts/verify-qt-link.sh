@@ -36,6 +36,7 @@ EOF
         -*)
             echo "error: unknown argument: $arg" >&2
             echo "Usage: bash scripts/verify-qt-link.sh [release|debug|path/to/LINUX_QT_LINK.txt]" >&2
+            echo "       bash scripts/verify-qt-link.sh --help" >&2
             exit 2
             ;;
         # A bare word names the proof, resolved above.
@@ -48,6 +49,7 @@ done
 if [[ $# -gt 1 ]]; then
     echo "error: unexpected argument: $2" >&2
     echo "Usage: bash scripts/verify-qt-link.sh [path/to/LINUX_QT_LINK.txt]" >&2
+    echo "       bash scripts/verify-qt-link.sh --help" >&2
     exit 2
 fi
 

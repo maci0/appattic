@@ -35,6 +35,7 @@ EOF
         *)
             echo "error: unknown argument: $arg" >&2
             echo "Usage: $0 [--core] [--qt]" >&2
+            echo "       $0 --help" >&2
             exit 2
             ;;
     esac

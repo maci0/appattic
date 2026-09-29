@@ -285,6 +285,8 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertTrue(parseCLIArguments(["--top", "--help"]).help)
         XCTAssertTrue(parseCLIArguments(["disk", "/a", "/b", "-h"]).help)
         XCTAssertTrue(parseCLIArguments(["--nope", "-v"]).version)
+        XCTAssertTrue(parseCLIArguments(["--nope", "--version"]).version)
+        XCTAssertTrue(cliHelpText.contains("--help and --version are the exception"), cliHelpText)
     }
 
     func testTheFirstErrorWins() {

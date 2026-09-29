@@ -287,7 +287,8 @@ options:
 An option that names the commands it belongs to ("on report", "on disk", "on
 update") is a usage error on every other command, so a flag that would be
 ignored fails instead of running: 'appattic stale --top 5' exits 2 rather than
-printing the full table.
+printing the full table. --help and --version are the exception: they ask a
+question and exit, so a bad token anywhere on the line does not suppress them.
 
 Progress and status go to stderr. Reports and --dry-run scripts go to stdout.
 
@@ -379,8 +380,9 @@ public func cliColorEnabled(
 }
 
 /// Parse an argv array with the program name already dropped, the same way
-/// `CommandLine.arguments.dropFirst()` hands it to the CLI. `help` wins over
-/// `parseError`, so `--help` still prints on a line that also has a bad token.
+/// `CommandLine.arguments.dropFirst()` hands it to the CLI. `help` and
+/// `version` win over `parseError`, so `--help` and `--version` still print on
+/// a line that also has a bad token.
 public func parseCLIArguments(_ args: [String]) -> CLIOptions {
     var opts = CLIOptions()
     // No command typed is the `report` command. It is settled before the walk

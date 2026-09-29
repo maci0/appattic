@@ -30,6 +30,7 @@ EOF
     *)
         echo "error: unknown argument: $1" >&2
         echo "Usage: bash scripts/lint.sh" >&2
+        echo "       bash scripts/lint.sh --help" >&2
         exit 2
         ;;
 esac
