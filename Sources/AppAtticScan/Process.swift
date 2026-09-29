@@ -582,10 +582,10 @@ public func runGeneratedScript(
         .appendingPathComponent("appattic-script-\(UUID().uuidString).sh")
     let errURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("appattic-script-\(UUID().uuidString).err")
-    // Registered before either write, not after. A write is two steps, the
-    // file then the owner-only mode, and a failure in the second leaves the
-    // file behind. With the removal armed first, that path takes the temp file
-    // with it; a removal for a file the write never created is a no-op.
+    // Registered before either write, not after. A write that fails partway
+    // leaves the temp name behind. With the removal armed first, that path
+    // takes the temp file with it; a removal for a file the write never
+    // created is a no-op.
     defer { try? FileManager.default.removeItem(at: url) }
     defer { try? FileManager.default.removeItem(at: errURL) }
     try writeOwnerOnlyFile(Data(script.utf8), to: url)
