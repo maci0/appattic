@@ -147,6 +147,72 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.dataDirs, "/usr/share")
     }
 
+    /// The network-folder scan opens at this root, and `appattic config` is how
+    /// two machines are told apart, so the root it prints has to be the one the
+    /// window opens. `ui/linux-qt/diskpage.cpp` resolves the same variable the
+    /// same way; these cases are its rules.
+    func testGvfsRootFollowsTheWindowResolution() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let fallback = (home as NSString).appendingPathComponent(".gvfs")
+        for unset in [[:], ["XDG_RUNTIME_DIR": ""], ["XDG_RUNTIME_DIR": "  "],
+                      ["XDG_RUNTIME_DIR": "run/user/1000"]] {
+            XCTAssertEqual(gvfsRoot(home: home, env: unset), fallback, "\(unset)")
+        }
+        // An absolute root the machine does not have falls back too, so a stale
+        // XDG_RUNTIME_DIR does not send the chooser at a directory that is gone.
+        let absent = NSTemporaryDirectory() + "appattic-no-such-runtime-\(UUID().uuidString)"
+        XCTAssertEqual(
+            gvfsRoot(home: home, env: ["XDG_RUNTIME_DIR": absent]),
+            fallback
+        )
+        // A real gvfs directory under an absolute root is the root in force.
+        let runtime = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-runtime-\(UUID().uuidString)")
+        let gvfs = runtime.appendingPathComponent("gvfs")
+        try FileManager.default.createDirectory(at: gvfs, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: runtime) }
+        XCTAssertEqual(gvfsRoot(home: home, env: ["XDG_RUNTIME_DIR": runtime.path]), gvfs.path)
+        // A trailing separator names the same directory, as it does for the
+        // other XDG roots.
+        XCTAssertEqual(
+            gvfsRoot(home: home, env: ["XDG_RUNTIME_DIR": runtime.path + "/"]),
+            gvfs.path
+        )
+    }
+
+    /// The root is on the `config` output: a diff of two machines is the only
+    /// way to tell which root a window would open at.
+    func testConfigPrintsTheRuntimeRoot() {
+        let lines = EffectiveConfig(settings: .default, env: [:]).lines
+        XCTAssertTrue(
+            lines.contains {
+                $0.hasPrefix("XDG_RUNTIME_DIR: ")
+                    && $0.hasSuffix("/.gvfs")
+            },
+            "\(lines)"
+        )
+    }
+
+    /// `coreOutDir` ignores a value that is not an absolute path, so the
+    /// report has to say so rather than name a directory the window skipped.
+    func testCoreOutEffectMatchesWhatTheShellReads() throws {
+        func effect(_ raw: String) throws -> String {
+            let env = ["APPATTIC_CORE_OUT": raw]
+            let entries = EffectiveConfig(settings: .default, env: env).environment
+            return try XCTUnwrap(entries.first { $0.name == "APPATTIC_CORE_OUT" }).effect
+        }
+        XCTAssertEqual(try effect("/opt/appattic"), "WASM modules read from this directory")
+        XCTAssertEqual(try effect(" /opt/appattic "), "WASM modules read from this directory")
+        XCTAssertEqual(
+            try effect(""),
+            "set but empty, so it is searched next to the binary"
+        )
+        XCTAssertEqual(
+            try effect("core/out"),
+            "not an absolute path, so it is searched next to the binary"
+        )
+    }
+
     func testStartPageUnsetAndEmptyOpenOverview() {
         XCTAssertEqual(resolveStartPage(env: [:]).page, .overview)
         XCTAssertNil(resolveStartPage(env: [:]).warning)

@@ -117,6 +117,34 @@ if [[ "$qt_valid_values" != "$(tr '\n' ',' <<<"$swift_pages" | sed 's/,$//')" ]]
 fi
 echo "page vocabulary: ok"
 
+# One on/off spelling, three trees. `configBoolSwitch` in the scan library
+# reports what `core/host/hostexec.c` will do with the two host-exec switches,
+# and Package.swift reads APPATTIC_NO_MAC_UI at manifest time, where it cannot
+# import the library that declares the rule. Nothing compared the lists, so a
+# value the README calls on (`yes`) can be read as off by the core host while
+# the report calls it on, and APPATTIC_NO_MAC_UI grew a third spelling.
+switch_on_words() {
+    grep -o '"[a-z0-9]*"' <<<"$1" | tr -d '"' | LC_ALL=C sort -u | tr '\n' ' '
+}
+# The C host writes the off-branch first and the on-branch second, and each
+# branch's spellings sit on the lines ending at the branch's `return`. The
+# on-branch is the `eq_ignore_case` names immediately before `return 1;`.
+c_on="$(sed -n '/^static int env_flag/,/^}/p' "$ROOT/core/host/hostexec.c" \
+    | grep -B2 'return 1;' | grep 'eq_ignore_case')"
+swift_on="$(switch_on_words "$(sed -n '/^func configBoolSwitch/,/^}/p' \
+    "$ROOT/Sources/AppAtticScan/Settings.swift" | grep 'return')")"
+manifest_on="$(switch_on_words "$(sed -n '/^private func envSwitchIsOn/,/^}/p' \
+    "$ROOT/Package.swift" | grep 'return')")"
+c_on="$(switch_on_words "$c_on")"
+if [[ -z "$swift_on" || "$swift_on" != "$c_on" || "$swift_on" != "$manifest_on" ]]; then
+    echo "error: the on/off switch spellings differ between the trees" >&2
+    echo "       swift (configBoolSwitch): $swift_on" >&2
+    echo "       c      (env_flag):        $c_on" >&2
+    echo "       manifest (Package.swift): $manifest_on" >&2
+    exit 1
+fi
+echo "switch spellings: ok"
+
 # The desktop entry, the AppStream metainfo, the man page, and the Flatpak
 # manifest have to name the same app, the same binary, and the same icon, and
 # the install has to produce what they name. Nothing builds a Flatpak or an

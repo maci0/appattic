@@ -89,6 +89,30 @@ public func xdgSystemDirs(
     xdgSystemDirList(env: env).joined(separator: ":")
 }
 
+/// The `gvfs` directory the network-folder scan starts at: `$XDG_RUNTIME_DIR`
+/// when that names an absolute directory, and `~/.gvfs` when it is unset,
+/// empty, relative, or names a root that does not exist.
+///
+/// The same resolution `ui/linux-qt/diskpage.cpp` applies to the same
+/// variable, so `appattic config` reports the root the window opens rather
+/// than a second opinion of it.
+public func gvfsRoot(
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    let raw = (env["XDG_RUNTIME_DIR"] ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard raw.hasPrefix("/") else {
+        return (home as NSString).appendingPathComponent(".gvfs")
+    }
+    var root = raw
+    while root.count > 1 && root.hasSuffix("/") { root.removeLast() }
+    let gvfs = (root as NSString).appendingPathComponent("gvfs")
+    return FileManager.default.fileExists(atPath: gvfs)
+        ? gvfs
+        : (home as NSString).appendingPathComponent(".gvfs")
+}
+
 /// Fold one scalar the way `norm` does: NFD -> case+diacritic fold -> keep
 /// ASCII letters/digits. Only the non-ASCII path needs the full Unicode machinery.
 private func normSlow(_ s: String) -> String {

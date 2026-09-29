@@ -13,7 +13,20 @@ let uiDeps: [Package.Dependency] = []
 // UI here. AppAtticUI needs swift-cross-ui 0.2.1, which needs a Swift 6
 // compiler, and Swift 6.1's SIL lifetime pass crashes on swift-mutex 0.0.6
 // (fixed only on swift main). Leave the variable unset to build the UI.
-let macUI = ProcessInfo.processInfo.environment["APPATTIC_NO_MAC_UI"] != "1"
+//
+// The spellings that mean on are the ones `configBoolSwitch` in
+// Sources/AppAtticScan/Settings.swift accepts, and the ones
+// `core/host/hostexec.c` applies to the two host-exec switches: `1`, `true`,
+// `yes`, `on`, case-insensitive, surrounding blanks ignored, and nothing else.
+// `scripts/lint.sh` compares the two lists so they cannot drift. A manifest
+// cannot import the scan library, so the rule is restated here.
+private func envSwitchIsOn(_ name: String) -> Bool {
+    guard let raw = ProcessInfo.processInfo.environment[name] else { return false }
+    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
+let macUI = !envSwitchIsOn("APPATTIC_NO_MAC_UI")
 let uiProducts: [Product] = macUI ? [
     // AppAtticUI, not AppAttic: APFS is case-insensitive, so AppAttic and appattic are the same file.
     .executable(name: "AppAtticUI", targets: ["AppAttic"]),

@@ -69,6 +69,7 @@ XDG_CONFIG_HOME: /home/u/.config
 XDG_CACHE_HOME: /home/u/.cache
 XDG_STATE_HOME: /home/u/.local/state
 XDG_DATA_DIRS: /usr/local/share:/usr/share
+XDG_RUNTIME_DIR: /home/u/.gvfs
 NO_COLOR: unset [colors on a tty]
 TERM: unset [not set]
 COLORFGBG: unset [light status colors]
@@ -111,7 +112,7 @@ Environment:
 
 | Variable | Used by | Role |
 |---|---|---|
-| `APPATTIC_CORE_OUT` | Linux Qt | Directory of `appattic_core.wasm` and plugins. AppImage sets this. |
+| `APPATTIC_CORE_OUT` | Linux Qt | Absolute directory of `appattic_core.wasm` and plugins. AppImage sets this. Set but empty, padded, or relative is ignored and the directory is searched next to the binary, the rule the XDG variables below follow. |
 | `APPATTIC_HOST_EXEC_LIVE` | Linux Qt | `1` runs the core's allowlisted package queries against the real binaries instead of the built-in fixtures. Off by default, and read as off for any value other than `1`, `true`, `yes`, or `on`. |
 | `APPATTIC_HOST_EXEC_FIXTURE` | Linux Qt | `1` serves the built-in fixtures on non-macOS hosts. Same accepted values as above. macOS uses fixtures either way. |
 | `APPATTIC_PAGE` | UI | Initial sidebar: `overview` (default), `leftovers`, `stale`, `outdated`, `packages`, `disk`, `settings`. An unset or empty value opens the overview; an unknown name is reported on stderr and also opens the overview. |
@@ -123,7 +124,7 @@ Environment:
 | `XDG_CACHE_HOME` | Linux | Absolute cache root scanned for leftovers, by the CLI and by the Linux window. |
 | `XDG_STATE_HOME` | Linux | Absolute state root scanned for leftovers, by the CLI and by the Linux window. |
 | `XDG_DATA_DIRS` | Linux | Colon-separated absolute data roots searched for desktop entries. Unset, empty, or a list whose entries are all relative uses `/usr/local/share:/usr/share`; relative entries in a longer list are dropped, and `appattic config` prints the list that survives. |
-| `XDG_RUNTIME_DIR` | Linux Qt | Runtime root of the session, read for the `gvfs` directory the network-folder scan opens at. Unset, empty, or relative uses `~/.gvfs`. The CLI does not read it. |
+| `XDG_RUNTIME_DIR` | Linux Qt | Runtime root of the session, read for the `gvfs` directory the network-folder scan opens at. Unset, empty, relative, or naming a root with no `gvfs` uses `~/.gvfs`. The CLI scans nothing with it; `appattic config` prints the root it resolves to. |
 | `FLATPAK_ID` | Linux Qt and the core host | Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags and package-manager queries go through `/run/host` and `flatpak-spawn --host`. Unset or empty is a normal host run. |
 
 Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used. A trailing separator is dropped from a root that ends in one, so `XDG_CONFIG_HOME=/srv/config/` and `XDG_CONFIG_HOME=/srv/config` name the same directory to the CLI, to the Linux window, and to the core host.

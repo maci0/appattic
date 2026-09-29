@@ -134,6 +134,11 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
     public let cacheHome: String
     public let stateHome: String
     public let dataDirs: String
+    /// The `gvfs` root the Linux window's network-folder scan opens at. The
+    /// only XDG root outside the four the scan walks, and read by no command
+    /// in this process, so it had no line and a diff of two machines could not
+    /// show which root either window would pick.
+    public let runtimeHome: String
     public let environment: [ConfigEnvEntry]
 
     /// One environment switch, its raw value, and what that value resolves to.
@@ -174,6 +179,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         self.cacheHome = xdgCacheHome(env: env)
         self.stateHome = xdgStateHome(env: env)
         self.dataDirs = xdgSystemDirs(env: env)
+        self.runtimeHome = gvfsRoot(home: FileManager.default.homeDirectoryForCurrentUser.path, env: env)
         self.environment = configEnvEntries(env: env)
     }
 
@@ -205,6 +211,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
             "XDG_CACHE_HOME: \(cacheHome)",
             "XDG_STATE_HOME: \(stateHome)",
             "XDG_DATA_DIRS: \(dataDirs)",
+            "XDG_RUNTIME_DIR: \(runtimeHome)",
         ])
         // The switches last, and only the ones the process actually reads, so
         // the block stays the diff surface: a value that is unset says `unset`
@@ -269,9 +276,15 @@ public func configEnvEntries(
             configBoolSwitch(raw) ? "on: built-in fixtures" : "off: live package queries"
         },
         entry("APPATTIC_CORE_OUT", unsetEffect: "searched next to the binary") { raw in
-            raw.isEmpty
-                ? "set but empty, so it is searched next to the binary"
-                : "WASM modules read from this directory"
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return "set but empty, so it is searched next to the binary" }
+            // `coreOutDir` ignores a value that is not an absolute path, so
+            // reporting it as in force would name a directory the window
+            // never looked in.
+            guard trimmed.hasPrefix("/") else {
+                return "not an absolute path, so it is searched next to the binary"
+            }
+            return "WASM modules read from this directory"
         },
     ]
 }

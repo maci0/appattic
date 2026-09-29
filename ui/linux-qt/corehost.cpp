@@ -13,9 +13,22 @@
 
 static int homePathTag(const char *xdgEnv, const QString &rel);
 
+/* An empty, padded, or relative APPATTIC_CORE_OUT is ignored and the
+   candidates below are searched, the rule every other path-valued variable
+   here follows (XDG_RUNTIME_DIR in diskpage.cpp, the XDG roots in
+   finding.cpp, `core/host/hostexec.c`). Used verbatim, a value that arrives
+   padded or relative named a directory that holds no appattic_core.wasm, and
+   the window said the engine was missing while naming a path the user never
+   typed. A trailing separator is dropped for the same reason as everywhere
+   else: the caller appends "/appattic_core.wasm", and POSIX leaves a doubled
+   separator implementation-defined. The root itself may be "/". */
 QString coreOutDir() {
-    const QByteArray env = qgetenv("APPATTIC_CORE_OUT");
-    if (!env.isEmpty()) return QString::fromUtf8(env);
+    const QString env = QString::fromUtf8(qgetenv("APPATTIC_CORE_OUT")).trimmed();
+    if (QDir::isAbsolutePath(env)) {
+        QString root = env;
+        while (root.size() > 1 && root.endsWith(QLatin1Char('/'))) root.chop(1);
+        return root;
+    }
 
     const QDir exeDir(QCoreApplication::applicationDirPath());
     const QStringList candidates = {
