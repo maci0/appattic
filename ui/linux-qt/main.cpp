@@ -2961,6 +2961,17 @@ private:
         return out;
     }
 
+    /* Hand a finished or failed script back to the event loop instead of
+       deleting it here. Both handlers run inside `ScriptProcess`'s own signal
+       emission, and `delete` would free the sender while the emission is still
+       walking its connection list. Detaching first also keeps a handler that
+       starts the next run from seeing the object it is being called from. */
+    void retireScript() {
+        ScriptProcess *done = m_script;
+        m_script = nullptr;
+        if (done) done->deleteLater();
+    }
+
     void runScript(const QString &script, const QString &progress, const QString &done) {
         if (m_scanning) return;
         delete m_script;
@@ -2995,8 +3006,7 @@ private:
            reported as "commands before the failure may have already run"
            rather than faked as restored. */
         connect(m_script, &ScriptProcess::failed, this, [this]() {
-            delete m_script;
-            m_script = nullptr;
+            retireScript();
             m_scanning = false;
             m_rescan->setEnabled(true);
             if (m_scanBar) m_scanBar->hide();
@@ -3065,8 +3075,7 @@ private:
                 m_markedManual.clear();
                 rescan();
             }
-            delete m_script;
-            m_script = nullptr;
+            retireScript();
         });
         m_script->start();
     }

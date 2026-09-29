@@ -220,7 +220,8 @@ void walkDirFd(
     size_t *pathLen,
     size_t pathCap,
     WalkShared *ctx,
-    std::vector<WalkJob> *defer
+    std::vector<WalkJob> *defer,
+    bool emitDone = true
 );
 
 void visitEntry(
@@ -341,7 +342,8 @@ void walkDirFd(
     size_t *pathLen,
     size_t pathCap,
     WalkShared *ctx,
-    std::vector<WalkJob> *defer
+    std::vector<WalkJob> *defer,
+    bool emitDone
 ) {
     if (isCancelled(*ctx->opts)) return;
     const qint64 dircount = ctx->dirs.fetch_add(1) + 1;
@@ -369,7 +371,7 @@ void walkDirFd(
             visitEntry(node, fd, d.name, path, pathLen, pathCap, ctx, defer);
         }
     }
-    if (ctx->opts->dirDone) ctx->opts->dirDone(*node, ctx->opts->user);
+    if (emitDone && ctx->opts->dirDone) ctx->opts->dirDone(*node, ctx->opts->user);
 }
 #else
 void walkDirFd(
@@ -379,7 +381,8 @@ void walkDirFd(
     size_t *pathLen,
     size_t pathCap,
     WalkShared *ctx,
-    std::vector<WalkJob> *defer
+    std::vector<WalkJob> *defer,
+    bool emitDone
 ) {
     if (isCancelled(*ctx->opts)) return;
     const qint64 dircount = ctx->dirs.fetch_add(1) + 1;
@@ -412,7 +415,7 @@ void walkDirFd(
     }
     if (errno != 0) node->unreadable = true;
     closedir(dir);
-    if (ctx->opts->dirDone) ctx->opts->dirDone(*node, ctx->opts->user);
+    if (emitDone && ctx->opts->dirDone) ctx->opts->dirDone(*node, ctx->opts->user);
 }
 #endif
 
@@ -605,7 +608,12 @@ DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts) {
     ctx.opts = &opts;
     ctx.seen.insert(InodeKey{meta.dev, meta.ino});
     std::vector<WalkJob> jobs;
-    walkDirFd(node, fd, pathBuf, &pathLen, sizeof pathBuf, &ctx, &jobs);
+    // The root is the one node whose totals are not final when its own walk
+    // ends: a deferred child's subtree is measured later, on a pool thread,
+    // and only reaches the root in the sum below. Emitting its `dirDone` here
+    // would hand the callback a root that is missing every subdirectory it
+    // dispatched, so the emit is withheld and made below.
+    walkDirFd(node, fd, pathBuf, &pathLen, sizeof pathBuf, &ctx, &jobs, /*emitDone=*/false);
     close(fd);
     if (!jobs.empty()) {
         unsigned nworkers = std::thread::hardware_concurrency();
@@ -647,6 +655,11 @@ DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts) {
             if (job.node && job.node->parent) addChildTotals(job.node->parent, job.node);
         }
     }
+    // Every deferred subtree is measured and added by now, so the root's
+    // totals are the ones a caller can act on. A cancelled walk reports
+    // nothing: what it managed to measure is not a subtree total, and the
+    // window shows the cancelled state instead of a partial row.
+    if (opts.dirDone && !isCancelled(opts)) opts.dirDone(*node, opts.user);
     node->sortChildren(true);
 #else
     node->unreadable = true;

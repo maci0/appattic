@@ -1122,7 +1122,73 @@ void noteDescriptors(const DiskNode &, void *user) {
     }
 }
 
+/// Records the root's totals as the `dirDone` callback saw them. The callback
+/// runs on whichever thread finished the directory, so the samples are only
+/// safe to compare after the scan returned and every worker has joined.
+struct RootDoneProbe {
+    QString root;
+    QVector<qint64> samples;
+};
+
+void noteRootTotals(const DiskNode &node, void *user) {
+    auto *probe = static_cast<RootDoneProbe *>(user);
+    if (node.path == probe->root) probe->samples.append(node.apparent);
+}
+
 } // namespace
+
+/// The root is the one node whose `dirDone` can outrun its own totals: a
+/// deferred child's subtree is measured later, on a pool thread, and only
+/// reaches the root when the threads are joined. A callback that streams rows
+/// as the walk goes then shows a root smaller than the tree it belongs to.
+static int checkRootDirDoneTotals() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "root dirDone: temp dir failed\n");
+        return 1;
+    }
+    // Past kMaxDeferredDirFds, so the root's walk really does leave measured
+    // subtrees outstanding for the worker phase.
+    const int dirCount = 200;
+    for (int i = 0; i < dirCount; ++i) {
+        const QString sub = QStringLiteral("%1/d%2").arg(tmp.path()).arg(i);
+        if (!QDir().mkpath(sub)) {
+            std::fprintf(stderr, "root dirDone: mkpath %d failed\n", i);
+            return 1;
+        }
+        if (writeFile(sub + QStringLiteral("/f.bin"), QByteArray(4096, 'x'))) {
+            std::fprintf(stderr, "root dirDone: write %d failed\n", i);
+            return 1;
+        }
+    }
+    RootDoneProbe probe;
+    probe.root = QDir::cleanPath(tmp.path());
+    DiskScanOptions opts;
+    opts.oneFileSystem = true;
+    opts.dirDone = &noteRootTotals;
+    opts.user = &probe;
+    DiskNode *tree = scanDiskTree(probe.root, opts);
+    if (!tree || tree->unreadable) {
+        std::fprintf(stderr, "root dirDone: scan produced no tree\n");
+        delete tree;
+        return 1;
+    }
+    if (probe.samples.size() != 1) {
+        std::fprintf(stderr, "root dirDone: fired %d times for the root, want 1\n",
+            int(probe.samples.size()));
+        delete tree;
+        return 1;
+    }
+    if (probe.samples[0] != tree->apparent) {
+        std::fprintf(stderr, "root dirDone: reported %lld, the tree holds %lld\n",
+            static_cast<long long>(probe.samples[0]), static_cast<long long>(tree->apparent));
+        delete tree;
+        return 1;
+    }
+    delete tree;
+    std::fprintf(stdout, "root dirDone: ok (%lld)\n", static_cast<long long>(probe.samples[0]));
+    return 0;
+}
 
 /// A wide tree must not sit on one descriptor per directory it defers: the
 /// deferred fds are all live until the worker phase starts, so an uncapped
@@ -1676,6 +1742,7 @@ static int checkSettingsBackupRepeatedSave() {
 int main() {
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
+        checkRootDirDoneTotals(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
         checkSettingsBackup(), checkSettingsBackupRepeatedSave(),
         checkLocaleGrouping(),

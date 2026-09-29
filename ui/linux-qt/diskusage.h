@@ -52,8 +52,9 @@ struct DiskScanOptions {
     /// Called when a directory's walk ends, so its subtree is complete. The
     /// walk is threaded, so this runs on any of the scan pool's threads, and
     /// up to eight at once: take a copy and post it, do not touch shared state
-    /// without a lock. The reference only lives for the call. Deferred
-    /// hard-link totals can still be added to it.
+    /// without a lock. The reference only lives for the call, and the totals
+    /// it carries are final: `scanDiskTree` withholds the root's call until
+    /// every deferred subtree has been measured and added.
     void (*dirDone)(const DiskNode &node, void *user) = nullptr;
     void *user = nullptr;
 };
