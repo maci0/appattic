@@ -239,7 +239,19 @@ zig fmt --check "$root/src" "$root/bench"
 # an artifact kind added later, and it left the host binary behind when the
 # link step was skipped. Only the full build clears it; test and test-core
 # leave the artifacts alone.
+# The clear is not allowed to fail quietly. `rm -rf` is nearly infallible, so
+# the guard is the case worth naming: a core/out this build cannot write is a
+# directory whose previous contents are still on disk, and the packaging
+# scripts bundle it by glob. Swallowing that error let a failed clean run a
+# full build on top of the old one, so an artifact from a removed plugin
+# shipped in a green release.
 rm -rf "${out:?}"/* "${out:?}"/.[!.]* 2>/dev/null || true
+if [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
+    echo "error: $out still holds files after the clean; cannot guarantee the" >&2
+    echo "       build below emits every artifact it ships" >&2
+    ls -A "$out" >&2
+    exit 1
+fi
 
 # One artifact name for every consumer of it: the emit below, the built list
 # and the host's try line. core.zig is the one source whose artifact is not
@@ -333,7 +345,12 @@ cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
     -o "$out/hostexec_test"
 "$out/hostexec_test"
 
+# The same strict set the test binary above and the Qt link both compile these
+# three sources with. embed.c and hostexec.c reach the shipped Qt binary under
+# it there, so the standalone host was the one build of the same sources that
+# a warning could pass through.
 cc "${cc_cflags[@]}" "${cc_ldflags[@]}" \
+    "${cc_strict_warnings[@]}" \
     -I"$root/host" \
     "${wasmtime_cflags[@]}" \
     "$root/host/stub.c" \

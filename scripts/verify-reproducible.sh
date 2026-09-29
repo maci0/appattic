@@ -4,9 +4,10 @@
 # its own directory, under a different name, locale, timezone and
 # SOURCE_DATE_EPOCH, and the two outputs must be byte-identical.
 #
-# Covers one WASM module (zig) and the C host sources (cc). The linked host
-# needs the Wasmtime C API, so the C pass builds the host test binary, which
-# compiles the same core/host sources with the same flags core/build.sh uses.
+# Covers two WASM modules (zig): appattic_core.wasm and one real plugin. The
+# linked host needs the Wasmtime C API, so the C pass builds the host test
+# binary, which compiles the same core/host sources with the same flags
+# core/build.sh uses.
 #
 # Usage: bash scripts/verify-reproducible.sh
 set -euo pipefail
@@ -20,10 +21,11 @@ export TZ=UTC
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     echo "Usage: bash scripts/verify-reproducible.sh"
     echo
-    echo "  Builds one WASM module and the C host test twice, from two"
-    echo "  differently named directories, under a different locale, timezone"
-    echo "  and SOURCE_DATE_EPOCH, and requires the artifacts to match. Also"
-    echo "  requires the module mtime a .cwasm.stamp records to be the epoch."
+    echo "  Builds two WASM modules (appattic_core.wasm and one real plugin)"
+    echo "  and the C host test twice, from two differently named directories,"
+    echo "  under a different locale, timezone and SOURCE_DATE_EPOCH, and"
+    echo "  requires the artifacts to match. Also requires the module mtime a"
+    echo "  .cwasm.stamp records to be the epoch."
     exit 0
 fi
 if [[ $# -ne 0 ]]; then
@@ -69,13 +71,24 @@ cp -R "$ROOT/core/host" "$B/host"
 export ZIG_GLOBAL_CACHE_DIR="$tmp/zig-global"
 export ZIG_LOCAL_CACHE_DIR="$tmp/zig-local"
 
-# One representative WASM module, built exactly as core/build.sh builds them.
+# Two modules, built exactly as core/build.sh builds them.
+#
+# core.zig on its own proves almost nothing. It is four lines that import
+# abi.zig, emit one constant, and come out at 81 bytes: no std, no string
+# data, no comptime table, nothing a timestamp, a build path or a hash-map
+# iteration order could get into. The other 28 modules are the ones that
+# carry std, embedded strings and a build-time result, and until one of them
+# was checked here this gate passed on the least complex artifact in the
+# set. apt.zig is the largest of them and one of the heaviest users of std,
+# so it is where a leaked path or an unsorted map would show.
+REPRO_PLUGIN=apt.zig
+
 build_wasm() {
     local root="$1" out="$2"
     (cd "$root" && zig build-exe \
         "${zig_build_flags[@]}" \
         -femit-bin="$out" \
-        src/core.zig)
+        "src/$3")
 }
 
 build_host() {
@@ -92,7 +105,8 @@ build_host() {
 echo "pass 1: LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH=1000000000"
 build_host "$A" "$tmp/host1"
 if [[ "$HAVE_ZIG" -eq 1 ]]; then
-    build_wasm "$A" "$tmp/core1.wasm"
+    build_wasm "$A" "$tmp/core1.wasm" core.zig
+    build_wasm "$A" "$tmp/plugin1.wasm" "$REPRO_PLUGIN"
 fi
 
 echo "pass 2: TZ=Asia/Tokyo SOURCE_DATE_EPOCH=1800000000"
@@ -104,7 +118,8 @@ echo "pass 2: TZ=Asia/Tokyo SOURCE_DATE_EPOCH=1800000000"
     export SOURCE_DATE_EPOCH=1800000000
     build_host "$B" "$tmp/host2"
     if [[ "$HAVE_ZIG" -eq 1 ]]; then
-        build_wasm "$B" "$tmp/core2.wasm"
+        build_wasm "$B" "$tmp/core2.wasm" core.zig
+        build_wasm "$B" "$tmp/plugin2.wasm" "$REPRO_PLUGIN"
     fi
 )
 
@@ -127,6 +142,7 @@ fail=0
 compare "C host test binary" "$tmp/host1" "$tmp/host2" || fail=1
 if [[ "$HAVE_ZIG" -eq 1 ]]; then
     compare "core.wasm" "$tmp/core1.wasm" "$tmp/core2.wasm" || fail=1
+    compare "$REPRO_PLUGIN" "$tmp/plugin1.wasm" "$tmp/plugin2.wasm" || fail=1
 fi
 
 # What a precompiled image's `.cwasm.stamp` records: the module's mtime beside
