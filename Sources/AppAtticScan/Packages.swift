@@ -218,10 +218,25 @@ public func packageActionScript(remove: [PackageEntry], markManual: [PackageEntr
     return lines.joined(separator: "\n") + "\n"
 }
 
-public func parsePacmanOrphans(_ text: String) -> [PackageEntry] {
+/// One package per line of a manager listing, in listing order. `line` returns
+/// nil for a line that is not a package row, so a manager carries its row
+/// grammar and nothing else.
+private func parsePackageLines(
+    _ text: String,
+    capacity: Int,
+    _ line: (Substring) -> PackageEntry?
+) -> [PackageEntry] {
     var out: [PackageEntry] = []
-    out.reserveCapacity(256)
+    out.reserveCapacity(capacity)
     for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        guard let pkg = line(raw) else { continue }
+        out.append(pkg)
+    }
+    return out
+}
+
+public func parsePacmanOrphans(_ text: String) -> [PackageEntry] {
+    parsePackageLines(text, capacity: 256) { raw in
         guard let pair = raw.utf8.withContiguousStorageIfAvailable({ u -> (Substring, Substring?)? in
             let (ls, le) = trimRange(u)
             guard ls < le else { return nil }
@@ -242,16 +257,13 @@ public func parsePacmanOrphans(_ text: String) -> [PackageEntry] {
             guard let name = tokBounds(u, le, &i), name.0 < name.1 else { return nil }
             let ver = tokBounds(u, le, &i)
             return (tokSub(raw, u, name), ver.map { tokSub(raw, u, $0) })
-        }) ?? nil else { continue }
-        out.append(makePackage(name: String(pair.0), manager: "pacman", kind: "orphan", version: pair.1.map(String.init)))
+        }) ?? nil else { return nil }
+        return makePackage(name: String(pair.0), manager: "pacman", kind: "orphan", version: pair.1.map(String.init))
     }
-    return out
 }
 
 public func parseDpkgRc(_ text: String) -> [PackageEntry] {
-    var out: [PackageEntry] = []
-    out.reserveCapacity(256)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+    parsePackageLines(text, capacity: 256) { raw in
         guard let pair = raw.utf8.withContiguousStorageIfAvailable({ u -> (Substring, Substring?)? in
             let (ls, le) = trimRange(u)
             // `rc` + whitespace.
@@ -260,10 +272,9 @@ public func parseDpkgRc(_ text: String) -> [PackageEntry] {
             guard let name = tokBounds(u, le, &i), name.0 < name.1 else { return nil }
             let ver = tokBounds(u, le, &i)
             return (tokSub(raw, u, name), ver.map { tokSub(raw, u, $0) })
-        }) ?? nil else { continue }
-        out.append(makePackage(name: String(pair.0), manager: "dpkg", kind: "orphan", version: pair.1.map(String.init)))
+        }) ?? nil else { return nil }
+        return makePackage(name: String(pair.0), manager: "dpkg", kind: "orphan", version: pair.1.map(String.init))
     }
-    return out
 }
 
 /// `apt-get -s autoremove` row: `Remv name [version]`.
@@ -304,20 +315,17 @@ public func parseAptAutoremove(_ text: String) -> [PackageEntry] {
 }
 
 public func parseDnfUnneeded(_ text: String) -> [PackageEntry] {
-    var out: [PackageEntry] = []
-    out.reserveCapacity(256)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        if isDnfListingNoise(raw) { continue }
+    parsePackageLines(text, capacity: 256) { raw in
+        if isDnfListingNoise(raw) { return nil }
         guard let name = raw.utf8.withContiguousStorageIfAvailable({ u -> Substring? in
             let (ls, le) = trimRange(u)
             guard ls < le else { return nil }
             var i = ls
             guard let tb = tokBounds(u, le, &i), tb.0 < tb.1 else { return nil }
             return tokSub(raw, u, tb)
-        }) ?? nil else { continue }
-        out.append(makePackage(name: String(name), manager: "dnf", kind: "orphan"))
+        }) ?? nil else { return nil }
+        return makePackage(name: String(name), manager: "dnf", kind: "orphan")
     }
-    return out
 }
 
 /// `|`-separated table row: status | repo | name | current | available.
@@ -346,19 +354,16 @@ func pipeColumns(_ raw: Substring) -> [(Int, Int)]? {
 }
 
 public func parseZypperUnneeded(_ text: String) -> [PackageEntry] {
-    var out: [PackageEntry] = []
-    out.reserveCapacity(256)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        guard let cols = pipeColumns(raw), cols.count >= 4 else { continue }
+    parsePackageLines(text, capacity: 256) { raw in
+        guard let cols = pipeColumns(raw), cols.count >= 4 else { return nil }
         guard let row = raw.utf8.withContiguousStorageIfAvailable({ u -> (Substring, Substring?)? in
             let name = tokSub(raw, u, cols[1])
             guard !name.isEmpty, name.caseInsensitiveCompare("Name") != .orderedSame else { return nil }
             let ver = tokSub(raw, u, cols[3])
             return (name, ver.isEmpty ? nil : ver)
-        }) ?? nil else { continue }
-        out.append(makePackage(name: String(row.0), manager: "zypper", kind: "orphan", version: row.1.map(String.init)))
+        }) ?? nil else { return nil }
+        return makePackage(name: String(row.0), manager: "zypper", kind: "orphan", version: row.1.map(String.init))
     }
-    return out
 }
 
 func jsonDependencyEntries(_ value: Any) -> [(String, String?)] {
@@ -452,13 +457,10 @@ func parseBunTreeLine(_ s: Substring) -> (name: String, version: String)? {
 }
 
 public func parseBunGlobalList(_ text: String) -> [PackageEntry] {
-    var out: [PackageEntry] = []
-    out.reserveCapacity(64)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        guard let (name, ver) = parseBunTreeLine(raw) else { continue }
-        out.append(makePackage(name: name, manager: "bun", kind: "global", version: ver))
+    parsePackageLines(text, capacity: 64) { raw in
+        guard let (name, ver) = parseBunTreeLine(raw) else { return nil }
+        return makePackage(name: name, manager: "bun", kind: "global", version: ver)
     }
-    return out
 }
 
 public func parsePipxList(_ text: String) -> [PackageEntry] {
@@ -483,9 +485,7 @@ public func parsePipxList(_ text: String) -> [PackageEntry] {
         // version has to break the tie: `sort` is not stable.
         return out.sorted { collatedBefore($0.name, $1.name, tieBreak: $0.version ?? "", $1.version ?? "") }
     }
-    var out: [PackageEntry] = []
-    out.reserveCapacity(64)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+    return parsePackageLines(text, capacity: 64) { raw in
         // `pipx list` row: `package <name> <version>, installed using …`.
         // Case-insensitive `package` token, then two tokens; trailing comma
         // on the version is stripped.
@@ -512,16 +512,13 @@ public func parsePipxList(_ text: String) -> [PackageEntry] {
                 guard ve > vb.0 else { return nil }
                 return (tokSub(raw, u, nb), tokSub(raw, u, (vb.0, ve)))
             }
-        }) ?? nil else { continue }
-        out.append(makePackage(name: String(hit.0), manager: "pipx", kind: "global", version: String(hit.1)))
+        }) ?? nil else { return nil }
+        return makePackage(name: String(hit.0), manager: "pipx", kind: "global", version: String(hit.1))
     }
-    return out
 }
 
 public func parseUvToolList(_ text: String) -> [PackageEntry] {
-    var out: [PackageEntry] = []
-    out.reserveCapacity(64)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+    parsePackageLines(text, capacity: 64) { raw in
         // `uv tool list` row: `name v<version>`. `- item` rows and anything
         // without exactly two tokens drop out; version is digits and dots.
         guard let hit = raw.utf8.withContiguousStorageIfAvailable({ u -> (Substring, Substring)? in
@@ -541,10 +538,9 @@ public func parseUvToolList(_ text: String) -> [PackageEntry] {
             while i < le, bWS(u[i]) { i += 1 }
             guard i == le else { return nil }
             return (tokSub(raw, u, nb), tokSub(raw, u, (vb.0 + 1, vb.1)))
-        }) ?? nil else { continue }
-        out.append(makePackage(name: String(hit.0), manager: "uv", kind: "global", version: String(hit.1)))
+        }) ?? nil else { return nil }
+        return makePackage(name: String(hit.0), manager: "uv", kind: "global", version: String(hit.1))
     }
-    return out
 }
 
 /// One package-manager query. `failed` tells "the manager is not installed"

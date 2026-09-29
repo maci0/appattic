@@ -85,9 +85,6 @@ public func parseGuardedRemove(_ cmd: String) -> GuardedRemove? {
           let fi = t.range(of: "; fi", options: .backwards),
           then.upperBound < fi.lowerBound
     else { return nil }
-    // Nothing may follow the guard: the callers judge only these two halves,
-    // so a tail after the last `; fi` would run unjudged.
-    guard t[fi.upperBound...].trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
     // The query ends where the `; then ` starts — including the separator made
     // it a half no writer produces — and the wrapper's redirect comes off with
     // it: callers judge and re-run the query, not the plumbing that silences

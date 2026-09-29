@@ -545,14 +545,28 @@ func asciiCaseInsensitiveIndex(
     return nil
 }
 
-public func parseAptUpgradable(_ text: String) -> [OutdatedPkg] {
+/// One package per line of a `list --upgradable`-style listing, in listing
+/// order. `line` returns nil for a line that is not a package row, so a manager
+/// carries its row grammar and nothing else.
+private func parseUpdateLines(
+    _ text: String,
+    capacity: Int,
+    _ line: (Substring) -> OutdatedPkg?
+) -> [OutdatedPkg] {
     var out: [OutdatedPkg] = []
-    out.reserveCapacity(1024)
+    out.reserveCapacity(capacity)
     for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        guard let (name, cur, latest) = parseAptUpgradableLine(raw) else { continue }
-        out.append(OutdatedPkg(name: name, manager: "apt", currentVersion: cur, latestVersion: latest))
+        guard let pkg = line(raw) else { continue }
+        out.append(pkg)
     }
     return out
+}
+
+public func parseAptUpgradable(_ text: String) -> [OutdatedPkg] {
+    parseUpdateLines(text, capacity: 1024) { raw in
+        guard let (name, cur, latest) = parseAptUpgradableLine(raw) else { return nil }
+        return OutdatedPkg(name: name, manager: "apt", currentVersion: cur, latestVersion: latest)
+    }
 }
 
 /// `pacman -Qu` / `paru -Qua` line: `name cur -> latest [ignored?]`.
@@ -585,18 +599,10 @@ func parsePacmanQuLine(_ s: Substring) -> (name: String, current: String, latest
 }
 
 public func parsePacmanQu(_ text: String) -> [OutdatedPkg] {
-    var out: [OutdatedPkg] = []
-    out.reserveCapacity(1024)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        guard let (name, cur, latest) = parsePacmanQuLine(raw) else { continue }
-        out.append(OutdatedPkg(
-            name: name,
-            manager: "pacman",
-            currentVersion: cur,
-            latestVersion: latest
-        ))
+    parseUpdateLines(text, capacity: 1024) { raw in
+        guard let (name, cur, latest) = parsePacmanQuLine(raw) else { return nil }
+        return OutdatedPkg(name: name, manager: "pacman", currentVersion: cur, latestVersion: latest)
     }
-    return out
 }
 
 /// `dnf list --upgrades` row: `name[.arch] version repo`. The version token must
@@ -677,25 +683,16 @@ func isDnfListingNoise(_ line: Substring) -> Bool {
 }
 
 public func parseDnfUpgrades(_ text: String, manager: String = "dnf") -> [OutdatedPkg] {
-    var out: [OutdatedPkg] = []
-    out.reserveCapacity(1024)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        if isDnfListingNoise(raw) { continue }
-        guard let (name, latest) = parseDnfUpgradesLine(raw) else { continue }
-        out.append(OutdatedPkg(
-            name: name,
-            manager: manager,
-            latestVersion: latest
-        ))
+    parseUpdateLines(text, capacity: 1024) { raw in
+        if isDnfListingNoise(raw) { return nil }
+        guard let (name, latest) = parseDnfUpgradesLine(raw) else { return nil }
+        return OutdatedPkg(name: name, manager: manager, latestVersion: latest)
     }
-    return out
 }
 
 public func parseZypperListUpdates(_ text: String) -> [OutdatedPkg] {
-    var out: [OutdatedPkg] = []
-    out.reserveCapacity(256)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        guard let cols = pipeColumns(raw), cols.count >= 5 else { continue }
+    parseUpdateLines(text, capacity: 256) { raw in
+        guard let cols = pipeColumns(raw), cols.count >= 5 else { return nil }
         guard let row = raw.utf8.withContiguousStorageIfAvailable({ u -> (Substring, Substring, Substring?)? in
             // Status `S` rows and the header row drop out.
             let (ss, se) = cols[0]
@@ -709,15 +706,14 @@ public func parseZypperListUpdates(_ text: String) -> [OutdatedPkg] {
             let cur = tokSub(raw, u, cols[3])
             let avail = tokSub(raw, u, cols[4])
             return (name, avail, cur.isEmpty ? nil : cur)
-        }) ?? nil else { continue }
-        out.append(OutdatedPkg(
+        }) ?? nil else { return nil }
+        return OutdatedPkg(
             name: String(row.0),
             manager: "zypper",
             currentVersion: row.2.map(String.init),
             latestVersion: String(row.1)
-        ))
+        )
     }
-    return out
 }
 
 /// `mas outdated` line: `id name (cur -> latest)`. The id is digits, the name
@@ -761,19 +757,16 @@ func parseMasOutdatedLine(_ s: Substring) -> (id: String, name: String, current:
 }
 
 public func parseMasOutdated(_ text: String) -> [OutdatedPkg] {
-    var out: [OutdatedPkg] = []
-    out.reserveCapacity(1024)
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        guard let (id, name, cur, latest) = parseMasOutdatedLine(raw) else { continue }
-        out.append(OutdatedPkg(
+    parseUpdateLines(text, capacity: 1024) { raw in
+        guard let (id, name, cur, latest) = parseMasOutdatedLine(raw) else { return nil }
+        return OutdatedPkg(
             name: id,
             manager: "app-store",
             currentVersion: cur,
             latestVersion: latest,
             title: name
-        ))
+        )
     }
-    return out
 }
 
 public func storeCountries(_ localeText: String? = nil) -> [String] {
