@@ -396,9 +396,9 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
         wasmtime_error_t *perr = wasmtime_module_deserialize_file(engine, cwasm, &pre);
         if (!perr && pre) {
             if (!cache_put(path, &st, pre)) {
+                /* `cache_put` took ownership and dropped the module, so
+                   deleting it again here would free it twice. */
                 fail_msg(e, "module cache is full");
-                /* Nothing took the module, so this call has to drop it. */
-                wasmtime_module_delete(pre);
                 return NULL;
             }
             return pre;
@@ -417,8 +417,8 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
         return NULL;
     }
     if (!cache_put(path, &st, module)) {
+        /* Owned and freed by `cache_put`, like the image above. */
         fail_msg(e, "module cache is full");
-        wasmtime_module_delete(module);
         return NULL;
     }
     return module;
