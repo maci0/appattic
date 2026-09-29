@@ -398,8 +398,15 @@ void walkDirFd(
         node->unreadable = true;
         return;
     }
-    errno = 0;
-    while (struct dirent *ent = readdir(dir)) {
+    // `errno` is cleared per call, not once before the loop: `visitEntry`
+    // runs fstatat/openat, which set errno on ordinary events (an entry that
+    // vanished mid-scan, a directory this process may not open). Clearing it
+    // only up front would report a directory read in full as unreadable
+    // because of the last failure inside it.
+    for (;;) {
+        errno = 0;
+        struct dirent *ent = readdir(dir);
+        if (!ent) break;
         if (isCancelled(*ctx->opts)) break;
         visitEntry(node, fd, ent->d_name, path, pathLen, pathCap, ctx, defer);
     }

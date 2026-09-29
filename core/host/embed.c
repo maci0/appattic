@@ -11,6 +11,14 @@
 #include <wasm.h>
 #include <wasmtime.h>
 
+/* Darwin spells the stat timestamp members `st_*timespec`; glibc spells them
+   `st_*tim`. Both are `struct timespec`, so only the member name differs. */
+#if defined(__APPLE__)
+#define appattic_stat_mtime(st) ((st).st_mtimespec)
+#else
+#define appattic_stat_mtime(st) ((st).st_mtim)
+#endif
+
 typedef struct {
     char *buf;
     size_t len;
@@ -258,8 +266,8 @@ static int cache_put(const char *path, const struct stat *st, wasmtime_module_t 
         ModSlot *s = &g_mods[g_mod_count++];
         s->path = copy;
         s->size = (long)st->st_size;
-        s->mtime_s = (long)st->st_mtim.tv_sec;
-        s->mtime_ns = (long)st->st_mtim.tv_nsec;
+        s->mtime_s = (long)appattic_stat_mtime(*st).tv_sec;
+        s->mtime_ns = (long)appattic_stat_mtime(*st).tv_nsec;
         s->module = module;
         pthread_mutex_unlock(&g_mod_lock);
         return 1;
@@ -311,8 +319,8 @@ static int stamp_matches_wasm(const char *image_path, const struct stat *st) {
     line[got] = '\0';
     long size = 0, mtime_s = 0, mtime_ns = 0;
     if (sscanf(line, STAMP_SCAN, &size, &mtime_s, &mtime_ns) != 3) return 0;
-    return size == (long)st->st_size && mtime_s == (long)st->st_mtim.tv_sec
-        && mtime_ns == (long)st->st_mtim.tv_nsec;
+    return size == (long)st->st_size && mtime_s == (long)appattic_stat_mtime(*st).tv_sec
+        && mtime_ns == (long)appattic_stat_mtime(*st).tv_nsec;
 }
 
 /* Write the stamp for `wasm_path`'s image. 0 on success. The image is renamed
@@ -336,8 +344,9 @@ static int write_stamp(const char *wasm_path, const struct stat *st, char *err, 
         fail_msg(&e, "cannot write precompiled module stamp");
         return 1;
     }
-    const int n = fprintf(f, STAMP_FORMAT, (long)st->st_size, (long)st->st_mtim.tv_sec,
-                          (long)st->st_mtim.tv_nsec);
+    const int n = fprintf(f, STAMP_FORMAT, (long)st->st_size,
+                          (long)appattic_stat_mtime(*st).tv_sec,
+                          (long)appattic_stat_mtime(*st).tv_nsec);
     const int ok = n > 0 && fflush(f) == 0 && fsync(fileno(f)) == 0;
     fclose(f);
     if (!ok) {
@@ -366,8 +375,8 @@ static wasmtime_module_t *module_for_path(wasm_engine_t *engine, const char *pat
     pthread_mutex_lock(&g_mod_lock);
     for (int i = 0; i < g_mod_count; i++) {
         ModSlot *s = &g_mods[i];
-        if (s->size == (long)st.st_size && s->mtime_s == (long)st.st_mtim.tv_sec
-            && s->mtime_ns == (long)st.st_mtim.tv_nsec && strcmp(s->path, path) == 0) {
+        if (s->size == (long)st.st_size && s->mtime_s == (long)appattic_stat_mtime(st).tv_sec
+            && s->mtime_ns == (long)appattic_stat_mtime(st).tv_nsec && strcmp(s->path, path) == 0) {
             wasmtime_module_t *hit = s->module;
             pthread_mutex_unlock(&g_mod_lock);
             return hit;
