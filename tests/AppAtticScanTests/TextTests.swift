@@ -74,6 +74,11 @@ final class TextTests: XCTestCase {
         // A skin-tone modifier rides on the base glyph instead of taking a
         // cell of its own, so the pair is the width of the base alone.
         XCTAssertEqual(displayWidth("👍🏽"), 2)
+        // Wide symbols sit below 0x2E80, so a table row of them has to take two
+        // cells each or the columns to their right drift.
+        XCTAssertEqual(displayWidth("☕ Notes"), 8)
+        XCTAssertEqual(displayWidth("✅ Backup"), 9)
+        XCTAssertEqual(displayWidth("⌚ ⭐"), 5)
     }
 
     func testSanitizeForTerminalNeutralizesControlsButKeepsColor() {

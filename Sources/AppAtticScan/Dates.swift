@@ -6,7 +6,11 @@ func truncateISOFractionalSeconds(_ s: String, maxDigits: Int = 3) -> String {
     guard let dot = s[tIndex...].firstIndex(of: ".") else { return s }
     var digitEnd = s.index(after: dot)
     var count = 0
-    while digitEnd < s.endIndex, s[digitEnd].isNumber {
+    // ASCII digits, the form ISO-8601 and the Qt twin in `finding.cpp` both
+    // spell. `Character.isNumber` is Unicode Nd|Nl|No, so a fraction written
+    // in Arabic-Indic digits would be counted here and cut mid-run, leaving a
+    // mixed-script fraction the formatter then rejects outright.
+    while digitEnd < s.endIndex, s[digitEnd].isASCII, s[digitEnd].isNumber {
         count += 1
         digitEnd = s.index(after: digitEnd)
     }

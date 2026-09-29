@@ -3,9 +3,25 @@ import Foundation
 // The PATH and overlay directories: which ones are scanned, the broken
 // symlinks in them, what a package dir shadows, and the tool names they ship.
 
+/// The entries of `root`, as paths, dot files excluded.
+///
+/// Reads `d_name` as raw bytes rather than through
+/// `FileManager.contentsOfDirectory`, which decodes with the platform default
+/// and substitutes U+FFFD. The paths returned here are the arguments of the
+/// guarded `rm -rf` the leftover scan generates, so a lossy name is not a
+/// cosmetic loss: the U+FFFD path names a *different* entry, and the report
+/// claims an entry was removed that is still on disk. An entry whose bytes are
+/// not UTF-8 has no path a UTF-8 API can name, so `direntName` returns nil for
+/// it and it is left out, the same rule the disk walk follows.
 func listEntries(_ root: String) -> [String] {
-    guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
-    return names.filter { !$0.hasPrefix(".") }.sorted().map { (root as NSString).appendingPathComponent($0) }
+    guard let dir = opendir(root) else { return [] }
+    defer { closedir(dir) }
+    var paths: [String] = []
+    while let ent = readdir(dir) {
+        guard let name = direntName(ent), !name.hasPrefix(".") else { continue }
+        paths.append((root as NSString).appendingPathComponent(name))
+    }
+    return paths.sorted()
 }
 
 func shouldScanUserBinDir(

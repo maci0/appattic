@@ -483,7 +483,12 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 // Only the rows the finished tree shows directly under the root.
                 const int slash = path.lastIndexOf(QLatin1Char('/'));
                 const QString parent = slash > 0 ? path.left(slash) : QStringLiteral("/");
-                if (parent != d->scanPath) return;
+                // Both sides are filesystem text, so compare them the way the
+                // rest of the UI does (see pathIdentityKey in finding.cpp). A
+                // raw code-unit `!=` misses the match under an exFAT or SMB
+                // mount that hands back an NFD spelling of a root the path bar
+                // spelled NFC, and the tree comes up empty with no error.
+                if (pathIdentityKey(parent) != pathIdentityKey(d->scanPath)) return;
                 QTreeWidgetItem *top = d->tree->topLevelItem(0);
                 if (!top) {
                     QString label = QFileInfo(d->scanPath).fileName();
