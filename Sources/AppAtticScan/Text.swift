@@ -95,6 +95,33 @@ public func readUTF8File(_ path: String) -> String? {
     return decodeUTF8(data)
 }
 
+/// Read at most the last `maxBytes` of a file as UTF-8, for a file another
+/// program writes without a size ceiling. A whole-file read costs a `Data`, a
+/// `String` and, in the history parsers, a `[UInt8]` of it, all live at once,
+/// in a process that stays open after the scan finishes.
+///
+/// The tail is cut on a line boundary, so no parser sees half a line: the one
+/// the cut lands in is dropped, and a file that is one long line within the
+/// bound reads as empty rather than as a fragment.
+public func readUTF8FileTail(_ path: String, maxBytes: Int) -> String? {
+    guard maxBytes > 0 else { return nil }
+    let url = URL(fileURLWithPath: path)
+    guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+    defer { try? handle.close() }
+    guard let size = try? handle.seekToEnd() else { return nil }
+    let cut = size > UInt64(maxBytes)
+    let start = cut ? size - UInt64(maxBytes) : 0
+    do {
+        try handle.seek(toOffset: start)
+        guard let data = try handle.read(upToCount: maxBytes) else { return nil }
+        if !cut { return decodeUTF8(data) }
+        guard let newline = data.firstIndex(of: 0x0A) else { return "" }
+        return decodeUTF8(data[data.index(after: newline)...])
+    } catch {
+        return nil
+    }
+}
+
 /// East Asian Wide and Fullwidth blocks, which a terminal draws two columns
 /// wide. Ambiguous-width scalars (Latin-1 letters, box drawing) stay one column
 /// so the tables do not depend on the terminal's locale setting.

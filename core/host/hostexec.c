@@ -1,3 +1,9 @@
+/* pipe2, for the close-on-exec flag the two ends of a query's pipe need
+   without a window in which a concurrent fork could inherit them. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "hostexec.h"
 
 #include <limits.h>
@@ -979,8 +985,46 @@ static void reap_child(pid_t pid) {
     if (kill(-pid, SIGKILL) != 0) {
         (void)kill(pid, SIGKILL);
     }
+    /* Polled, not blocking. SIGKILL cannot be caught, but a child in
+       uninterruptible sleep (a query on a hung FUSE, CIFS or NFS mount) does
+       not reach a zombie for it, and a blocking wait there parks the calling
+       thread for good: the scan thread never returns and the whole teardown in
+       the shell runs behind a drain it can pass. The child is left to init to
+       reap once the kernel unblocks it, which is the only thing that can. */
     int st = 0;
-    (void)waitpid(pid, &st, 0);
+    waited = 0;
+    while (waited < HOST_EXEC_KILL_GRACE_MS) {
+        if (waitpid(pid, &st, WNOHANG) == pid) return;
+        struct timespec sl;
+        sl.tv_sec = 0;
+        sl.tv_nsec = (long)HOST_EXEC_REAP_POLL_MS * 1000000L;
+        (void)nanosleep(&sl, NULL);
+        waited += HOST_EXEC_REAP_POLL_MS;
+    }
+}
+
+/* A pipe whose ends carry O_CLOEXEC. Every host query forks, and the process
+   that is left behind is the app's own lifetime, so an end inherited by an
+   unrelated concurrent fork keeps the other end open inside a package manager
+   that outlives the query that made it. pipe2 where it exists, the two fcntl
+   calls where it does not. */
+static int pipe_cloexec(int fds[2]) {
+#ifdef O_CLOEXEC
+    if (pipe2(fds, O_CLOEXEC) == 0) return 0;
+    if (errno != ENOSYS) return -1;
+#endif
+    if (pipe(fds) != 0) return -1;
+    for (int i = 0; i < 2; i++) {
+        int flags = fcntl(fds[i], F_GETFD);
+        if (flags < 0 || fcntl(fds[i], F_SETFD, flags | FD_CLOEXEC) < 0) {
+            int saved = errno;
+            close(fds[0]);
+            close(fds[1]);
+            errno = saved;
+            return -1;
+        }
+    }
+    return 0;
 }
 
 /* The analyzer pass in scripts/lint.sh reads the dup2 below as a leaked
@@ -997,7 +1041,7 @@ static void reap_child(pid_t pid) {
 #endif
 static int run_live_forked(char **argv, char *out, size_t cap) {
     int fds[2];
-    if (pipe(fds) != 0) return APPATTIC_HOST_EXEC_FAIL;
+    if (pipe_cloexec(fds) != 0) return APPATTIC_HOST_EXEC_FAIL;
     pid_t pid = fork();
     if (pid < 0) {
         close(fds[0]);
@@ -1009,6 +1053,10 @@ static int run_live_forked(char **argv, char *out, size_t cap) {
         (void)setpgid(0, 0);
         close(fds[0]);
         if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(127);
+        /* dup2 leaves the flag clear on the new descriptor, but it is a no-op
+           when the pipe end already is fd 1, so the flag is cleared here for
+           that case: stdout has to survive the exec below. */
+        (void)fcntl(STDOUT_FILENO, F_SETFD, 0);
         close(fds[1]);
         int devnull = open("/dev/null", O_RDWR);
         if (devnull >= 0) {

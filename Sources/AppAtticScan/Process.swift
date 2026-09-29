@@ -445,15 +445,16 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: @escaping Monoton
     // Dedicated threads: pmap workers already occupy the GCD pool. Queueing
     // pipe reads on that pool deadlocks (workers wait for readers, readers wait
     // for threads).
-    group.enter()
-    Thread.detachNewThread {
+    //
+    // A thread that could not be created takes its group entry back. The
+    // entries are only balanced by the readers themselves, so one that never
+    // started parks every `group.wait()` below forever, with this run's four
+    // pipe descriptors still open.
+    let outReaderStarted = startPipeReader(in: group) {
         collected.out = collected.drain(outRead)
-        group.leave()
     }
-    group.enter()
-    Thread.detachNewThread {
+    let errReaderStarted = startPipeReader(in: group) {
         collected.err = collected.drain(errRead)
-        group.leave()
     }
     // The read ends are this function's, and both readers are joined before
     // either close, so a run cannot hand a live descriptor to the next one.
@@ -462,21 +463,34 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: @escaping Monoton
         try? outRead.close()
         try? errRead.close()
     }
+    func closeWriteEnds() {
+        try? outPipe.fileHandleForWriting.close()
+        try? errPipe.fileHandleForWriting.close()
+    }
+    if !outReaderStarted || !errReaderStarted {
+        // Nothing is going to drain the pipes, so the run cannot start: the
+        // child would block on the first full pipe and every descriptor here
+        // would outlive the call. Report it the way a command that produced no
+        // usable result is reported, and join whichever reader did start.
+        closeWriteEnds()
+        collected.closeDrainWindow()
+        group.wait()
+        closeReadEnds()
+        return (127, "", "could not start a reader for the command's output")
+    }
     let exited = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in exited.signal() }
     do {
         try process.run()
     } catch {
-        try? outPipe.fileHandleForWriting.close()
-        try? errPipe.fileHandleForWriting.close()
+        closeWriteEnds()
         collected.closeDrainWindow()
         group.wait()
         closeReadEnds()
         return (127, "", error.localizedDescription)
     }
     isolateProcessGroup(process)
-    try? outPipe.fileHandleForWriting.close()
-    try? errPipe.fileHandleForWriting.close()
+    closeWriteEnds()
     // Block on the exit notification instead of polling `isRunning`: the old
     // 50 ms sleep charged a full tick to every subprocess, so a scan that runs
     // dozens of `which`/`du`/package queries paid that dead time per call
@@ -502,6 +516,22 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: @escaping Monoton
     let out = decodeUTF8(collected.out)
     let err = decodeUTF8(collected.err)
     return (exit.status(from: process), out, err)
+}
+
+/// Runs one pipe reader on its own thread, joined by `group` on every path.
+/// False when the thread could not be created, with the group entry this call
+/// took already given back, so the caller's wait cannot be left short one
+/// reader.
+private func startPipeReader(in group: DispatchGroup, _ body: @escaping () -> Void) -> Bool {
+    group.enter()
+    if Thread.detachNewThread({
+        body()
+        group.leave()
+    }) != nil {
+        return true
+    }
+    group.leave()
+    return false
 }
 
 /// The status a stopped script reports, 124 being the shell's own "timed out".

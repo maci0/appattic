@@ -133,4 +133,18 @@ final class TextTests: XCTestCase {
         XCTAssertTrue(collatedBefore("Zoom", "Zoom", tieBreak: "/Applications/Zoom.app", "/Users/x/Zoom.app"))
         XCTAssertFalse(collatedBefore("Zoom", "Zoom", tieBreak: "/Users/x/Zoom.app", "/Applications/Zoom.app"))
     }
+
+    func testReadUTF8FileTailReadsWholeSmallFileAndCutsBigOnes() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tail-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let small = "one\ntwo\nthree\n"
+        try Data(small.utf8).write(to: url)
+        XCTAssertEqual(readUTF8FileTail(url.path, maxBytes: 64), small)
+        // The cut lands inside "two", so that line is dropped whole and the
+        // reader starts on the first complete one after it.
+        XCTAssertEqual(readUTF8FileTail(url.path, maxBytes: 9), "three\n")
+        XCTAssertNil(readUTF8FileTail(url.path, maxBytes: 0))
+        XCTAssertNil(readUTF8FileTail(url.appendingPathComponent("missing").path, maxBytes: 64))
+    }
 }

@@ -6,6 +6,14 @@ import FoundationXML
 public let indexWindowS: TimeInterval = 120
 let maxHistoryLines = 500_000
 
+/// How much of a shell history file one scan reads, counted from its end. The
+/// files are written by the shell and have no ceiling of ours: a `.bash_history`
+/// left for years runs to hundreds of megabytes, and reading one whole costs a
+/// `Data`, a `String` and a `[UInt8]` of it in a window that stays open after
+/// the scan. Only recent launches are scored, and both parsers stop at
+/// `maxHistoryLines`, so the bytes before the bound change no answer.
+let historyReadLimitBytes = 8 * 1024 * 1024
+
 /// How far past the scan time a recorded launch may sit and still be treated
 /// as real. Desktop clocks run a little ahead of ours, and a backwards NTP
 /// step leaves these files with timestamps in the future. `daysSince` clamps a
@@ -303,7 +311,7 @@ func retainHistoryToken(_ token: String, keep: Set<String>?) -> Bool {
 }
 
 public func parseHistoryFile(_ path: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
-    guard let text = readUTF8File(path) else { return }
+    guard let text = readUTF8FileTail(path, maxBytes: historyReadLimitBytes) else { return }
     let bytes = Array(text.utf8)
     if !historyBytesAreASCII(bytes) {
         parseHistoryFileRegex(text, index: &index, keep: keep)
@@ -535,7 +543,7 @@ func parseHistoryASCII(_ bytes: [UInt8], index: inout HistoryIndex, keep: Set<St
 }
 
 public func parseFishHistory(_ path: String, index: inout HistoryIndex, keep: Set<String>? = nil) {
-    guard let text = readUTF8File(path) else { return }
+    guard let text = readUTF8FileTail(path, maxBytes: historyReadLimitBytes) else { return }
     let bytes = Array(text.utf8)
     if !historyBytesAreASCII(bytes) {
         parseFishHistoryRegex(text, index: &index, keep: keep)
