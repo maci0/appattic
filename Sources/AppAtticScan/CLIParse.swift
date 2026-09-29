@@ -384,12 +384,10 @@ public func cliColorEnabled(
 /// `version` win over `parseError`, so `--help` and `--version` still print on
 /// a line that also has a bad token.
 public func parseCLIArguments(_ args: [String]) -> CLIOptions {
+    // No command typed is the `report` command, the `CLIOptions` default: it
+    // is in place before the walk, so `appattic --top 5` carries the command
+    // the flag needs and `appattic report --top 5` names the same one.
     var opts = CLIOptions()
-    // No command typed is the `report` command. It is settled before the walk
-    // so the default is in place for the command-scoped check below: left
-    // implicit, `appattic --top 5` would carry no command for a flag that
-    // needs one, and `appattic report --top 5` would not.
-    opts.command = "report"
     var i = 0
     var positional: [String] = []
     // A bad flag does not stop the scan: later tokens still count, so

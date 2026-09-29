@@ -120,15 +120,6 @@ public func shellComment(_ value: String) -> String {
     // read by the terminal running it: `ESC ] 0 ;` retitles the window and
     // `ESC [ 2 J` clears the rows the user is about to approve. Newlines are
     // flattened above, so they stay readable spaces; the rest become U+FFFD,
-    // the same marker `terminalSafe` uses.
-    var scalars = String.UnicodeScalarView()
-    for scalar in flattened.unicodeScalars {
-        let v = scalar.value
-        if v < 0x20 || v == 0x7F || (v >= 0x80 && v <= 0x9F) {
-            scalars.append("\u{FFFD}")
-        } else {
-            scalars.append(scalar)
-        }
-    }
-    return String(scalars).trimmingCharacters(in: .whitespaces)
+    // the same marker `terminalSafe` uses, and it is the same predicate.
+    return terminalSafe(flattened).trimmingCharacters(in: .whitespaces)
 }
