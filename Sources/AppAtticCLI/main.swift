@@ -271,10 +271,13 @@ enum C {
     static func yellow(_ s: String) -> String { paint(s, tone.forRole(.review)) }
 }
 
+/// The SGR escape the table paints with, matched once per measured cell.
+/// Compiled at file scope because `renderTable` measures every cell twice.
+let sgrEscape = try! NSRegularExpression(pattern: #"\u{1b}\[[0-9;]*m"#)
+
 func visibleLen(_ s: String) -> Int {
     if !C.enabled { return displayWidth(s) }
-    let re = try! NSRegularExpression(pattern: #"\u{1b}\[[0-9;]*m"#)
-    return displayWidth(re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: ""))
+    return displayWidth(sgrEscape.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: ""))
 }
 
 func padCell(_ cell: String, to width: Int) -> String {

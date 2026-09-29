@@ -120,40 +120,71 @@ public func visibleStaleSoftware(_ items: [SoftwareItem], includeSystem: Bool) -
     items.filter { $0.tierKind?.isVisibleStale(includeSystem: includeSystem) == true }
 }
 
-func matchDataItems(softwareName: String, bundleId: String?, items: [DataItem]) -> [DataItem] {
-    var out: [DataItem] = []
-    let swLow = softwareName.posixLowercased()
-    // A name in another script folds to "", and so does every other such name,
-    // so the folded comparison below is skipped for it. Only the exact
-    // lowercase and bundle-id matches can decide ownership.
-    let swNorm = normKey(softwareName)
-    let b = (bundleId ?? "").posixLowercased()
-    for it in items {
-        if it.leftoverStatus != .owned { continue }
-        let n = stripLeftoverNameSuffix(it.name).posixLowercased()
-        if let owner = it.owner, owner.posixLowercased() == swLow {
-            out.append(it)
-            continue
+/// Owned data rows indexed by the four keys a software row can be matched on.
+/// `buildSoftware` asks the same question of every app and every formula, and
+/// the scan of `items` behind each answer re-lowered and re-folded every row,
+/// so the pair count grew as the product of both lists. Each row's keys are
+/// pure, so they are computed once here and the per-question cost drops to the
+/// buckets that share a key.
+struct OwnedDataIndex {
+    /// Lowercased `owner`, which decides ownership on its own.
+    let owner: [String: [Int]]
+    /// Lowercased suffix-stripped name, which answers both the bundle-id
+    /// comparison and the name comparison.
+    let stem: [String: [Int]]
+    /// Lowercased `leftoverDisplayName`, which answers the name comparison.
+    let display: [String: [Int]]
+    /// `normKey` of the display name and of the raw name, which answer the
+    /// folded comparison. Empty folds are not indexed: `normKey` returns nil
+    /// for them, so no software row ever queries them.
+    let folded: [String: [Int]]
+
+    init(_ items: [DataItem]) {
+        var owner: [String: [Int]] = [:]
+        var stem: [String: [Int]] = [:]
+        var display: [String: [Int]] = [:]
+        var folded: [String: [Int]] = [:]
+        for (i, it) in items.enumerated() where it.leftoverStatus == .owned {
+            if let name = it.owner?.posixLowercased() {
+                owner[name, default: []].append(i)
+            }
+            let stemName = stripLeftoverNameSuffix(it.name).posixLowercased()
+            stem[stemName, default: []].append(i)
+            let label = leftoverDisplayName(name: it.name, extraPaths: it.extraPaths).posixLowercased()
+            display[label, default: []].append(i)
+            if let k = normKey(label) { folded[k, default: []].append(i) }
+            if let k = normKey(it.name) { folded[k, default: []].append(i) }
         }
-        if !b.isEmpty, n == b {
-            out.append(it)
-            continue
-        }
-        let display = leftoverDisplayName(name: it.name, extraPaths: it.extraPaths)
-        if display.posixLowercased() == swLow || n == swLow {
-            out.append(it)
-            continue
-        }
-        guard let folded = swNorm,
-              normKey(display) == folded || normKey(it.name) == folded
-        else { continue }
-        out.append(it)
+        self.owner = owner
+        self.stem = stem
+        self.display = display
+        self.folded = folded
     }
-    return out
+
+    /// Rows matching one software name and bundle id, in `items` order. The
+    /// buckets each list positions in ascending order, and the union is taken
+    /// by a sorted dedup so a row reachable under two keys is still appended
+    /// once, as the sequential scan did.
+    func match(softwareName: String, bundleId: String?) -> [Int] {
+        let swLow = softwareName.posixLowercased()
+        // A name in another script folds to "", and so does every other such
+        // name, so the folded comparison below is skipped for it. Only the
+        // exact lowercase and bundle-id matches can decide ownership.
+        let swNorm = normKey(softwareName)
+        let b = (bundleId ?? "").posixLowercased()
+
+        var hits: Set<Int> = []
+        for bucket in [owner[swLow], stem[swLow], display[swLow]] {
+            hits.formUnion(bucket ?? [])
+        }
+        if !b.isEmpty { hits.formUnion(stem[b] ?? []) }
+        if let swNorm { hits.formUnion(folded[swNorm] ?? []) }
+        return hits.sorted()
+    }
 }
 
-func attachOwnedData(_ sw: Software, name: String, bundleId: String?, items: [DataItem]) {
-    let matched = matchDataItems(softwareName: name, bundleId: bundleId, items: items)
+func attachOwnedData(_ sw: Software, name: String, bundleId: String?, items: [DataItem], index: OwnedDataIndex) {
+    let matched = index.match(softwareName: name, bundleId: bundleId).map { items[$0] }
     sw.dataBytes = matched.reduce(0) { addBytes($0, $1.sizeBytes) }
     sw.dataPaths = matched.map(\.path)
     sw.dataMtime = newestActivity(matched)
@@ -196,34 +227,56 @@ func newestActivity(_ items: [DataItem]) -> Date? {
     return best
 }
 
-func caskForApp(_ app: AppRecord, casks: [Cask], pathIndex: [String: String]) -> Cask? {
-    if let token = pathIndex[app.path], let hit = casks.first(where: { $0.name == token }) {
-        return hit
+/// One cask's name-derived match keys, computed once per scan. Every key is a
+/// function of the cask alone, and `caskForApp` used to rebuild all of them
+/// for every app on the machine.
+struct CaskMatchKeys {
+    let cask: Cask
+    let appBaseNames: [String]
+    let loweredTitles: Set<String>
+    let foldedCaskName: String
+    let foldedTitles: [String]
+}
+
+func caskMatchKeys(_ casks: [Cask]) -> [CaskMatchKeys] {
+    casks.map { c in
+        let titles = [c.name] + c.titles
+        return CaskMatchKeys(
+            cask: c,
+            appBaseNames: c.appNames.map {
+                URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent.posixLowercased()
+            },
+            loweredTitles: Set(titles.filter { !$0.isEmpty }.map { $0.posixLowercased() }),
+            foldedCaskName: norm(c.name),
+            foldedTitles: titles.map { norm($0) }
+        )
+    }
+}
+
+func caskForApp(_ app: AppRecord, keys: [CaskMatchKeys], pathIndex: [String: String]) -> Cask? {
+    if let token = pathIndex[app.path], let hit = keys.first(where: { $0.cask.name == token }) {
+        return hit.cask
     }
     let base = URL(fileURLWithPath: app.path).deletingPathExtension().lastPathComponent.posixLowercased()
     let display = app.displayName.posixLowercased()
     let an = norm(app.displayName)
-    for c in casks {
-        for art in c.appNames {
-            let artBase = URL(fileURLWithPath: art).deletingPathExtension().lastPathComponent.posixLowercased()
-            if !artBase.isEmpty, artBase == base { return c }
+    for k in keys {
+        for artBase in k.appBaseNames where !artBase.isEmpty {
+            if artBase == base { return k.cask }
         }
-        let titles = [c.name] + c.titles
-        let lowered = Set(titles.filter { !$0.isEmpty }.map { $0.posixLowercased() })
-        if !display.isEmpty, lowered.contains(display) { return c }
+        if !display.isEmpty, k.loweredTitles.contains(display) { return k.cask }
         if an.count < 6 { continue }
-        let cn = norm(c.name)
+        let cn = k.foldedCaskName
         // `norm` drops separators, so once normalised a pretty title can extend
         // the app name with no word boundary left to check ("Google Chrome" vs
         // "Google Chrome Canary"). A longer title only names the same product
         // when the cask name itself shares the app-name prefix, which is the
         // form Homebrew uses for a variant ("zerotier-one" for ZeroTier One).
         let caskNamesApp = cn.count >= 3 && (cn == an || an.hasPrefix(cn) || cn.hasPrefix(an))
-        for t in titles {
-            let tn = norm(t)
+        for tn in k.foldedTitles {
             if tn.isEmpty { continue }
-            if an == tn { return c }
-            if caskNamesApp, min(an.count, tn.count) >= 6, tn.hasPrefix(an) || an.hasPrefix(tn) { return c }
+            if an == tn { return k.cask }
+            if caskNamesApp, min(an.count, tn.count) >= 6, tn.hasPrefix(an) || an.hasPrefix(tn) { return k.cask }
         }
     }
     return nil
@@ -276,9 +329,11 @@ public func buildSoftware(
     for c in brew.casks {
         for p in c.appPaths { caskAppPaths[p] = c.name }
     }
+    let ownedData = OwnedDataIndex(dataItems)
+    let caskKeys = caskMatchKeys(brew.casks)
 
     for a in apps {
-        let cask = caskForApp(a, casks: brew.casks, pathIndex: caskAppPaths)
+        let cask = caskForApp(a, keys: caskKeys, pathIndex: caskAppPaths)
         let source: String
         if a.isSystem {
             source = "system"
@@ -307,7 +362,7 @@ public func buildSoftware(
             bundleId: a.bundleId,
             extra: a.extra
         )
-        attachOwnedData(sw, name: a.displayName, bundleId: a.bundleId, items: dataItems)
+        attachOwnedData(sw, name: a.displayName, bundleId: a.bundleId, items: dataItems, index: ownedData)
         if let cask { sw.caskName = cask.name }
         sw.summary = shortDesc(
             appBlurb(a.extra, appName: a.displayName)
@@ -341,7 +396,7 @@ public func buildSoftware(
                 historySpanDays: span,
                 summary: shortDesc(f.desc)
             )
-            attachOwnedData(sw, name: f.name, bundleId: nil, items: dataItems)
+            attachOwnedData(sw, name: f.name, bundleId: nil, items: dataItems, index: ownedData)
             software.append(sw)
         }
     }

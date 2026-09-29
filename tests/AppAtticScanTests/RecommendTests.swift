@@ -493,11 +493,10 @@ final class RecommendTests: XCTestCase {
             status: "owned",
             sizeBytes: 80_000_000
         )
-        let hits = matchDataItems(
-            softwareName: "Sketch",
-            bundleId: "com.bohemiancoding.sketch3",
-            items: [support, cache, orphan, other]
-        )
+        let items = [support, cache, orphan, other]
+        let hits = OwnedDataIndex(items)
+            .match(softwareName: "Sketch", bundleId: "com.bohemiancoding.sketch3")
+            .map { items[$0] }
         XCTAssertEqual(Set(hits.map(\.path)), Set([support.path, cache.path]))
         XCTAssertEqual(hits.reduce(0) { $0 + $1.sizeBytes }, 45_000_000)
     }
@@ -530,12 +529,13 @@ final class RecommendTests: XCTestCase {
             status: "owned",
             sizeBytes: 12_000_000
         )
+        let items = [wechat, other, ascii]
         XCTAssertEqual(
-            matchDataItems(softwareName: "微信", bundleId: nil, items: [wechat, other, ascii]).map(\.path),
+            OwnedDataIndex(items).match(softwareName: "微信", bundleId: nil).map { items[$0].path },
             [wechat.path]
         )
         XCTAssertEqual(
-            matchDataItems(softwareName: "Sketch", bundleId: nil, items: [wechat, other, ascii]).map(\.path),
+            OwnedDataIndex(items).match(softwareName: "Sketch", bundleId: nil).map { items[$0].path },
             [ascii.path]
         )
     }

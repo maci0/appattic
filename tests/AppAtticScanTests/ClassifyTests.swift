@@ -1409,7 +1409,8 @@ final class ClassifyTests: XCTestCase {
             status: "owned",
             sizeBytes: 4_000
         )
-        let hits = matchDataItems(softwareName: "herald", bundleId: "herald", items: [item])
+        let items = [item]
+        let hits = OwnedDataIndex(items).match(softwareName: "herald", bundleId: "herald").map { items[$0] }
         XCTAssertEqual(hits.map(\.path), [item.path])
         XCTAssertEqual(hits[0].sizeBytes, 4_000)
     }
