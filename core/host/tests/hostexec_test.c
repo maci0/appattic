@@ -269,9 +269,47 @@ static int check_xdg_root(void) {
     return 0;
 }
 
+/* The PATH rewrite the child execs under is built before the fork, because
+   opendir and setenv take the malloc arena lock and a child that reaches for
+   it after a fork in a threaded parent can hang forever. What that changed
+   from the outside is one thing: a run that armed the rewrite itself has to
+   undo it, or a long-lived embedder keeps the scan's PATH after the scan. */
+static int check_live_exec_restores_path(void) {
+    char out[4096];
+    const char *before = getenv("PATH");
+    char saved[4096];
+    if (snprintf(saved, sizeof saved, "%s", before ? before : "") >= (int)sizeof saved) {
+        return fail("live exec: PATH too long for the round-trip check");
+    }
+    const char *saved_live = getenv("APPATTIC_HOST_EXEC_LIVE");
+    const char *saved_fixture = getenv("APPATTIC_HOST_EXEC_FIXTURE");
+    char keep_live[32];
+    char keep_fixture[32];
+    if (saved_live) snprintf(keep_live, sizeof keep_live, "%s", saved_live);
+    if (saved_fixture) snprintf(keep_fixture, sizeof keep_fixture, "%s", saved_fixture);
+
+    setenv("APPATTIC_HOST_EXEC_LIVE", "1", 1);
+    unsetenv("APPATTIC_HOST_EXEC_FIXTURE");
+    (void)appattic_host_exec("ls -1 /nonexistent-appattic-probe", out, sizeof out);
+    const char *after = getenv("PATH");
+    if (!after || strcmp(after, saved) != 0) {
+        if (saved_live) setenv("APPATTIC_HOST_EXEC_LIVE", keep_live, 1);
+        else unsetenv("APPATTIC_HOST_EXEC_LIVE");
+        if (saved_fixture) setenv("APPATTIC_HOST_EXEC_FIXTURE", keep_fixture, 1);
+        else unsetenv("APPATTIC_HOST_EXEC_FIXTURE");
+        return fail("live exec left the user PATH applied");
+    }
+    if (saved_live) setenv("APPATTIC_HOST_EXEC_LIVE", keep_live, 1);
+    else unsetenv("APPATTIC_HOST_EXEC_LIVE");
+    if (saved_fixture) setenv("APPATTIC_HOST_EXEC_FIXTURE", keep_fixture, 1);
+    else unsetenv("APPATTIC_HOST_EXEC_FIXTURE");
+    return 0;
+}
+
 int main(void) {
     int rc = 0;
     rc |= check_xdg_root();
+    rc |= check_live_exec_restores_path();
     rc |= expect_allow("apt-get -s autoremove");
     rc |= expect_allow("apt-get --simulate autoremove");
     rc |= expect_allow("apt-get --dry-run autoremove");

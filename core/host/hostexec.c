@@ -995,7 +995,7 @@ static void reap_child(pid_t pid) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
 #endif
-static int run_live(char **argv, char *out, size_t cap) {
+static int run_live_forked(char **argv, char *out, size_t cap) {
     int fds[2];
     if (pipe(fds) != 0) return APPATTIC_HOST_EXEC_FAIL;
     pid_t pid = fork();
@@ -1141,6 +1141,32 @@ static int run_live(char **argv, char *out, size_t cap) {
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
+
+/* Apply the user PATH, fork, and undo the apply if this call is what armed
+   it. The child needs the rewrite in its environment, but computing it is not
+   fork-safe work: opendir, readdir, stat, snprintf and setenv all take the
+   malloc arena lock, and this host forks from a scan thread in a process
+   whose other threads are running. A child that reaches for the arena while
+   another thread held it at fork time never comes back, and the scan hangs on
+   a query that will never answer. Building it here, on a thread that is
+   allowed to allocate, and letting the child inherit the finished PATH across
+   the fork removes that entirely; the child still calls
+   apply_user_path_locked, where it is a no-op for exactly this reason.
+
+   Whether this call armed the rewrite is read under the same lock that armed
+   it, so two threads racing here cannot both claim the inverse: the embedder
+   that applied PATH before the scan (runCoreWasm, taggedPluginSpecs) owns the
+   undo, and an embedder that never applied does not keep the scan's PATH
+   after the scan ends. */
+static int run_live(char **argv, char *out, size_t cap) {
+    pthread_mutex_lock(&g_user_path_lock);
+    const int applied_here = !g_user_path_applied;
+    apply_user_path_locked();
+    pthread_mutex_unlock(&g_user_path_lock);
+    const int rc = run_live_forked(argv, out, cap);
+    if (applied_here) appattic_host_restore_user_path();
+    return rc;
+}
 
 int appattic_host_exec(const char *cmdline, char *out, size_t cap) {
     if (!out || cap == 0) return APPATTIC_HOST_EXEC_BAD;
