@@ -194,6 +194,13 @@ if ! grep -q "runtime-version: \"${KDE_RUNTIME}\"" "$BUILT_MANIFEST"; then
     echo "error: manifest runtime-version is not ${KDE_RUNTIME}" >&2
     exit 1
 fi
+# The sdk has to name the same branch: an unversioned `sdk: org.kde.Sdk`
+# resolves its default branch, so the build would compile against a different
+# toolchain than the one ensure_kde_sdk installed and the runtime it ships.
+if ! grep -q "^sdk: .*//${KDE_RUNTIME}$" "$BUILT_MANIFEST"; then
+    echo "error: manifest sdk does not pin branch ${KDE_RUNTIME}" >&2
+    exit 1
+fi
 # core/build.sh refuses a zig other than the one in .zig-version, so a bump that
 # reaches the manifest later than this check would fail inside the build rather
 # than here. The prefetch above already used $ZIG_VER.

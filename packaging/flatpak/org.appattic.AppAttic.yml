@@ -3,7 +3,12 @@
 app-id: org.appattic.AppAttic
 runtime: org.kde.Platform
 runtime-version: "6.10"
-sdk: org.kde.Sdk
+# The branch belongs on the sdk for the same reason it belongs on the runtime:
+# `sdk: org.kde.Sdk` alone resolves the SDK's default branch (master), so the
+# build would compile against a different toolchain than the 6.10 runtime it
+# installs, and scripts/linux-flatpak.sh, which puts org.kde.Sdk//6.10 on the
+# host, would not have made the one that was used.
+sdk: org.kde.Sdk//6.10
 command: appattic-qt
 finish-args:
   - --share=ipc

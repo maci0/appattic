@@ -257,8 +257,12 @@ check_vendored() {
 # that drops runtime-version resolves the runtime's default branch instead,
 # which moves the bytes in the bundle without touching anything this tree
 # checks, so the omission has to fail here rather than on the builder.
+#
+# The SDK needs the same branch. `sdk: org.kde.Sdk` is a valid ref and resolves
+# the SDK's default branch, so a build that installs and verifies
+# org.kde.Sdk//6.10 still compiles against whatever the default branch is.
 check_flatpak_platform() {
-    local manifest rel key value
+    local manifest rel key value sdk branch
     while IFS= read -r manifest; do
         [[ -n "$manifest" ]] || continue
         rel="${manifest#"$ROOT"/}"
@@ -268,6 +272,13 @@ check_flatpak_platform() {
                 fail "$rel has no $key; the bundle ships the runtime, and an unnamed one is not pinned"
             fi
         done
+        sdk="$(flatpak_manifest_value "$manifest" sdk)"
+        branch="${sdk##*//}"
+        if [[ -z "$branch" || "$branch" == "$sdk" ]]; then
+            fail "$rel names the sdk as $sdk with no branch; flatpak-builder resolves the default branch instead of the one the build installs"
+        elif [[ "$branch" != "$(flatpak_manifest_value "$manifest" runtime-version)" ]]; then
+            fail "$rel builds against sdk branch $branch and runs on runtime branch $(flatpak_manifest_value "$manifest" runtime-version); they have to be the same"
+        fi
     done < <(flatpak_manifests)
 }
 
