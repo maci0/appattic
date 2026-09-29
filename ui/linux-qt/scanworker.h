@@ -38,7 +38,7 @@ public slots:
            replayed an hour later stores a different idle count. */
         m_scanNow = QDateTime::currentDateTime();
         /* Clear first so every exit path below leaves the process-global cancel
-           clear; the previous order left it armed when the run never started. */
+           clear. */
         clearCoreWasmCancel();
         if (isCancelled()) {
             emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
@@ -72,10 +72,9 @@ signals:
     void finished(const QVector<Finding> &findings, const QString &err, int rc);
 
 private:
-    /// Enrich one plugin's findings and publish the running total. Order
-    /// matches the old single pass at the end: timing, then owned-path status,
-    /// then sibling grouping, so a partial list never disagrees with the final
-    /// one on the rows it already has.
+    /// Enrich one plugin's findings and publish the running total. The order
+    /// is timing, then owned-path status, then sibling grouping, so a partial
+    /// list never disagrees with the final one on the rows it already has.
     void ingestBlob(const char *json, size_t len) {
         QVector<Finding> batch;
         appendFindingsFromBlob(batch, QByteArray(json, int(len)));

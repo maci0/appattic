@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fast local checks (lint + Zig core tests + scan tests + CLI).
+# Fast local checks (lint + Zig core tests + scan tests + CLI + reproducible
+# artifacts).
 # Full Linux CI parity: bash scripts/check.sh --qt
 # No Swift toolchain, for core/src/ and core/host/ work: bash scripts/check.sh --core
 # Usage: bash scripts/check.sh [--core] [--qt]

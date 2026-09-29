@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Sourced by linux-deps.sh and linux-appimage.sh.
+# Sourced by the scripts that download a pinned third-party artifact.
 # Looks up names in dep-checksums.sha256 next to this file and checks SHA-256.
 
 require_sha256sum() {

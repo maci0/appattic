@@ -76,11 +76,11 @@ export ZIG_LOCAL_CACHE_DIR="$tmp/zig-local"
 # core.zig on its own proves almost nothing. It is four lines that import
 # abi.zig, emit one constant, and come out at 81 bytes: no std, no string
 # data, no comptime table, nothing a timestamp, a build path or a hash-map
-# iteration order could get into. The other 28 modules are the ones that
+# iteration order could get into. The other 27 modules are the ones that
 # carry std, embedded strings and a build-time result, and until one of them
 # was checked here this gate passed on the least complex artifact in the
-# set. apt.zig is the largest of them and one of the heaviest users of std,
-# so it is where a leaked path or an unsorted map would show.
+# set. snapd.zig is the largest of them and apt.zig second, so either is where
+# a leaked path or an unsorted map would show.
 REPRO_PLUGIN=apt.zig
 
 build_wasm() {

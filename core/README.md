@@ -23,10 +23,10 @@ Every manager and leftover path is a plugin: one `<id>.zig` compiled to `<id>.wa
 > restated here.
 >
 > Two asymmetries a table of pairs would hide: `gem.zig`, `composer.zig` and
-> `apt.zig`'s `parsePpaSources` have no Swift counterpart yet, and Swift reads
-> the user-global pip list with `pip list --user --not-required --format=json`
-> where Zig uses `pip list --user --outdated --format=json` and also reports
-> the `--outdated` rows. `BrewInfo.swift` reads Homebrew's "Refusing to load
+> `apt.zig`'s `parsePpaSources` have no Swift counterpart yet, and Zig adds a
+> second `pip list --user --outdated --format=json` query on top of the
+> `--not-required` listing both sides run, so it also reports outdated rows
+> Swift does not. `BrewInfo.swift` reads Homebrew's "Refusing to load
 > cask ... from untrusted tap" error and marks those rows report-only;
 > `brew.zig` does not, so every outdated cask it finds is updatable.
 >

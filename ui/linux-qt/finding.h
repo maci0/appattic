@@ -52,7 +52,8 @@ struct Finding {
     // U+001E, not '\n': every field here is filesystem text, and a newline is
     // a legal byte in a Linux filename, so a '\n'-joined key can be produced by
     // two different findings. The sibling key for the same job already uses
-    // U+001E (see packageChildMarkKey), a byte a POSIX filename cannot contain.
+    // U+001E (see packageChildMarkKey, ui/linux-qt/main.cpp:96), a byte a
+    // POSIX filename cannot contain.
     QString uid() const {
         static const QChar sep(0x1e);
         return plugin + sep + id + sep + path + sep + kind + sep + name;
