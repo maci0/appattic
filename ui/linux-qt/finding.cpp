@@ -506,6 +506,13 @@ static QString normalizedForPrefixTest(const QString &path) {
     return QLatin1Char('/') + parts.join(QLatin1Char('/'));
 }
 
+// The packaged roots a removal may never touch, shared by the path test and
+// the command test so a root added to one covers the other.
+static const char *const kPackagedRoots[] = {
+    "/usr", "/bin", "/sbin", "/etc", "/System", "/lib", "/lib64",
+    "/boot", "/dev", "/proc", "/sys", "/private", "/Library",
+};
+
 bool isProtectedPackagedPath(const QString &path) {
     if (path.isEmpty()) return false;
     // The removal quotes the path as written, so a `..` segment walks out of
@@ -514,11 +521,7 @@ bool isProtectedPackagedPath(const QString &path) {
     // resolves it.
     if (hasParentSegment(path)) return true;
     const QString normalized = normalizedForPrefixTest(path);
-    static const char *kRoots[] = {
-        "/usr", "/bin", "/sbin", "/etc", "/System", "/lib", "/lib64",
-        "/boot", "/dev", "/proc", "/sys", "/private", "/Library",
-    };
-    for (const char *root : kRoots) {
+    for (const char *root : kPackagedRoots) {
         const QLatin1String r(root);
         if (normalized == r || normalized.startsWith(r + QLatin1Char('/'))) return true;
     }
@@ -535,18 +538,17 @@ static bool commandRemovesProtectedPath(const QString &cmd) {
     // `rm -rf /usr/bin` does, and matching only the quoted and spaced forms
     // let the doubled slash through. The set is wider than the paths it can
     // match, which is the safe direction for a deny.
-    auto has = [&](const char *root) {
+    for (const char *root : kPackagedRoots) {
         const QString r = QLatin1String(root);
-        return cmd.contains(QLatin1Char(' ') + r)
+        if (cmd.contains(QLatin1Char(' ') + r)
             || cmd.contains(QLatin1Char('\t') + r)
             || cmd.contains(QLatin1Char('\'') + r)
             || cmd.contains(QLatin1Char('"') + r)
-            || cmd.contains(QLatin1Char('/') + r);
-    };
-    return has("/usr") || has("/bin") || has("/sbin") || has("/etc")
-        || has("/System") || has("/lib") || has("/lib64") || has("/boot")
-        || has("/dev") || has("/proc") || has("/sys") || has("/private")
-        || has("/Library");
+            || cmd.contains(QLatin1Char('/') + r)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /// A plugin `command` reaches the generated script verbatim, so it may only
@@ -957,7 +959,6 @@ bool isStaleTierStatus(const QString &status) {
 /// both are excluded. The tier check is the path a plugin takes without a
 /// dedicated kind: no core plugin emits `review` or `remove` today, so the page
 /// is empty until one does.
-
 bool isStale(const Finding &f) {
     if (f.kind.contains(QLatin1String("stale")) || f.kind.contains(QLatin1String("unused-app"))
         || f.kind.contains(QLatin1String("stale-app"))) {

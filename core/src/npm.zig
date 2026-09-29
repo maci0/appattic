@@ -20,23 +20,12 @@ const none_json =
     \\{"plugin":"npm","engine":null,"findings":[],"script":null,"dialog":{"title":"No npm","body":"npm is not on PATH. Plugin inactive."},"note":"npm missing"}
 ;
 
-pub const NpmGlobal = struct {
-    name: []const u8,
-    version: []const u8,
-};
-
 /// Parse `npm ls -g --depth=0 --json`. User-global `dependencies` only.
-pub fn parseNpmGlobalList(text: []const u8, out: []NpmGlobal) usize {
-    var deps: [128]jsonscan.Dep = undefined;
-    const n = jsonscan.parseJsonDependencies(text, &deps);
-    const cap = @min(n, out.len);
-    for (0..cap) |i| {
-        out[i] = .{ .name = deps[i].name, .version = deps[i].version };
-    }
-    return cap;
+pub fn parseNpmGlobalList(text: []const u8, out: []jsonscan.Dep) usize {
+    return jsonscan.parseJsonDependencies(text, out);
 }
 
-fn renderNpm(hits: []const NpmGlobal, outdated: []const jsonscan.NamedVer) bool {
+fn renderNpm(hits: []const jsonscan.Dep, outdated: []const jsonscan.NamedVer) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
     var cmd_buf: [1024]u8 = undefined;
@@ -80,7 +69,7 @@ fn query_impl(present: i32) i32 {
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
-    var hits: [128]NpmGlobal = undefined;
+    var hits: [128]jsonscan.Dep = undefined;
     var n: usize = 0;
     const nexec = host_exec.run(query_cmd, &exec_buf);
     note.add(query_cmd, nexec);
@@ -102,7 +91,7 @@ comptime {
 }
 
 test "parseNpmGlobalList dependencies JSON" {
-    var buf: [8]NpmGlobal = undefined;
+    var buf: [8]jsonscan.Dep = undefined;
     const text =
         \\{"name":"lib","dependencies":{"typescript":{"version":"5.4.5"},"prettier":{"version":"3.3.0"}}}
     ;
@@ -114,7 +103,7 @@ test "parseNpmGlobalList dependencies JSON" {
 }
 
 test "parseNpmGlobalList empty junk" {
-    var buf: [4]NpmGlobal = undefined;
+    var buf: [4]jsonscan.Dep = undefined;
     try std.testing.expectEqual(@as(usize, 0), parseNpmGlobalList("", &buf));
     try std.testing.expectEqual(@as(usize, 0), parseNpmGlobalList("{}", &buf));
     try std.testing.expectEqual(@as(usize, 0), parseNpmGlobalList("not json", &buf));

@@ -331,7 +331,7 @@ public func makeApp(from appPath: String) -> AppRecord? {
 /// Desktop Entry string escapes (`\s` `\n` `\t` `\r` `\\`). `readDesktop`
 /// skips them for the Exec, TryExec, and URL keys.
 /// Byte walk: escapes are ASCII, and UTF-8 trail bytes never contain 0x5C,
-// so non-ASCII passes through untouched.
+/// so non-ASCII passes through untouched.
 func unescapeDesktopValue(_ raw: String) -> String {
     guard raw.contains("\\") else { return raw }
     let bytes = Array(raw.utf8)

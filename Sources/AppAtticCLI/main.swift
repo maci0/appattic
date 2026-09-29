@@ -409,9 +409,7 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
         // rows: a header and a rule read as a report about nothing.
         print(C.green("  Nothing found: no unused installed software.")
             + (includeSystem ? "" : C.dim(" System apps are hidden; --include-system shows them.")))
-        if !result.outdated.isEmpty {
-            print(C.dim("  \(localeCount(result.outdated.count)) package(s) have a newer version. See: appattic outdated"))
-        }
+        printOutdatedHint(result)
         return
     }
     print(C.dim("  \(C.yellow("\(nReview)")) review · \(C.red("\(nRemove)")) remove candidates"))
@@ -449,6 +447,12 @@ func printStale(_ result: ScanResult, includeSystem: Bool) {
     }
     print()
     print(C.dim("  Tiers: KEEP = in use · REVIEW = idle, check before deleting · REMOVE = stale & easy to reinstall"))
+    printOutdatedHint(result)
+}
+
+/// A scan that found stale software still found something to update, and the
+/// pointer belongs under whichever section the reader just finished.
+func printOutdatedHint(_ result: ScanResult) {
     if !result.outdated.isEmpty {
         print(C.dim("  \(localeCount(result.outdated.count)) package(s) have a newer version. See: appattic outdated"))
     }

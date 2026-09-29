@@ -187,22 +187,20 @@ bool parseSettingsJson(const QByteArray &raw, AppSettings *out, QString *err) {
         }
     }
     AppSettings s;
-    if (o.contains(QLatin1String("confirmDelete")) && !o.value(QLatin1String("confirmDelete")).isNull()) {
-        const QJsonValue v = o.value(QLatin1String("confirmDelete"));
+    // A missing key and an explicit null both leave the default in place, and
+    // a present key of the wrong type is a file to refuse, not to coerce.
+    auto readBool = [&](const QLatin1String &key, bool *slot) {
+        if (!o.contains(key) || o.value(key).isNull()) return true;
+        const QJsonValue v = o.value(key);
         if (!v.isBool()) {
-            if (err) *err = QStringLiteral("confirmDelete must be true or false");
+            if (err) *err = QStringLiteral("%1 must be true or false").arg(key);
             return false;
         }
-        s.confirmDelete = v.toBool();
-    }
-    if (o.contains(QLatin1String("includeSystem")) && !o.value(QLatin1String("includeSystem")).isNull()) {
-        const QJsonValue v = o.value(QLatin1String("includeSystem"));
-        if (!v.isBool()) {
-            if (err) *err = QStringLiteral("includeSystem must be true or false");
-            return false;
-        }
-        s.includeSystem = v.toBool();
-    }
+        *slot = v.toBool();
+        return true;
+    };
+    if (!readBool(QLatin1String("confirmDelete"), &s.confirmDelete)) return false;
+    if (!readBool(QLatin1String("includeSystem"), &s.includeSystem)) return false;
     if (o.contains(QLatin1String("ignoredLeftoverPaths"))
         && !o.value(QLatin1String("ignoredLeftoverPaths")).isNull()) {
         const QJsonValue v = o.value(QLatin1String("ignoredLeftoverPaths"));

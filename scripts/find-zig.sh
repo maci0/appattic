@@ -18,27 +18,32 @@ appattic_find_zig() {
     return 1
 }
 
-# The version the tree is built against, whether or not zig is installed:
-# ZIG_VERSION overrides the pin the way the Docker builds use it, and the
-# installer scripts need the string for a download URL. Exits loud on a
-# missing or empty pin, so a caller that downloads a tarball never names
+# The pin the tree declares, read straight from the file: no override, and loud
+# on a missing or empty pin, so a caller that downloads a tarball never names
 # ziglang.org/download//.
-appattic_zig_version() {
-    local ver
-    if [[ -n "${ZIG_VERSION:-}" ]]; then
-        printf '%s\n' "$ZIG_VERSION"
-        return 0
-    fi
+appattic_zig_pin() {
     if [[ ! -r "$ROOT/.zig-version" ]]; then
         echo "error: missing $ROOT/.zig-version; the required Zig version is declared there" >&2
         return 1
     fi
+    local ver
     ver="$(tr -d '[:space:]' < "$ROOT/.zig-version")"
     if [[ -z "$ver" ]]; then
         echo "error: empty $ROOT/.zig-version" >&2
         return 1
     fi
     printf '%s\n' "$ver"
+}
+
+# The version the tree is built against, whether or not zig is installed:
+# ZIG_VERSION overrides the pin the way the Docker builds use it, and the
+# installer scripts need the string for a download URL.
+appattic_zig_version() {
+    if [[ -n "${ZIG_VERSION:-}" ]]; then
+        printf '%s\n' "$ZIG_VERSION"
+        return 0
+    fi
+    appattic_zig_pin
 }
 
 # Same rule as scripts/lint.sh: a local checkout without zig gets a note and
@@ -54,16 +59,8 @@ appattic_require_zig() {
     fi
     # The pin, not the override: this gate asks whether the installed toolchain
     # is the one the tree declares, and ZIG_VERSION only names what to fetch.
-    if [[ ! -r "$ROOT/.zig-version" ]]; then
-        echo "error: missing $ROOT/.zig-version; the required Zig version is declared there" >&2
-        exit 1
-    fi
     local want ver
-    want="$(tr -d '[:space:]' < "$ROOT/.zig-version")"
-    if [[ -z "$want" ]]; then
-        echo "error: empty $ROOT/.zig-version" >&2
-        exit 1
-    fi
+    want="$(appattic_zig_pin)" || exit 1
     ver="$(zig version)"
     if [[ "$ver" != "$want" ]]; then
         echo "error: need zig $want from .zig-version (have $ver). scripts/linux-deps.sh --install-zig" >&2

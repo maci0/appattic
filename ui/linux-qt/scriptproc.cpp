@@ -23,7 +23,6 @@ static const int kScriptOutputCap = 64 * 1024;
 /// window is unusable until the app is killed. These scripts are not rolled
 /// back, so a stop mid-run is reported as partial work, never as a clean
 /// failure.
-
 const int kScriptTimeoutMs = 600000;
 const int kScriptTimeoutMinutes = kScriptTimeoutMs / 60000;
 

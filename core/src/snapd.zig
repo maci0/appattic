@@ -113,16 +113,7 @@ const none_json =
     \\{"plugin":"snapd","engine":null,"findings":[],"script":null,"dialog":{"title":"No snapd","body":"snap is not on PATH. Plugin inactive."},"note":"snapd missing"}
 ;
 
-const snap_list_all_fixture =
-    \\Name     Version                     Rev    Tracking         Publisher     Notes
-    \\bare     1.0                         5      latest/stable    canonical**   base
-    \\core22   20240111                    1122   latest/stable    canonical*    base
-    \\core22   20231123                    1033   latest/stable    canonical*    disabled
-    \\chromium 120.0.6099.224              1846   latest/stable    canonical**   disabled
-    \\core20   20230622                    1974   latest/stable    canonical**   base,disabled
-    \\firefox  129.0                       4336   latest/stable    mozilla**     -
-    \\
-;
+const snap_list_all_fixture = host_exec.snap_fixture;
 
 /// Where snapd keeps the image file of one installed revision. `snap remove`
 /// takes that file away and exits nonzero when it is already gone, so this is
@@ -418,16 +409,7 @@ test "renderSnapd shell-quotes a snap name and an orphan path" {
 const sliceInside = fuzzsupport.sliceInside;
 const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
-const fuzz_snap_fixture = packFuzzSlice(
-    \\Name     Version                     Rev    Tracking         Publisher     Notes
-    \\bare     1.0                         5      latest/stable    canonical**   base
-    \\core22   20240111                    1122   latest/stable    canonical*    base
-    \\core22   20231123                    1033   latest/stable    canonical*    disabled
-    \\chromium 120.0.6099.224              1846   latest/stable    canonical**   disabled
-    \\core20   20230622                    1974   latest/stable    canonical**   base,disabled
-    \\firefox  129.0                       4336   latest/stable    mozilla**     -
-    \\
-);
+const fuzz_snap_fixture = packFuzzSlice(host_exec.snap_fixture);
 const fuzz_snap_header = packFuzzSlice("Name Version Rev Tracking Publisher Notes\n");
 const fuzz_snap_empty = packFuzzSlice("");
 const fuzz_snap_ws = packFuzzSlice(" \t\r\n  \n\t\n");

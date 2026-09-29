@@ -3,6 +3,16 @@ import Foundation
 // The PATH and overlay directories: which ones are scanned, the broken
 // symlinks in them, what a package dir shadows, and the tool names they ship.
 
+/// Order two rows by name, case-insensitively, and break a tie on path.
+///
+/// Both callers group into a dictionary, which iterates in hash order, so
+/// without the tiebreak two rows called `Foo` and `foo` swap places between
+/// processes and the report reads as if items moved.
+func byNameThenPath(_ lhs: DataItem, _ rhs: DataItem) -> Bool {
+    let byName = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+    return byName == .orderedSame ? lhs.path < rhs.path : byName == .orderedAscending
+}
+
 /// The entries of `root`, as paths, dot files excluded.
 ///
 /// Reads `d_name` as raw bytes rather than through
@@ -107,13 +117,7 @@ public func listBrokenUserBinLinks(dirs: [String]? = nil) -> [DataItem] {
             extraPaths: extra
         ))
     }
-    // `grouped` iterates in hash order, so the path breaks case-insensitive
-    // name ties: without it two links called `Foo` and `foo` swap places
-    // between processes.
-    return items.sorted {
-        let byName = $0.name.localizedCaseInsensitiveCompare($1.name)
-        return byName == .orderedSame ? $0.path < $1.path : byName == .orderedAscending
-    }
+    return items.sorted(by: byNameThenPath)
 }
 
 public func defaultOverlayShadowRoots(
@@ -217,12 +221,7 @@ public func listShadowingOverlays(
             ))
         }
     }
-    // Path breaks the case-insensitive name tie, so two overlays called `Foo`
-    // and `foo` keep the same order between processes.
-    return items.sorted {
-        let byName = $0.name.localizedCaseInsensitiveCompare($1.name)
-        return byName == .orderedSame ? $0.path < $1.path : byName == .orderedAscending
-    }
+    return items.sorted(by: byNameThenPath)
 }
 
 func preferredBrokenLinkName(_ names: [String], toolFolder: String) -> String {

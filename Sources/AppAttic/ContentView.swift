@@ -60,6 +60,23 @@ private struct VRule: View {
     }
 }
 
+/// The three destructive actions the action bar can start. One type instead of
+/// a mode string, so the button label, the alert title, and the run that
+/// follows are each a switch with no third copy of the list to keep in step.
+private enum ConfirmMode {
+    case update
+    case markManual
+    case delete
+
+    var actionLabel: String {
+        switch self {
+        case .update: return "Update"
+        case .markManual: return "Mark Manual"
+        case .delete: return "Delete"
+        }
+    }
+}
+
 struct ContentView: View {
     @State var vm = ScannerViewModel()
     @State private var selected: SidebarItem = ContentView.initialSidebarItem
@@ -70,7 +87,7 @@ struct ContentView: View {
     @State private var packageFilter: PackageListFilter = .all
     @State private var showScript = false
     @State private var showConfirm = false
-    @State private var confirmMode = "delete"
+    @State private var confirmMode = ConfirmMode.delete
     @State private var includeSystem = false
     @State private var confirmDelete = true
     @State private var settingsLoadFailed = false
@@ -95,9 +112,6 @@ struct ContentView: View {
         }
     }()
 
-    private var leftoverRows: [LeftoverItem] { vm.leftoverRows }
-    private var staleRows: [SoftwareItem] { vm.staleRows }
-    private var outdatedRows: [OutdatedEntry] { vm.outdatedRows }
     private var packageRows: [PackageEntry] { vm.packageRows(filter: packageFilter) }
 
     var body: some View {
@@ -160,38 +174,48 @@ struct ContentView: View {
         }
         .alert(confirmTitle, isPresented: $showConfirm) {
             Button("Cancel") { showConfirm = false }
-            Button(confirmMode == "update" ? "Update" : (confirmMode == "mark-manual" ? "Mark Manual" : "Delete")) {
-                if confirmMode == "update" {
-                    vm.executeUpdate { ok in
-                        showScript = false
-                        if ok { vm.scan(includeSystem: includeSystem) }
-                    }
-                } else if confirmMode == "mark-manual" {
-                    vm.executeMarkManual { ok in
-                        showScript = false
-                        if ok { vm.scan(includeSystem: includeSystem) }
-                    }
-                } else {
-                    vm.executeCleanup { ok in
-                        showScript = false
-                        if ok { vm.scan(includeSystem: includeSystem) }
-                    }
-                }
-            }
+            Button(confirmMode.actionLabel) { runAction(confirmMode) }
         }
         .sheet(isPresented: $showScript) {
             scriptSheet
         }
     }
 
+    /// Every action bar button and the confirm alert end here, so the three
+    /// actions differ only by which `execute` they call. The script sheet
+    /// stays up while the run works and closes when it reports back.
+    private func runAction(_ mode: ConfirmMode) {
+        let after: (Bool) -> Void = { ok in
+            showScript = false
+            if ok { vm.scan(includeSystem: includeSystem) }
+        }
+        switch mode {
+        case .update: vm.executeUpdate(then: after)
+        case .markManual: vm.executeMarkManual(then: after)
+        case .delete: vm.executeCleanup(then: after)
+        }
+    }
+
+    /// `confirmDelete` off means the button acts at once; on, the alert asks
+    /// first and the alert calls `runAction` itself.
+    private func requestAction(_ mode: ConfirmMode) {
+        confirmMode = mode
+        if confirmDelete {
+            showConfirm = true
+        } else {
+            runAction(mode)
+        }
+    }
+
     private var confirmTitle: String {
-        if confirmMode == "update" {
+        switch confirmMode {
+        case .update:
             return "Update \(vm.selectedOutdated.count) Homebrew or Flatpak packages?"
-        }
-        if confirmMode == "mark-manual" {
+        case .markManual:
             return "Mark \(vm.selectedMarkManual.count) packages as manually installed?"
+        case .delete:
+            return "Delete \(vm.cleanupSelectionCount) selected items? This runs the previewed uninstall script now. Steam may still ask you to confirm."
         }
-        return "Delete \(vm.cleanupSelectionCount) selected items? This runs the previewed uninstall script now. Steam may still ask you to confirm."
     }
 
     var sidebar: some View {
@@ -517,7 +541,7 @@ struct ContentView: View {
     }
 
     var leftoverPage: some View {
-        let rows = leftoverRows
+        let rows = vm.leftoverRows
         let selectedPath = resolvedSelection(leftoverSel, visibleIds: rows.map(\.path))
         return HStack(alignment: .top, spacing: 0) {
             listPane(
@@ -544,12 +568,12 @@ struct ContentView: View {
     }
 
     private var leftoverCountLabel: String {
-        let n = leftoverRows.count
+        let n = vm.leftoverRows.count
         return n == 1 ? "1 leftover" : "\(n) leftovers"
     }
 
     var stalePage: some View {
-        let rows = staleRows
+        let rows = vm.staleRows
         let selectedPath = resolvedSelection(staleSel, visibleIds: rows.map(\.path))
         return HStack(alignment: .top, spacing: 0) {
             listPane(
@@ -580,12 +604,12 @@ struct ContentView: View {
     }
 
     private var staleCountLabel: String {
-        let n = staleRows.count
+        let n = vm.staleRows.count
         return n == 1 ? "1 stale app" : "\(n) stale apps"
     }
 
     var outdatedPage: some View {
-        let rows = outdatedRows
+        let rows = vm.outdatedRows
         let selectedId = resolvedSelection(outdatedSel, visibleIds: rows.map(\.id))
         return HStack(alignment: .top, spacing: 0) {
             listPane(
@@ -614,7 +638,7 @@ struct ContentView: View {
     }
 
     private var outdatedCountLabel: String {
-        let n = outdatedRows.count
+        let n = vm.outdatedRows.count
         return n == 1 ? "1 outdated package" : "\(n) outdated packages"
     }
 
@@ -1350,47 +1374,15 @@ struct ContentView: View {
             }
                 .disabled(vm.isScanning)
             if !vm.selectedOutdated.isEmpty {
-                Button("Update") {
-                    confirmMode = "update"
-                    if confirmDelete {
-                        showConfirm = true
-                    } else {
-                        vm.executeUpdate { ok in
-                            showScript = false
-                            if ok { vm.scan(includeSystem: includeSystem) }
-                        }
-                    }
-                }
+                Button("Update") { requestAction(.update) }
                 .disabled(vm.isScanning)
             }
             if !vm.selectedMarkManual.isEmpty {
-                Button("Mark Manual") {
-                    confirmMode = "mark-manual"
-                    if confirmDelete {
-                        showConfirm = true
-                    } else {
-                        vm.executeMarkManual { ok in
-                            showScript = false
-                            if ok { vm.scan(includeSystem: includeSystem) }
-                        }
-                    }
-                }
+                Button("Mark Manual") { requestAction(.markManual) }
                 .disabled(vm.isScanning)
             }
             if vm.hasActionableCleanup {
-                Button("Delete") {
-                    confirmMode = "delete"
-                    if confirmDelete {
-                        showConfirm = true
-                    } else {
-                        vm.executeCleanup { ok in
-                            showScript = false
-                            if ok {
-                                vm.scan(includeSystem: includeSystem)
-                            }
-                        }
-                    }
-                }
+                Button("Delete") { requestAction(.delete) }
                 .disabled(vm.isScanning)
             }
         }
@@ -1588,21 +1580,21 @@ struct ContentView: View {
     func selectAllLeftovers() {
         vm.selectedLeftovers = toggleListedSelection(
             selected: vm.selectedLeftovers,
-            visible: leftoverRows.map(\.path)
+            visible: vm.leftoverRows.map(\.path)
         )
     }
 
     func selectAllStale() {
         vm.selectedApps = toggleListedSelection(
             selected: vm.selectedApps,
-            visible: staleRows.filter { StaleTier.isSelectable($0.tierKind) }.map(\.path)
+            visible: vm.staleRows.filter { StaleTier.isSelectable($0.tierKind) }.map(\.path)
         )
     }
 
     func selectAllOutdated() {
         vm.selectedOutdated = toggleListedSelection(
             selected: vm.selectedOutdated,
-            visible: outdatedRows.filter(\.updatable).map(\.id)
+            visible: vm.outdatedRows.filter(\.updatable).map(\.id)
         )
     }
 
@@ -1623,11 +1615,11 @@ struct ContentView: View {
     private var canSelectAll: Bool {
         switch selected {
         case .leftovers:
-            return !leftoverRows.isEmpty
+            return !vm.leftoverRows.isEmpty
         case .stale:
-            return staleRows.contains { StaleTier.isSelectable($0.tierKind) }
+            return vm.staleRows.contains { StaleTier.isSelectable($0.tierKind) }
         case .outdated:
-            return outdatedRows.contains(where: \.updatable)
+            return vm.outdatedRows.contains(where: \.updatable)
         case .packages:
             return !packageRows.isEmpty
         default:
@@ -1638,12 +1630,12 @@ struct ContentView: View {
     private var allVisibleSelected: Bool {
         switch selected {
         case .leftovers:
-            return leftoverRows.allSatisfy { vm.selectedLeftovers.contains($0.path) }
+            return vm.leftoverRows.allSatisfy { vm.selectedLeftovers.contains($0.path) }
         case .stale:
-            let paths = staleRows.filter { StaleTier.isSelectable($0.tierKind) }.map(\.path)
+            let paths = vm.staleRows.filter { StaleTier.isSelectable($0.tierKind) }.map(\.path)
             return !paths.isEmpty && paths.allSatisfy { vm.selectedApps.contains($0) }
         case .outdated:
-            let ids = outdatedRows.filter(\.updatable).map(\.id)
+            let ids = vm.outdatedRows.filter(\.updatable).map(\.id)
             return !ids.isEmpty && ids.allSatisfy { vm.selectedOutdated.contains($0) }
         case .packages:
             return !packageRows.isEmpty && packageRows.allSatisfy { vm.selectedPackages.contains($0.id) }

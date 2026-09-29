@@ -104,8 +104,6 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
     for (outdated) |h| {
         if (!first) w.raw(",");
         first = false;
-        // Guarded: `pacman -S` on a package already at the scanned version
-        // reinstalls it, so a script that runs twice would do the work twice.
         var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
         guard.writeUpgradeGuard(&cmd_w, &q_buf, "pacman -Qu", "pacman --noconfirm -S", h.name);
         const cmd = cmd_w.slice() orelse {

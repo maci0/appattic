@@ -230,19 +230,30 @@ static int smokeVerifyTables(const SmokeState &st) {
 
 
 
-int runVersion(int argc, char **argv) {
+// A headless box has no display for Qt to pick a platform from, so both entry
+// points name one before the QApplication is built. `fixture` routes every
+// plugin query through the recorded output instead of the machine.
+static void prepareEnvironment(bool fixture) {
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
         && qEnvironmentVariableIsEmpty("DISPLAY")
         && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
         qputenv("QT_QPA_PLATFORM", "offscreen");
     }
-    QApplication app(argc, argv);
+    if (fixture) qputenv("APPATTIC_HOST_EXEC_FIXTURE", "1");
+}
+
+static QString identifyApp() {
     QApplication::setApplicationName(QStringLiteral("AppAttic"));
     QApplication::setOrganizationName(QStringLiteral("AppAttic"));
     std::fprintf(stdout, "AppAttic " APPATTIC_VERSION "\n");
     std::fprintf(stdout, "Qt %s\n", qVersion());
-    const QString out = coreOutDir();
-    const QString core = out + QStringLiteral("/appattic_core.wasm");
+    return coreOutDir() + QStringLiteral("/appattic_core.wasm");
+}
+
+int runVersion(int argc, char **argv) {
+    prepareEnvironment(false);
+    QApplication app(argc, argv);
+    const QString core = identifyApp();
     /* stdout is the version, stderr the build state, the same split
        runSmoke makes: a missing core is a build note, not part of --version. */
     if (!QFileInfo::exists(core)) {
@@ -254,24 +265,15 @@ int runVersion(int argc, char **argv) {
 }
 
 int runSmoke(int argc, char **argv) {
-    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
-        && qEnvironmentVariableIsEmpty("DISPLAY")
-        && qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
-        qputenv("QT_QPA_PLATFORM", "offscreen");
-    }
-    qputenv("APPATTIC_HOST_EXEC_FIXTURE", "1");
+    prepareEnvironment(true);
     QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("AppAttic"));
-    QApplication::setOrganizationName(QStringLiteral("AppAttic"));
-    std::fprintf(stdout, "AppAttic " APPATTIC_VERSION "\n");
-    std::fprintf(stdout, "Qt %s\n", qVersion());
-    const QString out = coreOutDir();
-    const QString core = out + QStringLiteral("/appattic_core.wasm");
+    const QString core = identifyApp();
     if (!QFileInfo::exists(core)) {
         std::fprintf(stderr, "wasm: core missing (%s)\n", core.toUtf8().constData());
         std::fprintf(stderr, "build with: bash core/build.sh\n");
         return 1;
     }
+    const QString out = coreOutDir();
     const QStringList plugins = pluginWasmFiles(out);
     int wasm_on_disk = 0;
     for (const QString &p : plugins) {

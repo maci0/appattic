@@ -65,7 +65,9 @@ const pacman_outdated_fixture =
     \\
 ;
 
-const snap_fixture =
+/// `snap list --all` as the plugin and the host agree on it: one enabled
+/// revision per snap except core22, which carries a disabled one.
+pub const snap_fixture =
     \\Name     Version                     Rev    Tracking         Publisher     Notes
     \\bare     1.0                         5      latest/stable    canonical**   base
     \\core22   20240111                    1122   latest/stable    canonical*    base

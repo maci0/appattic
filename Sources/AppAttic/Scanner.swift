@@ -478,33 +478,66 @@ final class ScannerViewModel {
     }
 
     func executeCleanup(then completion: @escaping (Bool) -> Void) {
-        let script = generateCleanupScript()
-        guard scriptHasActionableCommands(script) else {
-            errorMessage = "Nothing to delete. Uninstall Steam and CrossOver items in those apps."
-            completion(false)
-            return
-        }
-        runTempScript(script, message: "Removing selected items…", clear: .cleanup, then: completion)
+        run(Action.cleanup, then: completion)
     }
 
     func executeUpdate(then completion: @escaping (Bool) -> Void) {
-        let script = generateUpdateScript()
-        guard scriptHasActionableCommands(script) else {
-            errorMessage = "Nothing to update. \(outdatedSkippedManagersNote)"
-            completion(false)
-            return
-        }
-        runTempScript(script, message: "Updating selected packages…", clear: .update, then: completion)
+        run(.update, then: completion)
     }
 
     func executeMarkManual(then completion: @escaping (Bool) -> Void) {
-        let script = generateMarkManualScript()
+        run(.markManual, then: completion)
+    }
+
+    private func run(_ action: Action, then completion: @escaping (Bool) -> Void) {
+        let script = action.script(self)
         guard scriptHasActionableCommands(script) else {
-            errorMessage = "Nothing to mark as manually installed."
+            errorMessage = action.emptyMessage
             completion(false)
             return
         }
-        runTempScript(script, message: "Marking packages as manually installed…", clear: .markManual, then: completion)
+        runTempScript(script, message: action.progressMessage, clear: action.clear, then: completion)
+    }
+
+    /// The three destructive actions, each naming the script it writes, what
+    /// the progress line says while it runs, what an empty selection reports,
+    /// and which selection the run clears.
+    private enum Action {
+        case cleanup
+        case update
+        case markManual
+
+        func script(_ vm: ScannerViewModel) -> String {
+            switch self {
+            case .cleanup: return vm.generateCleanupScript()
+            case .update: return vm.generateUpdateScript()
+            case .markManual: return vm.generateMarkManualScript()
+            }
+        }
+
+        var progressMessage: String {
+            switch self {
+            case .cleanup: return "Removing selected items…"
+            case .update: return "Updating selected packages…"
+            case .markManual: return "Marking packages as manually installed…"
+            }
+        }
+
+        var emptyMessage: String {
+            switch self {
+            case .cleanup: return "Nothing to delete. Uninstall Steam and CrossOver items in those apps."
+            case .update: return "Nothing to update. \(outdatedSkippedManagersNote)"
+            case .markManual: return "Nothing to mark as manually installed."
+            }
+        }
+
+        var clear: ScriptClear {
+            switch self {
+            case .cleanup: return .cleanup
+            case .update: return .update
+            case .markManual: return .markManual
+            }
+        }
     }
 
     private enum ScriptClear {

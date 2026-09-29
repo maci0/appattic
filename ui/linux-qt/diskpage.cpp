@@ -842,14 +842,17 @@ static QTreeWidgetItem *makeItem(DiskNode *n) {
     return it;
 }
 
+// `depth` is 0 for the initial fill, so the tree walks three levels on its own;
+// an expanded row asks for its children with a depth past the limit, which
+// loads one level and marks any deeper dir as expandable.
 static void appendChildren(QTreeWidgetItem *parent, DiskNode *node, int depth) {
-    if (depth > 12) return;
     for (DiskNode *ch : node->children) {
         QTreeWidgetItem *it = makeItem(ch);
         parent->addChild(it);
-        if (ch->isDir && !ch->children.isEmpty() && depth < 3) {
+        if (!ch->isDir || ch->children.isEmpty()) continue;
+        if (depth < 3) {
             appendChildren(it, ch, depth + 1);
-        } else if (ch->isDir && !ch->children.isEmpty()) {
+        } else {
             it->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
         }
     }

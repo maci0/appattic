@@ -304,16 +304,15 @@ func parseAptAutoremoveLine(_ s: Substring) -> (name: String, version: String)? 
 }
 
 public func parseAptAutoremove(_ text: String) -> [PackageEntry] {
-    var out: [PackageEntry] = []
-    out.reserveCapacity(256)
+    // `apt autoremove --dry-run` can name a package once per proposed removal,
+    // so the first row wins and the rest are dropped.
     var seen = Set<String>()
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        guard let (name, ver) = parseAptAutoremoveLine(raw) else { continue }
-        if seen.insert(name).inserted {
-            out.append(makePackage(name: name, manager: "apt", kind: "orphan", version: ver))
+    return parsePackageLines(text, capacity: 256) { raw in
+        guard let (name, ver) = parseAptAutoremoveLine(raw), seen.insert(name).inserted else {
+            return nil
         }
+        return makePackage(name: name, manager: "apt", kind: "orphan", version: ver)
     }
-    return out
 }
 
 public func parseDnfUnneeded(_ text: String) -> [PackageEntry] {

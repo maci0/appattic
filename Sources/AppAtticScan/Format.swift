@@ -134,17 +134,15 @@ private let durationFormatters: [Calendar.Component: (DateComponents) -> String?
     var formatters: [Calendar.Component: (DateComponents) -> String?] = [:]
     // Each unit with the calendar unit that names it: `allowedUnits` is an
     // `NSCalendar.Unit`, and there is no `DateComponentsFormatter.Units` for the
-    // loop to build an empty set of, which is what this arm used to name. The
-    // pairs also give the array its type, so the literal does not leave the
-    // element type to be decided by the loop body.
+    // loop to build an empty set of. The pairs also give the array its type, so
+    // the literal does not leave the element type to be decided by the loop
+    // body.
     //
     // The week is `weekOfMonth`, not `weekOfYear`. `allowedUnits` accepts only
     // year, month, weekOfMonth, day, hour, minute and second; any other bit
-    // raises NSInternalInconsistencyException from the setter, so the old
-    // `.weekOfYear` here aborted the process the first time `humanDays`
-    // rendered a fortnight — before the test that called it could assert
-    // anything. `DateComponents` carries the same unit below, so the count is
-    // the field the formatter reads.
+    // raises NSInternalInconsistencyException from the setter, so a fortnight
+    // would abort the process instead of rendering. `DateComponents` carries
+    // the same unit below, so the count is the field the formatter reads.
     let units: [(component: Calendar.Component, allowed: NSCalendar.Unit)] = [
         (.hour, .hour), (.day, .day), (.weekOfMonth, .weekOfMonth), (.month, .month), (.year, .year),
     ]

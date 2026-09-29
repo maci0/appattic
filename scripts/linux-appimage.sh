@@ -368,10 +368,11 @@ find "$APPDIR" -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} +
 # the release workflow has to publish it beside the image, or the check finds
 # nothing. The URL names the tag this build carries, so an image built from an
 # untagged checkout is the only one whose endpoint 404s.
+#
+# The URL has to name the .zsync and not the image: AppImageUpdate downloads it
+# and reads a zsync header out of it, so pointed at the image every update check
+# fails to parse what it fetched. scripts/check-packaging.sh asserts this.
 UPDATE_ZSYNC="$OUT.zsync"
-# The zsync transport makes AppImageUpdate download this URL and read a zsync
-# header out of it, so the URL has to be the .zsync and not the image: pointed
-# at the image, every update check fails to parse what it fetched.
 UPDATE_URL="https://github.com/maci0/appattic/releases/download/v${VERSION}/${UPDATE_ZSYNC#"$DIST/"}"
 
 mkdir -p "$DIST"

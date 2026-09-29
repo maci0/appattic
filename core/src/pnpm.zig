@@ -18,23 +18,12 @@ const none_json =
     \\{"plugin":"pnpm","engine":null,"findings":[],"script":null,"dialog":{"title":"No pnpm","body":"pnpm is not on PATH. Plugin inactive."},"note":"pnpm missing"}
 ;
 
-pub const PnpmGlobal = struct {
-    name: []const u8,
-    version: []const u8,
-};
-
 /// Parse `pnpm ls -g --depth=0 --json` (object or array of objects).
-pub fn parsePnpmGlobalList(text: []const u8, out: []PnpmGlobal) usize {
-    var deps: [128]jsonscan.Dep = undefined;
-    const n = jsonscan.parseJsonDependencies(text, &deps);
-    const cap = @min(n, out.len);
-    for (0..cap) |i| {
-        out[i] = .{ .name = deps[i].name, .version = deps[i].version };
-    }
-    return cap;
+pub fn parsePnpmGlobalList(text: []const u8, out: []jsonscan.Dep) usize {
+    return jsonscan.parseJsonDependencies(text, out);
 }
 
-fn renderPnpm(hits: []const PnpmGlobal) bool {
+fn renderPnpm(hits: []const jsonscan.Dep) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
     var cmd_buf: [1024]u8 = undefined;
@@ -77,7 +66,7 @@ fn query_impl(present: i32) i32 {
         if (!renderPnpm(&.{})) return 1;
         return 0;
     }
-    var hits: [128]PnpmGlobal = undefined;
+    var hits: [128]jsonscan.Dep = undefined;
     var n = parsePnpmGlobalList(exec_buf[0..@intCast(nexec)], &hits);
     note.addTruncatedRows(n, hits.len);
     return note.renderShrinking(renderPnpm, &hits, &n);
@@ -88,7 +77,7 @@ comptime {
 }
 
 test "parsePnpmGlobalList object and array" {
-    var buf: [4]PnpmGlobal = undefined;
+    var buf: [4]jsonscan.Dep = undefined;
     const object =
         \\{"dependencies":{"nx":{"version":"19.0.0"}}}
     ;
@@ -106,7 +95,7 @@ test "parsePnpmGlobalList object and array" {
 }
 
 test "parsePnpmGlobalList empty" {
-    var buf: [4]PnpmGlobal = undefined;
+    var buf: [4]jsonscan.Dep = undefined;
     try std.testing.expectEqual(@as(usize, 0), parsePnpmGlobalList("", &buf));
     try std.testing.expectEqual(@as(usize, 0), parsePnpmGlobalList("{}", &buf));
 }

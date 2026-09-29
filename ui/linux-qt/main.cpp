@@ -112,20 +112,6 @@ static bool isDarkPalette(const QPalette &p) {
     return p.color(QPalette::Window).lightness() < 128;
 }
 
-static QFont bodyFont() { return aaBodyFont(); }
-static QFont smallFont() { return aaSmallFont(); }
-static QFont titleFont() { return aaTitleFont(); }
-static QFont pageFont() { return aaPageFont(); }
-static QFont sectionFont() { return aaSectionFont(); }
-static QFont labelFont() { return aaLabelFont(); }
-static QFont numericFont() { return aaNumericFont(); }
-static QFont valueFont() { return aaValueFont(); }
-static QFont monoFont() { return aaMonoFont(); }
-
-static int rowPx(const QWidget *w = nullptr) {
-    return aaRowPx(w);
-}
-
 static QIcon themeIcon(const QString &name, const QString &fallback) {
     QIcon ic = QIcon::fromTheme(name);
     if (ic.isNull()) ic = QIcon::fromTheme(fallback);
@@ -322,7 +308,7 @@ public:
         QString countText;
         if (count > 0) {
             countText = localeCount(count);
-            cw = QFontMetrics(smallFont()).horizontalAdvance(countText) + 12;
+            cw = QFontMetrics(aaSmallFont()).horizontalAdvance(countText) + 12;
             o.rect.setWidth(qMax(0, o.rect.width() - cw));
         }
         style->drawControl(QStyle::CE_ItemViewItem, &o, p, w);
@@ -333,7 +319,7 @@ public:
         if (o.state & QStyle::State_Selected) dim.setAlpha(210);
         p->save();
         p->setPen(dim);
-        p->setFont(smallFont());
+        p->setFont(aaSmallFont());
         // The badge belongs on the trailing edge, which is the left one once
         // the layout direction flips. `o.rect.right()` alone pins it to the
         // physical right and pushes it off the row in Arabic or Hebrew.
@@ -357,7 +343,7 @@ public:
             QStyledItemDelegate::sizeHint(opt, idx),
             w
         );
-        s.setHeight(qMax(s.height(), rowPx(w)));
+        s.setHeight(qMax(s.height(), aaRowPx(w)));
         return s;
     }
 };
@@ -403,7 +389,7 @@ private:
         if (m_rowPxWidget != w || m_rowPxFont != f) {
             m_rowPxWidget = w;
             m_rowPxFont = f;
-            m_rowPx = rowPx(w);
+            m_rowPx = aaRowPx(w);
         }
         return m_rowPx;
     }
@@ -481,7 +467,7 @@ public:
         );
         settingsItem->setData(Qt::UserRole, 0);
         m_settingsNav->addItem(settingsItem);
-        m_settingsNav->setFixedHeight(rowPx(m_settingsNav) + 8);
+        m_settingsNav->setFixedHeight(aaRowPx(m_settingsNav) + 8);
         sv->addWidget(m_sidebar, 1);
         sv->addWidget(m_settingsNav, 0);
         m_sidebar->setCurrentRow(0);
@@ -499,10 +485,10 @@ public:
         tools->setToolButtonStyle(Qt::ToolButtonTextOnly);
         tools->setContextMenuPolicy(Qt::PreventContextMenu);
         m_pageTitle = new QLabel(QStringLiteral("Overview"));
-        m_pageTitle->setFont(pageFont());
+        m_pageTitle->setFont(aaPageFont());
         m_pageTitle->setContentsMargins(kSpaceSm, kSpaceXs, kSpaceMd, kSpaceXs);
         m_count = new QLabel;
-        m_count->setFont(smallFont());
+        m_count->setFont(aaSmallFont());
         m_count->setForegroundRole(QPalette::PlaceholderText);
         m_count->setContentsMargins(kSpaceSm, 0, kSpaceSm, 0);
         m_scanBar = new QProgressBar;
@@ -618,7 +604,7 @@ public:
         eiv->setSpacing(kSpaceSm);
         eiv->setAlignment(Qt::AlignHCenter);
         m_emptyTitle = new QLabel;
-        m_emptyTitle->setFont(titleFont());
+        m_emptyTitle->setFont(aaTitleFont());
         m_emptyTitle->setAlignment(Qt::AlignCenter);
         m_emptyTitle->setWordWrap(true);
         m_emptyDetail = new QLabel;
@@ -677,10 +663,10 @@ public:
         actionBar->setContextMenuPolicy(Qt::PreventContextMenu);
         m_actionBar = actionBar;
         m_actionCount = new QLabel;
-        m_actionCount->setFont(smallFont());
+        m_actionCount->setFont(aaSmallFont());
         m_actionCount->setContentsMargins(kSpaceSm, 0, kSpaceSm, 0);
         m_actionBytes = new QLabel;
-        m_actionBytes->setFont(smallFont());
+        m_actionBytes->setFont(aaSmallFont());
         m_actionBytes->setForegroundRole(QPalette::PlaceholderText);
         m_clearSel = new QPushButton(QStringLiteral("Clear"));
         m_clearSel->setToolTip(QStringLiteral("Clear the current selection"));
@@ -1112,11 +1098,11 @@ private:
         );
         title->setWordWrap(true);
         auto *hint = new QLabel(QStringLiteral("Review every line before running."));
-        hint->setFont(smallFont());
+        hint->setFont(aaSmallFont());
         hint->setForegroundRole(QPalette::PlaceholderText);
         hint->setVisible(!question.isEmpty());
         auto *edit = new QPlainTextEdit;
-        edit->setFont(monoFont());
+        edit->setFont(aaMonoFont());
         edit->setReadOnly(true);
         edit->setPlainText(script);
         auto *box = new QDialogButtonBox;
@@ -1305,11 +1291,11 @@ private:
         v->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceSm);
         v->setSpacing(kSpaceTight);
         auto *l = new QLabel(label.toUpper());
-        l->setFont(labelFont());
+        l->setFont(aaLabelFont());
         l->setForegroundRole(QPalette::PlaceholderText);
         l->setWordWrap(true);
         auto *val = new QLabel(QStringLiteral("unknown"));
-        val->setFont(valueFont());
+        val->setFont(aaValueFont());
         // Wrapping is what lets the row shrink: a plain label's minimum width
         // is its whole text, so seven instruments overflowed the window at
         // small widths and the last ones (Last scan) were cut off with no way
@@ -1351,7 +1337,7 @@ private:
         v->setContentsMargins(0, 0, 0, 0);
         v->setSpacing(0);
         auto *h = new QLabel(title);
-        h->setFont(sectionFont());
+        h->setFont(aaSectionFont());
         h->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceXs);
         auto *rule = new QFrame;
         rule->setFrameShape(QFrame::HLine);
@@ -1404,7 +1390,7 @@ private:
         delCol.second->addWidget(delHint);
 
         auto ignCol = section(QStringLiteral("Ignored leftovers"));
-        QFont small = smallFont();
+        QFont small = aaSmallFont();
         auto *ignListHost = new QWidget;
         auto *ilv = new QVBoxLayout(ignListHost);
         ilv->setContentsMargins(0, 0, 0, 0);
@@ -1420,7 +1406,7 @@ private:
         m_ignoredList->setToolTip(
             QStringLiteral("Select a path, then press Show Again, to show that leftover in the list")
         );
-        m_ignoredList->setMaximumHeight(rowPx(m_ignoredList) * 6 + 8);
+        m_ignoredList->setMaximumHeight(aaRowPx(m_ignoredList) * 6 + 8);
         m_ignoredList->setMinimumWidth(220);
         aaApplySourceList(m_ignoredList);
         ilv->addWidget(m_ignoredEmpty);
@@ -1496,14 +1482,14 @@ private:
         v->setContentsMargins(0, 0, 0, 0);
         v->setSpacing(kSpaceSm);
         auto *t = new QLabel(title);
-        t->setFont(sectionFont());
+        t->setFont(aaSectionFont());
         v->addWidget(t);
         return {w, v};
     }
 
     QLabel *hintLabel(const QString &text) {
         auto *l = new QLabel(text);
-        l->setFont(smallFont());
+        l->setFont(aaSmallFont());
         l->setWordWrap(true);
         l->setForegroundRole(QPalette::PlaceholderText);
         return l;
@@ -1621,7 +1607,7 @@ private:
             leftoverSized = true;
             leftoverBytes = addSatBytes(leftoverBytes, f.bytes);
         }
-        const bool scanningEmpty = isScanPending() && m_findings.isEmpty();
+        const bool scanningEmpty = emptyScanPending();
         const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
         const QString pending = QStringLiteral("…");
         const QString blockedMark = QStringLiteral("-");
@@ -1653,7 +1639,7 @@ private:
         m_statStale->setText(statCount(stale));
         m_statOutdated->setText(statCount(outdated));
         m_statPackages->setText(statCount(packages));
-        m_statInstalled->setFont(bodyFont());
+        m_statInstalled->setFont(aaBodyFont());
         m_statInstalled->setForegroundRole(QPalette::PlaceholderText);
         m_statScan->setText(
             scanningEmpty ? pending
@@ -1688,7 +1674,7 @@ private:
                 it->setToolTip(1, plainTooltip(whatText(f, page)));
                 if (!f.path.isEmpty()) it->setToolTip(2, plainTooltip(f.path));
                 if (page != Page::Outdated) {
-                    it->setFont(2, numericFont());
+                    it->setFont(2, aaNumericFont());
                     it->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
                 }
                 it->setForeground(1, t.dim);
@@ -1973,7 +1959,7 @@ private:
         const CellCtx ctx{
             page,
             tone,
-            numericFont(),
+            aaNumericFont(),
             tone.dim,
             tone.amber,
             palette().color(QPalette::Highlight),
@@ -2017,8 +2003,8 @@ private:
             m_selectedChild.clear();
         }
 
-        const bool scanningEmpty = isScanPending() && m_findings.isEmpty();
-        const bool scanFailed = m_hasScanned && !m_scanning && !m_scanOk && m_findings.isEmpty();
+        const bool scanningEmpty = emptyScanPending();
+        const bool scanFailed = emptyScanFailed();
         const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
         if (rows.isEmpty() && scanningEmpty) {
             m_table->show();
@@ -2466,11 +2452,21 @@ private:
         }
     }
 
+    /// A scan that has not answered yet and has nothing to show: the page says
+    /// "Scanning", not "nothing found".
+    bool emptyScanPending() const { return isScanPending() && m_findings.isEmpty(); }
+
+    /// A finished scan that produced no findings and reported a failure: the
+    /// page offers a retry instead of claiming there is nothing there.
+    bool emptyScanFailed() const {
+        return m_hasScanned && !m_scanning && !m_scanOk && m_findings.isEmpty();
+    }
+
     QString emptyDetail(Page page) const {
         return pageEmptyDetail(
             page,
-            isScanPending() && m_findings.isEmpty(),
-            m_hasScanned && !m_scanning && !m_scanOk && m_findings.isEmpty(),
+            emptyScanPending(),
+            emptyScanFailed(),
             m_search->text(),
             m_ignored.size(),
             m_filter->currentData().toString(),
@@ -2543,7 +2539,7 @@ private:
     /// the moment a translation is longer, and the uppercase pass widens them
     /// further (German "ß" uppercases to "SS").
     void sizeFactKeys() {
-        const QFontMetrics fm(labelFont());
+        const QFontMetrics fm(aaLabelFont());
         int px = 0;
         for (const QLabel *k : m_factKeys) {
             px = qMax(px, fm.horizontalAdvance(k->text()));
@@ -2578,10 +2574,10 @@ private:
         h->setContentsMargins(0, 0, 0, 0);
         h->setSpacing(kSpaceMd);
         const Tone t = toneFrom(palette());
-        auto *k = inspectorLabel(label.toUpper(), labelFont(), t.dim);
+        auto *k = inspectorLabel(label.toUpper(), aaLabelFont(), t.dim);
         k->setAlignment(Qt::AlignTrailing | Qt::AlignTop);
         m_factKeys.append(k);
-        auto *v = inspectorLabel(value, mono ? monoFont() : bodyFont(), color);
+        auto *v = inspectorLabel(value, mono ? aaMonoFont() : aaBodyFont(), color);
         h->addWidget(k);
         h->addWidget(v, 1);
         m_inspectorLay->addWidget(row);
@@ -2594,12 +2590,12 @@ private:
         const Finding *f = findingByUid(m_selectedUid);
         if (page == Page::Overview || page == Page::Settings || page == Page::DiskUsage) return;
         if (isScanPending() && m_findings.isEmpty()) {
-            m_inspectorLay->addWidget(inspectorLabel(QStringLiteral("Scanning"), titleFont(), t.text));
+            m_inspectorLay->addWidget(inspectorLabel(QStringLiteral("Scanning"), aaTitleFont(), t.text));
             m_inspectorLay->addWidget(inspectorLabel(
                 !m_scanPhase.isEmpty()
                     ? scanStatusText()
                     : QStringLiteral("Results appear here when the scan finishes."),
-                bodyFont(),
+                aaBodyFont(),
                 t.dim
             ));
             m_inspectorLay->addStretch();
@@ -2622,17 +2618,17 @@ private:
                 title = QStringLiteral("Select a package");
                 body = QStringLiteral("Orphan distro packages and user-global language tools. Remove or mark-manual after confirm.");
             }
-            m_inspectorLay->addWidget(inspectorLabel(title, titleFont(), t.text));
-            m_inspectorLay->addWidget(inspectorLabel(body, bodyFont(), t.dim));
+            m_inspectorLay->addWidget(inspectorLabel(title, aaTitleFont(), t.text));
+            m_inspectorLay->addWidget(inspectorLabel(body, aaBodyFont(), t.dim));
             m_inspectorLay->addStretch();
             return;
         }
         if (!m_selectedChild.isEmpty() && page == Page::Packages) {
-            m_inspectorLay->addWidget(inspectorLabel(m_selectedChild, titleFont(), t.text));
+            m_inspectorLay->addWidget(inspectorLabel(m_selectedChild, aaTitleFont(), t.text));
             addFact(QStringLiteral("What"), QStringLiteral("Dependency of %1").arg(displayName(*f)), t.text);
             addFact(QStringLiteral("Why"), QStringLiteral("Selected alone. Remove this package, not the parent tree."), t.text);
         } else {
-            m_inspectorLay->addWidget(inspectorLabel(displayName(*f), titleFont(), t.text));
+            m_inspectorLay->addWidget(inspectorLabel(displayName(*f), aaTitleFont(), t.text));
             addFact(QStringLiteral("What"), whatText(*f, page), t.text);
             addFact(QStringLiteral("Why"), whyText(*f), t.text);
         }
@@ -2762,11 +2758,7 @@ private:
     }
 
     QString emptyTitle(Page page) const {
-        return pageEmptyTitle(
-            page,
-            isScanPending() && m_findings.isEmpty(),
-            m_hasScanned && !m_scanning && !m_scanOk && m_findings.isEmpty()
-        );
+        return pageEmptyTitle(page, emptyScanPending(), emptyScanFailed());
     }
 
     void refreshActionBar() {

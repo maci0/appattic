@@ -15,8 +15,6 @@ struct DiskUsageView: View {
     /// the scan's result replaces that, so a notice has to wait for the result.
     @State private var notice = ""
     @State private var path = FileManager.default.homeDirectoryForCurrentUser.path
-    private let allocated = true
-    private let oneFileSystem = true
     @State private var selected: DiskUsageNode? = nil
     /// The node waiting for the trash confirmation. Moving to Trash is not
     /// undoable from here, so the button arms this instead of deleting.
@@ -84,7 +82,7 @@ struct DiskUsageView: View {
                     Text(root.path)
                         .font(.system(size: TypeScale.body))
                     Spacer()
-                    Text(humanSize(root.metric(allocatedSize: allocated)))
+                    Text(humanSize(root.metric(allocatedSize: true)))
                         .font(.system(size: TypeScale.body))
                         .foregroundColor(Color.appDim)
                 }
@@ -205,7 +203,7 @@ struct DiskUsageView: View {
                     .font(.system(size: TypeScale.body))
                     .foregroundColor(selected?.path == node.path ? Color.appOnAccent : Color.appText)
                 Spacer()
-                Text(humanSize(node.metric(allocatedSize: allocated)))
+                Text(humanSize(node.metric(allocatedSize: true)))
                     .font(.system(size: TypeScale.small))
                     .foregroundColor(selected?.path == node.path ? Color.appOnAccent : Color.appDim)
                     .frame(width: 72, alignment: .trailing)
@@ -222,9 +220,10 @@ struct DiskUsageView: View {
         scanning = true
         status = "Scanning \(redactHomePaths(rootPath))"
         path = rootPath
-        let one = oneFileSystem
         DispatchQueue.global(qos: .userInitiated).async {
-            let tree = scanDiskUsage(root: rootPath, oneFileSystem: one, cancel: { ticket.isCancelled })
+            // One file system: the root is the volume the user picked, and its
+            // siblings are separate volumes the walk would double count.
+            let tree = scanDiskUsage(root: rootPath, oneFileSystem: true, cancel: { ticket.isCancelled })
             DispatchQueue.main.async {
                 // A scan that a newer one superseded says nothing: the newer
                 // run owns the state and will write it.
@@ -243,7 +242,7 @@ struct DiskUsageView: View {
                 // is real but partial. Printing the same totals a finished scan
                 // prints would read as the whole disk.
                 let stopped = ticket.isCancelled
-                let totals = "\(humanSize(tree.metric(allocatedSize: allocated))) · \(tree.items) items"
+                let totals = "\(humanSize(tree.metric(allocatedSize: true))) · \(tree.items) items"
                 status = [stopped ? "Scan stopped" : nil, notice, totals]
                     .compactMap { $0 }
                     .joined(separator: " · ")

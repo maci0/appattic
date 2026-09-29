@@ -135,10 +135,10 @@ run_as_root() {
 # shellcheck source=find-qt6.sh
 . "$_script_dir/find-qt6.sh"
 
+# Either discovery path finding Qt 6 is enough to build against; a tree with
+# only one of them still has a cmake or a pkg-config answer.
 qt6_dev_ok() {
-    appattic_qt6_pkg_config_ok && return 0
-    appattic_qt6_cmake_ok && return 0
-    return 1
+    appattic_qt6_pkg_config_ok || appattic_qt6_cmake_ok
 }
 
 debian_enable_universe() {
@@ -416,6 +416,21 @@ emit_ci_path() {
     done
 }
 
+# A missing Zig is worth one download attempt; a second miss after the install
+# is a broken network or a bad tarball, and a build that goes on without the
+# toolchain reports it much later and much less clearly.
+ensure_zig_on_path() {
+    if ! zig_ok; then
+        install_zig_tarball
+    fi
+    if ! zig_ok; then
+        echo "error: zig ${ZIG_VER} still missing after install" >&2
+        exit 1
+    fi
+    echo "zig: $(zig version | head -n 1)"
+    emit_ci_path
+}
+
 if [[ "$INSTALL_PKGS" -eq 1 ]]; then
     echo "Installing Qt 6…"
     install_family_pkgs
@@ -460,15 +475,7 @@ if [[ "$INSTALL_PKGS" -eq 1 ]]; then
     if command -v clang >/dev/null 2>&1; then
         echo "clang: $(clang --version | head -n 1)"
     fi
-    if ! zig_ok; then
-        install_zig_tarball
-    fi
-    if ! zig_ok; then
-        echo "error: zig ${ZIG_VER} still missing after install" >&2
-        exit 1
-    fi
-    echo "zig: $(zig version | head -n 1)"
-    emit_ci_path
+    ensure_zig_on_path
 fi
 
 install_wasmtime_c_api() {
@@ -579,15 +586,7 @@ fi
 # scripts/lint.sh runs `zig fmt --check`. The lint job has no Qt, so it needs
 # the toolchain on its own rather than through --install.
 if [[ "$INSTALL_ZIG" -eq 1 ]]; then
-    if ! zig_ok; then
-        install_zig_tarball
-    fi
-    if ! zig_ok; then
-        echo "error: zig ${ZIG_VER} still missing after install" >&2
-        exit 1
-    fi
-    echo "zig: $(zig version | head -n 1)"
-    emit_ci_path
+    ensure_zig_on_path
 fi
 
 install_shellcheck() {

@@ -780,14 +780,11 @@ fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
             // The path is a root-joined copy inside the store, never the line
             // as printed. A path from anywhere else is a pointer into a dead
             // frame.
-            const in_store = sliceInside(&paths, hit.path);
-            try std.testing.expect(in_store);
+            try std.testing.expect(sliceInside(&paths, hit.path));
             try std.testing.expectEqualStrings(hit.name, pstore.basenameOf(hit.path));
-            if (in_store) {
-                const joined = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ spec.root, hit.name });
-                defer std.testing.allocator.free(joined);
-                try std.testing.expectEqualStrings(joined, hit.path);
-            }
+            const joined = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ spec.root, hit.name });
+            defer std.testing.allocator.free(joined);
+            try std.testing.expectEqualStrings(joined, hit.path);
         }
 
         // `out` is fixed, so a listing longer than it must stop at the bound
