@@ -103,6 +103,9 @@ command -v curl >/dev/null 2>&1 || fail_dep "curl missing" "install curl"
 . "$ROOT/scripts/find-zig.sh"
 appattic_find_zig || fail_dep "zig missing" "bash scripts/linux-deps.sh --install-zig"
 
+# shellcheck source=find-qt6.sh
+. "$ROOT/scripts/find-qt6.sh"
+
 wasmtime_libdir() {
     if [[ -d "${WASMTIME_DIR}/lib" ]]; then
         echo "${WASMTIME_DIR}/lib"
@@ -144,15 +147,7 @@ if [[ "$wasm_count" -lt 2 ]]; then
 fi
 echo "wasm: $wasm_count modules in core/out"
 
-for p in "/usr/lib/${HOST_ARCH}-linux-gnu/cmake" \
-         /usr/lib/x86_64-linux-gnu/cmake \
-         /usr/lib/aarch64-linux-gnu/cmake \
-         /usr/lib64/cmake \
-         /usr/lib/cmake; do
-    if [[ -d "$p/Qt6" ]]; then
-        export CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:+$CMAKE_PREFIX_PATH:}$p"
-    fi
-done
+appattic_qt6_cmake_prefix_path "$APPIMAGE_ARCH"
 
 gen=()
 if command -v ninja >/dev/null 2>&1; then

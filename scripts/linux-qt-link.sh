@@ -179,11 +179,7 @@ require_wasm_artifacts() {
   echo "wasm: core/out ready ($(find "$CORE_OUT" -maxdepth 1 -name '*.wasm' | LC_ALL=C sort | wc -l | tr -d ' ') modules)"
 }
 
-for p in /usr/lib/x86_64-linux-gnu/cmake /usr/lib/aarch64-linux-gnu/cmake /usr/lib64/cmake /usr/lib/cmake; do
-    if [[ -d "$p/Qt6" ]]; then
-        export CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:+$CMAKE_PREFIX_PATH:}$p"
-    fi
-done
+appattic_qt6_cmake_prefix_path "$ARCH"
 
 gen=()
 if command -v ninja >/dev/null 2>&1; then
