@@ -1,0 +1,264 @@
+.TH APPATTIC 1 "2026-09-29" "appattic 3.0.0" "User Commands"
+.SH NAME
+appattic \- find leftover data, unused software, outdated packages, and disk usage
+.SH SYNOPSIS
+.B appattic
+.RB [ --version ]
+.RB [ --help ]
+.RI [ command ]
+.RB [ options ]
+.br
+.B appattic help
+.RI [ command ]
+.br
+.B appattic disk
+.RI [ PATH ]
+.SH DESCRIPTION
+.B appattic
+scans the machine for data left behind by uninstalled apps, installed software
+nothing has used, unused distro and language packages, packages with a newer
+version, and folder sizes. The reporting commands delete nothing.
+.B appattic update
+is the one command that runs something, and only the named package upgrades
+the scan found, never a full distro upgrade.
+.PP
+With no command it prints the full report. A scan is cached and reused for 24
+hours; the status line on standard error names the time and points at
+.BR \-\-fresh .
+.PP
+Progress and status go to standard error. Reports and
+.B \-\-dry\-run
+scripts go to standard output, so a report pipes cleanly:
+.B appattic leftovers --top 10 | head
+shows ten rows and no status lines.
+.SH COMMANDS
+.TP
+.B config
+Print the settings file, its values, and the XDG paths this machine resolves,
+then exit. Nothing is scanned, so it is safe to run anywhere.
+.TP
+.B report
+Leftovers, stale software, outdated packages, and packages. The default.
+.TP
+.B leftovers
+Only orphaned data and PATH overlays from uninstalled apps.
+.TP
+.B stale
+Unused installed software, tiered KEEP, REVIEW, and REMOVE.
+.TP
+.B outdated
+Installed packages with a newer version available.
+.TP
+.B packages
+Distro orphans and language globals.
+.TP
+.BI "disk " [PATH ]
+Folder sizes as a tree. PATH defaults to the home directory. PATH is a path:
+it carries a separator, it is
+.B .
+or
+.BR .. ,
+or it is a name that starts with a dash and came behind
+.BR \-\- .
+.TP
+.B erase
+Delete the stored scan snapshot. It reads nothing first to decide, and it runs
+before the settings are read, so it works on a machine whose
+.I settings.json
+no longer parses.
+.TP
+.BI "update " [ \-\-yes ]
+Upgrade the named packages the scan found. It prompts on a terminal and exits
+2 without one unless
+.B \-\-yes
+is given.
+.PP
+.B \-\-
+ends the options, so a
+.B disk
+root that starts with a dash is passed as given:
+.B appattic disk -- -backup
+.SH OPTIONS
+.TP
+.BI \-\-json " FILE"
+Also write the whole scan to FILE, which has to end in
+.BR .json .
+.BR \-\-top ,
+.BR \-\-category ,
+.B \-\-leftovers\-only
+and
+.B \-\-stale\-only
+shape what is printed, not what is written. A value that names no JSON file is a
+usage error, so
+.B appattic \-\-json erase
+cannot write a file named
+.B erase
+instead of running the erase command.
+.TP
+.B \-\-include\-system
+On report, leftovers, stale, outdated, packages, update, and config: include OS
+system apps in the stale list. It turns the setting on for this run and cannot
+turn it off when the settings file already has it true.
+.TP
+.B \-\-fresh
+On report, leftovers, stale, outdated, packages, and update: ignore the
+last-scan cache and scan now.
+.TP
+.B \-\-dry\-run
+On report, leftovers, stale, outdated, packages, and update: print the shell
+script for the command without running it.
+.TP
+.BI \-\-top " N"
+On report and leftovers: only the N largest. On disk: the N largest entries per
+folder.
+.TP
+.BI \-\-category " CAT"
+On report and leftovers: filter by category, substring match, repeatable. A
+value that names a command is refused rather than taken, so
+.B appattic \-\-category erase
+reports the missing value and still reads
+.B erase
+as the command.
+.TP
+.B \-\-leftovers\-only
+On report: skip stale, outdated, and packages.
+.TP
+.B \-\-stale\-only
+On report: skip leftovers, outdated, and packages.
+.TP
+.B \-\-no\-color
+Disable ANSI color.
+.B NO_COLOR
+set to a non-empty value and
+.B TERM=dumb
+do the same.
+.TP
+.B \-\-all\-file\-systems
+On disk: descend into other mounted devices.
+.TP
+.B \-\-allocated
+On disk: print allocated blocks instead of apparent size.
+.TP
+.BR \-\-yes ", " \-y
+On update: skip the prompt. Required without a terminal.
+.TP
+.BR \-\-version ", " \-v
+Print the version and exit.
+.TP
+.BR \-\-help ", " \-h
+Print the help and exit.
+.B appattic help
+is the same, and a command name after it is checked for a typo.
+.PP
+An option that names the commands it belongs to ("on report", "on disk", "on
+update") is a usage error on every other command, so a flag that would be
+ignored fails instead of running:
+.B appattic stale --top 5
+exits 2 rather than printing the full table.
+.B \-\-help
+wins over a usage error anywhere on the line.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+The run failed, or an update was cancelled.
+.TP
+.B 2
+Usage error: a bad command, option, or value; a disk root that is missing or is
+not a directory; an update with no terminal and no
+.BR \-\-yes ;
+or a malformed
+.IR settings.json .
+.SH ENVIRONMENT
+.TP
+.B NO_COLOR
+A non-empty value disables color, as
+.B \-\-no\-color
+does.
+.TP
+.B TERM
+.B dumb
+disables color.
+.TP
+.B COLORFGBG
+.IR fg;bg .
+The background decides the dark or light status colors.
+.TP
+.B XDG_DATA_HOME
+Absolute data root, the parent of
+.I appattic/settings.json
+and
+.IR appattic/last-scan.json .
+.TP
+.BR XDG_CONFIG_HOME ", " XDG_CACHE_HOME ", " XDG_STATE_HOME
+Absolute configuration, cache, and state roots, scanned for leftovers.
+.PP
+Per the XDG Base Directory specification, an empty or relative XDG path is
+ignored and the standard user default is used. The accepted values and their
+effects are the ones
+.B appattic config
+prints.
+.SH FILES
+.TP
+.I ~/.local/share/appattic/settings.json
+.IR includeSystem ", " confirmDelete ", and the ignored leftover paths, which
+must each be the full path a report prints. A missing file uses the defaults. A
+malformed file is an error, and the run exits 2 without overwriting it.
+.TP
+.I ~/.local/share/appattic/last-scan.json
+The scan cache, a full list of the app and leftover paths the last scan found
+under your home directory. It is owner-only. A run that updates packages drops
+it, so does
+.BR "appattic erase" ,
+and so does a run more than 24 hours after the one that wrote it.
+.SH EXAMPLES
+.PP
+Ten largest leftovers:
+.PP
+.RS
+.nf
+appattic leftovers --top 10
+.fi
+.RE
+.PP
+Export the whole scan and keep the report on standard output:
+.PP
+.RS
+.nf
+appattic report --json "$HOME/scan.json" > report.txt
+.fi
+.RE
+.PP
+The ten largest folders under /var, by allocated blocks:
+.PP
+.RS
+.nf
+appattic disk /var --top 10 --allocated
+.fi
+.RE
+.PP
+Filter by two categories:
+.PP
+.RS
+.nf
+appattic leftovers --category caches --category browser
+.fi
+.RE
+.PP
+See what an update would run, then run it unattended:
+.PP
+.RS
+.nf
+appattic update --dry-run
+appattic update --yes
+.fi
+.RE
+.SH SEE ALSO
+The project README and
+.UR https://github.com/maci0/appattic
+.UE
+for the full scan description, and
+.BR appattic\-qt (1)
+for the Linux window.

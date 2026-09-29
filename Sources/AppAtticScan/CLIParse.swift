@@ -186,9 +186,10 @@ func cliValueNamesCommand(_ value: String) -> Bool {
 /// Whether `value` can be the root `disk` walks. A path carries a separator,
 /// absolute or relative; the one name with no separator that is still a path is
 /// the dash-leading one `--` exists to pass through, since it can reach the
-/// positional list no other way.
+/// positional list no other way. `.` and `..` name the two directories every
+/// shell starts in, so they are roots too: `appattic disk .` used to exit 2.
 func cliDiskRoot(_ value: String) -> Bool {
-    value.contains("/") || value.hasPrefix("-")
+    value.contains("/") || value.hasPrefix("-") || value == "." || value == ".."
 }
 
 /// "disk", "report and disk", "report, leftovers, and disk".
@@ -247,8 +248,8 @@ commands:
   outdated      installed packages with a newer version available
   packages      distro orphans and language globals
   disk [PATH]   folder sizes (like Disk Usage Analyzer). Optional PATH, default
-                home. PATH is a path: it carries a separator, or it is a name
-                that starts with a dash and came behind `--`
+                home. PATH is a path: it carries a separator, it is . or .., or
+                it is a name that starts with a dash and came behind `--`
   erase         delete the stored scan snapshot (the paths the last scan recorded)
   update        named package upgrades (prompts on a TTY; --dry-run prints the script). Not a full distro upgrade
 

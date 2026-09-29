@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The release version has one declaration (appAtticVersion in Version.swift) and
 # the packaging copies that have to keep in step: the newest AppStream release,
-# the macOS bundle Info.plist, and the appattic-qt man page. CMakeLists.txt
+# the macOS bundle Info.plist, and the two man pages. CMakeLists.txt
 # reads the declaration, so this is the place that checks the copies, the
 # derivation, that the release has notes a user can read, and that the version
 # was not already released from another commit.
@@ -18,6 +18,7 @@ CMAKE="$ROOT/ui/linux-qt/CMakeLists.txt"
 METAINFO="$ROOT/packaging/org.appattic.AppAttic.metainfo.xml"
 PLIST="$ROOT/packaging/Info.plist"
 MANPAGE="$ROOT/packaging/appattic-qt.1"
+CLI_MANPAGE="$ROOT/packaging/appattic.1"
 
 TAG=""
 while [[ $# -gt 0 ]]; do
@@ -34,8 +35,8 @@ while [[ $# -gt 0 ]]; do
             cat <<'EOF'
 Usage: bash scripts/check-version.sh [--tag TAG]
 
-  Checks that the AppStream release, the macOS Info.plist, and the
-  appattic-qt man page match appAtticVersion, that the AppStream release
+  Checks that the AppStream release, the macOS Info.plist, and both man
+  pages match appAtticVersion, that the AppStream release
   carries a date and a <description>, that CMakeLists.txt still derives
   its version from Version.swift, and that the declared version is not a
   release already published from a different commit.
@@ -136,6 +137,7 @@ fi
 plist_short="$(plist_string "Info.plist" CFBundleShortVersionString "$PLIST")"
 plist_build="$(plist_string "Info.plist" CFBundleVersion "$PLIST")"
 man_version="$(extract "man page" "$MANPAGE" 's/^\.TH [^ ]* 1 "[^"]*" "[^ ]* \([^"]*\)" .*/\1/p')"
+cli_man_version="$(extract "CLI man page" "$CLI_MANPAGE" 's/^\.TH [^ ]* 1 "[^"]*" "[^ ]* \([^"]*\)" .*/\1/p')"
 
 # CMakeLists.txt has no version of its own: it reads appAtticVersion out of
 # $VERSION_SRC with string(REGEX MATCH). There is no copy of it to compare, so
@@ -196,6 +198,11 @@ fi
 if [[ "$man_version" != "$swift_version" ]]; then
     echo "error: version mismatch: appattic-qt.1 header is $man_version, appAtticVersion is $swift_version" >&2
     echo "error: bump both in the same commit: $VERSION_SRC, $MANPAGE" >&2
+    exit 1
+fi
+if [[ "$cli_man_version" != "$swift_version" ]]; then
+    echo "error: version mismatch: appattic.1 header is $cli_man_version, appAtticVersion is $swift_version" >&2
+    echo "error: bump both in the same commit: $VERSION_SRC, $CLI_MANPAGE" >&2
     exit 1
 fi
 

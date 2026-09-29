@@ -129,6 +129,17 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertEqual(parseCLIArguments(["disk", "/a", "/b"]).error, "unexpected argument: /b")
     }
 
+    /// `.` and `..` are the two roots every shell already sits in, so `disk`
+    /// takes them. A bare word elsewhere is still a typo, not a directory.
+    func testDiskAcceptsTheCurrentAndParentDirectory() {
+        for root in [".", ".."] {
+            let opts = parseCLIArguments(["disk", root])
+            XCTAssertEqual(opts.diskPath, root, root)
+            XCTAssertNil(opts.error, root)
+        }
+        XCTAssertEqual(parseCLIArguments(["disk", "REPORT"]).error, "unexpected argument: REPORT")
+    }
+
     /// `--` ends the options, so a folder whose name starts with a dash is
     /// reachable. Without it the token reads as an unknown option and the run
     /// exits 2, which is the one way a `disk PATH` cannot be named.
