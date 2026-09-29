@@ -99,7 +99,7 @@ fn render(hits: []const BrokenLink) bool {
         w.raw(",\"rootLabel\":");
         w.str(h.root_label);
         w.raw(",\"status\":\"orphaned\"");
-        jsonbuf.writeRmCommand(&w, &q_buf, "rm ", h.path);
+        jsonbuf.writeRmCommand(&w, &q_buf, "rm -f ", h.path);
         w.raw("}");
     }
     w.raw("],\"script\":");
@@ -112,7 +112,7 @@ fn render(hits: []const BrokenLink) bool {
         s_w.raw(plugin_id);
         s_w.raw(". Review before running.\n");
         for (hits) |h| {
-            s_w.raw("rm ");
+            s_w.raw("rm -f ");
             s_w.raw(jsonbuf.shQuote(&q_buf, h.path) orelse {
                 s_w.failed = true;
                 break;
@@ -174,7 +174,10 @@ test "plugin_query present JSON uses symlink orphaned fields" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"symlink\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"status\":\"orphaned\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "/home/user/.local/bin/gone-app") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "rm /home/user/.local/bin/gone-app") != null);
+    // `rm -f`, not `rm`: the script runs under `set -e`, so a bare `rm` on a
+    // link a previous run already took away exits nonzero there and stops
+    // every line below it. The same shape path_shadow.zig writes.
+    try std.testing.expect(std.mem.indexOf(u8, json, "rm -f /home/user/.local/bin/gone-app") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "rm -rf") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "dconf") == null);
 }
