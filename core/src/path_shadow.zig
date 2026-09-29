@@ -275,8 +275,9 @@ fn renderShadows(hits: []const ShadowFinding) bool {
             return false;
         });
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove shadowing files?\",\"body\":\"Overlay files hide packaged copies. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove shadowing files?\",\"body\":\"Overlay files hide packaged copies. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

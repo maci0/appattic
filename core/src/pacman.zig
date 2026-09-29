@@ -125,8 +125,9 @@ fn renderPacman(orphans: []const PacmanOrphan, outdated: []const PacmanOutdated)
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove pacman orphans?\",\"body\":\"Named -Qdt leaves only. Named pacman -S waits for confirm. Not a full system upgrade. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove pacman orphans?\",\"body\":\"Named -Qdt leaves only. Named pacman -S waits for confirm. Not a full system upgrade. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

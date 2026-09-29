@@ -174,8 +174,9 @@ fn renderBrew(hits: []const BrewOutdated) bool {
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Update Homebrew packages?\",\"body\":\"User-global formulae and casks from brew outdated. Named brew upgrade waits for confirm. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Update Homebrew packages?\",\"body\":\"User-global formulae and casks from brew outdated. Named brew upgrade waits for confirm. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

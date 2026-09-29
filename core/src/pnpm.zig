@@ -56,8 +56,9 @@ fn renderPnpm(hits: []const PnpmGlobal) bool {
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove pnpm globals?\",\"body\":\"User-global -g packages only. Not project lockfiles. Named remove waits for confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove pnpm globals?\",\"body\":\"User-global -g packages only. Not project lockfiles. Named remove waits for confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

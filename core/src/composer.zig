@@ -61,8 +61,9 @@ fn renderComposer(hits: []const ComposerOutdated) bool {
         jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "composer", "composer global update ", false);
     }
     w.raw("],\"script\":null");
-    w.raw(",\"dialog\":{\"title\":\"Outdated Composer globals?\",\"body\":\"Global composer.json packages only. Not project vendor. Report-only. Named composer global update waits for confirm. AppAttic does not run this upgrade.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Outdated Composer globals?\",\"body\":\"Global composer.json packages only. Not project vendor. Report-only. Named composer global update waits for confirm. AppAttic does not run this upgrade.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

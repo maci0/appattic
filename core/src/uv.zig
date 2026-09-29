@@ -66,8 +66,9 @@ fn renderUv(hits: []const UvTool) bool {
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove uv tools?\",\"body\":\"uv tool installs only. Named uninstall waits for confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove uv tools?\",\"body\":\"uv tool installs only. Named uninstall waits for confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

@@ -93,8 +93,9 @@ fn renderAur(outdated: []const AurOutdated, helper: []const u8) bool {
         };
         jsonbuf.writeOutdatedCommand(&w, h.name, h.current, h.latest, "aur", cmd, true);
     }
-    w.raw("],\"script\":null,\"dialog\":{\"title\":\"AUR packages outdated\",\"body\":\"Named paru/yay/pikaur -S waits for confirm. Nothing runs until you confirm.\"}}");
+    w.raw("],\"script\":null,\"dialog\":{\"title\":\"AUR packages outdated\",\"body\":\"Named paru/yay/pikaur -S waits for confirm. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -113,13 +114,15 @@ fn query_impl(present: i32) i32 {
     const nq = host_exec.runFirst(&exec_up_buf, &outdated_cmds, &used, &note);
     if (nq >= 0) n_out = parseAurQua(exec_up_buf[0..@intCast(nq)], &outdated);
     note.addTruncatedRows(n_out, outdated.len);
+    // `renderAur` takes the helper name beside the list, so the shared
+    // single-list shrinker cannot call it. The drop is recorded as the first
+    // row goes, not once the render succeeds: `renderAur` writes the note
+    // itself.
     const n_parsed = n_out;
     while (true) {
-        if (renderAur(outdated[0..n_out], helperFromCmd(used))) {
-            note.addDroppedRows(n_parsed - n_out);
-            return 0;
-        }
+        if (renderAur(outdated[0..n_out], helperFromCmd(used))) return 0;
         if (n_out == 0) return 1;
+        if (n_out == n_parsed) note.addDroppedRows(1);
         n_out -= 1;
     }
 }

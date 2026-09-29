@@ -130,8 +130,9 @@ fn renderPip(outdated: []const PipOutdated, globals: []const PipOutdated) bool {
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove pip user-site packages?\",\"body\":\"Top-level user-site packages (pip list --user --not-required). Dependencies stay off Packages. Outdated rows are report-only. Named uninstall waits for confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove pip user-site packages?\",\"body\":\"Top-level user-site packages (pip list --user --not-required). Dependencies stay off Packages. Outdated rows are report-only. Named uninstall waits for confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

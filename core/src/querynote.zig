@@ -67,6 +67,11 @@ pub const Log = struct {
     /// Trim rows off the end of a parsed list until `render` fits it in the
     /// result buffer, recording what the trimming cost. Returns 0 once the
     /// render succeeds, 1 when the list is empty and it still does not.
+    ///
+    /// The count is recorded as the first row goes, not once the render
+    /// succeeds: `render` writes the note itself, so a count added afterwards
+    /// never reaches the result and the shortened list reads as the whole
+    /// machine.
     pub fn renderShrinking(
         self: *Log,
         comptime render: anytype,
@@ -75,11 +80,9 @@ pub const Log = struct {
     ) i32 {
         const n_parsed = n.*;
         while (true) {
-            if (render(list[0..n.*])) {
-                self.addDroppedRows(n_parsed - n.*);
-                return 0;
-            }
+            if (render(list[0..n.*])) return 0;
             if (n.* == 0) return 1;
+            if (n.* == n_parsed) self.addDroppedRows(1);
             n.* -= 1;
         }
     }
@@ -94,24 +97,73 @@ pub const Log = struct {
         second: anytype,
         n_second: *usize,
     ) i32 {
-        const n_parsed = n_first.* + n_second.*;
+        var noted = false;
         while (true) {
-            if (render(first[0..n_first.*], second[0..n_second.*])) {
-                self.addDroppedRows(n_parsed - (n_first.* + n_second.*));
-                return 0;
-            }
+            if (render(first[0..n_first.*], second[0..n_second.*])) return 0;
             if (n_second.* > 0) {
                 n_second.* -= 1;
-                continue;
+            } else if (n_first.* > 0) {
+                n_first.* -= 1;
+            } else {
+                return 1;
             }
-            if (n_first.* == 0) return 1;
-            n_first.* -= 1;
+            if (!noted) {
+                self.addDroppedRows(1);
+                noted = true;
+            }
+        }
+    }
+
+    /// `renderShrinkingPair` for a plugin that parses four lists, trimmed
+    /// `second`, then `fourth`, then `third`, then `first`: the order apt
+    /// wants, so an outdated list never survives at the cost of an orphan.
+    pub fn renderShrinkingQuad(
+        self: *Log,
+        comptime render: anytype,
+        first: anytype,
+        n_first: *usize,
+        second: anytype,
+        n_second: *usize,
+        third: anytype,
+        n_third: *usize,
+        fourth: anytype,
+        n_fourth: *usize,
+    ) i32 {
+        var noted = false;
+        while (true) {
+            if (render(
+                first[0..n_first.*],
+                second[0..n_second.*],
+                third[0..n_third.*],
+                fourth[0..n_fourth.*],
+            )) return 0;
+            if (n_second.* > 0) {
+                n_second.* -= 1;
+            } else if (n_fourth.* > 0) {
+                n_fourth.* -= 1;
+            } else if (n_third.* > 0) {
+                n_third.* -= 1;
+            } else if (n_first.* > 0) {
+                n_first.* -= 1;
+            } else {
+                return 1;
+            }
+            if (!noted) {
+                self.addDroppedRows(1);
+                noted = true;
+            }
         }
     }
 
     /// Append the `note` field. Writes nothing when every command answered and
     /// no parser ran out of room, so a clean result keeps the shape it had
     /// before.
+    ///
+    /// The note is a member of the result object, not a document of its own, so
+    /// the caller writes the object's closing `}` after this returns. A plugin
+    /// that closed the object first put the note outside it, and the host parser
+    /// dropped the whole plugin result on any run where a command did not
+    /// answer.
     pub fn write(self: *const Log, w: *jsonbuf.W) void {
         if (self.n == 0 and self.dropped == 0 and self.dropped_rows == 0) return;
         w.raw(",\"note\":\"");
@@ -249,6 +301,17 @@ test "rows shed from one list are one list, not one list each" {
         ",\"note\":\"1 list hit the row limit: more rows exist than were shown\"",
         w.slice().?,
     );
+}
+
+test "the note is a member of the result object" {
+    var buf: [512]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    var log = Log{};
+    log.add("ls -1 /home/user", host_exec.fail);
+    w.raw("{\"plugin\":\"path-xdg-config\"");
+    log.write(&w);
+    w.raw("}");
+    try std.testing.expect(jsonbuf.isValidJson(w.slice().?));
 }
 
 test "a list that lost no rows adds no note" {

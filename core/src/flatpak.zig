@@ -239,8 +239,9 @@ fn renderFlatpak(hits: []const FlatpakUnused, outdated: []const FlatpakOutdated)
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove unused Flatpak runtimes?\",\"body\":\"Named unused runtimes only. Named flatpak update waits for confirm. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove unused Flatpak runtimes?\",\"body\":\"Named unused runtimes only. Named flatpak update waits for confirm. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

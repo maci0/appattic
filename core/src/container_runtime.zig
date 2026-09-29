@@ -242,8 +242,9 @@ fn renderCtr(engine: []const u8, images: []const Hit, volumes: []const Hit, cont
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove container leftovers?\",\"body\":\"Named objects only. Stopped containers use named rm. Unnamed build cache is review-only. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove container leftovers?\",\"body\":\"Named objects only. Stopped containers use named rm. Unnamed build cache is review-only. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -275,25 +276,25 @@ fn query_impl(present: i32) i32 {
     note.addTruncatedRows(nvol, volumes.len);
     var nps = parseExitedContainers(parseBuf(np, &ps_buf), &containers);
     note.addTruncatedRows(nps, containers.len);
-    const n_parsed = nps + nvol + nimg;
+    // `renderCtr` takes the engine name beside the three lists, so the shared
+    // shrinkers cannot call it. The drop is recorded as the first row goes,
+    // not once the render succeeds: `renderCtr` writes the note itself.
+    var noted = false;
     while (true) {
-        if (renderCtr(engine, images[0..nimg], volumes[0..nvol], containers[0..nps])) {
-            note.addDroppedRows(n_parsed - (nps + nvol + nimg));
-            return 0;
-        }
+        if (renderCtr(engine, images[0..nimg], volumes[0..nvol], containers[0..nps])) return 0;
         if (nps > 0) {
             nps -= 1;
-            continue;
-        }
-        if (nvol > 0) {
+        } else if (nvol > 0) {
             nvol -= 1;
-            continue;
-        }
-        if (nimg > 0) {
+        } else if (nimg > 0) {
             nimg -= 1;
-            continue;
+        } else {
+            return 1;
         }
-        return 1;
+        if (!noted) {
+            note.addDroppedRows(1);
+            noted = true;
+        }
     }
 }
 

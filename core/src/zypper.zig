@@ -136,8 +136,9 @@ fn renderZypper(orphans: []const ZypperOrphan, outdated: []const ZypperOutdated)
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove zypper unneeded?\",\"body\":\"Named --unneeded packages only. Named zypper update waits for confirm. Not a full distro upgrade. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove zypper unneeded?\",\"body\":\"Named --unneeded packages only. Named zypper update waits for confirm. Not a full distro upgrade. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

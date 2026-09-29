@@ -59,8 +59,9 @@ fn renderGem(hits: []const GemOutdated) bool {
         jsonbuf.writeOutdated(&w, h.name, h.current, h.latest, "gem", "gem update ", false);
     }
     w.raw("],\"script\":null");
-    w.raw(",\"dialog\":{\"title\":\"Outdated RubyGems?\",\"body\":\"User-install gems from gem outdated. Report-only. Named gem update waits for confirm. AppAttic does not run this upgrade.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Outdated RubyGems?\",\"body\":\"User-install gems from gem outdated. Report-only. Named gem update waits for confirm. AppAttic does not run this upgrade.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

@@ -70,8 +70,9 @@ fn renderDeno(hits: []const DenoGlobal) bool {
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove Deno globals?\",\"body\":\"User-global Deno installs in ~/.deno/bin only. Named uninstall waits for confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove Deno globals?\",\"body\":\"User-global Deno installs in ~/.deno/bin only. Named uninstall waits for confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

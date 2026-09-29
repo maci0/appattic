@@ -245,6 +245,18 @@ fn isAllDigits(s: []const u8) bool {
     return true;
 }
 
+/// Prefixes a name carries to belong to a desktop environment or a runtime, not
+/// to an app whose owner is gone. `core` is not here: it also has to be followed
+/// by a version.
+const system_name_prefixes = [_][]const u8{
+    "gtk-",
+    "kde",
+    "kwin",
+    "baloo",
+    "plasma",
+    "xdg",
+};
+
 /// Same rules as Swift `classifyLinuxSystemName`: these are not leftover orphans.
 pub fn isSystemLeftoverName(name: []const u8) bool {
     var n = name;
@@ -254,15 +266,12 @@ pub fn isSystemLeftoverName(name: []const u8) bool {
     for (snap_system_names) |s| {
         if (std.ascii.eqlIgnoreCase(s, n)) return true;
     }
-    if (n.len >= 4 and std.ascii.eqlIgnoreCase(n[0..4], "gtk-")) return true;
-    if (n.len >= 3 and std.ascii.eqlIgnoreCase(n[0..3], "kde")) return true;
-    if (n.len >= 4 and std.ascii.eqlIgnoreCase(n[0..4], "kwin")) return true;
-    if (n.len >= 5 and std.ascii.eqlIgnoreCase(n[0..5], "baloo")) return true;
-    if (n.len >= 6 and std.ascii.eqlIgnoreCase(n[0..6], "plasma")) return true;
+    for (system_name_prefixes) |prefix| {
+        if (n.len >= prefix.len and std.ascii.eqlIgnoreCase(n[0..prefix.len], prefix)) return true;
+    }
     if (n.len > 2 and (n[n.len - 2] == 'r' or n[n.len - 2] == 'R') and (n[n.len - 1] == 'c' or n[n.len - 1] == 'C')) {
         if (nameInSysTable(n[0 .. n.len - 2])) return true;
     }
-    if (n.len >= 3 and std.ascii.eqlIgnoreCase(n[0..3], "xdg")) return true;
     if (n.len >= 4 and std.ascii.eqlIgnoreCase(n[0..4], "core")) {
         if (n.len == 4 or isAllDigits(n[4..])) return true;
     }
@@ -375,8 +384,9 @@ fn render(comptime spec: Spec, hits: []const Orphan) bool {
     }
     w.raw(",\"dialog\":{\"title\":");
     w.str(spec.dialog_title);
-    w.raw(",\"body\":\"Named dirs only. Nothing runs until you confirm.\"}}");
+    w.raw(",\"body\":\"Named dirs only. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse {
         result_nbytes = 0;
         return false;
@@ -415,13 +425,14 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     var n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths, spec.allow, &store_dropped);
     note.addTruncatedRows(n, hits.len);
     note.addDroppedRows(store_dropped);
+    // `render` takes the spec as a comptime parameter, so the shared
+    // single-list shrinker cannot call it. The drop is recorded as the first
+    // row goes, not once the render succeeds: `render` writes the note itself.
     const n_parsed = n;
     while (true) {
-        if (render(spec, hits[0..n])) {
-            note.addDroppedRows(n_parsed - n);
-            return 0;
-        }
+        if (render(spec, hits[0..n])) return 0;
         if (n == 0) return 1;
+        if (n == n_parsed) note.addDroppedRows(1);
         n -= 1;
     }
 }
@@ -439,6 +450,22 @@ pub fn bind(comptime spec: Spec) void {
         }
     };
     plugin_abi.bind(spec.id, SpecQuery.run, &result_buf, &result_nbytes);
+}
+
+test "a note lands inside the result object" {
+    const spec = Spec{
+        .id = "path-xdg-config",
+        .root_label = ".config",
+        .root = "/home/user/.config",
+        .keep = "",
+        .missing_note = "",
+        .dialog_title = "Remove leftover config?",
+    };
+    note = .{};
+    note.add("ls -1 /home/user/.config", host_exec.fail);
+    try std.testing.expect(render(spec, &.{}));
+    note = .{};
+    try std.testing.expect(jsonbuf.isValidJson(resultSlice()));
 }
 
 test "parseListing orphans names not in keep" {

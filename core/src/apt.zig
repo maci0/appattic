@@ -219,8 +219,9 @@ fn renderApt(
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove apt orphans?\",\"body\":\"Named autoremove leaves only. Named apt install --only-upgrade waits for confirm. Not a full apt upgrade. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove apt orphans?\",\"body\":\"Named autoremove leaves only. Named apt install --only-upgrade waits for confirm. Not a full apt upgrade. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -261,30 +262,7 @@ fn query_impl(present: i32) i32 {
     if (np >= 0) n_ppa = parsePpaSources(exec_ppa_buf[0..@intCast(np)], &ppas);
     note.addTruncatedRows(n_ppa, ppas.len);
 
-    const n_parsed = n_out + n_ppa + n_rc + n_orph;
-    while (true) {
-        if (renderApt(orphans[0..n_orph], outdated[0..n_out], rc_pkgs[0..n_rc], ppas[0..n_ppa])) {
-            note.addDroppedRows(n_parsed - (n_out + n_ppa + n_rc + n_orph));
-            return 0;
-        }
-        if (n_out > 0) {
-            n_out -= 1;
-            continue;
-        }
-        if (n_ppa > 0) {
-            n_ppa -= 1;
-            continue;
-        }
-        if (n_rc > 0) {
-            n_rc -= 1;
-            continue;
-        }
-        if (n_orph > 0) {
-            n_orph -= 1;
-            continue;
-        }
-        return 1;
-    }
+    return note.renderShrinkingQuad(renderApt, &orphans, &n_orph, &outdated, &n_out, &rc_pkgs, &n_rc, &ppas, &n_ppa);
 }
 
 comptime {

@@ -121,8 +121,9 @@ fn renderPipx(hits: []const PipxTool) bool {
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove pipx tools?\",\"body\":\"User-global pipx tools only. Named uninstall waits for confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove pipx tools?\",\"body\":\"User-global pipx tools only. Named uninstall waits for confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

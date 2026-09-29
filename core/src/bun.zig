@@ -104,8 +104,9 @@ fn renderBun(hits: []const BunGlobal) bool {
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove bun globals?\",\"body\":\"User-global bun packages only. Named remove waits for confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove bun globals?\",\"body\":\"User-global bun packages only. Named remove waits for confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

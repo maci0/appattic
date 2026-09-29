@@ -65,8 +65,9 @@ fn renderNpm(hits: []const NpmGlobal, outdated: []const jsonscan.NamedVer) bool 
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove npm globals?\",\"body\":\"User-global -g packages only. Not project node_modules. Outdated rows are report-only. Named uninstall waits for confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove npm globals?\",\"body\":\"User-global -g packages only. Not project node_modules. Outdated rows are report-only. Named uninstall waits for confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;

@@ -160,8 +160,9 @@ fn renderDnf(orphans: []const DnfOrphan, outdated: []const DnfOutdated, manager:
         }
         w.raw("\"");
     }
-    w.raw(",\"dialog\":{\"title\":\"Remove dnf unneeded?\",\"body\":\"Named repoquery --unneeded packages only. Named dnf/yum upgrade waits for confirm. Not a full distro upgrade. Nothing runs until you confirm.\"}}");
+    w.raw(",\"dialog\":{\"title\":\"Remove dnf unneeded?\",\"body\":\"Named repoquery --unneeded packages only. Named dnf/yum upgrade waits for confirm. Not a full distro upgrade. Nothing runs until you confirm.\"}");
     note.write(&w);
+    w.raw("}");
     const s = w.slice() orelse return false;
     result_nbytes = @intCast(s.len);
     return true;
@@ -189,21 +190,23 @@ fn query_impl(present: i32) i32 {
     note.addTruncatedRows(n_out, outdated.len);
 
     const mgr = if (nexec >= 0) managerFromCmd(used_q) else managerFromCmd(used_u);
-    const n_parsed = n_out + n_orph;
+    // `renderDnf` takes the manager name beside the two lists, so the shared
+    // two-list shrinker cannot call it. The drop is recorded as the first row
+    // goes, not once the render succeeds: `renderDnf` writes the note itself.
+    var noted = false;
     while (true) {
-        if (renderDnf(orphans[0..n_orph], outdated[0..n_out], mgr)) {
-            note.addDroppedRows(n_parsed - (n_out + n_orph));
-            return 0;
-        }
+        if (renderDnf(orphans[0..n_orph], outdated[0..n_out], mgr)) return 0;
         if (n_out > 0) {
             n_out -= 1;
-            continue;
-        }
-        if (n_orph > 0) {
+        } else if (n_orph > 0) {
             n_orph -= 1;
-            continue;
+        } else {
+            return 1;
         }
-        return 1;
+        if (!noted) {
+            note.addDroppedRows(1);
+            noted = true;
+        }
     }
 }
 
