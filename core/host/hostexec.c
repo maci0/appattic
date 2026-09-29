@@ -983,6 +983,18 @@ static void reap_child(pid_t pid) {
     (void)waitpid(pid, &st, 0);
 }
 
+/* The analyzer pass in scripts/lint.sh reads the dup2 below as a leaked
+   descriptor: the child closes fds[1] and keeps the copy on STDOUT_FILENO,
+   which is stdout and is meant to survive into the exec'd program. The only
+   ways out of the child branch are that exec and _exit, and the parent's
+   close(fds[1]) does not reach the child's descriptor table. Scoped to this
+   function so an fd leak anywhere else in the file still fails the gate.
+   Guarded because clang has no -Wanalyzer-fd-leak and, under the -Werror the
+   compile loop also uses, rejects the pragma as an unknown warning group. */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+#endif
 static int run_live(char **argv, char *out, size_t cap) {
     int fds[2];
     if (pipe(fds) != 0) return APPATTIC_HOST_EXEC_FAIL;
@@ -1091,15 +1103,13 @@ static int run_live(char **argv, char *out, size_t cap) {
         return take_complete_output(out, n, 1);
     }
     int st = 0;
-    int reaped = 0;
     int waited = 0;
     int poll_ms = HOST_EXEC_POLL_MIN_MS;
-    while (!reaped) {
+    // Every way out of this loop is a break or a return, so it runs until the
+    // child is reaped rather than until a flag says so.
+    for (;;) {
         pid_t wr = waitpid(pid, &st, WNOHANG);
-        if (wr == pid) {
-            reaped = 1;
-            break;
-        }
+        if (wr == pid) break;
         if (wr < 0) {
             if (errno == EINTR) continue;
             reap_child(pid);
@@ -1128,6 +1138,9 @@ static int run_live(char **argv, char *out, size_t cap) {
     }
     return (int)n;
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 int appattic_host_exec(const char *cmdline, char *out, size_t cap) {
     if (!out || cap == 0) return APPATTIC_HOST_EXEC_BAD;

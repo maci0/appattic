@@ -17,7 +17,7 @@ Usage: bash scripts/lint.sh
 
   shellcheck on the shell scripts, yamllint on the YAML,
   host C warnings-as-errors under every compiler on PATH,
-  host C under ASan + UBSan,
+  host C under ASan + UBSan, host C under -fanalyzer and clang --analyze,
   hostexec warnings-as-errors, dependency pin consistency,
   the system-name list matches across the Zig core and the Swift library,
   desktop entry, AppStream metainfo, man page, Flatpak manifest,
@@ -254,6 +254,88 @@ for comp in "${compilers[@]}"; do
         "$comp" "${comp_cflags[@]}" -I "$ROOT/core/host" -c "$src" -o "$obj"
     done
 done
+
+# The same sources under the compiler's static analyzer. Everything above
+# asks whether the code compiles clean; this asks whether the paths the
+# compiler never took are sound, which is the question a C host running
+# fork, pipe, poll and exec under another process's PATH cannot answer by
+# reading the warnings. It runs at -O0 because the analyzer follows the
+# source CFG, and at -O2 GCC bails out of most of this file with
+# "terminating analysis for this program point" and reports nothing.
+#
+# -fanalyzer is GCC's alone. clang has no such option and warns about the
+# unknown one, which under -Werror fails the gate, so the pass runs only for a
+# GCC driver and says so otherwise rather than reporting a pass it did not
+# earn.
+gcc_analyzer=""
+for comp in "${compilers[@]}"; do
+    if "$comp" --version 2>/dev/null | head -1 | grep -qi gcc; then
+        gcc_analyzer="$comp"
+        break
+    fi
+done
+if [[ -z "$gcc_analyzer" ]]; then
+    echo "note: no GCC on PATH, the C static analyzer pass did not run" >&2
+    echo "      install: bash scripts/linux-deps.sh --install" >&2
+else
+    echo "== C host under -fanalyzer =="
+    # -Wno-analyzer-too-complex: the analyzer reporting that it gave up on a
+    # path is the analyzer's limit, not a defect in this tree, and under
+    # -Werror it would fail the gate on the very file it could not finish.
+    analyzer_cflags=(-O0 -fanalyzer -Wno-analyzer-too-complex
+        -Wall -Wextra -Werror)
+    for src in "${c_sources[@]}"; do
+        base="$(basename "$src")"
+        # embed.c keeps the compile pass's rule: it needs the Wasmtime C API
+        # headers, and a source this gate cannot compile is a source it cannot
+        # analyze. A host without them says which file went unchecked.
+        if [[ "$base" == embed.c ]]; then
+            continue
+        fi
+        "$gcc_analyzer" "${analyzer_cflags[@]}" -I "$ROOT/core/host" \
+            -c "$src" -o "$tmp/analyzer-${base%.c}.o"
+    done
+    echo "analyzer: ok"
+fi
+
+# The GCC pass above and this one are not the same analyzer reading the same
+# code. GCC's -fanalyzer follows the CFG out of one function; clang's walks
+# paths through the whole translation unit, so it is what catches a store that
+# nothing reads and a value that reaches a call on a path GCC never took. The
+# C host forks, pipes and execs under another process's PATH, which is exactly
+# the shape where a second opinion is worth the seconds it costs.
+#
+# clang --analyze prints its findings and still exits 0, and -Werror does not
+# reach them: a gate that only looked at the exit status would report every
+# finding as a pass. So the findings are captured and matched here, the way
+# core/build.sh reads zig test's log for the same reason.
+if [[ -z "$(command -v clang || true)" ]]; then
+    echo "note: clang missing, the clang static analyzer pass did not run" >&2
+    echo "      install: bash scripts/linux-deps.sh --install" >&2
+else
+    echo "== C host under clang --analyze =="
+    for src in "${c_sources[@]}"; do
+        base="$(basename "$src")"
+        # embed.c for the reason the compile pass above gives.
+        if [[ "$base" == embed.c ]]; then
+            continue
+        fi
+        log="$tmp/analyzer-${base%.c}.log"
+        if ! clang --analyze -Xclang -analyzer-output=text \
+                -std=gnu11 -I "$ROOT/core/host" "$src" -o /dev/null \
+                >"$log" 2>&1; then
+            echo "error: clang --analyze failed on $src" >&2
+            cat "$log" >&2
+            exit 1
+        fi
+        if grep -q '^[^ ].*: warning:' "$log"; then
+            echo "error: clang --analyze found something in $src" >&2
+            cat "$log" >&2
+            exit 1
+        fi
+    done
+    echo "clang analyzer: ok"
+fi
 mapfile -t cc_cflags < <(compiler_cflags cc)
 cc "${cc_cflags[@]}" \
     -I "$ROOT/core/host" \
