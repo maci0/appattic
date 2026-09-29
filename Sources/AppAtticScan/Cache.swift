@@ -179,13 +179,7 @@ public func isScanCacheStale(
 /// not land. Nothing was there to delete, so that is false too, never a failure.
 @discardableResult
 public func clearScanCache(at url: URL = defaultScanCacheURL()) -> Bool {
-    guard FileManager.default.fileExists(atPath: url.path) else { return false }
-    do {
-        try FileManager.default.removeItem(at: url)
-    } catch {
-        return false
-    }
-    return true
+    (try? eraseScanCache(at: url)) ?? false
 }
 
 /// Delete the stored snapshot on request, whatever its age, and report whether
@@ -408,7 +402,13 @@ func rootInventoryStamp(_ label: String, _ path: String) -> String {
         return "root:\(stampEscape(label)):missing"
     }
     let names = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
-    let ents = stampJoin(names.filter { !$0.hasPrefix(".") }.sorted())
+    // Name *and* mtime, like every other inventory stamp in this file. Names
+    // alone miss a write inside an entry that already existed: `applyRecentActivity`
+    // re-reads a nested mtime to tell an orphaned leftover from an active one,
+    // so a cache touched after that change keeps serving the pre-change status.
+    let ents = stampJoin(names.filter { !$0.hasPrefix(".") }.sorted().map {
+        inventoryEntryStamp(dir: path, name: $0)
+    })
     return "root:\(stampEscape(label)):\(ents)"
 }
 

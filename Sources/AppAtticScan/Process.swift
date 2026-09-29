@@ -152,6 +152,13 @@ private let commandPipePollSliceMs: Int = 100
 /// is noticed, not how long a command that has already exited is waited on.
 private let childExitPollInterval: TimeInterval = 0.1
 
+/// How long the timeout path keeps reaping a stopped child before giving it up
+/// and returning. Bounded on purpose: `stopProcess` has already signalled the
+/// process group twice, and a descendant that called `setsid()` sits outside
+/// that group, so the exit notification can still be pending for a process
+/// nobody is waiting on. The status is discarded on this path either way.
+private let stoppedChildReapTimeout: TimeInterval = 1.0
+
 /// How much of a redirected command's output a report keeps. A package
 /// transaction writes a line per file it touches and can run for minutes, and
 /// the report shows a few hundred characters of the end, so the rest is read
@@ -397,13 +404,35 @@ private func waitForDirectChild(
         }
         if monotonicSeconds() >= deadline {
             stopProcess(process, exited: exited)
-            process.waitUntilExit()
-            return ChildExit(timedOut: true, reapedStatus: nil)
+            return ChildExit(timedOut: true, reapedStatus: reapStoppedChild(pid, exited))
         }
         if exited.wait(timeout: .now() + childExitPollInterval) == .success {
             process.waitUntilExit()
             return ChildExit(timedOut: false, reapedStatus: nil)
         }
+    }
+}
+
+/// Reap the direct child of a command that was just stopped, or give up.
+///
+/// Not `waitUntilExit`: that returns only once everything the child spawned is
+/// gone, and `stopProcess` has just come back from a semaphore that never
+/// fired, which says the exit notification is still pending. The direct child
+/// is reapable on its own, so poll that, and give up rather than block the
+/// caller for good.
+private func reapStoppedChild(_ pid: pid_t, _ exited: DispatchSemaphore) -> Int32? {
+    let deadline = monotonicSeconds() + stoppedChildReapTimeout
+    while true {
+        switch directChildState(pid) {
+        case .reaped(let status):
+            return exitStatus(fromWaitStatus: status)
+        case .reapedElsewhere:
+            return nil
+        case .running:
+            break
+        }
+        if monotonicSeconds() >= deadline { return nil }
+        _ = exited.wait(timeout: .now() + childExitPollInterval)
     }
 }
 

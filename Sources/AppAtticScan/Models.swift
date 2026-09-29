@@ -195,6 +195,11 @@ public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
     public let steam_appid: String?
     public let pkg_id: String?
     public let bundle_id: String?
+    /// Whether the app's *data* directories were measured, as
+    /// `size_measured` is for the app bundle. Carried on the wire because a
+    /// row held at REVIEW for unmeasurable data has to stay at REVIEW when the
+    /// scan is exported and read back.
+    public let data_measured: Bool?
     public var id: String { path }
     public var totalBytes: Int { addBytes(size_bytes ?? 0, data_bytes ?? 0) }
     /// `tier` as a typed value, or nil when it is unset or not a known tier.
@@ -224,7 +229,8 @@ public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
         summary: String? = nil,
         steam_appid: String? = nil,
         pkg_id: String? = nil,
-        bundle_id: String? = nil
+        bundle_id: String? = nil,
+        data_measured: Bool? = nil
     ) {
         self.name = name
         self.kind = kind
@@ -250,6 +256,7 @@ public struct SoftwareItem: Codable, Identifiable, Hashable, Sendable {
         self.steam_appid = steam_appid
         self.pkg_id = pkg_id
         self.bundle_id = bundle_id
+        self.data_measured = data_measured
     }
 }
 

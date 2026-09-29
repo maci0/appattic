@@ -294,7 +294,10 @@ func commentedOutdatedLines(_ pkgs: [OutdatedPkg]) -> [String] {
         case "snap":
             return "# snap refresh \(quoted)"
         case "apt":
-            return "# apt install --only-upgrade \(quoted)"
+            // `apt-get`, the binary `updateCommand` runs: the report and the
+            // live script are the same upgrade, so they must not name two
+            // different tools.
+            return "# apt-get install --only-upgrade \(quoted)"
         case "pacman":
             return "# pacman -S \(quoted)"
         case "aur":
@@ -729,6 +732,7 @@ public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [],
             usageSource: item.usage_source,
             installedAt: parseISODate(item.installed_at),
             dataBytes: item.data_bytes ?? 0,
+            dataMeasured: item.data_measured ?? true,
             dataPaths: item.data_paths ?? [],
             runningService: item.running_service ?? false,
             version: item.version ?? item.current_version,

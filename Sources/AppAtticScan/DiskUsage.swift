@@ -158,8 +158,12 @@ func decodeDirentName(_ bytes: UnsafeRawBufferPointer) -> String? {
 /// has no usable path, so the entry is reported as unaccounted instead.
 func direntName(_ ent: UnsafeMutablePointer<dirent>) -> String? {
     withUnsafePointer(to: &ent.pointee.d_name) { ptr in
-        ptr.withMemoryRebound(to: CChar.self, capacity: 256) { chars in
-            decodeDirentName(UnsafeRawBufferPointer(start: chars, count: 256))
+        // 256 on Linux, `__DARWIN_MAXDIRNAMLEN` on Darwin. Reading a fixed 256
+        // on macOS truncates a long name, and the truncated string names a
+        // different entry for the `fstatat` that follows.
+        let capacity = MemoryLayout.size(ofValue: ent.pointee.d_name)
+        ptr.withMemoryRebound(to: CChar.self, capacity: capacity) { chars in
+            decodeDirentName(UnsafeRawBufferPointer(start: chars, count: capacity))
         }
     }
 }
@@ -503,7 +507,8 @@ func unescapeProcMountField(_ field: String) -> String {
         let first = rest.index(after: slash)
         guard let last = rest.index(first, offsetBy: 2, limitedBy: rest.endIndex),
               last < rest.endIndex,
-              let byte = UInt8(rest[first...last], radix: 8) else {            out += rest[...slash]
+              let byte = UInt8(rest[first...last], radix: 8) else {
+            out += rest[...slash]
             rest = rest[first...]
             continue
         }
@@ -512,6 +517,20 @@ func unescapeProcMountField(_ field: String) -> String {
         rest = rest[rest.index(first, offsetBy: 3)...]
     }
     return out + rest
+}
+
+/// Root file system first, then the home one, then the rest in collated
+/// mount-path order. Both platform arms sort with this: sorting the macOS rows
+/// on the path alone put `/` first only because it collates before `/Users`
+/// and `/Volumes`, which says nothing about a home volume on another device.
+private func volumeBefore(_ a: DiskVolume, _ b: DiskVolume) -> Bool {
+    if a.isRoot != b.isRoot { return a.isRoot }
+    if a.isHome != b.isHome { return a.isHome }
+    // Collated: a mount point is a path, and byte order files every non-ASCII
+    // one ("/media/Ünïcode", "/Volumes/日本語") after the ASCII mounts. The
+    // path breaks the tie, since two rows can carry the same label and `sort`
+    // is not stable.
+    return collatedBefore(a.rootPath, b.rootPath, tieBreak: a.rootPath, b.rootPath)
 }
 
 /// The volumes to list, the root file system first, then the home one, then
@@ -558,15 +577,7 @@ public func listDiskVolumes(
             isHome: home == root || home.hasPrefix(root == "/" ? "/" : root + "/")
         ))
     }
-    return out.sorted { a, b in
-        if a.isRoot != b.isRoot { return a.isRoot }
-        if a.isHome != b.isHome { return a.isHome }
-        // Collated: a mount point is a path, and byte order files every
-        // non-ASCII one ("/media/Ünïcode", "/Volumes/日本語") after the ASCII
-        // mounts. The path breaks the tie, since two rows can carry the same
-        // label and `sort` is not stable.
-        return collatedBefore(a.rootPath, b.rootPath, tieBreak: a.rootPath, b.rootPath)
-    }
+    return out.sorted(by: volumeBefore)
     #else
     _ = mountsText
     var out: [DiskVolume] = []
@@ -590,6 +601,6 @@ public func listDiskVolumes(
     // list is in readdir order, so the rows and the JSON written from them
     // would come out in a different order on every run. Collated, so a
     // non-ASCII mount name is not filed after every ASCII one.
-    return out.sorted { collatedBefore($0.rootPath, $1.rootPath, tieBreak: $0.rootPath, $1.rootPath) }
+    return out.sorted(by: volumeBefore)
     #endif
 }

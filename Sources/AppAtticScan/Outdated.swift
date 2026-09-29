@@ -495,7 +495,7 @@ func parseAptUpgradableLine(_ s: Substring) -> (name: String, current: String, l
         guard ls < le else { return nil }
         var i = ls
         while i < le, u[i] != 0x2F /* / */, !bWS(u[i]) { i += 1 }
-        guard i < le, u[i] == 0x2F else { return nil }
+        guard i > ls, i < le, u[i] == 0x2F else { return nil }
         let nameB = (ls, i)
         // The rest of that token is the suite, which is not a field either
         // reader keeps.

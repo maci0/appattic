@@ -237,6 +237,10 @@ func walkLogicalBytes(
     }
     defer { closedir(dirp) }
     while true {
+        // Head of the loop, not the foot: the entry paths below `continue`
+        // past a check sitting at the bottom, and a directory of unreadable
+        // entries then runs with no deadline at all.
+        if clock() > deadline { return false }
         errno = 0
         guard let ent = readdir(dirp) else {
             if errno != 0 { sawError = true }
@@ -278,7 +282,6 @@ func walkLogicalBytes(
         } else if kind == Int32(S_IFREG) {
             total = addBytes(total, Int(st.st_size))
         }
-        if clock() > deadline { return false }
     }
     return true
 }

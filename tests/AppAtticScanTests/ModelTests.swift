@@ -59,6 +59,7 @@ final class ModelTests: XCTestCase {
         let json = """
         {"name":"Sketch","kind":"app","path":"/Applications/Sketch.app","source":"applications",\
         "version":"100","size_bytes":2048,"size_measured":true,"data_bytes":512,\
+        "data_measured":false,\
         "data_paths":["/Library/Application Support/Sketch"],"last_used":"2026-08-01T00:00:00Z",\
         "installed_at":"2026-01-01T00:00:00Z","usage_source":"history","running_service":false,\
         "tier":"keep","reason":"running","cask_name":"sketch","is_leaf":true,"outdated":false,\
@@ -68,6 +69,7 @@ final class ModelTests: XCTestCase {
         let decoded = try JSONDecoder().decode(SoftwareItem.self, from: Data(json.utf8))
         XCTAssertEqual(decoded.size_bytes, 2048)
         XCTAssertEqual(decoded.data_bytes, 512)
+        XCTAssertEqual(decoded.data_measured, false)
         XCTAssertEqual(decoded.tier, "keep")
         XCTAssertEqual(decoded.bundle_id, "com.bohemiancoding.sketch3")
         XCTAssertEqual(decoded.data_paths, ["/Library/Application Support/Sketch"])
@@ -78,7 +80,7 @@ final class ModelTests: XCTestCase {
             Set(keys.keys),
             [
                 "name", "kind", "path", "source", "version", "size_bytes", "size_measured",
-                "data_bytes", "data_paths", "last_used", "installed_at", "usage_source",
+                "data_bytes", "data_measured", "data_paths", "last_used", "installed_at", "usage_source",
                 "running_service", "tier", "reason", "cask_name", "is_leaf", "outdated",
                 "current_version", "latest_version", "summary", "steam_appid", "pkg_id",
                 "bundle_id",
