@@ -18,7 +18,7 @@ const q_volumes = "volume ls -f dangling=true";
 const q_ps = "ps -a -f status=exited";
 
 // Full commands, one row per engine, so a query that did not answer can be
-// named in the note. The Log keeps the slice, so it has to be a static one.
+// named in the note. A static one, so the text the Log copies is stable.
 const commands = [_][3][]const u8{
     .{ "docker " ++ q_images, "docker " ++ q_volumes, "docker " ++ q_ps },
     .{ "podman " ++ q_images, "podman " ++ q_volumes, "podman " ++ q_ps },

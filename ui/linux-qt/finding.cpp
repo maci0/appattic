@@ -817,14 +817,24 @@ QString withRootCmd(const QString &cmd) {
 }
 
 QString scriptRootHelper() {
+    // Absolute paths, not a PATH lookup: this app puts the account's own
+    // `~/.local/bin` and `~/bin` ahead of the system directories, and those are
+    // writable by whatever runs as the account. A `pkexec` or `sudo` planted
+    // there would run at the prompt this helper opens, with the arguments the
+    // caller chose.
     return QStringLiteral(
         "rootcmd() {\n"
         "  if [ \"$(id -u)\" -eq 0 ]; then\n"
         "    \"$@\"\n"
-        "  elif command -v pkexec >/dev/null 2>&1; then\n"
-        "    pkexec \"$@\"\n"
         "  else\n"
-        "    sudo \"$@\"\n"
+        "    for helper in /usr/bin/pkexec /bin/pkexec /usr/bin/sudo /bin/sudo; do\n"
+        "      if [ -x \"$helper\" ]; then\n"
+        "        \"$helper\" \"$@\"\n"
+        "        return\n"
+        "      fi\n"
+        "    done\n"
+        "    echo \"rootcmd: neither pkexec nor sudo is installed\" >&2\n"
+        "    return 127\n"
         "  fi\n"
         "}");
 }
@@ -860,6 +870,31 @@ void groupLinuxLeftovers(QVector<Finding> &findings) {
         for (int i : idx) {
             if (findings[i].bytes > findings[primary].bytes) primary = i;
         }
+        // One row is one thing the user ticks, and every extra path rides along
+        // in the `rm -rf` that row produces. Names that fold together are the
+        // same leftover only when they are siblings: `~/.config/google-chrome`
+        // and `~/.config/chromium` are one row, `~/.cache/foo` and
+        // `~/.local/share/foo` are two, and a row that spanned both would
+        // delete a directory the review never showed.
+        const QString primaryDir = findings[primary].path.isEmpty()
+            ? QString()
+            : QFileInfo(findings[primary].path).absolutePath();
+        auto isSibling = [&findings, &primaryDir](int i) {
+            const Finding &f = findings[i];
+            if (QFileInfo(f.path).absolutePath() != primaryDir) return false;
+            for (const QString &extra : f.extraPaths) {
+                if (QFileInfo(extra).absolutePath() != primaryDir) return false;
+            }
+            return true;
+        };
+        bool allSiblings = true;
+        for (int i : idx) {
+            if (!isSibling(i)) {
+                allSiblings = false;
+                break;
+            }
+        }
+        if (!allSiblings) continue;
         // A member with no measurement (`bytes < 0`) leaves the merged total
         // unknown. Summing the rest anyway prints a partial sum as if it were
         // the whole group, which is what the CLI's `sizeMeasured` flag avoids.

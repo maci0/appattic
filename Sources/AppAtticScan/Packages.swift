@@ -160,7 +160,9 @@ public func packageRemoveCommand(_ entry: PackageEntry) -> String {
             remove: "deno uninstall --global \(q)"
         )
     default:
-        return "# \(shellComment(entry.manager)) \(q)"
+        // A comment line, so the name goes through `shellComment`: a quoted
+        // newline is still a newline, and it would end the comment early.
+        return "# \(shellComment(entry.manager)) \(shellComment(entry.name))"
     }
 }
 

@@ -147,8 +147,9 @@ fn findShadowsExec(
     var name_used: usize = 0;
 
     var pkg_used: usize = 0;
-    // The note keeps a slice of the command it names, so the scratch outlives
-    // the iteration that filled it.
+    // One scratch for the whole loop: the Log copies the command it names, so
+    // a buffer per iteration would work too, and a single one keeps every
+    // entry naming its own text.
     var pkg_cmd_buf: [512]u8 = undefined;
     var pkg_listings: [max_package_dirs]?[]const u8 = .{null} ** max_package_dirs;
     const pkg_count = @min(packageDirs.len, max_package_dirs);

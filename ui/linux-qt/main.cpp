@@ -2863,6 +2863,15 @@ private:
             return QStringLiteral("# skipped ") + f.plugin
                 + QStringLiteral(": command is not shell-safe, refusing to run it");
         }
+        // `rootcmd` is this file's own escalation wrapper, and only
+        // `withRootCmd` writes it. A command that already carries the prefix
+        // asked for itself, and `commandIsShellSafe` judges bytes, not the
+        // program: the helper would run whatever it names as root.
+        if (raw.startsWith(QLatin1String("rootcmd "))
+            || raw.contains(QLatin1String("; then rootcmd "))) {
+            return QStringLiteral("# skipped ") + f.plugin
+                + QStringLiteral(": command asks for root escalation, refusing to run it");
+        }
         return withRootCmd(raw);
     }
 

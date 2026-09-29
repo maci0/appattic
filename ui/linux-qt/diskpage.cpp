@@ -38,6 +38,21 @@
 #include <utility>
 
 static QTreeWidgetItem *makeItem(DiskNode *n);
+
+/// A yes/no dialog whose text is a directory name, not markup. `QMessageBox`
+/// renders with `Qt::AutoText`, so a folder named `<b>Documents</b>` would show
+/// as bold, and an `<a href=...>` as a link, in the alert that gates the move
+/// to Trash: the user would approve text that is not the name of what is
+/// trashed. Every name here comes off a directory listing.
+static QMessageBox::StandardButton askPlain(
+    QWidget *parent, const QString &title, const QString &text
+) {
+    QMessageBox box(
+        QMessageBox::Question, title, text, QMessageBox::Yes | QMessageBox::No, parent
+    );
+    box.setTextFormat(Qt::PlainText);
+    return box.exec() == QMessageBox::Yes ? QMessageBox::Yes : QMessageBox::No;
+}
 static QTreeWidgetItem *makeValueItem(
     const QString &name,
     const QString &path,
@@ -911,16 +926,17 @@ void DiskPage::trashSelected() {
     if (!d->selected || d->selected == d->root) return;
     const QString path = d->selected->path;
     const QString msg = QStringLiteral("Move “%1” to Trash?").arg(d->selected->name);
-    if (QMessageBox::question(this, QStringLiteral("Move to Trash"), msg)
-        != QMessageBox::Yes) {
+    if (askPlain(this, QStringLiteral("Move to Trash"), msg) != QMessageBox::Yes) {
         return;
     }
     if (!QFile::moveToTrash(path)) {
-        QMessageBox::warning(
-            this,
+        QMessageBox box(
+            QMessageBox::Warning,
             QStringLiteral("Move to Trash"),
             QStringLiteral("Could not move %1 to Trash.").arg(redactHomePaths(path))
         );
+        box.setTextFormat(Qt::PlainText);
+        box.exec();
         return;
     }
     // Without this the window only says it is scanning again, and a user who

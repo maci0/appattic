@@ -5,6 +5,10 @@ const host_exec = @import("host_exec.zig");
 /// Failures kept per plugin run. Past this the rest are counted, not listed.
 pub const max_logged = 8;
 
+/// Command text one logged failure keeps. Every plugin builds its command in a
+/// buffer this size or smaller, so nothing a real caller passes is cut.
+const max_cmd_bytes = 512;
+
 /// Query commands that did not answer during one plugin run.
 ///
 /// `host_exec.run` returns a negative code for a refused command, a failed or
@@ -15,6 +19,12 @@ pub const max_logged = 8;
 /// `note`.
 pub const Log = struct {
     items: [max_logged][2][]const u8 = undefined,
+    /// The text `items[i][0]` points at. A plugin passes the scratch buffer it
+    /// formats the command into, and that buffer dies with the iteration that
+    /// filled it, so a kept slice would name a dead stack frame: every note
+    /// would read as whatever the last loop iteration wrote there. The copy is
+    /// what the item names.
+    cmd_store: [max_logged][max_cmd_bytes]u8 = undefined,
     n: usize = 0,
     /// Failures past `max_logged`, counted rather than dropped. The note is
     /// the only signal that a plugin's finding list is short of the whole
@@ -38,7 +48,12 @@ pub const Log = struct {
             self.dropped += 1;
             return;
         }
-        self.items[self.n] = .{ cmd, host_exec.reason(rc) };
+        var kept = @min(cmd.len, max_cmd_bytes);
+        // A cut inside a multi-byte scalar leaves a trailing byte the note's
+        // JSON string cannot carry, so the cut backs up to the scalar it split.
+        while (kept > 0 and kept < cmd.len and (cmd[kept] & 0xC0) == 0x80) kept -= 1;
+        @memcpy(self.cmd_store[self.n][0..kept], cmd[0..kept]);
+        self.items[self.n] = .{ self.cmd_store[self.n][0..kept], host_exec.reason(rc) };
         self.n += 1;
     }
 
@@ -205,6 +220,30 @@ test "a failed command is named in the note" {
     try std.testing.expectEqualStrings(
         ",\"note\":\"apt list --upgradable did not answer: it failed, was cancelled, or hit the 60s timeout" ++
             "; dpkg -l did not answer: the host refused it as not an allowlisted query\"",
+        w.slice().?,
+    );
+}
+
+test "a logged command survives the buffer it was built in" {
+    var log = Log{};
+    // The shape a plugin uses: a scratch buffer per iteration, handed to `add`
+    // and dead by the next one.
+    var first: [32]u8 = undefined;
+    var second: [32]u8 = undefined;
+    log.add(try std.fmt.bufPrint(&first, "ls -1 {s}", .{"alpha"}), host_exec.fail);
+    log.add(try std.fmt.bufPrint(&second, "ls -1 {s}", .{"beta"}), host_exec.fail);
+    var buf: [512]u8 = undefined;
+    var w = jsonbuf.W{ .buf = &buf };
+    log.write(&w);
+    const reason = host_exec.reason(host_exec.fail);
+    var want: [256]u8 = undefined;
+    try std.testing.expectEqualStrings(
+        try std.fmt.bufPrint(
+            &want,
+            ",\"note\":\"ls -1 alpha did not answer: {s}" ++
+                "; ls -1 beta did not answer: {s}\"",
+            .{ reason, reason },
+        ),
         w.slice().?,
     );
 }

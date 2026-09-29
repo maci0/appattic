@@ -125,7 +125,7 @@ public func uninstallCommand(
     }
     if source == "appimage" {
         if isProtectedPackagedPath(path) {
-            return "# skipped packaged path \(shellQuote(path))"
+            return "# skipped packaged path \(shellComment(path))"
         }
         return "rm -rf \(shellQuote(path))"
     }
@@ -142,7 +142,7 @@ public func uninstallCommand(
         return "# \(shellComment(name)): uninstall from Steam. Do not delete \(shellComment(path))"
     }
     if isProtectedPackagedPath(path) {
-        return "# skipped packaged path \(shellQuote(path))"
+        return "# skipped packaged path \(shellComment(path))"
     }
     return "rm -rf \(shellQuote(path))"
 }
@@ -283,7 +283,10 @@ public func previewScript(cleanup: String, update: String) -> String {
 
 func commentedOutdatedLines(_ pkgs: [OutdatedPkg]) -> [String] {
     pkgs.map { pkg in
-        let quoted = shellQuote(pkg.name)
+        // `shellComment`, not `shellQuote`: these lines are comments, and a
+        // quoted newline is still a newline, so a name carrying one ended the
+        // comment and made the rest of the name a command the script runs.
+        let quoted = shellComment(pkg.name)
         switch pkg.manager {
         case "brew-formula":
             return "# brew upgrade \(quoted)"
@@ -451,14 +454,23 @@ public func withRootCmd(_ cmd: String) -> String {
     return "rootcmd \(cmd)"
 }
 
+/// Absolute paths, not a PATH lookup: the child process runs with the
+/// account's own `~/.local/bin` and `~/bin` ahead of the system directories,
+/// and both are writable by whatever runs as the account. A `pkexec` or `sudo`
+/// planted there would run at the prompt this helper opens.
 public let scriptRootHelper = """
 rootcmd() {
   if [ "$(id -u)" -eq 0 ]; then
     "$@"
-  elif command -v pkexec >/dev/null 2>&1; then
-    pkexec "$@"
   else
-    sudo "$@"
+    for helper in /usr/bin/pkexec /bin/pkexec /usr/bin/sudo /bin/sudo; do
+      if [ -x "$helper" ]; then
+        "$helper" "$@"
+        return
+      fi
+    done
+    echo "rootcmd: neither pkexec nor sudo is installed" >&2
+    return 127
   fi
 }
 """
@@ -466,7 +478,7 @@ rootcmd() {
 public func leftoverRemoveCommand(path: String, rootLabel: String, extraPaths: [String] = []) -> String {
     if rootLabel == "LaunchAgents" {
         if isProtectedPackagedPath(path) || !isRemovableLeftoverPath(path) {
-            return "# skipped packaged path \(shellQuote(path))"
+            return "# skipped packaged path \(shellComment(path))"
         }
         let q = shellQuote(path)
         return "launchctl bootout gui/$(id -u) \(q) 2>/dev/null || true\nrm -rf \(q)"
@@ -477,7 +489,7 @@ public func leftoverRemoveCommand(path: String, rootLabel: String, extraPaths: [
             && (!isProtectedPackagedPath($0) || isPpaSourcesPath($0))
     }
     if paths.isEmpty {
-        return "# skipped packaged path \(shellQuote(path))"
+        return "# skipped packaged path \(shellComment(path))"
     }
     return "rm -rf " + paths.map(shellQuote).joined(separator: " ")
 }
