@@ -190,6 +190,16 @@ bool keepSettingsBackup(const QString &settingsPath) {
     const QByteArray raw = in.readAll();
     in.close();
     if (raw.isEmpty()) return true;
+    /* A file the backup already holds is not copied again. persistSettings
+       runs on every toggle, a double click reaches the handler twice, and a
+       window that re-saves what it loaded writes the same bytes; copying them
+       would leave the backup holding a copy of the file already there, and the
+       last state that differed from the current one would be gone. The Swift
+       saveSettings makes the same comparison. */
+    {
+        QFile kept(settingsBackupPath(settingsPath));
+        if (kept.open(QIODevice::ReadOnly) && kept.readAll() == raw) return true;
+    }
     QSaveFile out(settingsBackupPath(settingsPath));
     if (!out.open(QIODevice::WriteOnly)) return false;
     if (out.write(raw) != raw.size() || !out.commit()) return false;

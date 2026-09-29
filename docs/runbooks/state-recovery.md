@@ -11,7 +11,7 @@ rather than in someone's head.
 | File | Contents | Rebuildable | How it is protected |
 |------|----------|-------------|---------------------|
 | `<data dir>/settings.json` | `confirmDelete`, `includeSystem`, and the leftover paths the user chose to ignore | No. The ignore list is paths the user typed, and no scan can recover them | Written whole: the scanner and the CLI through `mkstemp` at `0600`, `fsync`, `rename`, and a parent-directory `fsync`; the Linux window through `QSaveFile`. The file it replaces is kept as `settings.json.bak` |
-| `<data dir>/settings.json.bak` | The last settings file the app wrote, kept by `saveSettings` and by the Linux window's `persistSettings` | It is itself a copy of the above, one save older | Written the same owner-only way, never read at run time |
+| `<data dir>/settings.json.bak` | The last settings file the app wrote that differs from the current one, kept by `saveSettings` and by the Linux window's `persistSettings` | It is a copy of the above, one change older. A save that changed nothing leaves it alone, so a repeated save cannot overwrite it with a copy of the current file | Written the same owner-only way, never read at run time |
 | `<data dir>/last-scan.json` | The whole last scan: every app path and leftover path under the home directory | Yes. A rescan rebuilds it, at the cost of one run | Written the same way. Deleted when it is stale, after a run that changes the machine, and by `appattic erase` |
 | `$TMPDIR/appattic-script-*.sh`, `*.err` | A generated cleanup or update script and the tail of its stderr | Yes, the run regenerates it | `0600`, removed when the run ends, including when it fails |
 
@@ -88,9 +88,12 @@ the snapshot without deleting it.
 
 - No remote copy of any of it. Nothing here leaves the machine, so nothing can
   be restored from anywhere but this disk and the user's own backups.
-- No version history. `settings.json.bak` is one generation old, on purpose:
+- No version history. `settings.json.bak` is one change old, on purpose:
   it holds the account's own paths, and a second copy of those is already the
   standing state. Anything older would be more of the same, unread by anything.
+  It is not rewritten by a save that changed nothing, so saving the same
+  settings again leaves the earlier state in place instead of replacing it
+  with a copy of the file that is already there.
 - No backup of a file's contents. AppAttic reports paths and sizes; it does
   not store what is in them, so a deleted file is not recoverable from it.
 - A crash between the write of the new settings and the copy that keeps the

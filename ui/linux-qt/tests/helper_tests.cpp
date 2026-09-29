@@ -1614,11 +1614,70 @@ static int checkSettingsBackup() {
     return 0;
 }
 
+/// persistSettings runs on every toggle and a double click reaches the handler
+/// twice, so a save that changed nothing is a normal event. It must not copy
+/// the file it is about to write over the backup: that would leave the backup
+/// holding a copy of the file already there and the last state that differed
+/// from the current one would be gone, which is the state the backup is for.
+static int checkSettingsBackupRepeatedSave() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "settings rerun: temp dir failed\n");
+        return 1;
+    }
+    const QString path = tmp.filePath(QStringLiteral("settings.json"));
+    AppSettings first;
+    first.ignoredLeftoverPaths = QStringList{QStringLiteral("/first")};
+    AppSettings second;
+    second.ignoredLeftoverPaths = QStringList{QStringLiteral("/second")};
+    if (writeFile(path, encodeSettingsJson(first)) || !keepSettingsBackup(path)) {
+        std::fprintf(stderr, "settings rerun: first write failed\n");
+        return 1;
+    }
+    if (writeFile(path, encodeSettingsJson(second)) || !keepSettingsBackup(path)) {
+        std::fprintf(stderr, "settings rerun: second write failed\n");
+        return 1;
+    }
+    // The same bytes again, three times: what the backup holds must not move.
+    for (int i = 0; i < 3; ++i) {
+        if (writeFile(path, encodeSettingsJson(second)) || !keepSettingsBackup(path)) {
+            std::fprintf(stderr, "settings rerun: repeated write failed\n");
+            return 1;
+        }
+    }
+    QFile backupFile(settingsBackupPath(path));
+    AppSettings kept;
+    QString err;
+    if (!backupFile.open(QIODevice::ReadOnly)
+        || !parseSettingsJson(backupFile.readAll(), &kept, &err)
+        || kept.ignoredLeftoverPaths != first.ignoredLeftoverPaths) {
+        std::fprintf(stderr, "settings rerun: a save that changed nothing moved the backup (%s)\n", qPrintable(err));
+        return 1;
+    }
+    // A save that does change something still keeps the file it replaced.
+    AppSettings third;
+    third.ignoredLeftoverPaths = QStringList{QStringLiteral("/third")};
+    if (writeFile(path, encodeSettingsJson(third)) || !keepSettingsBackup(path)) {
+        std::fprintf(stderr, "settings rerun: third write failed\n");
+        return 1;
+    }
+    QFile afterThird(settingsBackupPath(path));
+    AppSettings replaced;
+    if (!afterThird.open(QIODevice::ReadOnly)
+        || !parseSettingsJson(afterThird.readAll(), &replaced, &err)
+        || replaced.ignoredLeftoverPaths != second.ignoredLeftoverPaths) {
+        std::fprintf(stderr, "settings rerun: a changed save did not keep what it replaced (%s)\n", qPrintable(err));
+        return 1;
+    }
+    std::fprintf(stdout, "settings rerun: ok\n");
+    return 0;
+}
+
 int main() {
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
-        checkSettingsBackup(),
+        checkSettingsBackup(), checkSettingsBackupRepeatedSave(),
         checkLocaleGrouping(),
         checkLegacySettingsMigration(),
     };

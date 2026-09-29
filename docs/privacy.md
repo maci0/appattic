@@ -42,7 +42,7 @@ descended into unless you ask for them.
 |------|----------|------|-------|
 | `<data dir>/last-scan.json` | The whole scan result: every app path and leftover path under the home directory | `0600`, in a `0700` directory | Until the next scan, until a run that removes or updates something, or `appattic erase`; a snapshot older than 24 hours is deleted and never served |
 | `<data dir>/settings.json` | `confirmDelete`, `includeSystem`, and the leftover paths you chose to ignore | `0600`, in a `0700` directory | Until you change it |
-| `<data dir>/settings.json.bak` | The settings file the one before it, kept so an emptied or mangled `settings.json` can be put back | `0600`, in a `0700` directory | Until the next settings change. Nothing reads it while the app runs; `docs/runbooks/state-recovery.md` is what says how to use it |
+| `<data dir>/settings.json.bak` | The settings file from before the last change, kept so an emptied or mangled `settings.json` can be put back | `0600`, in a `0700` directory | Until a settings change that differs from the current file. A save that changed nothing leaves it as it was. Nothing reads it while the app runs; `docs/runbooks/state-recovery.md` is what says how to use it |
 | `$TMPDIR/appattic-script-*.sh`, `*.err` | The generated cleanup or update script and the tail of its stderr | `0600` | Deleted when the run ends, including when it fails |
 
 `<data dir>` is `$XDG_DATA_HOME/appattic` on Linux (usually
@@ -104,7 +104,7 @@ paths, unredacted, because its job is to name the files to edit.
 - Keep your ignore list: `settings.json` is yours, and its entries are the only
   paths you typed. Edit or delete the file; AppAttic does not rewrite it behind
   your back. A file that no longer loads is not repaired or overwritten, and
-  `settings.json.bak` holds the state before the last change.
+  `settings.json.bak` holds the state before the last change that differed.
 
 ## Deletion is a local action
 

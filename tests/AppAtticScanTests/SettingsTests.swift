@@ -305,6 +305,41 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(mode & 0o777, 0o600)
     }
 
+    /// A save that changed nothing, run again, must leave the backup alone.
+    /// The settings page persists on every toggle and a double click reaches
+    /// the handler twice, so a second save with the same bytes is a normal
+    /// event. Copying them into the backup would leave it holding a copy of
+    /// the file that is already there, and the last state that differed from
+    /// the current one would be gone: the one thing the backup is for.
+    func testRepeatedSaveOfUnchangedSettingsKeepsTheEarlierBackup() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-repeated-\(UUID().uuidString).json")
+        let backup = settingsBackupURL(url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: backup)
+        }
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/First"]), to: url)
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/Second"]), to: url)
+        let before = try Data(contentsOf: backup)
+        XCTAssertEqual(try loadSettings(from: backup).ignoredLeftoverPaths, ["/tmp/First"])
+
+        let second = try loadSettings(from: url)
+        for _ in 1...3 {
+            try saveSettings(second, to: url)
+        }
+        XCTAssertEqual(
+            try Data(contentsOf: backup),
+            before,
+            "a save that changed nothing replaced the backup with a copy of the current file"
+        )
+        XCTAssertEqual(try loadSettings(from: backup).ignoredLeftoverPaths, ["/tmp/First"])
+
+        // A save that does change something still keeps what it replaced.
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/Third"]), to: url)
+        XCTAssertEqual(try loadSettings(from: url).ignoredLeftoverPaths, ["/tmp/Third"])
+        XCTAssertEqual(try loadSettings(from: backup).ignoredLeftoverPaths, ["/tmp/Second"])
+    }
+
     /// The recovery the backup exists for, end to end: a settings file that no
     /// longer loads, and the backup put back in its place.
     func testSettingsBackupRestoresAFileThatNoLongerLoads() throws {

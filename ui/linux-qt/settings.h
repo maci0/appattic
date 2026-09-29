@@ -46,9 +46,11 @@ QByteArray encodeSettingsJson(const AppSettings &s);
 
 /// Where the last settings file this shell wrote is kept, and the copy that
 /// puts it there. `settings.json` holds the user's own choices, so the state
-/// before a replace has to outlive the write that replaces it. False when
-/// there was nothing to copy or the copy did not land; the caller writes the
-/// new settings either way, because a backup is not the write it asked for.
+/// before a replace has to outlive the write that replaces it. A file the
+/// backup already holds is left alone, so a save that changed nothing cannot
+/// replace that state with a copy of the current file. False when there was
+/// nothing to copy or the copy did not land; the caller writes the new
+/// settings either way, because a backup is not the write it asked for.
 /// The Swift scanner's `saveSettings` keeps the same file.
 QString settingsBackupPath(const QString &settingsPath);
 bool keepSettingsBackup(const QString &settingsPath);

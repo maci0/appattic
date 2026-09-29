@@ -95,9 +95,12 @@ public func defaultSettingsURL() -> URL {
 /// the ignore list is the user's own choices, and a file that has been emptied,
 /// truncated by a full disk, or hand-mangled into invalid JSON is refused by
 /// `loadSettings` and never repaired. `saveSettings` copies the file it is
-/// about to replace here first, so the last state the app itself wrote is
-/// always one `cp` away. Nothing reads this file at run time: it is recovery
-/// material, and `docs/runbooks/state-recovery.md` is what says so to a user.
+/// about to replace here first, so the last state the app itself wrote that
+/// differs from the current one is always one `cp` away. A save that changed
+/// nothing leaves this holding what it already held, so a repeated save cannot
+/// replace that state with a copy of itself. Nothing reads this file at run
+/// time: it is recovery material, and `docs/runbooks/state-recovery.md` is
+/// what says so to a user.
 public func settingsBackupURL(_ url: URL = defaultSettingsURL()) -> URL {
     url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + ".bak")
 }
@@ -389,6 +392,14 @@ public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSett
 /// Copy the settings file that is about to be replaced to `settings.json.bak`,
 /// so the last state the app wrote survives the write that replaces it.
 ///
+/// A file the backup already holds is not copied again. A save that changed
+/// nothing is a normal one: the settings page persists on every toggle, a
+/// double click reaches the handler twice, and a window that re-saves what it
+/// loaded writes the same bytes. Copying them would leave the backup holding a
+/// copy of the file that is already there, and the last state that differed
+/// from the current one would be gone: exactly the state this file exists for,
+/// destroyed by a run that removed nothing.
+///
 /// A backup that does not land does not stop the save. The file being replaced
 /// is either readable and the copy is worth having, or unreadable and there is
 /// nothing to copy; either way the write the caller asked for has to be the one
@@ -396,5 +407,7 @@ public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSett
 /// state the app wrote.
 private func keepSettingsBackup(at url: URL) throws {
     guard let previous = try? Data(contentsOf: url), !previous.isEmpty else { return }
-    try writeOwnerOnlyFile(previous, to: settingsBackupURL(url))
+    let backup = settingsBackupURL(url)
+    if let kept = try? Data(contentsOf: backup), kept == previous { return }
+    try writeOwnerOnlyFile(previous, to: backup)
 }
