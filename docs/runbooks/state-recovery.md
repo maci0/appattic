@@ -10,7 +10,7 @@ rather than in someone's head.
 
 | File | Contents | Rebuildable | How it is protected |
 |------|----------|-------------|---------------------|
-| `<data dir>/settings.json` | `confirmDelete`, `includeSystem`, and the leftover paths the user chose to ignore | No. The ignore list is paths the user typed, and no scan can recover them | Written whole: the scanner and the CLI through `mkstemp` at `0600`, `fsync`, `rename`, and a parent-directory `fsync`; the Linux window through `QSaveFile`. The file it replaces is kept as `settings.json.bak` |
+| `<data dir>/settings.json` | `confirmDelete`, `includeSystem`, and the leftover paths the user chose to ignore | No. The ignore list is paths the user typed, and no scan can recover them | Written whole and flushed before the save reports success: the scanner and the CLI through `mkstemp` at `0600`, `fsync`, `rename`, and a parent-directory `fsync`; the Linux window through `QSaveFile` at `0600`, `rename`, and the same two `fsync` calls in `writeDurableFile`. The file it replaces is kept as `settings.json.bak` |
 | `<data dir>/settings.json.bak` | The last settings file the app wrote that differs from the current one, kept by `saveSettings` and by the Linux window's `persistSettings` | It is a copy of the above, one change older. A save that changed nothing leaves it alone, so a repeated save cannot overwrite it with a copy of the current file | Written the same owner-only way, never read at run time |
 | `<data dir>/last-scan.json` | The whole last scan: every app path and leftover path under the home directory | Yes. A rescan rebuilds it, at the cost of one run | Written the same way. Deleted when it is stale, after a run that changes the machine, and by `appattic erase` |
 | `$TMPDIR/appattic-script-*.sh`, `*.err` | A generated cleanup or update script and the tail of its stderr | Yes, the run regenerates it | `0600`, removed when the run ends, including when it fails |
@@ -100,6 +100,10 @@ the snapshot without deleting it.
   old one leaves the new settings in place and the backup one generation
   further back. A file is written whole or not at all: the Swift scanner and
   the CLI go through `mkstemp`, `fsync`, `rename`, and a directory `fsync`
-  after the rename, so a crash cannot leave a file that is half of one
-  generation and half of the next. The Linux window writes through
-  `QSaveFile`, which replaces by rename but leaves the flush to Qt.
+  after the rename, and the Linux window does the same through `QSaveFile` and
+  `writeDurableFile`, so a crash cannot leave a file that is half of one
+  generation and half of the next, and neither shell reports a save that is
+  only in the page cache. A file that cannot be made durable is removed rather
+  than published: the save is reported as failed, and what is left on disk is
+  the copy the write took of the state it replaced, which is
+  `settings.json.bak`.

@@ -55,4 +55,12 @@ QByteArray encodeSettingsJson(const AppSettings &s);
 QString settingsBackupPath(const QString &settingsPath);
 bool keepSettingsBackup(const QString &settingsPath);
 
+/// Replace `path` with `raw` whole or not at all, and only report success once
+/// the bytes are on disk. The rename a save is made of publishes the file while
+/// its contents are still in the page cache, so without the fsync a crash can
+/// leave a correctly named settings file holding a truncated write. A file that
+/// cannot be made durable is removed rather than published, which leaves the
+/// copy the write took of the state it replaced as the state on disk.
+bool writeDurableFile(const QByteArray &raw, const QString &path);
+
 #endif

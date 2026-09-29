@@ -3215,13 +3215,7 @@ private:
            state before this write has to outlive it. A backup that does not
            land is not a reason to refuse the save the user asked for. */
         keepSettingsBackup(path);
-        QSaveFile f(path);
-        if (!f.open(QIODevice::WriteOnly)) {
-            showError(settingsUnwritableMessage(path));
-            return false;
-        }
-        const QByteArray raw = encodeSettingsJson(s);
-        if (f.write(raw) != raw.size() || !f.commit()) {
+        if (!writeDurableFile(encodeSettingsJson(s), path)) {
             showError(settingsUnwritableMessage(path));
             return false;
         }

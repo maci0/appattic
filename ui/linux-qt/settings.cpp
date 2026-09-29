@@ -16,6 +16,65 @@
 #include <QStandardPaths>
 #include <QVariant>
 
+#include <fcntl.h>
+#include <unistd.h>
+
+namespace {
+
+/// The file's bytes are on disk. QSaveFile replaces by rename, and a rename
+/// publishes a file whose contents are still in the page cache, so a crash
+/// between the two leaves a correctly named file holding a truncated write.
+/// The state written here is the account's own choices, which no scan can
+/// rebuild, so the save is not a save until the bytes are. The Swift scanner's
+/// `writeOwnerOnlyFile` does this for the same file from the CLI and the macOS
+/// window.
+bool syncWrittenFile(const QString &path) {
+    const QByteArray cPath = path.toLocal8Bit();
+    const int fd = ::open(cPath.constData(), O_RDONLY);
+    if (fd < 0) return false;
+    const bool synced = ::fsync(fd) == 0;
+    ::close(fd);
+    if (!synced) return false;
+    // The directory entry naming the new file is in the page cache until the
+    // directory itself is written out, so a crash here can leave the
+    // destination as it was before the write. That is not the file's failure
+    // to write: the bytes are on disk and the name resolves, and reporting it
+    // would make a durable write look like a failed one. A directory that
+    // cannot be opened for fsync at all (some network mounts) is as durable as
+    // that filesystem can make it.
+    const QByteArray cDir = QFileInfo(path).absolutePath().toLocal8Bit();
+    const int dir = ::open(cDir.constData(), O_RDONLY | O_DIRECTORY);
+    if (dir < 0) return true;
+    ::fsync(dir);
+    ::close(dir);
+    return true;
+}
+
+} // namespace
+
+/// Write `raw` to `path` whole or not at all, and leave it on disk. The
+/// temporary file is created at `0600` and is the destination from the rename
+/// on, so nothing sees the file at the umask default the way a write followed
+/// by a chmod does. A file that cannot be made durable is removed rather than
+/// published: the caller is told the write failed, and the copy the write took
+/// of the state it replaced is what is left.
+bool writeDurableFile(const QByteArray &raw, const QString &path) {
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly)) return false;
+    if (!out.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        out.cancelWriting();
+        return false;
+    }
+    if (out.write(raw) != raw.size()) {
+        out.cancelWriting();
+        return false;
+    }
+    if (!out.commit()) return false;
+    if (syncWrittenFile(path)) return true;
+    QFile::remove(path);
+    return false;
+}
+
 QString settingsFilePath() {
     return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
         .filePath(QStringLiteral("appattic/settings.json"));
@@ -200,9 +259,7 @@ bool keepSettingsBackup(const QString &settingsPath) {
         QFile kept(settingsBackupPath(settingsPath));
         if (kept.open(QIODevice::ReadOnly) && kept.readAll() == raw) return true;
     }
-    QSaveFile out(settingsBackupPath(settingsPath));
-    if (!out.open(QIODevice::WriteOnly)) return false;
-    if (out.write(raw) != raw.size() || !out.commit()) return false;
+    if (!writeDurableFile(raw, settingsBackupPath(settingsPath))) return false;
     restrictPrivateDataFile(settingsBackupPath(settingsPath));
     return true;
 }

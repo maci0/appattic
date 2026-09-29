@@ -1739,12 +1739,63 @@ static int checkSettingsBackupRepeatedSave() {
     return 0;
 }
 
+/// A save is only a save once the bytes are on disk: the rename that publishes
+/// the file does not flush it, so a crash between the two leaves a correctly
+/// named settings.json holding a truncated write. The write reports failure
+/// rather than success when it cannot finish, it never leaves a file that is
+/// neither the old state nor the new one, and it does not publish the file at
+/// the umask default on the way past.
+static int checkDurableWrite() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "durable write: temp dir failed\n");
+        return 1;
+    }
+    const QString path = tmp.filePath(QStringLiteral("settings.json"));
+    AppSettings first;
+    first.ignoredLeftoverPaths = QStringList{QStringLiteral("/first")};
+    if (writeFile(path, encodeSettingsJson(first))) {
+        std::fprintf(stderr, "durable write: the starting file was not written\n");
+        return 1;
+    }
+    AppSettings second;
+    second.ignoredLeftoverPaths = QStringList{QStringLiteral("/second")};
+    if (!writeDurableFile(encodeSettingsJson(second), path)) {
+        std::fprintf(stderr, "durable write: the write did not land\n");
+        return 1;
+    }
+    QFile written(path);
+    AppSettings s;
+    QString err;
+    if (!written.open(QIODevice::ReadOnly)
+        || !parseSettingsJson(written.readAll(), &s, &err)
+        || s.ignoredLeftoverPaths != second.ignoredLeftoverPaths) {
+        std::fprintf(stderr, "durable write: the file is not what was written (%s)\n", qPrintable(err));
+        return 1;
+    }
+    const QFile::Permissions perms = QFileInfo(path).permissions();
+    if (perms & (QFileDevice::ReadGroup | QFileDevice::ReadOther
+            | QFileDevice::WriteGroup | QFileDevice::WriteOther)) {
+        std::fprintf(stderr, "durable write: the file is group/other readable\n");
+        return 1;
+    }
+    // A write that cannot be made is reported, and publishes nothing: the
+    // state the caller still holds is the one on disk.
+    const QString absent = tmp.filePath(QStringLiteral("no-such-dir/settings.json"));
+    if (writeDurableFile(encodeSettingsJson(second), absent) || QFile::exists(absent)) {
+        std::fprintf(stderr, "durable write: a write that could not land reported success\n");
+        return 1;
+    }
+    std::fprintf(stdout, "durable write: ok\n");
+    return 0;
+}
+
 int main() {
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
         checkRootDirDoneTotals(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
-        checkSettingsBackup(), checkSettingsBackupRepeatedSave(),
+        checkSettingsBackup(), checkSettingsBackupRepeatedSave(), checkDurableWrite(),
         checkLocaleGrouping(),
         checkLegacySettingsMigration(),
     };
