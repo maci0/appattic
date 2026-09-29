@@ -146,10 +146,10 @@ public let commandPipeDrainGrace: TimeInterval = 2
 /// opens once the process has exited.
 private let commandPipePollSliceMs: Int = 100
 
-/// How often the wait for a spawned command re-checks the direct child with a
-/// zero-timeout `waitpid`. The `terminationHandler` is the fast path and is
-/// signalled without waiting for this to elapse; the interval only bounds how
-/// late the fallback below can be noticed.
+/// How often the wait for a spawned command re-checks the direct child after
+/// the `terminationHandler` has not fired. `waitpid` is asked first (see
+/// `waitForDirectChild`), so this bounds how late a handler that never arrives
+/// is noticed, not how long a command that has already exited is waited on.
 private let childExitPollInterval: TimeInterval = 0.1
 
 /// How much of a redirected command's output a report keeps. A package
@@ -365,6 +365,14 @@ private func exitStatus(fromWaitStatus status: Int32) -> Int32 {
 
 /// Wait for `process` to exit, for `exited` to be signalled, or for `timeout`
 /// to pass.
+///
+/// `waitpid` is asked before the semaphore, not after: the semaphore is a
+/// deadline-bounded wait, so putting it first charged every command up to a
+/// whole `childExitPollInterval` of dead time on the platform where
+/// `terminationHandler` is late. `waitpid(WNOHANG)` costs one syscall and
+/// answers immediately, and the two signals race for the same child anyway
+/// (whichever wins, the loser sees `.reapedElsewhere` or `.reaped`), so the
+/// cheap question goes first.
 private func waitForDirectChild(
     _ process: Process,
     exited: DispatchSemaphore,
@@ -375,10 +383,6 @@ private func waitForDirectChild(
     // The injected clock is the pipe drain window's, and a stepped one must not
     // decide how long a command may run: the deadline is the host's own clock.
     while true {
-        if exited.wait(timeout: .now() + childExitPollInterval) == .success {
-            process.waitUntilExit()
-            return ChildExit(timedOut: false, reapedStatus: nil)
-        }
         switch directChildState(pid) {
         case .reaped(let status):
             // Foundation's handler is still pending and never will report this
@@ -395,6 +399,10 @@ private func waitForDirectChild(
             stopProcess(process, exited: exited)
             process.waitUntilExit()
             return ChildExit(timedOut: true, reapedStatus: nil)
+        }
+        if exited.wait(timeout: .now() + childExitPollInterval) == .success {
+            process.waitUntilExit()
+            return ChildExit(timedOut: false, reapedStatus: nil)
         }
     }
 }

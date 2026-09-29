@@ -391,11 +391,15 @@ func jsonDependencyEntries(_ value: Any) -> [(String, String?)] {
     return out
 }
 
-func parseGlobalJSON(_ text: String, manager: String) -> [PackageEntry] {
-    guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) else { return [] }
-    return jsonDependencyEntries(obj).map { name, version in
+func globalPackageEntries(_ document: Any, manager: String) -> [PackageEntry] {
+    jsonDependencyEntries(document).map { name, version in
         makePackage(name: name, manager: manager, kind: "global", version: version)
     }
+}
+
+func parseGlobalJSON(_ text: String, manager: String) -> [PackageEntry] {
+    guard let document = parseJSONDocument(text) else { return [] }
+    return globalPackageEntries(document, manager: manager)
 }
 
 public func parseNpmGlobalList(_ text: String) -> [PackageEntry] {
@@ -463,27 +467,38 @@ public func parseBunGlobalList(_ text: String) -> [PackageEntry] {
     }
 }
 
-public func parsePipxList(_ text: String) -> [PackageEntry] {
-    if let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
-       let venvs = obj["venvs"] as? [String: Any]
-    {
-        var out: [PackageEntry] = []
-        for (fallback, raw) in venvs.sorted(by: { $0.key < $1.key }) {
-            var name = fallback
-            var version: String?
-            if let meta = raw as? [String: Any],
-               let metadata = meta["metadata"] as? [String: Any],
-               let main = metadata["main_package"] as? [String: Any]
-            {
-                if let pkg = main["package"] as? String, !pkg.isEmpty { name = pkg }
-                version = main["package_version"] as? String
-            }
-            out.append(makePackage(name: name, manager: "pipx", kind: "global", version: version))
+/// The `venvs` object of a `pipx list --json` answer, as rows. Empty for a
+/// document without one, which is what the text fallback below answers for an
+/// older pipx.
+func pipxListEntries(_ document: Any) -> [PackageEntry] {
+    guard let obj = document as? [String: Any],
+          let venvs = obj["venvs"] as? [String: Any]
+    else { return [] }
+    var out: [PackageEntry] = []
+    for (fallback, raw) in venvs.sorted(by: { $0.key < $1.key }) {
+        var name = fallback
+        var version: String?
+        if let meta = raw as? [String: Any],
+           let metadata = meta["metadata"] as? [String: Any],
+           let main = metadata["main_package"] as? [String: Any]
+        {
+            if let pkg = main["package"] as? String, !pkg.isEmpty { name = pkg }
+            version = main["package_version"] as? String
         }
-        // Collated, so "Ä" is not parked after "Z" for a German or Swedish
-        // reader. `venvs` is a JSON object and its key order varies, so the
-        // version has to break the tie: `sort` is not stable.
-        return out.sorted { collatedBefore($0.name, $1.name, tieBreak: $0.version ?? "", $1.version ?? "") }
+        out.append(makePackage(name: name, manager: "pipx", kind: "global", version: version))
+    }
+    // Collated, so "Ä" is not parked after "Z" for a German or Swedish
+    // reader. `venvs` is a JSON object and its key order varies, so the
+    // version has to break the tie: `sort` is not stable.
+    return out.sorted { collatedBefore($0.name, $1.name, tieBreak: $0.version ?? "", $1.version ?? "") }
+}
+
+public func parsePipxList(_ text: String) -> [PackageEntry] {
+    if let document = parseJSONDocument(text),
+       let obj = document as? [String: Any],
+       obj["venvs"] as? [String: Any] != nil
+    {
+        return pipxListEntries(document)
     }
     return parsePackageLines(text, capacity: 64) { raw in
         // `pipx list` row: `package <name> <version>, installed using …`.
@@ -552,15 +567,22 @@ public func parseUvToolList(_ text: String) -> [PackageEntry] {
 /// has not failed until every step has.
 struct PackageQueryResult {
     var output: String?
+    /// The decoded `output`, for a step that declared its answer JSON. Decoding
+    /// a listing to find out whether it decodes and decoding it again to read
+    /// it is two passes over a document that runs to megabytes on a machine
+    /// with a few hundred packages, so the query hands the object over.
+    var json: Any?
     var failed: Bool
 }
 
-/// A JSON document, or not. Every JSON parser here answers an unreadable
-/// payload with an empty list, and an empty list is what the report prints and
-/// the scan cache stores, so the query layer asks this before accepting a
-/// `rc == 0` answer whose shape it declared as JSON.
-func jsonListingIsUsable(_ text: String) -> Bool {
-    (try? JSONSerialization.jsonObject(with: Data(text.utf8))) != nil
+/// `text` decoded as JSON, or nil when it is not JSON. Every JSON parser in
+/// this module goes through here, so one listing is decoded once per query
+/// rather than once per question asked about it. The query layer takes the
+/// object rather than the text for the same reason: every parser here answers
+/// an unreadable payload with an empty list, and an empty list is what the
+/// report prints and the scan cache stores.
+func parseJSONDocument(_ text: String) -> Any? {
+    try? JSONSerialization.jsonObject(with: Data(text.utf8))
 }
 
 /// One argument spelling for a query, and whether it answers with JSON.
@@ -570,6 +592,11 @@ func jsonListingIsUsable(_ text: String) -> Bool {
 struct PackageQueryStep {
     var args: [String]
     var json: Bool = false
+    /// Reads a step whose answer is JSON, from the object `runPackageQuery`
+    /// decoded. Set on every `json` step, so the listing is decoded once
+    /// instead of once to check it and again to read it. The chain's `parse`
+    /// stays for the text spellings of the same manager.
+    var parseJSON: ((Any) -> [PackageEntry])?
 }
 
 func runPackageQuery(
@@ -593,17 +620,22 @@ func runPackageQuery(
             // records the manager only when none of them answers. The next
             // binary is tried too, because `names` are alternate spellings of
             // one manager: a broken `pip` must not shadow a `pip3` that answers.
-            if json && !jsonListingIsUsable(out) { continue }
-            return PackageQueryResult(output: out, failed: false)
+            if json {
+                guard let decoded = parseJSONDocument(out) else { continue }
+                return PackageQueryResult(output: out, json: decoded, failed: false)
+            }
+            return PackageQueryResult(output: out, json: nil, failed: false)
         }
     }
-    return PackageQueryResult(output: nil, failed: attempted)
+    return PackageQueryResult(output: nil, json: nil, failed: attempted)
 }
 
 /// One manager, one or more argument spellings tried in order, the first
 /// answer parsed. A failure is recorded only when every spelling failed, so
 /// `pipx list --json` failing on an old pipx leaves the check alone when
-/// `pipx list` answered. Returns the parsed rows, empty when nothing answered.
+/// `pipx list` answered. `parse` reads a text answer and is nil for a chain
+/// whose every step is JSON, each of those steps carrying its own `parseJSON`.
+/// Returns the parsed rows, empty when nothing answered.
 func runPackageQueryChain(
     _ steps: [PackageQueryStep],
     which: WhichFn,
@@ -612,7 +644,7 @@ func runPackageQueryChain(
     label: String,
     timeout: TimeInterval = 60,
     ok: (Int32) -> Bool = { $0 == 0 },
-    parse: (String) -> [PackageEntry]
+    parse: ((String) -> [PackageEntry])? = nil
 ) -> [PackageEntry] {
     var failed = false
     for step in steps {
@@ -621,7 +653,11 @@ func runPackageQueryChain(
             timeout: timeout, ok: ok, json: step.json
         )
         failed = failed || result.failed
-        if let out = result.output { return parse(out) }
+        if let out = result.output {
+            if let decoded = result.json, let parseJSON = step.parseJSON { return parseJSON(decoded) }
+            guard let parse else { continue }
+            return parse(out)
+        }
     }
     if failed { noteScanCheckFailed(label) }
     return []
@@ -691,16 +727,16 @@ public func collectPackages(
     }
     queries.append {
         return runPackageQueryChain(
-            [PackageQueryStep(args: ["ls", "-g", "--depth=0", "--json"], json: true)],
-            which: which, run: run, names: ["npm"], label: "npm",
-            parse: parseNpmGlobalList
+            [PackageQueryStep(args: ["ls", "-g", "--depth=0", "--json"], json: true,
+                parseJSON: { globalPackageEntries($0, manager: "npm") })],
+            which: which, run: run, names: ["npm"], label: "npm"
         )
     }
     queries.append {
         return runPackageQueryChain(
-            [PackageQueryStep(args: ["ls", "-g", "--depth=0", "--json"], json: true)],
-            which: which, run: run, names: ["pnpm"], label: "pnpm",
-            parse: parsePnpmGlobalList
+            [PackageQueryStep(args: ["ls", "-g", "--depth=0", "--json"], json: true,
+                parseJSON: { globalPackageEntries($0, manager: "pnpm") })],
+            which: which, run: run, names: ["pnpm"], label: "pnpm"
         )
     }
     queries.append {
@@ -712,7 +748,10 @@ public func collectPackages(
     }
     queries.append {
         return runPackageQueryChain(
-            [PackageQueryStep(args: ["list", "--json"], json: true), PackageQueryStep(args: ["list"])],
+            [
+                PackageQueryStep(args: ["list", "--json"], json: true, parseJSON: pipxListEntries),
+                PackageQueryStep(args: ["list"]),
+            ],
             which: which, run: run, names: ["pipx"], label: "pipx",
             parse: parsePipxList
         )
@@ -727,11 +766,12 @@ public func collectPackages(
     queries.append {
         return runPackageQueryChain(
             [
-                PackageQueryStep(args: ["list", "--user", "--not-required", "--format=json"], json: true),
-                PackageQueryStep(args: ["list", "--user", "--format=json"], json: true),
+                PackageQueryStep(args: ["list", "--user", "--not-required", "--format=json"], json: true,
+                                 parseJSON: pipUserListEntries),
+                PackageQueryStep(args: ["list", "--user", "--format=json"], json: true,
+                                 parseJSON: pipUserListEntries),
             ],
-            which: which, run: run, names: ["pip", "pip3"], label: "pip",
-            parse: parsePipUserList
+            which: which, run: run, names: ["pip", "pip3"], label: "pip"
         )
     }
     var out = pmap(queries, workers: 4) { $0() }.flatMap { $0 }
@@ -739,10 +779,8 @@ public func collectPackages(
     return out
 }
 
-public func parsePipUserList(_ text: String) -> [PackageEntry] {
-    guard let arr = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]] else {
-        return []
-    }
+func pipUserListEntries(_ document: Any) -> [PackageEntry] {
+    guard let arr = document as? [[String: Any]] else { return [] }
     var out: [PackageEntry] = []
     for obj in arr {
         guard let name = obj["name"] as? String, !name.isEmpty else { continue }
@@ -750,6 +788,11 @@ public func parsePipUserList(_ text: String) -> [PackageEntry] {
         out.append(makePackage(name: name, manager: "pip", kind: "global", version: version))
     }
     return out
+}
+
+public func parsePipUserList(_ text: String) -> [PackageEntry] {
+    guard let document = parseJSONDocument(text) else { return [] }
+    return pipUserListEntries(document)
 }
 
 func listDenoGlobals() -> [PackageEntry] {

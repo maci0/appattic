@@ -1114,12 +1114,20 @@ func masCatalog(
 ) -> [String: [String: Any]] {
     var ids: [String] = []
     var mutated = apps
+    // One `mdls` per app that has no cached id, and the spawns overlap: the
+    // per-app `mdls` was a serial loop, so a machine with thirty App Store
+    // apps spent thirty round trips on the process spawn alone before the
+    // first request went out. `pmap` keeps the results in input order, so
+    // `ids` is the same list the serial loop built.
+    let missing = mutated.indices.filter { mutated[$0].extra["mas_adam_id"] == nil }
+    let found = pmap(missing.map { mutated[$0].path }, workers: 8) { masSpotlightMeta($0) }
+    let resolvedFromSpotlight = Dictionary(uniqueKeysWithValues: zip(missing, found))
     for i in mutated.indices {
         var extra = mutated[i].extra
         var adam = extra["mas_adam_id"]
         if adam == nil {
-            let (found, category) = masSpotlightMeta(mutated[i].path)
-            if let found { extra["mas_adam_id"] = found; adam = found }
+            let (id, category) = resolvedFromSpotlight[i] ?? (nil, nil)
+            if let id { extra["mas_adam_id"] = id; adam = id }
             if let category { extra["mas_category"] = category }
             mutated[i].extra = extra
         }

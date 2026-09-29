@@ -402,6 +402,28 @@ final class PackageTests: XCTestCase {
         XCTAssertFalse(cmds.contains { $0.contains("mas") })
     }
 
+    /// A step that answers JSON is decoded once, by the query, and the step's
+    /// own parser reads the object it hands over. These two managers have no
+    /// text spelling in the chain, so the step parser is the only path their
+    /// rows can arrive by: if the chain fell back to the text parser they would
+    /// be empty.
+    func testCollectPackagesReadsJSONStepsThroughTheStepParser() {
+        let answers: [String: String] = [
+            "pipx": #"{"venvs":{"ruff":{"metadata":{"main_package":{"package":"ruff","package_version":"0.5.0"}}}}}"#,
+            "pip3": #"[{"name":"httpie","version":"3.2.2"}]"#,
+        ]
+        let pkgs = collectPackages(
+            which: { name in answers[name] != nil ? "/usr/bin/\(name)" : nil },
+            run: { cmd, _ in
+                let bin = cmd.first.map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
+                return (0, answers[bin] ?? "", "")
+            },
+            osRelease: "ID=arch\n"
+        )
+        XCTAssertTrue(pkgs.contains { $0.name == "ruff" && $0.manager == "pipx" && $0.version == "0.5.0" }, "\(pkgs)")
+        XCTAssertTrue(pkgs.contains { $0.name == "httpie" && $0.manager == "pip" && $0.version == "3.2.2" }, "\(pkgs)")
+    }
+
     func testCollectPackagesFedoraUsesRepoqueryNotLeaves() {
         var cmds: [[String]] = []
         let cmdsLock = NSLock()

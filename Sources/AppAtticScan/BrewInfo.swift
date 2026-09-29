@@ -159,9 +159,17 @@ public func untrustedCaskReason(_ cask: UntrustedCask) -> String {
     return "Homebrew refuses to load this cask from an untrusted tap. It is still installed. AppAttic will not trust the tap for you."
 }
 
+/// `out` decoded as a `brew info --json=v2` document, or nil when it is not
+/// one. `brew info --json=v2 --installed` answers with every installed
+/// formula's full metadata, which runs to megabytes on a machine with a few
+/// hundred of them, so the callers below take the decoded document rather
+/// than decoding once to check it and again to read it.
+func infoJSONDocument(_ out: String) -> [String: Any]? {
+    parseJSONDocument(out) as? [String: Any]
+}
+
 func parseInfoJSON(_ out: String) -> [String: Any] {
-    guard let obj = try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [String: Any] else { return [:] }
-    return obj
+    infoJSONDocument(out) ?? [:]
 }
 
 public func fetchInfoJSON(
@@ -175,16 +183,16 @@ public func fetchInfoJSON(
         // A success status carrying a payload that is not JSON is a broken
         // answer, not an empty installed list. The report would show every
         // formula without a version, and the scan would cache that for a day.
-        if jsonListingIsUsable(outF) {
-            formulae = parseInfoJSON(outF)["formulae"] as? [Any] ?? []
+        if let doc = infoJSONDocument(outF) {
+            formulae = doc["formulae"] as? [Any] ?? []
         } else {
             noteScanCheckFailed("brew-info")
         }
     }
     let (rcC, outC, _) = run([brew, "info", "--json=v2", "--cask", "--installed"], 180)
     if rcC == 0, !outC.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        if jsonListingIsUsable(outC) {
-            casks = parseInfoJSON(outC)["casks"] as? [Any] ?? []
+        if let doc = infoJSONDocument(outC) {
+            casks = doc["casks"] as? [Any] ?? []
         } else {
             noteScanCheckFailed("brew-info")
         }
@@ -474,8 +482,8 @@ public func collectBrew(
 // Parsers and metadata for the Homebrew side of the Outdated report. They
 // belong with the rest of the brew feature, not in the manager-agnostic report.
 
-public func parseBrewOutdatedJSON(_ text: String) -> [OutdatedPkg] {
-    guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return [] }
+func brewOutdatedEntries(_ document: Any) -> [OutdatedPkg] {
+    guard let obj = document as? [String: Any] else { return [] }
     var out: [OutdatedPkg] = []
     for (key, manager) in [("formulae", "brew-formula"), ("casks", "brew-cask")] {
         for item in obj[key] as? [[String: Any]] ?? [] {
@@ -497,6 +505,11 @@ public func parseBrewOutdatedJSON(_ text: String) -> [OutdatedPkg] {
     return out
 }
 
+public func parseBrewOutdatedJSON(_ text: String) -> [OutdatedPkg] {
+    guard let document = parseJSONDocument(text) else { return [] }
+    return brewOutdatedEntries(document)
+}
+
 func queryBrewStatus(
     _ brew: String,
     progress: ((String) -> Void)? = nil,
@@ -511,8 +524,8 @@ func queryBrewStatus(
     // the answer "nothing is outdated": the parser would answer an empty list
     // and the scan would write that empty list to the cache and serve it for a
     // day. `outdatedFailed` is the same unknown a nonzero status produces.
-    guard jsonListingIsUsable(out) else { return ([], true) }
-    return (parseBrewOutdatedJSON(out), false)
+    guard let document = parseJSONDocument(out) else { return ([], true) }
+    return (brewOutdatedEntries(document), false)
 }
 
 /// The two lookup tables `brewPackageMeta` reads out of `brew info --json=v2`:
