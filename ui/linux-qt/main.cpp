@@ -891,7 +891,7 @@ private slots:
             m_scanAt.clear();
             showError(QStringLiteral(
                 "Scan engine is missing: no appattic_core.wasm in %1. Rebuild the app, "
-                "or set APPATTIC_CORE_OUT to the directory that holds it.").arg(out));
+                "or set APPATTIC_CORE_OUT to the directory that holds it.").arg(redactHomePaths(out)));
             fillCurrent();
             return;
         }

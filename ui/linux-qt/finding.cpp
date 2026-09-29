@@ -85,7 +85,11 @@ QString redactHomePaths(const QString &text, const QString &home) {
         pattern = QStringLiteral("(?:") + pattern + QLatin1Char('|')
             + QRegularExpression::escape(decomposed) + QLatin1Char(')');
     }
-    const QRegularExpression re(pattern + QStringLiteral("(?=/|$|[\\s:\"',;])"));
+    // The lookahead matches everything but a character that could continue a
+    // path, so a home path in a parenthetical or bracketed message is
+    // redacted like one followed by a separator. Same set as Swift
+    // `isHomeBoundary`.
+    const QRegularExpression re(pattern + QStringLiteral("(?=/|$|[^A-Za-z0-9._~+=-])"));
     if (!text.contains(re)) return text;
     QString out = text;
     out.replace(re, QStringLiteral("~"));
@@ -489,6 +493,19 @@ static bool hasParentSegment(const QString &path) {
     return path.split(QLatin1Char('/')).contains(QLatin1String(".."));
 }
 
+/// The path with empty and `.` components dropped, for a prefix test. The
+/// removal quotes the path as written, so `rm` resolves `//usr` and `/usr/.`
+/// to the packaged root a raw prefix test would miss. Matches Swift
+/// `normalizedForPrefixTest`.
+static QString normalizedForPrefixTest(const QString &path) {
+    QStringList parts;
+    const QStringList raw = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    for (const QString &p : raw) {
+        if (p != QLatin1String(".")) parts << p;
+    }
+    return QLatin1Char('/') + parts.join(QLatin1Char('/'));
+}
+
 bool isProtectedPackagedPath(const QString &path) {
     if (path.isEmpty()) return false;
     // The removal quotes the path as written, so a `..` segment walks out of
@@ -496,13 +513,14 @@ bool isProtectedPackagedPath(const QString &path) {
     // not under a packaged root by spelling and deletes `/etc` once `rm`
     // resolves it.
     if (hasParentSegment(path)) return true;
+    const QString normalized = normalizedForPrefixTest(path);
     static const char *kRoots[] = {
         "/usr", "/bin", "/sbin", "/etc", "/System", "/lib", "/lib64",
         "/boot", "/dev", "/proc", "/sys", "/private", "/Library",
     };
     for (const char *root : kRoots) {
         const QLatin1String r(root);
-        if (path == r || path.startsWith(r + QLatin1Char('/'))) return true;
+        if (normalized == r || normalized.startsWith(r + QLatin1Char('/'))) return true;
     }
     return false;
 }
@@ -512,11 +530,18 @@ static bool commandRemovesProtectedPath(const QString &cmd) {
         && !cmd.startsWith(QLatin1String("rm"))) {
         return false;
     }
+    // A slash counts as a delimiter because the command is judged on its raw
+    // spelling: `rm -rf //usr/bin` carries the packaged root the way
+    // `rm -rf /usr/bin` does, and matching only the quoted and spaced forms
+    // let the doubled slash through. The set is wider than the paths it can
+    // match, which is the safe direction for a deny.
     auto has = [&](const char *root) {
         const QString r = QLatin1String(root);
         return cmd.contains(QLatin1Char(' ') + r)
+            || cmd.contains(QLatin1Char('\t') + r)
             || cmd.contains(QLatin1Char('\'') + r)
-            || cmd.contains(QLatin1Char('"') + r);
+            || cmd.contains(QLatin1Char('"') + r)
+            || cmd.contains(QLatin1Char('/') + r);
     };
     return has("/usr") || has("/bin") || has("/sbin") || has("/etc")
         || has("/System") || has("/lib") || has("/lib64") || has("/boot")
@@ -638,6 +663,17 @@ static bool leftoverStatusBlocksCleanup(const QString &status) {
         || status == QLatin1String("system");
 }
 
+/// A path a generated `rm` may name. Every leftover root the core walks is
+/// absolute, and a finding's path is read off the filesystem, so a relative
+/// spelling or a leading `-` did not come from a walk. `shellQuote` leaves
+/// either one unquoted, so `rm` resolves it against the script's working
+/// directory, or reads `--no-preserve-root` as the option it is. Matches Swift
+/// `isRemovableLeftoverPath`.
+static bool isRemovableLeftoverPath(const QString &path) {
+    return !path.isEmpty() && path.startsWith(QLatin1Char('/'))
+        && !path.startsWith(QLatin1Char('-'));
+}
+
 static bool isPpaSourcesPath(const QString &path) {
     // Tested on the spelling as written, not on the cleaned path: cleanPath
     // resolves `..`, so the check below could never see one and
@@ -653,12 +689,13 @@ QString leftoverCleanupCommand(const Finding &f) {
         if (f.path.isEmpty()) return {};
         if (!f.packagedPath.isEmpty() && f.path == f.packagedPath) return {};
         if (isProtectedPackagedPath(f.path)) return {};
+        if (!isRemovableLeftoverPath(f.path)) return {};
         return QStringLiteral("rm -f ") + shellQuote(f.path);
     }
     if (isLeftover(f)) {
         QStringList paths;
         auto add = [&](const QString &p) {
-            if (p.isEmpty() || paths.contains(p)) return;
+            if (!isRemovableLeftoverPath(p) || paths.contains(p)) return;
             if (isProtectedPackagedPath(p) && !isPpaSourcesPath(p)) return;
             paths << p;
         };

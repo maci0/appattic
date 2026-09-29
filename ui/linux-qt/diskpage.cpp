@@ -914,7 +914,7 @@ void DiskPage::trashSelected() {
         QMessageBox::warning(
             this,
             QStringLiteral("Move to Trash"),
-            QStringLiteral("Could not move %1 to Trash.").arg(path)
+            QStringLiteral("Could not move %1 to Trash.").arg(redactHomePaths(path))
         );
         return;
     }

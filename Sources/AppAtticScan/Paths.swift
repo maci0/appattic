@@ -147,7 +147,7 @@ public func pathIdentityKey(_ path: String) -> String {
 private let redactHomeLock = NSLock()
 private let redactHomeCacheLimit = 8
 nonisolated(unsafe) private var redactHomeCache: [String: String] = [:]
-nonisolated(unsafe) private var redactProcessHome: String? = nil
+nonisolated(unsafe) private var redactProcessHome: (standardized: String, raw: String?)? = nil
 
 /// Drop one entry once the map is over the limit. Not an age: a caller that
 /// feeds it unbounded keys must not grow it, but the working set is whatever
@@ -178,13 +178,20 @@ private func standardizedHome(_ home: String) -> String {
 /// Process home, resolved once: `homeDirectoryForCurrentUser` costs ~7 µs per
 /// call and the old default-arg form paid it on every log line. Kept out of
 /// `redactHomeCache` so an explicit `home: ""` cannot read this slot back.
-private func processHome() -> String {
+///
+/// Both spellings are kept. `standardizingPath` resolves symlinks on Darwin
+/// (/home, /tmp, /var) and on a symlinked Linux home, and a subprocess error
+/// can carry either the resolved form or the one `$HOME` names, so a cache
+/// holding only the resolved form left the other spelling in the message.
+private func processHome() -> (standardized: String, raw: String?) {
     redactHomeLock.lock()
     defer { redactHomeLock.unlock() }
     if let cached = redactProcessHome { return cached }
-    let std = (FileManager.default.homeDirectoryForCurrentUser.path as NSString).standardizingPath
-    redactProcessHome = std
-    return std
+    let raw = FileManager.default.homeDirectoryForCurrentUser.path
+    let std = (raw as NSString).standardizingPath
+    let cached = (standardized: std, raw: raw == std ? nil : raw)
+    redactProcessHome = cached
+    return cached
 }
 
 /// Replace the user's home directory prefix with `~` so logs and errors do not
@@ -203,7 +210,9 @@ public func redactHomePaths(
         // so a subprocess error can carry either spelling. Try both.
         if home != homePath { rawHome = home }
     } else {
-        homePath = processHome()
+        let cached = processHome()
+        homePath = cached.standardized
+        rawHome = cached.raw
     }
     for candidate in homePathSpellings(homePath) + (rawHome.map(homePathSpellings) ?? []) {
         if candidate.count > 1, text.contains(candidate),
@@ -247,10 +256,15 @@ private func redactHomePrefix(_ text: String, homePath: String) -> String? {
 }
 
 /// A path prefix may only be redacted when it ends here: end of text, a
-/// separator, or one of `[\s:"',;]`.
+/// separator, or a character that cannot continue a path. A parenthetical
+/// message (`Cannot open /home/u (denied)`) and a bracketed one put the
+/// account name behind a byte this set did not carry, so the whole line came
+/// back unredacted. Anything that is neither a separator nor a path character
+/// ends the path; only a path character means a longer name could follow.
 private func isHomeBoundary(_ c: Character) -> Bool {
-    c == "/" || c == " " || c == "\t" || c == "\n" || c == "\r"
-        || c == ":" || c == "\"" || c == "'" || c == "," || c == ";"
+    if c == "/" || c == " " || c == "\t" || c == "\n" || c == "\r" { return true }
+    return !c.isLetter && !c.isNumber && c != "." && c != "-" && c != "_"
+        && c != "~" && c != "+" && c != "="
 }
 
 public func cleanupPathDirectories(home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [String] {

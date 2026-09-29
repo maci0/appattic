@@ -38,7 +38,7 @@ enum AppAtticCLI {
         do {
             settings = try loadSettings()
         } catch {
-            fputs("error: \(redactHomePaths(error.localizedDescription))\n", stderr)
+            fputs("error: \(terminalSafe(redactHomePaths(error.localizedDescription)))\n", stderr)
             Foundation.exit(2)
         }
         let includeSystem = effectiveIncludeSystem(cliFlag: opts.includeSystem, settings: settings)
@@ -171,7 +171,7 @@ func runEraseCommand(_ opts: CLIOptions) {
     do {
         erased = try eraseScanCache(at: url)
     } catch {
-        fputs("error: \(redactHomePaths(error.localizedDescription))\n", stderr)
+        fputs("error: \(terminalSafe(redactHomePaths(error.localizedDescription)))\n", stderr)
         Foundation.exit(1)
     }
     let shown = redactHomePaths(url.path)

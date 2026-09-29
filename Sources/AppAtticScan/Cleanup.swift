@@ -342,6 +342,16 @@ func hasParentSegment(_ path: String) -> Bool {
     path.split(separator: "/").contains("..")
 }
 
+/// The path with empty and `.` components dropped, for a prefix test. The
+/// removal quotes the path as written, so `rm` resolves `//usr` and `/usr/.`
+/// to the packaged root a raw prefix test would miss. Matches Qt
+/// `normalizedForPrefixTest`.
+func normalizedForPrefixTest(_ path: String) -> String {
+    "/" + path.split(separator: "/", omittingEmptySubsequences: true)
+        .filter { $0 != "." }
+        .joined(separator: "/")
+}
+
 /// Packaged OS prefixes that leftover/uninstall scripts must not `rm`.
 /// The root list is identical to Qt `isProtectedPackagedPath` in `ui/linux-qt/finding.cpp`.
 public func isProtectedPackagedPath(_ path: String) -> Bool {
@@ -351,11 +361,21 @@ public func isProtectedPackagedPath(_ path: String) -> Bool {
     // not under a packaged root by spelling and deletes `/etc` once `rm`
     // resolves it.
     if hasParentSegment(path) { return true }
+    let normalized = normalizedForPrefixTest(path)
     let roots = [
         "/usr", "/bin", "/sbin", "/etc", "/System", "/lib", "/lib64",
         "/boot", "/dev", "/proc", "/sys", "/private", "/Library",
     ]
-    return roots.contains { path == $0 || path.hasPrefix($0 + "/") }
+    return roots.contains { normalized == $0 || normalized.hasPrefix($0 + "/") }
+}
+
+/// A path a generated `rm` may name. Every leftover root the scan walks is
+/// absolute, and a scan reads the path off the filesystem, so a relative
+/// spelling or a leading `-` did not come from a walk. `shellQuote` leaves
+/// either one unquoted, so `rm` would resolve it against the script's working
+/// directory, or read `--no-preserve-root` as the option it is.
+func isRemovableLeftoverPath(_ path: String) -> Bool {
+    !path.isEmpty && path.hasPrefix("/") && !path.hasPrefix("-")
 }
 
 /// A deb822/sources.list entry is removable even though it lives under `/etc`.
@@ -442,7 +462,7 @@ rootcmd() {
 
 public func leftoverRemoveCommand(path: String, rootLabel: String, extraPaths: [String] = []) -> String {
     if rootLabel == "LaunchAgents" {
-        if isProtectedPackagedPath(path) {
+        if isProtectedPackagedPath(path) || !isRemovableLeftoverPath(path) {
             return "# skipped packaged path \(shellQuote(path))"
         }
         let q = shellQuote(path)
@@ -450,7 +470,8 @@ public func leftoverRemoveCommand(path: String, rootLabel: String, extraPaths: [
     }
     var seen = Set<String>()
     let paths = ([path] + extraPaths).filter {
-        seen.insert($0).inserted && (!isProtectedPackagedPath($0) || isPpaSourcesPath($0))
+        seen.insert($0).inserted && isRemovableLeftoverPath($0)
+            && (!isProtectedPackagedPath($0) || isPpaSourcesPath($0))
     }
     if paths.isEmpty {
         return "# skipped packaged path \(shellQuote(path))"
