@@ -20,6 +20,7 @@ Usage: bash scripts/lint.sh
   host C under ASan + UBSan, host C under -fanalyzer and clang --analyze,
   hostexec warnings-as-errors, dependency pin consistency,
   the system-name list matches across the Zig core and the Swift library,
+  the host plugin argv matches the list core/build.sh emits,
   desktop entry, AppStream metainfo, man page, Flatpak manifest,
   zig fmt --check, no AI tool credit in commit messages
 EOF
@@ -144,6 +145,79 @@ if [[ -z "$swift_on" || "$swift_on" != "$c_on" || "$swift_on" != "$manifest_on" 
     exit 1
 fi
 echo "switch spellings: ok"
+
+# One plugin list, three trees. `wasm_sources` in core/build.sh is the
+# declaration the spec names, and the argv the build derives from it is copied
+# into core/README.md and into the spec's Host load list. The two documents are
+# hand-maintained copies of generated text and nothing compared them, so a
+# plugin added to wasm_sources leaves both quoting an argv the build no longer
+# prints, and the README says so in prose while the argv itself drifts. The
+# argv is rebuilt here from core/build.sh (its artifact-name function and its
+# tag case, read out of the file rather than restated) so the check follows a
+# tag rule or a rename that changes.
+build_try_line() {
+    local out=./core/out src dst
+    local artifact_fn tag_case
+    artifact_fn="$(sed -n '/^wasm_artifact_name() {/,/^}/p' "$ROOT/core/build.sh")"
+    # shellcheck disable=SC2016  # the pattern names a literal "$dst" in build.sh
+    tag_case="$(sed -n '/^    case "\$dst" in/,/^    esac/p' "$ROOT/core/build.sh")"
+    if [[ -z "$artifact_fn" || -z "$tag_case" ]]; then
+        echo "error: could not read wasm_artifact_name or the tag case out of core/build.sh" >&2
+        echo "       fix: keep the function and the 'case \"\$dst\" in' block build.sh has" >&2
+        exit 1
+    fi
+    eval "$artifact_fn"
+    try_line="$out/host $out/appattic_core.wasm"
+    while read -r src; do
+        [[ -n "$src" ]] || continue
+        # shellcheck disable=SC2034  # $dst is what the evaluated case reads
+        dst="$(wasm_artifact_name "$src")"
+        eval "$tag_case"
+    done < <(sed -n '/^wasm_sources=(/,/^)/p' "$ROOT/core/build.sh" \
+        | grep -o '[a-z0-9_]*\.zig')
+    printf '%s\n' "$try_line"
+}
+
+# The argv a document quotes, as one line of ./core/out/... tokens. The block
+# is the fenced run starting at the host line; the build line the spec block
+# opens with is above it and is not part of the argv. The host line carries two
+# tokens, every other line one, so each is taken on its own rather than by
+# rewriting the line.
+doc_try_line() {
+    # grep exiting 1 on no match is the empty-block answer the caller checks
+    # for, not a failure to report, so it does not end the run here.
+    { sed -n '/^\.\/core\/out\/host /,/^```/p' "$1" \
+        | grep -o '\./core/out/[a-z0-9_.]*=[0-9]*\|\./core/out/[a-z0-9_.]*' \
+        || true; } | tr '\n' ' ' | sed 's/ $//'
+}
+
+build_try_line_out="$(build_try_line)"
+if [[ -z "$build_try_line_out" ]]; then
+    echo "error: core/build.sh yielded an empty host argv" >&2
+    echo "       fix: wasm_sources is the plugin list the documents quote" >&2
+    exit 1
+fi
+plugin_argv_docs=(
+    "$ROOT/core/README.md"
+    "$ROOT/docs/specs/2026-08-26-zig-wasm-core-design.md"
+)
+for _doc in "${plugin_argv_docs[@]}"; do
+    _doc_line="$(doc_try_line "$_doc")"
+    if [[ -z "$_doc_line" ]]; then
+        echo "error: no host argv block found in ${_doc#"$ROOT"/}" >&2
+        echo "       fix: quote the argv core/build.sh prints, fenced, from" >&2
+        printf "             the './core/out/host ./core/out/appattic_core.wasm \\\\' line\n" >&2
+        exit 1
+    fi
+    if [[ "$_doc_line" != "$build_try_line_out" ]]; then
+        echo "error: the host argv in ${_doc#"$ROOT"/} is not the one core/build.sh prints" >&2
+        echo "       build:   $build_try_line_out" >&2
+        echo "       ${_doc#"$ROOT"/}: $_doc_line" >&2
+        echo "       fix: paste the 'try:' line core/build.sh prints" >&2
+        exit 1
+    fi
+done
+echo "host plugin argv: ok"
 
 # The desktop entry, the AppStream metainfo, the man page, and the Flatpak
 # manifest have to name the same app, the same binary, and the same icon, and
