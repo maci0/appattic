@@ -301,7 +301,7 @@ test "fuzz zypper table parsers" {
 /// `splitPipeCols` trims each cell in place and keeps at most `cols.len` of
 /// them, so a row with more pipes than columns must still yield cells that
 /// point into the input. Both parsers read a name that reaches a generated
-/// `zypper remove` line.
+/// `zypper --non-interactive rm` line.
 fn fuzzZypperTables(_: void, smith: *std.testing.Smith) !void {
     var raw: [4096]u8 = undefined;
     const text = raw[0..smith.slice(&raw)];

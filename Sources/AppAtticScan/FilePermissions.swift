@@ -102,9 +102,11 @@ public func writeOwnerOnlyFile(_ data: Data, to url: URL) throws {
     // The data has to reach the disk before the name does: a rename publishes
     // the file while its contents are still in the page cache, so a crash
     // between the two leaves a complete, correctly named file holding a
-    // truncated write. Both callers (the scan cache, the settings) replace the
-    // previous file entirely, so a half-written one is not a recoverable
-    // state.
+    // truncated write. The two callers that publish over a previous file (the
+    // scan cache and the settings) replace it entirely, so a half-written one
+    // is not a recoverable state; the script temp files and a `--json` export
+    // are new paths, where a failed write leaves nothing rather than a
+    // truncated file.
     if fsync(fd) != 0 {
         let message = String(cString: strerror(errno))
         unlink(finalName)

@@ -379,8 +379,8 @@ public enum TimestampFormat {
 
     /// "Today", "Yesterday", "3 days ago", localized and correctly pluralized.
     ///
-    /// swift-corelibs-foundation declares `DateComponentsFormatter` without
-    /// implementing it, so the value is nil there and `string(from:now:)`
+    /// swift-corelibs-foundation leaves `RelativeDateTimeFormatter`
+    /// unimplemented, so the closure is nil there and `string(from:now:)`
     /// falls back to the ASCII day unit. The type is erased into a closure so
     /// the name does not appear in this file's signatures off Darwin.
     static var relativeDays: ((Date, Date) -> String?)? { scoped.current().relativeDays }

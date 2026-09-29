@@ -63,7 +63,8 @@ public func localeCount(_ n: Int) -> String {
 }
 
 /// One decimal place without `String(format:)` (~1.2 µs/call from locale +
-/// varargs overhead). Rounds half away from zero the way `%.1f` prints.
+/// varargs overhead). Rounds half away from zero, where `%.1f` rounds half to
+/// even, so the two differ on an exact tie and agree everywhere else.
 func oneDecimal(_ n: Double) -> String {
     let neg = n < 0
     let tenths = Int((abs(n) * 10).rounded())
@@ -96,7 +97,7 @@ public func humanSize(_ bytes: Int) -> String {
 
 /// Whole-day age, with the unit chosen by magnitude: hours below 1 day (at
 /// least 1h, so a future or fractional value never prints a zero count), days
-/// below 14, weeks below 60 days, months below 1.5 years, then years. The unit
+/// below 14, weeks below 28 days, months below a year, then years. The unit
 /// changes silently with the input, so a caller comparing formatted strings
 /// across a threshold gets a different unit, not a different number.
 ///
@@ -128,19 +129,15 @@ public func humanDays(_ days: Double) -> String {
 private let durationFormatters: [Calendar.Component: (DateComponents) -> String?] = {
     #if canImport(Darwin)
     var formatters: [Calendar.Component: (DateComponents) -> String?] = [:]
-    // Each unit with the calendar unit that names it: `allowedUnits` is an
-    // `NSCalendar.Unit`, and there is no `DateComponentsFormatter.Units` for the
-    // loop to build an empty set of, which is what this arm used to name. The
-    // pairs also give the array its type, so the literal does not leave the
-    // element type to be decided by the loop body.
+    // Each unit with the calendar unit that names it. The pairs also give the
+    // array its type, so the literal does not leave the element type to be
+    // decided by the loop body.
     //
     // The week is `weekOfMonth`, not `weekOfYear`. `allowedUnits` accepts only
     // year, month, weekOfMonth, day, hour, minute and second; any other bit
-    // raises NSInternalInconsistencyException from the setter, so the old
-    // `.weekOfYear` here aborted the process the first time `humanDays`
-    // rendered a fortnight — before the test that called it could assert
-    // anything. `DateComponents` carries the same unit below, so the count is
-    // the field the formatter reads.
+    // raises NSInternalInconsistencyException from the setter and takes the
+    // process down. `DateComponents` carries the same unit below, so the count
+    // is the field the formatter reads.
     let units: [(component: Calendar.Component, allowed: NSCalendar.Unit)] = [
         (.hour, .hour), (.day, .day), (.weekOfMonth, .weekOfMonth), (.month, .month), (.year, .year),
     ]

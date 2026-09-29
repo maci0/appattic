@@ -601,8 +601,12 @@ func staleCleanupScript(_ result: ScanResult) -> String {
     return scriptWithHeader(header, body)
 }
 
-/// Printable `/bin/sh` for this CLI command. `outdated` comments every upgrade; `update` is named live upgrades after confirm.
-/// `packages` emits removals (the mark-manual set is always empty here; the UI builds that half). `report` emits leftovers and REMOVE-tier uninstalls; `leftovers` and `stale` emit their own half only, and `--leftovers-only` / `--stale-only` on `report` narrow it the same way. None of them emit package removals.
+/// Printable `/bin/sh` for this CLI command. `outdated` comments every upgrade;
+/// `update` is named live upgrades after confirm. `packages` emits removals
+/// (the mark-manual set is always empty here; the UI builds that half).
+/// `report` emits leftovers and REMOVE-tier uninstalls; `leftovers` and `stale`
+/// emit their own half only, and `--leftovers-only` / `--stale-only` on
+/// `report` narrow it the same way.
 public func dryRunScript(
     command: String,
     result: ScanResult,

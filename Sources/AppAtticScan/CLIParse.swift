@@ -202,9 +202,13 @@ func cliCommandNames(_ commands: [String]) -> String {
     }
 }
 
+/// How many edits still count as a typo rather than a different word. Two
+/// covers `updat` and `reportt`, and it is also where a short word starts
+/// picking up a neighbour it was not meant to name.
+private let cliSuggestionDistance = 2
+
 /// Closest command within `cliSuggestionDistance` edits, for a typo like `updat`.
 func nearestCLICommand(_ typed: String) -> String? {
-    let cliSuggestionDistance = 2
     let input = Array(typed.posixLowercased())
     var best: (command: String, distance: Int)?
     for command in cliCommands.sorted() {
@@ -256,8 +260,10 @@ commands:
   `--` ends the options: `appattic disk -- -backup` reads `-backup` as the PATH.
 
 options:
-  --json FILE         also write the scan as JSON to FILE, which has to end in
-                      .json. The file is the whole scan: --top, --category,
+  --json FILE         also write this command's result as JSON to FILE, which
+                      has to end in .json. The report commands write the whole
+                      scan, disk the disk tree, config and erase what they
+                      reported. On the report commands --top, --category,
                       --leftovers-only, and --stale-only shape what is printed,
                       not what is written. A value that names no JSON file is a
                       usage error, so `appattic --json erase` cannot write a

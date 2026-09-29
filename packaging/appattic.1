@@ -81,8 +81,15 @@ root that starts with a dash is passed as given:
 .SH OPTIONS
 .TP
 .BI \-\-json " FILE"
-Also write the whole scan to FILE, which has to end in
+Also write this command's result to FILE, which has to end in
 .BR .json .
+The report commands write the whole scan;
+.B disk
+writes the disk tree, and
+.B config
+and
+.B erase
+write what those commands reported.
 .BR \-\-top ,
 .BR \-\-category ,
 .B \-\-leftovers\-only
@@ -201,6 +208,14 @@ effects are the ones
 .B appattic config
 prints.
 .SH FILES
+.PP
+The two files below sit in one directory, which is
+.I $XDG_DATA_HOME/appattic
+(default
+.IR ~/.local/share/appattic )
+on Linux and
+.I ~/Library/Application Support/AppAttic
+on macOS. It holds everything the app writes for the account.
 .TP
 .I ~/.local/share/appattic/settings.json
 .IR includeSystem ", " confirmDelete ", and the ignored leftover paths, which

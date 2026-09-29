@@ -50,10 +50,11 @@ struct DiskScanOptions {
     bool (*cancelled)(void *user) = nullptr;
     void (*progress)(qint64 dirs, const QString &path, void *user) = nullptr;
     /// Called when a directory's walk ends, so its subtree is complete. The
-    /// walk is threaded, so this runs on any of the scan pool's threads, and
-    /// up to eight at once: take a copy and post it, do not touch shared state
-    /// without a lock. The reference only lives for the call. Deferred
-    /// hard-link totals can still be added to it.
+    /// root directory's own walk runs on the calling thread, and the top-level
+    /// directories it defers run on the scan pool, up to eight at once: take a
+    /// copy and post it, do not touch shared state without a lock. The
+    /// reference only lives for the call. Deferred hard-link totals can still
+    /// be added to it.
     void (*dirDone)(const DiskNode &node, void *user) = nullptr;
     void *user = nullptr;
 };

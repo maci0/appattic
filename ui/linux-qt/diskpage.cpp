@@ -401,7 +401,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         startScan(it->data(1, Qt::UserRole).toString());
     });
     // A double click is what the rest of the app drills in with, and the intro
-    // line now promises it. Enter alone was the only way in before.
+    // line now promises it. `itemActivated` above keeps Enter working.
     connect(d->volumes, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *it, int) {
         if (!it) return;
         startScan(it->data(1, Qt::UserRole).toString());
@@ -503,9 +503,11 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 item->setData(1, Qt::UserRole, apparent);
                 item->setData(2, Qt::UserRole, allocated);
                 item->setData(3, Qt::UserRole, items);
-                // Inserted by apparent size, the column the tree sorts on by
-                // default. The ring chart below sorts on the selected metric,
-                // so its order can differ from the streaming rows.
+                // Inserted in descending apparent size, so the rows are
+                // ordered as they stream in with no re-sort. The finished
+                // tree sorts on the selected metric, so its order can differ
+                // from these rows, and the ring chart below sorts on the
+                // selected metric too.
                 int at = top->childCount();
                 for (int i = 0; i < top->childCount(); ++i) {
                     if (apparent > top->child(i)->data(1, Qt::UserRole).toLongLong()) {
