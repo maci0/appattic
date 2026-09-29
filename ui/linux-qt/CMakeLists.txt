@@ -188,14 +188,30 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     endforeach()
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # -Wall -Wextra alone leaves the C++ tree diagnosing less than the C tree
+    # next to it, which compiles under the set core/build-flags.sh names: a
+    # printf with a wrong format, a macro reading a name it never defined, a
+    # cast that drops const, and two overloads where one hides the other all
+    # print under the next flag and none of them failed the build. Every flag
+    # here is one the tree already compiles clean under both clang and GCC
+    # (Qt headers arrive as system includes, so their own warnings stay out).
+    # -Wconversion is the one C flag with no C++ equivalent the tree passes:
+    # Qt hands back qsizetype, and narrowing it to int is how this code sizes
+    # a row, so the rule needs the fixups first, not a suppression.
+    set(_appattic_strict_cxx_warnings
+        -Wall
+        -Wextra
+        -Wformat=2
+        -Wundef
+        -Wcast-qual
+        -Wnon-virtual-dtor
+        -Woverloaded-virtual)
     target_compile_options(appattic-qt-core PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-Wall>
-        $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
+        $<$<COMPILE_LANGUAGE:CXX>:${_appattic_strict_cxx_warnings}>
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-D_GLIBCXX_ASSERTIONS>
     )
     target_compile_options(appattic-qt PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-Wall>
-        $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
+        $<$<COMPILE_LANGUAGE:CXX>:${_appattic_strict_cxx_warnings}>
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CONFIG:Debug>>>:-D_GLIBCXX_ASSERTIONS>
     )
     # Source-level so a separate AUTOMOC TU does not inherit -Werror. The list

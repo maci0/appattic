@@ -58,8 +58,9 @@ fi
 # them: shellcheck lists each by name, and the group keyword is not a list of
 # them. So the ones the tree passes are named one by one below. The rest stay
 # off because the tree does not pass them: masked return (SC2312) and
-# suppressed set -e (SC2310) want 115 and 79 rewrites, and ${var} braces
-# (SC2250) and [[ ]] (SC2292) are the two style rewrites, at 1390 and 29.
+# suppressed set -e (SC2310) want 120 and 81 rewrites, and ${var} braces
+# (SC2250) and [[ ]] (SC2292) are the two style rewrites, at 1502 and 32.
+# `shellcheck --enable=all` on the list above is what the four numbers are.
 shellcheck -x -P SCRIPTDIR \
     --enable=add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat \
     "${shell_files[@]}"
