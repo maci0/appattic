@@ -12,7 +12,7 @@ public enum AppAtticIOError: Error, Equatable, LocalizedError, CustomStringConve
 
     /// The cache and settings paths sit under the account home, so the account
     /// name is in them. The composed line is redacted here, exactly as
-    /// `SettingsError.description` and `DiskUsageError.description` do it: the
+    /// `SettingsError.description` and `DiskRootError.description` do it: the
     /// wrap used to be every caller's job, and a caller that printed
     /// `localizedDescription` without it — the CLI's own top-level handler, a
     /// future one, the error bar — leaked the account name. The callers'

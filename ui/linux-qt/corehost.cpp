@@ -87,9 +87,11 @@ static bool hostHasExecutable(const QString &name) {
     return !QStandardPaths::findExecutable(name, extra).isEmpty();
 }
 
-/* A plugin runs only when its host dependency answers. Three shapes cover
-   every stem: an executable on PATH, an XDG root (an absolute override wins),
-   or a home-relative directory. Anything else loads with tag 1. */
+/* A plugin runs only when its host dependency answers. container_runtime and
+   path_home_dot are special-cased in pluginTag before these tables; every
+   other stem takes one of three shapes: an executable on PATH, an XDG root
+   (an absolute override wins), or a home-relative directory. Anything else
+   loads with tag 1. */
 struct ExecRule {
     const char *stem;
     std::initializer_list<const char *> names;
@@ -176,10 +178,9 @@ static int homePathTag(const char *xdgEnv, const QString &rel) {
     return QDir::home().exists(rel) ? 1 : 0;
 }
 
-/* The load list is the built output, not a second hand-kept registry. It used
-   to be 27 literal names duplicating core/build.sh's wasm_sources: a plugin
-   built but not listed never activated, and the only cross-check counted
-   modules, so the drift was silent. Sorted for a stable progress order. */
+/* The load list is the built output, not a second hand-kept registry: a
+   hand-kept list silently never activates a plugin that was built but not
+   named. Sorted for a stable progress order. */
 QStringList pluginWasmFiles(const QString &out) {
     QDir dir(out);
     const QStringList names = dir.entryList(

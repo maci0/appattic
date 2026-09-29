@@ -59,7 +59,7 @@ appattic_require_swift
 OS="$(uname -s)"
 HAVE_QT=0
 HAVE_MAC_UI=0
-if command -v pkg-config >/dev/null 2>&1 && { pkg-config --exists Qt6Widgets || pkg-config --exists Qt6Core; }; then
+if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists Qt6Widgets; then
     HAVE_QT=1
 fi
 

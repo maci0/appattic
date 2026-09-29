@@ -1,9 +1,8 @@
 //! JSON reading for the plugins, on top of `std.json.Scanner`.
 //!
-//! The plugins used to carry a hand-written scanner: whitespace skipping,
-//! string slicing, delimiter matching, escape handling. The standard library
-//! owns that now; what is left here is a cursor over `std.json.Scanner` plus
-//! the three shapes the plugins ask for.
+//! The standard library owns whitespace skipping, string slicing, delimiter
+//! matching and escape handling; what is left here is a cursor over
+//! `std.json.Scanner` plus the three shapes the plugins ask for.
 //!
 //! Two properties keep every plugin simple:
 //! * the scanner needs an allocator for its nesting stack, so a cursor runs it

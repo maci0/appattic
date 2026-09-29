@@ -56,7 +56,8 @@ struct Finding {
     // U+001E, not '\n': every field here is filesystem text, and a newline is
     // a legal byte in a Linux filename, so a '\n'-joined key can be produced by
     // two different findings. The sibling key for the same job already uses
-    // U+001E (see packageChildMarkKey), a byte a POSIX filename cannot contain.
+    // U+001E (see packageChildMarkKey, ui/linux-qt/main.cpp:96), a byte a
+    // POSIX filename cannot contain.
     //
     // `path` and `name` go through `pathIdentityKey` like every other identity
     // in the app. Without it one directory reported twice, precomposed by one

@@ -318,7 +318,8 @@ if [[ "${#c_sources[@]}" -eq 0 ]]; then
 fi
 # embed.c is the Wasmtime loader, and it was the one source this gate skipped:
 # it needs the Wasmtime C API headers, and the lint job did not install them.
-# It is now installed there, so embed.c compiles here like every other source.
+# It is now installed there, so embed.c compiles here too, still skipped when a
+# host lacks the headers.
 # The flags are the ones the Qt CMakeLists already gives it for the shipped
 # binary, so the gate cannot demand more than the shipped build passes. A host
 # without the headers says which file went unchecked and how to get them.
