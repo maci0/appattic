@@ -522,28 +522,16 @@ final class PackagingTests: XCTestCase {
             .deletingLastPathComponent()
         let script = root.appendingPathComponent("scripts/release-notes.sh")
 
-        @discardableResult
-        func run(_ arguments: [String]) throws -> (status: Int32, out: String, err: String) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = [script.path] + arguments
-            let out = Pipe()
-            let err = Pipe()
-            process.standardOutput = out
-            process.standardError = err
-            try process.run()
-            let outData = out.fileHandleForReading.readDataToEndOfFile()
-            let errData = err.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            return (
-                process.terminationStatus,
-                String(data: outData, encoding: .utf8) ?? "",
-                String(data: errData, encoding: .utf8) ?? ""
-            )
+        func run(_ arguments: [String]) -> (status: Int32, out: String, err: String) {
+            // `runCommand` bounds the child. Hand-rolled `Process` plus
+            // `waitUntilExit` has no deadline, so a script that wedged would
+            // hang the whole run instead of failing this test.
+            let (status, out, err) = runCommand(["/bin/bash", script.path] + arguments, timeout: 30)
+            return (status, out, err)
         }
 
         // No argument: the declared version, which check-version.sh reads.
-        let current = try run([])
+        let current = run([])
         XCTAssertEqual(current.status, 0, current.err)
         XCTAssertTrue(current.out.hasPrefix("<p>"), current.out)
         XCTAssertTrue(current.out.contains("</p>"), current.out)
@@ -552,7 +540,7 @@ final class PackagingTests: XCTestCase {
 
         // A named release, with or without the v the tag carries.
         for argument in ["1.3.4", "v1.3.4"] {
-            let older = try run([argument])
+            let older = run([argument])
             XCTAssertEqual(older.status, 0, older.err)
             XCTAssertTrue(older.out.contains("bundled wasmtime"), older.out)
             // 2.0.0's flag move, so the two releases cannot be swapped.
@@ -562,7 +550,7 @@ final class PackagingTests: XCTestCase {
 
         // A release with no note is a silent release, so the script fails
         // rather than publishing an empty body.
-        let missing = try run(["9.9.9"])
+        let missing = run(["9.9.9"])
         XCTAssertEqual(missing.status, 1, missing.out + missing.err)
         XCTAssertEqual(missing.out, "", missing.out)
         XCTAssertTrue(missing.err.contains("no <description>"), missing.err)

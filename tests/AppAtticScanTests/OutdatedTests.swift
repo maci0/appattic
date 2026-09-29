@@ -503,12 +503,40 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(stamp.hasSuffix(" \(sign)\(zone)"), stamp)
     }
 
-    func testOutdatedReportFooterMentionsNamedDistroUpgrades() {
-        let lines = outdatedReportFooter([
-            OutdatedPkg(name: "firefox", manager: "pacman", currentVersion: "1", latestVersion: "2"),
-        ])
-        XCTAssertTrue(lines.contains(where: { $0.contains("pacman") && $0.contains("update") }), "\(lines)")
-        XCTAssertFalse(lines.contains(where: { $0.contains("report-only") && $0.contains("pacman") }), "\(lines)")
+    /// The manager list in the footer is one fixed literal, so matching
+    /// substrings of it against a pacman package proved nothing about pacman.
+    /// What the input decides is which lines appear: an updatable package
+    /// brings the upgrade line, a report-only manager brings the report-only
+    /// line, and neither appears for the rest.
+    func testOutdatedReportFooterLinesFollowThePackageManagers() throws {
+        let pacman = OutdatedPkg(name: "firefox", manager: "pacman", currentVersion: "1", latestVersion: "2")
+        let untrusted = OutdatedPkg(
+            name: "notepadnext",
+            manager: "brew-cask",
+            currentVersion: "1",
+            latestVersion: nil,
+            kind: "untrusted"
+        )
+        let store = OutdatedPkg(name: "iMovie", manager: "app-store", currentVersion: "1", latestVersion: "2")
+        let upgradeLine = try XCTUnwrap(outdatedReportFooter([pacman]).first)
+        XCTAssertEqual(outdatedReportFooter([pacman]).count, 1)
+        XCTAssertTrue(upgradeLine.contains("appattic update --dry-run"), upgradeLine)
+        XCTAssertFalse(upgradeLine.contains("report-only"), upgradeLine)
+        XCTAssertEqual(
+            outdatedReportFooter([untrusted]),
+            ["Untrusted casks stay listed. AppAttic will not trust the tap."],
+            "an untrusted cask is neither upgradable nor report-only, so it raises its line alone"
+        )
+        XCTAssertEqual(
+            outdatedReportFooter([store]),
+            ["App Store and Snap stay report-only."],
+            "a report-only manager is never offered as an upgrade"
+        )
+        XCTAssertEqual(
+            outdatedReportFooter([pacman, untrusted, store]),
+            [upgradeLine, "Untrusted casks stay listed. AppAttic will not trust the tap.", "App Store and Snap stay report-only."],
+            "one line per branch that fires, in branch order"
+        )
     }
 
     func testUpdateScriptIncludesNamedPacmanUpgrade() {
@@ -729,31 +757,6 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(script.contains("# App Store: com.apple.iMovieApp"))
         XCTAssertFalse(script.contains("mas upgrade"))
         XCTAssertFalse(script.contains("softwareupdate"))
-    }
-
-    func testOutdatedReportFooterDependsOnManagers() {
-        let brew = OutdatedPkg(name: "wget", manager: "brew-formula", currentVersion: "1", latestVersion: "2")
-        let store = OutdatedPkg(name: "iMovie", manager: "app-store", currentVersion: "1", latestVersion: "2")
-        let untrusted = OutdatedPkg(
-            name: "notepadnext",
-            manager: "brew-cask",
-            currentVersion: "1",
-            latestVersion: nil,
-            kind: "untrusted"
-        )
-        let brewLines = outdatedReportFooter([brew])
-        XCTAssertTrue(brewLines.contains(where: { $0.contains("Homebrew") && $0.contains("Flatpak") }))
-        XCTAssertFalse(brewLines.contains(where: { $0.contains("report-only") }))
-        let storeLines = outdatedReportFooter([store])
-        XCTAssertFalse(storeLines.contains(where: { $0.contains("Homebrew and Flatpak") }))
-        XCTAssertTrue(storeLines.contains(where: { $0.contains("report-only") }))
-        let onlyUntrusted = outdatedReportFooter([untrusted])
-        XCTAssertTrue(onlyUntrusted.contains(where: { $0.contains("Untrusted casks") }))
-        XCTAssertFalse(onlyUntrusted.contains(where: { $0.contains("report-only") }))
-        let mix = outdatedReportFooter([brew, store, untrusted])
-        XCTAssertTrue(mix.contains(where: { $0.contains("Homebrew") && $0.contains("Flatpak") }))
-        XCTAssertTrue(mix.contains(where: { $0.contains("Untrusted casks") }))
-        XCTAssertTrue(mix.contains(where: { $0.contains("report-only") }))
     }
 
     func testParseMasOutdatedLines() {

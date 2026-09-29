@@ -745,12 +745,9 @@ func shScriptParses(_ script: String) throws -> Bool {
     let file = dir.appendingPathComponent("check.sh")
     // `sh -n` parses without running: no command in the script executes.
     try Data(script.utf8).write(to: file)
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/sh")
-    process.arguments = ["-n", file.path]
-    process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
-    try process.run()
-    process.waitUntilExit()
-    return process.terminationStatus == 0
+    // `runCommand` bounds the child. `Process.waitUntilExit` has no deadline,
+    // so a wedged `/bin/sh` would hang the whole run instead of failing here.
+    let (status, _, err) = runCommand(["/bin/sh", "-n", file.path], timeout: 20)
+    XCTAssertNotEqual(status, 127, "could not run /bin/sh: \(err)")
+    return status == 0
 }

@@ -42,6 +42,13 @@ final class DiskSizeTests: XCTestCase {
     }
 
 
+    /// The partial total is evidence only if it is pinned to a number. A real
+    /// deadline either overruns before the first read or not at all, so the
+    /// old `timeout: -1` call always reported 0 and every bound below it held
+    /// for free. The clock is injected instead: the walk reads it on entry and
+    /// after each entry it accepts, and `.`/`..` skip that check, so letting the
+    /// fourth read pass the deadline stops the walk with exactly three 1 KiB
+    /// files counted, whatever order `readdir` hands them over in.
     func testDirectoryByteSizeKeepsPartialTotalOnTimeout() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("du-timeout-\(UUID().uuidString)")
@@ -50,16 +57,18 @@ final class DiskSizeTests: XCTestCase {
         for i in 0..<8 {
             try Data(repeating: 0x61, count: 1024).write(to: root.appendingPathComponent("f\(i).bin"))
         }
-        let (partialBytes, partialOK) = directoryByteSize(root.path, timeout: -1)
+        var reads = 0
+        let clock: MonotonicFn = {
+            reads += 1
+            return reads <= 3 ? 0 : 100
+        }
+        let (partialBytes, partialOK) = directoryByteSize(root.path, timeout: 10, clock: clock)
         XCTAssertFalse(partialOK, "a deadline overrun is a partial measurement")
+        XCTAssertEqual(partialBytes, 3 * 1024, "the walk stops where the deadline first lands")
         let (fullBytes, fullOK) = directoryByteSize(root.path, timeout: 60)
         XCTAssertTrue(fullOK, "the same tree measures cleanly once the deadline is out of the way")
         XCTAssertEqual(fullBytes, 8 * 1024)
-        // What a stopped walk reports is bounded by the real total. The lower
-        // bound used to be `bytes >= 0`, which holds for every Int a function
-        // can return and so asserted nothing.
         XCTAssertLessThan(partialBytes, fullBytes, "a partial total cannot reach the whole tree")
-        XCTAssertLessThan(partialBytes, 8 * 1024 + 1)
     }
 
 

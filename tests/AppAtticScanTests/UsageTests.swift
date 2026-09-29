@@ -939,6 +939,12 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(fast.everUsed, slow.everUsed)
         XCTAssertEqual(fast.lastSeen, slow.lastSeen)
         XCTAssertEqual(fast.oldestSeen, slow.oldestSeen)
+        // Parity alone holds if both scanners regress to an empty index, so
+        // pin what this corpus must yield: the keyed command behind the
+        // well-formed epoch line, and nothing older than that line's stamp.
+        XCTAssertTrue(fast.everUsed.contains("jq"), "\(fast.everUsed)")
+        XCTAssertEqual(fast.lastSeen["jq"], Date(timeIntervalSince1970: 1_717_200_000))
+        XCTAssertEqual(fast.oldestSeen, Date(timeIntervalSince1970: 1_717_200_000))
 
         let fishCorpus = [
             "- cmd: jq .",
@@ -974,6 +980,8 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(fastFish.everUsed, slowFish.everUsed)
         XCTAssertEqual(fastFish.lastSeen, slowFish.lastSeen)
         XCTAssertEqual(fastFish.oldestSeen, slowFish.oldestSeen)
+        XCTAssertTrue(fastFish.everUsed.contains("jq"), "\(fastFish.everUsed)")
+        XCTAssertEqual(fastFish.lastSeen["jq"], Date(timeIntervalSince1970: 1_717_200_000))
     }
 
     /// `keep` filtering must see the original-case token, as the regex path does.
@@ -991,5 +999,10 @@ final class UsageTests: XCTestCase {
         }()
         XCTAssertEqual(fast.everUsed, slow.everUsed)
         XCTAssertEqual(fast.lastSeen, slow.lastSeen)
+        // Parity holds when both sides keep nothing, so say what survives: the
+        // filter sees the original-case token, so `Jq` is kept and the older
+        // `LS` line is dropped rather than kept under a folded key.
+        XCTAssertEqual(fast.everUsed, ["jq"])
+        XCTAssertEqual(fast.lastSeen, ["jq": Date(timeIntervalSince1970: 1_717_200_000)])
     }
 }

@@ -23,6 +23,93 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(decoded, item)
     }
 
+    /// The synthesized `Codable` takes its key names from the property names,
+    /// so renaming `size_bytes` to `sizeBytes` leaves the round trip above green
+    /// while breaking every `last-scan.json` already on disk and every `--json`
+    /// consumer. A literal pins the wire names in both directions.
+    func testLeftoverJSONWireKeysAreFixed() throws {
+        let json = """
+        {"name":"Foo","path":"/tmp/Foo","root":"Caches","kind":"dir","status":"orphaned",\
+        "owner":"me","size_bytes":12,"size_measured":true,"mtime":"2026-08-17T00:00:00Z",\
+        "reason":"r","summary":"s","extra_paths":["/tmp/Foo-cache"],"shadows":"/usr/bin/foo"}
+        """
+        let decoded = try JSONDecoder().decode(LeftoverItem.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.owner, "me")
+        XCTAssertEqual(decoded.size_bytes, 12)
+        XCTAssertTrue(decoded.size_measured)
+        XCTAssertEqual(decoded.mtime, "2026-08-17T00:00:00Z")
+        XCTAssertEqual(decoded.extra_paths, ["/tmp/Foo-cache"])
+        XCTAssertEqual(decoded.shadows, "/usr/bin/foo")
+        let keys = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any]
+        )
+        XCTAssertEqual(
+            Set(keys.keys),
+            [
+                "name", "path", "root", "kind", "status", "owner", "size_bytes",
+                "size_measured", "mtime", "reason", "summary", "extra_paths", "shadows",
+            ]
+        )
+    }
+
+    /// Same wire contract for the software rows, which the dashboard and the
+    /// `appattic --json` payload both read. Every optional carries a value:
+    /// `nil` decodes and then drops its key on the way back out.
+    func testSoftwareItemJSONWireKeysAreFixed() throws {
+        let json = """
+        {"name":"Sketch","kind":"app","path":"/Applications/Sketch.app","source":"applications",\
+        "version":"100","size_bytes":2048,"size_measured":true,"data_bytes":512,\
+        "data_paths":["/Library/Application Support/Sketch"],"last_used":"2026-08-01T00:00:00Z",\
+        "installed_at":"2026-01-01T00:00:00Z","usage_source":"history","running_service":false,\
+        "tier":"keep","reason":"running","cask_name":"sketch","is_leaf":true,"outdated":false,\
+        "current_version":"100","latest_version":"101","summary":"s","steam_appid":"440",\
+        "pkg_id":"com.bohemiancoding.sketch3.pkg","bundle_id":"com.bohemiancoding.sketch3"}
+        """
+        let decoded = try JSONDecoder().decode(SoftwareItem.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.size_bytes, 2048)
+        XCTAssertEqual(decoded.data_bytes, 512)
+        XCTAssertEqual(decoded.tier, "keep")
+        XCTAssertEqual(decoded.bundle_id, "com.bohemiancoding.sketch3")
+        XCTAssertEqual(decoded.data_paths, ["/Library/Application Support/Sketch"])
+        let keys = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any]
+        )
+        XCTAssertEqual(
+            Set(keys.keys),
+            [
+                "name", "kind", "path", "source", "version", "size_bytes", "size_measured",
+                "data_bytes", "data_paths", "last_used", "installed_at", "usage_source",
+                "running_service", "tier", "reason", "cask_name", "is_leaf", "outdated",
+                "current_version", "latest_version", "summary", "steam_appid", "pkg_id",
+                "bundle_id",
+            ]
+        )
+    }
+
+    /// `totalBytes` is what the reclaimable total sums, so a dropped
+    /// `data_bytes` under-reports every row's real cost. The sum saturates
+    /// rather than trapping, like every other byte total here.
+    func testSoftwareItemTotalBytesAddsDataBytesAndSaturates() {
+        let row = SoftwareItem(
+            name: "Sketch",
+            kind: "app",
+            path: "/Applications/Sketch.app",
+            source: "applications",
+            size_bytes: 2048,
+            data_bytes: 512
+        )
+        XCTAssertEqual(row.totalBytes, 2560)
+        let saturated = SoftwareItem(
+            name: "Big",
+            kind: "app",
+            path: "/Applications/Big.app",
+            source: "applications",
+            size_bytes: Int.max,
+            data_bytes: 1
+        )
+        XCTAssertEqual(saturated.totalBytes, Int.max)
+    }
+
     func testLeftoverJSONMtimePrefersNestedActivity() {
         let folder = Date(timeIntervalSince1970: 1_700_000_000)
         let nested = Date(timeIntervalSince1970: 1_750_000_000)
