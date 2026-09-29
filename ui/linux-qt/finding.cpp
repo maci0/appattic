@@ -957,8 +957,9 @@ bool isStaleTierStatus(const QString &status) {
 
 /// Leftover dirs are not unused apps, and an outdated row is not either, so
 /// both are excluded. The tier check is the path a plugin takes without a
-/// dedicated kind: no core plugin emits `review` or `remove` today, so the page
-/// is empty until one does.
+/// dedicated kind, and it only applies to a row the scan could date: a
+/// `review` or `remove` row with no `idleDays`, `mtime`, or `lastUsed` stays
+/// off this page whatever tier it carries.
 bool isStale(const Finding &f) {
     if (f.kind.contains(QLatin1String("stale")) || f.kind.contains(QLatin1String("unused-app"))
         || f.kind.contains(QLatin1String("stale-app"))) {
@@ -1295,7 +1296,8 @@ QString markManualCommand(const Finding &f) {
     // A leading `-` reaches the manager as an option, not as the package name.
     // The name comes from a registry, a tap, or the scan cache, so refuse it
     // rather than quoting it into a different command. Mirrors Swift
-    // `isSafeCommandArgument` and Zig `jsonbuf.isSafeCmdIdent`.
+    // `isSafeCommandArgument`; the stricter Zig `jsonbuf.isSafeCmdIdent` also
+    // runs, in the plugin that produced the name.
     const QString name = displayName(f);
     if (name.isEmpty() || name.startsWith(QLatin1Char('-'))) return {};
     const QString q = shellQuote(name);

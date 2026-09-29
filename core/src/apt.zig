@@ -452,7 +452,7 @@ test "fuzz apt listing parsers" {
 }
 
 /// The four parsers share one input and one set of properties: a name that
-/// reaches a generated `apt-get remove` line, and a version that reaches the
+/// reaches a generated `apt-get purge -y` line, and a version that reaches the
 /// same line. A name must pass `jsonbuf.isSafeCmdIdent`, the stricter rule that
 /// also rejects a leading `-`, and every field must be a slice
 /// of the input rather than a rebuilt or padded buffer. Each parser also has

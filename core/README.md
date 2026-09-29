@@ -75,6 +75,14 @@ Host intercept rejects `system prune`, `rmi -f`, `volume prune`, `snap remove --
 
 The Linux Qt 6 window (`ui/linux-qt`) links `core/host/embed.c` and the same Wasmtime C API. It is not Gtk.
 
+## Benchmarks
+
+`bash core/bench.sh [filter-substr]` times the parsers and stores in
+`core/bench/bench.zig` natively: path listing, the JSON buffer, the JSON
+scanner, and the apt parser. It is not part of `core/build.sh` and not a
+gate; run it on demand to compare two changes. Linux only, and it needs the
+`.zig-version` toolchain.
+
 ## Backlog
 
 Not built. Not on the host load list. See spec heading **Backlog** for the

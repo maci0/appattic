@@ -7,8 +7,9 @@
 //!
 //! Two properties keep every plugin simple:
 //! * the scanner needs an allocator for its nesting stack, so a cursor runs it
-//!   on a fixed buffer: std.json reserves 129 bytes for that stack, whatever
-//!   the input size, so 256 bytes leave room;
+//!   on a fixed buffer: the stack is one bit per nesting level, so it grows
+//!   with the document and the buffer only has to cover the deepest manifest a
+//!   plugin parses. 256 bytes is far past any of them;
 //! * every returned slice points into the input, never into the stack, so a
 //!   plugin can keep the strings after the cursor is gone. Strings that arrive
 //!   in pieces (the ones that contain escapes) are dropped instead: they would

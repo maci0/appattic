@@ -63,7 +63,8 @@ public func localeCount(_ n: Int) -> String {
 }
 
 /// One decimal place without `String(format:)` (~1.2 µs/call from locale +
-/// varargs overhead). Rounds half away from zero the way `%.1f` prints.
+/// varargs overhead). Rounds half away from zero, where `%.1f` rounds half to
+/// even, so the two differ on an exact tie and agree everywhere else.
 func oneDecimal(_ n: Double) -> String {
     let neg = n < 0
     let tenths = Int((abs(n) * 10).rounded())

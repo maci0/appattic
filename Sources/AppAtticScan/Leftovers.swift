@@ -246,9 +246,8 @@ public func leftoverSizeText(measured: Bool, sizeBytes: Int, kind: String, root:
     return "n/a (size unknown)"
 }
 
-/// One `stat` (follows symlinks, like the old `attributesOfItem`): mtime and
-
-/// kind together, without Foundation's owner/group lookup per entry.
+/// One `stat` (follows symlinks): mtime and kind together, without Foundation's
+/// owner/group lookup per entry.
 private func statMtimeKind(_ path: String) -> (mtime: Date, isDir: Bool)? {
     var st = stat()
     guard path.withCString({ stat($0, &st) }) == 0 else { return nil }

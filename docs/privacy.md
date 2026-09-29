@@ -89,8 +89,8 @@ paths, unredacted, because its job is to name the files to edit.
 ## Your data, on request
 
 - See it: every command takes `--json FILE` and writes its result there, mode
-  `0600`, at a path you name. The scan commands write the whole scan; `config`
-  and `erase` write what that command reported.
+  `0600`, at a path you name. The scan commands write the whole scan; `disk`
+  writes the disk tree; `config` and `erase` write what that command reported.
 - Erase it: `appattic erase` deletes the stored scan snapshot whatever its age,
   without reading it first. It runs before settings are loaded, so it works on
   a machine whose `settings.json` no longer parses. The scan snapshot is the

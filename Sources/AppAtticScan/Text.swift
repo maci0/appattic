@@ -101,8 +101,9 @@ public func readUTF8File(_ path: String) -> String? {
 /// in a process that stays open after the scan finishes.
 ///
 /// The tail is cut on a line boundary, so no parser sees half a line: the one
-/// the cut lands in is dropped, and a file that is one long line within the
-/// bound reads as empty rather than as a fragment.
+/// the cut lands in is dropped, and a file larger than the bound that is one
+/// long line reads as empty rather than as a fragment. A file within the bound
+/// is read whole, with no cut and no line dropped.
 public func readUTF8FileTail(_ path: String, maxBytes: Int) -> String? {
     guard maxBytes > 0 else { return nil }
     let url = URL(fileURLWithPath: path)

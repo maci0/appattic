@@ -1,9 +1,9 @@
 import Foundation
 
 /// The live scan, kept as the objects the collectors produced. `runFullScan`
-/// hands back the `ScanData` form of this; a caller that wants the leftover,
-/// software, and verdict objects without a round trip through JSON builds it
-/// from `ScanResult.toScanData()` or asks for the result directly.
+/// hands back the `ScanData` form of this, which `toScanData()` builds; a
+/// caller that wants the leftover, software, and verdict objects themselves
+/// asks `performScan` for them directly.
 public final class ScanResult {
     public var scannedAt: Date
     public var durationS: Double

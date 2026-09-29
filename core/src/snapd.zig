@@ -131,9 +131,9 @@ const max_snap_cmd_len = 512;
 /// `if test -e <dir><name>_<rev>.snap; then snap remove <name> --revision
 /// <rev>; fi` into `buf`, or null when it does not fit. A removal naming two
 /// values, so neither half is one appended name, and the query is a path rather
-/// than a manager listing. Each quoted value gets its own buffer, since
-/// `shQuote` returns a slice of the one it wrote and the next call would
-/// overwrite it under the reader's feet.
+/// than a manager listing. `shQuote` returns a slice of the buffer it wrote,
+/// so a value is copied out by the `bufPrint` that takes it before the next
+/// call reuses that buffer.
 ///
 /// The caller writes the result with `W.str`, not `W.raw`: `shQuote` writes a
 /// value containing `'` as `'\''`, and the backslash of that escape is a JSON

@@ -28,8 +28,8 @@ public func shellQuote(_ value: String) -> String {
 /// than as its argument. A name here comes from a registry, a tap, or the
 /// scan cache, so it is not this app's to trust. No real package or formula is
 /// named this way, so a caller that sees `false` drops the row instead of
-/// emitting a command. The Zig core applies the same rule in
-/// `jsonbuf.isSafeCmdIdent`.
+/// emitting a command. The Zig core refuses the same leading `-` in
+/// `jsonbuf.isSafeCmdIdent`, and then limits the name to an identifier.
 public func isSafeCommandArgument(_ value: String) -> Bool {
     !value.isEmpty && !value.hasPrefix("-")
 }
