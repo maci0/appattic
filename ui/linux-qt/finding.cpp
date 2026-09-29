@@ -894,8 +894,14 @@ void enrichLeftoverUsageTiming(Finding &f, const QDateTime &now) {
     const QDateTime mt = fi.lastModified();
     if (!mt.isValid()) return;
     f.mtime = mt.toUTC().toString(Qt::ISODate);
+    // A negative count is an mtime ahead of now (a restored archive, a clock
+    // that ran ahead), not an age of zero: clamping it to 0 makes
+    // relativeDayLabel answer "Today" for a file the user has not touched in
+    // whatever the archive was taken at. -1 is the same "could not be read"
+    // the column already prints as unknown, and the mtime above still dates the
+    // row on its own.
     const qint64 days = localCalendarDaysSince(mt, now);
-    f.idleDays = days < 0 ? 0 : days;
+    f.idleDays = days < 0 ? -1 : days;
 }
 
 void enrichFindingsUsageTiming(QVector<Finding> &findings, const QDateTime &now) {

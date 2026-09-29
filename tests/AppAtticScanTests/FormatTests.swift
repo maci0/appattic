@@ -106,5 +106,9 @@ final class FormatTests: XCTestCase {
             XCTAssertTrue(label.hasPrefix(expectedCount(1)), "clamped label -> \(label)")
         }
         XCTAssertEqual(Set(clamped).count, 1, "negative, zero, and sub-day must all clamp alike")
+        // 28 days is the first month, and 28 / 30 truncates to zero months.
+        for label in [humanDays(28.0), humanDays(28.9)] {
+            XCTAssertTrue(label.hasPrefix(expectedCount(1)), "month floor -> \(label)")
+        }
     }
 }

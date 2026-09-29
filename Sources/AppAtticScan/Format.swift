@@ -96,9 +96,10 @@ public func humanSize(_ bytes: Int) -> String {
 
 /// Whole-day age, with the unit chosen by magnitude: hours below 1 day (at
 /// least 1h, so a future or fractional value never prints a zero count), days
-/// below 14, weeks below 60 days, months below 1.5 years, then years. The unit
-/// changes silently with the input, so a caller comparing formatted strings
-/// across a threshold gets a different unit, not a different number.
+/// below 14, weeks below 28 days, months below a year, then years. Every
+/// bucket keeps at least one of its unit. The unit changes silently with the
+/// input, so a caller comparing formatted strings across a threshold gets a
+/// different unit, not a different number.
 ///
 /// The count and the unit word are the locale's: Polish has four plural forms
 /// for a week, Arabic six for a day, and neither can come out of a `"\(n)d"`
@@ -112,7 +113,10 @@ public func humanDays(_ days: Double) -> String {
         return days >= 14 ? duration(.weekOfMonth, Int(days / 7)) : duration(.day, Int(days))
     }
     if days < 365 {
-        return duration(.month, Int(days / 30))
+        // `Int` truncates, so the 28 to 29 days that enter this branch divide
+        // to zero and printed as "0 mo". At least 1 month, the same floor the
+        // hour branch above keeps.
+        return duration(.month, max(Int(days / 30), 1))
     }
     return duration(.year, Int((days / 365).rounded()))
 }
