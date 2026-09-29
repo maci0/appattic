@@ -1844,8 +1844,12 @@ private:
         if (column == 1) {
             if (role == Qt::DisplayRole) return name;
             if (role == Qt::ToolTipRole) {
-                return f.path.isEmpty() ? QVariant(name)
-                                        : QVariant(name + QLatin1Char('\n') + f.path);
+                // `QToolTip` reads a string that starts with a tag as markup, so
+                // a directory named `<b>Firefox</b>` renders as bold Firefox and
+                // the tooltip stops naming a directory that exists. The name and
+                // the path are filesystem text, so this is the same escaping the
+                // preview trees do at 1687-1689.
+                return plainTooltip(f.path.isEmpty() ? name : name + QLatin1Char('\n') + f.path);
             }
             if (role == Qt::ForegroundRole && page == Page::Leftovers && isShadowFinding(f)) {
                 return ctx.amber;
@@ -1860,12 +1864,20 @@ private:
            display text is the tooltip for the same reason: one string, no
            second wording to fall out of step with the cell. */
         const bool text = role == Qt::DisplayRole || role == Qt::ToolTipRole;
+        // Same string, two roles, and only the tooltip one is read as markup:
+        // a leftover path or a version starting with `<` is eaten by the
+        // tooltip's rich-text guess. The cell paints the raw text either way.
+        const auto shown = [role](const QVariant &v) {
+            return role == Qt::ToolTipRole && v.canConvert<QString>() && !v.isNull()
+                       ? QVariant(plainTooltip(v.toString()))
+                       : v;
+        };
         switch (page) {
         case Page::Leftovers:
             if (text) {
-                if (column == 2) return locationLabel(f);
-                if (column == 3) return modifiedLabel(f);
-                if (column == 4) return size;
+                if (column == 2) return shown(locationLabel(f));
+                if (column == 3) return shown(modifiedLabel(f));
+                if (column == 4) return shown(size);
             }
             if (role == Qt::ForegroundRole) {
                 if (column == 2 && isShadowFinding(f)) return ctx.amber;
@@ -1874,9 +1886,9 @@ private:
             break;
         case Page::Stale:
             if (text) {
-                if (column == 2) return statusLabel(f);
-                if (column == 3) return modifiedLabel(f);
-                if (column == 4) return size;
+                if (column == 2) return shown(statusLabel(f));
+                if (column == 3) return shown(modifiedLabel(f));
+                if (column == 4) return shown(size);
             }
             if (role == Qt::ForegroundRole) {
                 if (column == 2) return statusColor(f, ctx.tone, page);
@@ -1885,8 +1897,8 @@ private:
             break;
         case Page::Outdated:
             if (text) {
-                if (column == 2) return managerLabel(f);
-                if (column == 3) return outdatedVersionLabel(f);
+                if (column == 2) return shown(managerLabel(f));
+                if (column == 3) return shown(outdatedVersionLabel(f));
             }
             if (role == Qt::ForegroundRole) {
                 if (column == 2) return ctx.dim;
@@ -1895,9 +1907,9 @@ private:
             break;
         case Page::Packages:
             if (text) {
-                if (column == 2) return managerLabel(f);
-                if (column == 3) return humanKind(f.kind);
-                if (column == 4) return size;
+                if (column == 2) return shown(managerLabel(f));
+                if (column == 3) return shown(humanKind(f.kind));
+                if (column == 4) return shown(size);
             }
             if (role == Qt::ForegroundRole) {
                 if (column == 2) return ctx.dim;

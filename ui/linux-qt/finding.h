@@ -21,6 +21,10 @@ enum class Page : int {
     Settings,
 };
 
+/// Canonical form of a path or name used as an identity. Declared above
+/// `Finding` because `uid()` is the row key and calls it.
+QString pathIdentityKey(const QString &path);
+
 struct Finding {
     QString plugin;
     QString engine;
@@ -53,16 +57,22 @@ struct Finding {
     // a legal byte in a Linux filename, so a '\n'-joined key can be produced by
     // two different findings. The sibling key for the same job already uses
     // U+001E (see packageChildMarkKey), a byte a POSIX filename cannot contain.
+    //
+    // `path` and `name` go through `pathIdentityKey` like every other identity
+    // in the app. Without it one directory reported twice, precomposed by one
+    // plugin and decomposed by another (an exFAT, NTFS, or SMB mount spells it
+    // the second way), gets two uids, and the tick mark then selects a
+    // different finding than the row it was ticked on.
     QString uid() const {
         static const QChar sep(0x1e);
-        return plugin + sep + id + sep + path + sep + kind + sep + name;
+        return plugin + sep + id + sep + pathIdentityKey(path) + sep + kind
+               + sep + pathIdentityKey(name);
     }
 };
 
 Q_DECLARE_METATYPE(Finding)
 
 QString jsonStr(const QJsonObject &o, const char *key);
-QString pathIdentityKey(const QString &path);
 QDateTime parseIsoInstant(const QString &value);
 QString redactHomePaths(const QString &text, const QString &home = QString());
 /// WASM path plugins list `/home/user/...`. host.exec rewrites that argv to the

@@ -372,9 +372,12 @@ void DiskChart::mouseMoveEvent(QMouseEvent *event) {
         m_hover = n;
         update();
         if (n) {
-            const QString tip = n->name + QLatin1Char('\n')
+            // `QToolTip` guesses markup from the first characters, so a folder
+            // named `<b>Ünïcode</b>` renders bold and the tooltip stops naming
+            // the directory. Same escaping as every other tooltip in the app.
+            const QString tip = plainTooltip(n->name + QLatin1Char('\n')
                 + humanSize(n->metric(m_allocated)) + QLatin1Char('\n')
-                + n->path;
+                + n->path);
             QToolTip::showText(event->globalPosition().toPoint(), tip, this);
         } else {
             QToolTip::hideText();

@@ -695,7 +695,14 @@ QString leftoverCleanupCommand(const Finding &f) {
     if (isLeftover(f)) {
         QStringList paths;
         auto add = [&](const QString &p) {
-            if (!isRemovableLeftoverPath(p) || paths.contains(p)) return;
+            // Compared in the canonical form, not by raw text: NFC and NFD
+            // spellings of one directory are the same directory, and a literal
+            // compare lets both through and writes two `rm -rf` lines for it.
+            if (!isRemovableLeftoverPath(p)) return;
+            const QString key = pathIdentityKey(p);
+            for (const QString &seen : paths) {
+                if (pathIdentityKey(seen) == key) return;
+            }
             if (isProtectedPackagedPath(p) && !isPpaSourcesPath(p)) return;
             paths << p;
         };
@@ -869,7 +876,12 @@ void groupLinuxLeftovers(QVector<Finding> &findings) {
         }
         if (!allSized) findings[primary].bytes = -1;
         findings[primary].extraPaths.removeDuplicates();
-        findings[primary].extraPaths.removeAll(findings[primary].path);
+        // The primary path is dropped from the sibling list by identity, not by
+        // spelling, so a group whose members came off a decomposed mount does
+        // not keep a second copy of its own path.
+        findings[primary].extraPaths.removeIf([&](const QString &p) {
+            return pathIdentityKey(p) == pathIdentityKey(findings[primary].path);
+        });
     }
     if (drop.isEmpty()) return;
     QVector<Finding> kept;

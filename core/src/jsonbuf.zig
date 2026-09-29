@@ -240,7 +240,10 @@ pub fn writeGlobal(
         w.str(version);
     }
     w.raw(",\"status\":\"global\",\"command\":\"");
-    w.raw(cmd);
+    // Escaped, not raw, for the reason `writeRmCommand` gives: a guard that
+    // names an apostrophe carries `shQuote`'s `'\''`, and that backslash is a
+    // JSON escape the host parser rejects, so the whole row is lost.
+    w.escaped(cmd);
     w.raw("\",\"manager\":");
     w.str(manager);
     w.raw("}");
@@ -440,6 +443,18 @@ test "writeRmCommand is a valid JSON string field on its own" {
     const got2 = w2.slice() orelse return error.Overflow;
     try std.testing.expect(isValidJson(got2));
     try std.testing.expect(std.mem.indexOf(u8, got2, ",\"command\":\"rm '/home/user/it'\\\\''s'\"") != null);
+}
+
+test "writeGlobal JSON-escapes the guard it is handed whole" {
+    var buf: [512]u8 = undefined;
+    var w = W{ .buf = &buf };
+    // A guard over a name holding an apostrophe carries shQuote's `'\''`, and
+    // that backslash is a JSON escape the host parser rejects.
+    const cmd = "if test -d '/home/user/it'\\''s'; then rm -rf '/home/user/it'\\''s'; fi";
+    writeGlobal(&w, "it's", "", cmd, "npm");
+    const got = w.slice() orelse return error.Overflow;
+    try std.testing.expect(isValidJson(got));
+    try std.testing.expect(std.mem.indexOf(u8, got, "\\'") != null);
 }
 
 test "writeOutdated JSON-escapes command and shell-quotes the name" {
