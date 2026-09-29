@@ -64,6 +64,10 @@ private:
     QProcess *m_proc = nullptr;
     QTimer *m_timer = nullptr;
     bool m_stopped = false;
+    /// The run has been reported. `stop` reports a script that outlives both
+    /// signals itself, so the `finished` that arrives later, if it ever does,
+    /// must not report the same run twice.
+    bool m_reported = false;
     QString m_path;
     QByteArray m_output;
 };

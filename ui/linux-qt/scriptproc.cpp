@@ -59,7 +59,15 @@ static void signalScriptGroup(QProcess *proc, int sig) {
     else proc->terminate();
 }
 
-ScriptProcess::ScriptProcess(QObject *parent) : QObject(parent) {}
+ScriptProcess::ScriptProcess(QObject *parent) : QObject(parent) {
+    // One timer for the object's life, not one per run: `prepare` is the entry
+    // point a caller reuses, and a `new QTimer(this)` in it left the previous
+    // one a child of this object, still holding its `timeout` connection, for
+    // as long as the window stayed open.
+    m_timer = new QTimer(this);
+    m_timer->setSingleShot(true);
+    connect(m_timer, &QTimer::timeout, this, &ScriptProcess::stop);
+}
 
 ScriptProcess::~ScriptProcess() {
     if (m_timer) m_timer->stop();
@@ -112,6 +120,7 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
     m_path = tmp.fileName();
     m_output.clear();
     m_stopped = false;
+    m_reported = false;
 
     auto *proc = new QProcess(this);
     m_proc = proc;
@@ -123,14 +132,13 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
     env.insert(QStringLiteral("APT_LISTCHANGES_FRONTEND"), QStringLiteral("none"));
     proc->setProcessEnvironment(env);
 
-    m_timer = new QTimer(this);
-    m_timer->setSingleShot(true);
-    connect(m_timer, &QTimer::timeout, this, &ScriptProcess::stop);
     m_timer->start(kScriptTimeoutMs);
 
     connect(proc, &QProcess::readyRead, this, [this, proc] { appendOutput(proc->readAll()); });
     connect(proc, &QProcess::finished, this, [this, proc, path = tmp.fileName()](int code) {
         appendOutput(proc->readAll());
+        if (m_reported) return;
+        m_reported = true;
         if (m_path == path) m_path.clear();
         QFile::remove(path);
         m_timer->stop();
@@ -144,6 +152,8 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
     });
     connect(proc, &QProcess::errorOccurred, this, [this, proc, path = tmp.fileName()](QProcess::ProcessError err) {
         if (err != QProcess::FailedToStart) return;
+        if (m_reported) return;
+        m_reported = true;
         m_timer->stop();
         m_stopped = false;
         if (m_path == path) m_path.clear();
@@ -161,10 +171,20 @@ void ScriptProcess::start() {
 
 void ScriptProcess::stop() {
     QProcess *proc = m_proc;
-    if (!proc) return;
+    if (!proc || m_reported) return;
     m_stopped = true;
     signalScriptGroup(proc, SIGTERM);
     if (proc->waitForFinished(kScriptStopGraceMs)) return;
     signalScriptGroup(proc, SIGKILL);
-    proc->waitForFinished(kScriptStopGraceMs);
+    if (proc->waitForFinished(kScriptStopGraceMs)) return;
+    /* SIGKILL cannot be caught, but a script blocked in uninterruptible sleep
+       on a hung mount does not reach a zombie for it, so `waitForFinished` can
+       still be false here with the group already signalled. Nothing will
+       report the run: the window keeps `m_scanning` set and every action
+       disabled until the process is killed from outside the window, and the
+       script's temp file stays in the temp directory for as long. Report it as
+       the stopped run it is, and leave the process and the file to this object:
+       the destructor signals the group again and reaps what is left. */
+    m_reported = true;
+    emit finished(-1, true, m_output);
 }
