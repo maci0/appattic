@@ -79,6 +79,19 @@ final class PathsTests: XCTestCase {
             xdgConfigHome(home: home, env: ["XDG_CONFIG_HOME": "/"]),
             "/"
         )
+        // A trailing separator names the same root. `core/host/hostexec.c` and
+        // `ui/linux-qt/finding.cpp` drop it too: the host builds the argument
+        // the core scans from this value, and one that ends in a separator
+        // makes a path with two of them, which a root of `/` turns into a
+        // leading `//`.
+        XCTAssertEqual(
+            xdgDataHome(home: home, env: ["XDG_DATA_HOME": "/tmp/myshare/"]),
+            "/tmp/myshare"
+        )
+        XCTAssertEqual(
+            xdgConfigHome(home: home, env: ["XDG_CONFIG_HOME": "/srv//"]),
+            "/srv"
+        )
         XCTAssertEqual(
             xdgConfigHome(home: home, env: ["XDG_CONFIG_HOME": ""]),
             "/home/x/.config"

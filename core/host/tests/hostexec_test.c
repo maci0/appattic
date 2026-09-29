@@ -252,6 +252,21 @@ static int check_xdg_root(void) {
             return fail("xdg: padded value did not resolve to the configured root");
         }
     }
+    /* A trailing separator is the same directory, and the rest of the argument
+       starts with one, so the root is stored without it: `Sources/AppAtticScan/
+       Paths.swift` and `ui/linux-qt/finding.cpp` normalize it the same way. */
+    {
+        char slashed[PATH_MAX];
+        snprintf(slashed, sizeof slashed, "%s/", tmpl);
+        setenv("XDG_CONFIG_HOME", slashed, 1);
+        n = appattic_host_exec("ls -1 /home/user/.config", out, sizeof out);
+        out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+        if (n <= 0 || !strstr(out, "marker")) {
+            unlink(marker);
+            rmdir(tmpl);
+            return fail("xdg: trailing separator did not resolve to the configured root");
+        }
+    }
     /* A relative value is ignored, so the default root stands and the marker
        directory is not what gets listed. */
     setenv("XDG_CONFIG_HOME", "relative/config", 1);

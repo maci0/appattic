@@ -652,9 +652,20 @@ void DiskPage::scanFolder() {
 void DiskPage::scanFilesystem() { startScan(QStringLiteral("/")); }
 
 void DiskPage::scanRemote() {
-    QString gvfs = QString::fromUtf8(qgetenv("XDG_RUNTIME_DIR")) + QStringLiteral("/gvfs");
-    if (gvfs.startsWith(QLatin1Char('/')) == false) {
-        gvfs = QDir::homePath() + QStringLiteral("/.gvfs");
+    // A session's network mounts live in `$XDG_RUNTIME_DIR/gvfs`, so an unset
+    // variable means `~/.gvfs` and not `/gvfs`: appending to an empty value
+    // named a root that is not a session's, and left the `~/.gvfs` fallback
+    // below unreachable. A relative or padded value is read as unset, the way
+    // the other XDG variables are read in `Sources/AppAtticScan/Paths.swift`
+    // and `core/host/hostexec.c`, trailing separator included.
+    const QString runtimeDir = QString::fromUtf8(qgetenv("XDG_RUNTIME_DIR")).trimmed();
+    QString gvfs = QDir::homePath() + QStringLiteral("/.gvfs");
+    if (QDir::isAbsolutePath(runtimeDir)) {
+        QString root = runtimeDir;
+        while (root.size() > 1 && root.endsWith(QLatin1Char('/'))) root.chop(1);
+        gvfs = root.endsWith(QLatin1Char('/'))
+            ? root + QStringLiteral("gvfs")
+            : root + QStringLiteral("/gvfs");
     }
     QString start = QDir::homePath();
     if (QDir(gvfs).exists()) start = gvfs;

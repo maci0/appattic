@@ -1,5 +1,9 @@
 import Foundation
 /// XDG Base Directory: unset, empty, or non-absolute values use `home/fallback`.
+/// A trailing separator is dropped, so the value reads as the directory the
+/// scan opens. `core/host/hostexec.c` and `ui/linux-qt/finding.cpp` normalize
+/// the same way, and a root that ends in one makes the host build a path with
+/// two separators where the CLI printed one.
 public func xdgUserDir(
     _ variable: String,
     fallback: String,
@@ -7,7 +11,9 @@ public func xdgUserDir(
     env: [String: String] = ProcessInfo.processInfo.environment
 ) -> String {
     if let raw = env[variable]?.trimmingCharacters(in: .whitespacesAndNewlines), raw.hasPrefix("/") {
-        return raw
+        var root = raw
+        while root.count > 1 && root.hasSuffix("/") { root.removeLast() }
+        return root
     }
     return (home as NSString).appendingPathComponent(fallback)
 }

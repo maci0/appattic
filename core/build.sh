@@ -157,7 +157,7 @@ detect_jobs() {
     fi
     case "$n" in
         ''|*[!0-9]*) n=1 ;;
-        # A plain count: nproc's own answer, or APPATTIC_BUILD_JOBS.
+        # A plain count: nproc's own answer.
         *) ;;
     esac
     if [ "$n" -gt 2 ]; then
@@ -166,7 +166,22 @@ detect_jobs() {
         printf '1\n'
     fi
 }
-JOBS="${APPATTIC_BUILD_JOBS:-$(detect_jobs)}"
+
+# The override is held to the same rule, because `run_modules` below counts in
+# arithmetic: a value that is zero, padded, or not a number folds to 0 there and
+# every module runs one at a time, so the build gets slower with nothing saying
+# why. A wrong override is a mistake in the caller's environment, so it is
+# named and the build stops before any module is emitted.
+JOBS=""
+case "${APPATTIC_BUILD_JOBS:-}" in
+    '' ) ;;
+    *[!0-9]* | 0 )
+        echo "error: APPATTIC_BUILD_JOBS=$APPATTIC_BUILD_JOBS is not a count; use a whole number of at least 1" >&2
+        exit 2
+        ;;
+    * ) JOBS="$APPATTIC_BUILD_JOBS" ;;
+esac
+[ -n "$JOBS" ] || JOBS="$(detect_jobs)"
 
 # Run "$1" once per remaining argument, at most $JOBS in flight, and report
 # failures in the order the list declared them. Each module writes its own

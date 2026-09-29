@@ -122,9 +122,10 @@ Environment:
 | `XDG_CACHE_HOME` | Linux | Absolute cache root scanned for leftovers, by the CLI and by the Linux window. |
 | `XDG_STATE_HOME` | Linux | Absolute state root scanned for leftovers, by the CLI and by the Linux window. |
 | `XDG_DATA_DIRS` | Linux | Colon-separated absolute data roots searched for desktop entries. Unset, empty, or a list whose entries are all relative uses `/usr/local/share:/usr/share`; relative entries in a longer list are dropped, and `appattic config` prints the list that survives. |
+| `XDG_RUNTIME_DIR` | Linux Qt | Runtime root of the session, read for the `gvfs` directory the network-folder scan opens at. Unset, empty, or relative uses `~/.gvfs`. The CLI does not read it. |
 | `FLATPAK_ID` | Linux Qt and the core host | Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags and package-manager queries go through `/run/host` and `flatpak-spawn --host`. Unset or empty is a normal host run. |
 
-Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used.
+Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used. A trailing separator is dropped from a root that ends in one, so `XDG_CONFIG_HOME=/srv/config/` and `XDG_CONFIG_HOME=/srv/config` name the same directory to the CLI, to the Linux window, and to the core host.
 
 `report`, `leftovers`, `stale`, `outdated`, and `packages` reuse the last scan when it is still current. Pass `--fresh` to scan now. `update` always scans live and drops the last-scan cache after a successful upgrade. A scan in which an update or package-listing check ran and failed is not saved, so a failed check is retried on the next run instead of being served as "up to date" or "no unused packages" for a day. The cache is a full inventory of the account's app and leftover paths, so a snapshot past the 24h reuse bound is deleted by the next run instead of being kept once no run would serve it, and a snapshot that does not decode is deleted on the spot. A file past 256 MB is not a snapshot and is not read into memory.
 

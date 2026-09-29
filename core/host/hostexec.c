@@ -584,6 +584,12 @@ static const char *xdg_root_for(const char *arg, size_t *rel_len) {
         memcpy(trimmed[i], v, len);
         trimmed[i][len] = '\0';
         if (trimmed[i][0] != '/') continue;
+        /* Trailing separators are dropped, as `ui/linux-qt/finding.cpp` drops
+           them: the rest of the argument starts with one, so a root that ends
+           in one would double it, and with `XDG_CONFIG_HOME=/` the argv would
+           begin `//`, which POSIX leaves implementation-defined. The root
+           itself is a single `/`, which is not a separator to drop. */
+        while (len > 1 && trimmed[i][len - 1] == '/') trimmed[i][--len] = '\0';
         *rel_len = n;
         return trimmed[i];
     }

@@ -14,7 +14,8 @@ bash scripts/test.sh DiskSizeTests    # one class, or one test: Class/testName
 ```
 
 `core/build.sh` compiles and tests one module per process, one core at a time
-minus one (`APPATTIC_BUILD_JOBS` overrides). Output and failure reports stay in
+minus one (`APPATTIC_BUILD_JOBS` overrides, as a whole number of at least 1; any
+other value stops the build and names the variable). Output and failure reports stay in
 the module order the script declares, so a red line names the module that broke.
 The second argument to `test` filters to one test, the Zig counterpart of
 `scripts/test.sh Class/testName`; a name that matches nothing fails rather than
