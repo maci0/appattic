@@ -305,13 +305,13 @@ public let relativeDayLimit = 45
 /// both on every call is too expensive for a table that formats a row per
 /// frame, so the pair is cached and replaced when either changes.
 ///
-/// The zone is part of the key, not a detail, because the two halves of
-/// `string(from:now:)` read the zone from different places: the day count comes
-/// from `Calendar.current` on every call, while the fallback date comes from the
-/// cached formatter. A process that outlives a zone change (a laptop crossing a
-/// border, a `TZ` change under a running CLI) would otherwise decide "today" in
-/// the new zone and print the date in the old one, and the two disagree by a day
-/// for every row near local midnight.
+/// The zone is part of the key, not a detail, because both halves of
+/// `string(from:now:)` have to read it: the day count and the fallback date
+/// decide "today" in the same zone. A process that outlives a zone change (a
+/// laptop crossing a border, a `TZ` change under a running CLI) would otherwise
+/// decide "today" in the new zone and print the date in the old one, and the two
+/// disagree by a day for every row near local midnight. `string(from:now:)`
+/// takes the same pair for the same reason.
 final class LocaleScopedTimestamps {
     private let lock = NSLock()
     private var localeID: String?
@@ -394,16 +394,32 @@ public enum TimestampFormat {
     /// negative, so an out-of-range or future timestamp (a restored archive, a
     /// file written while the clock was ahead) never renders as an empty cell
     /// or claims to have changed today.
-    public static func string(from date: Date, now: Date = Date()) -> String {
+    ///
+    /// `locale` and `zone` decide the day count as well as the printed date:
+    /// both halves read the pair handed in, so a caller that pins them (a
+    /// replayed run, a test) gets the same answer on every host. The defaults
+    /// are the process values.
+    public static func string(
+        from date: Date,
+        now: Date = Date(),
+        locale: Locale = .current,
+        zone: TimeZone = .current
+    ) -> String {
         // One snapshot of the locale-scoped pair, so the date and the relative
         // label cannot come from two different locales.
-        let formatters = scoped.current()
-        guard let days = calendarDaysSince(date, now: now), days >= 0, days < relativeDayLimit else {
+        let formatters = scoped.current(locale: locale, zone: zone)
+        // The day count in that same zone rather than `Calendar.current`: a
+        // relative label decided in one zone beside a date printed in another
+        // disagrees by a day for any timestamp near local midnight.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = zone
+        guard let days = calendarDaysSince(date, now: now, calendar: calendar),
+              days >= 0, days < relativeDayLimit else {
             return formatters.date.string(from: date)
         }
         // Anchor both ends at local midnight so the interval is a whole number
         // of days, including across a daylight-saving change.
-        let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         guard let then = calendar.date(byAdding: .day, value: -days, to: today) else {
             return formatters.date.string(from: date)

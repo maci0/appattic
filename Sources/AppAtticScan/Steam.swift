@@ -248,7 +248,10 @@ public func findSteamApps(libraryRoots: [String]? = nil) -> [AppRecord] {
         }
         let steamapps = (real as NSString).appendingPathComponent("steamapps")
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: steamapps) else { return }
-        for name in names where name.hasPrefix("appmanifest_") && name.hasSuffix(".acf") {
+        // Sorted: `contentsOfDirectory` hands back readdir order, and
+        // `seenIds` keeps the first record of an app id, so an unsorted walk
+        // picks a different library's copy of a shared app on each run.
+        for name in names.sorted() where name.hasPrefix("appmanifest_") && name.hasSuffix(".acf") {
             let acf = (steamapps as NSString).appendingPathComponent(name)
             guard let text = readUTF8File(acf),
                   let manifest = parseSteamAppManifest(text),

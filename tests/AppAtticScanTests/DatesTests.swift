@@ -234,9 +234,9 @@ final class DatesTests: XCTestCase {
 
     /// A `DateFormatter` keeps the time zone it was built with, so a formatter
     /// held from before a zone change dates every row in the zone the process
-    /// started in. The day count in `string(from:now:)` already reads
-    /// `Calendar.current`, so a stale formatter makes the relative label and
-    /// the absolute date disagree by a day.
+    /// started in. The day count in `string(from:now:)` reads the same scoped
+    /// zone, so a stale formatter makes the relative label and the absolute
+    /// date disagree by a day.
     ///
     /// The zone is handed in for the same reason as the locale above:
     /// `TimeZone.current` is get-only too.
@@ -254,5 +254,36 @@ final class DatesTests: XCTestCase {
             locale: english, zone: try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
         ).date.string(from: instant)
         XCTAssertNotEqual(newYork, tokyo, "the date formatter kept the old time zone")
+    }
+
+    /// The day count and the printed date have to come from the zone handed in.
+    /// The count used to come from `Calendar.current`, so a caller that pinned
+    /// a zone got a relative label counted in the process zone beside a date
+    /// printed in its own: a replay on another host, and any test, could not
+    /// pin the answer.
+    ///
+    /// The two zones disagree about the day at the chosen instant, so no host
+    /// zone can satisfy both: Kiritimati (20:20 local) is still on the same
+    /// day as twenty hours earlier, Tokyo (15:20 local) is not.
+    func testTimestampFormatCountsDaysInThePinnedZone() throws {
+        let now = Date(timeIntervalSince1970: 1_773_123_600)  // 2026-03-10T06:20Z
+        let twentyHoursAgo = now.addingTimeInterval(-20 * 3600)
+        let locale = Locale(identifier: "en_US_POSIX")
+        let sameDay = try XCTUnwrap(TimeZone(identifier: "Pacific/Kiritimati"))  // UTC+14
+        let nextDay = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))  // UTC+9
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = nextDay
+        XCTAssertEqual(calendarDaysSince(twentyHoursAgo, now: now, calendar: calendar), 1)
+
+        let labelSameDay = TimestampFormat.string(from: twentyHoursAgo, now: now, locale: locale, zone: sameDay)
+        let labelNextDay = TimestampFormat.string(from: twentyHoursAgo, now: now, locale: locale, zone: nextDay)
+        XCTAssertNotEqual(labelSameDay, labelNextDay, "the day count ignored the zone handed in")
+        // corelibs-foundation has no relative formatter, so the label is the
+        // ASCII day unit there and the count is visible in it directly.
+        if TimestampFormat.relativeDays == nil {
+            XCTAssertEqual(labelSameDay, "0 d")
+            XCTAssertEqual(labelNextDay, "1 d")
+        }
     }
 }
