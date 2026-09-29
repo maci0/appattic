@@ -136,8 +136,12 @@ if [[ "$OS" == Darwin && "$HAVE_MAC_UI" -eq 1 ]]; then
     # the last thing that writes to it.
     # BSD touch (macOS) has no -h and no @epoch form; -t is the one both
     # spell. The bundle holds only copied files, so nothing follows a symlink.
+    # The stamp is rendered in UTC and applied with TZ=UTC, because `touch -t`
+    # reads its argument in local time: a host whose TZ is not UTC would give
+    # every file in the bundle an mtime the machine's zone decided, and two
+    # builds of one source two different archives.
     stamp="$(date -u -r "$SOURCE_DATE_EPOCH" +%Y%m%d%H%M.%S)"
-    find AppAttic.app -exec touch -t "$stamp" {} +
+    TZ=UTC find AppAttic.app -exec touch -t "$stamp" {} +
     echo "Built AppAttic.app"
     echo "Launch: open AppAttic.app"
     echo "CLI:    ./run.sh report"

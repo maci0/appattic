@@ -95,6 +95,9 @@ if [[ "$HAVE_ZIG" -eq 1 ]]; then
 fi
 
 echo "pass 2: TZ=Asia/Tokyo SOURCE_DATE_EPOCH=1800000000"
+# The subshell is what keeps pass 2's zone and epoch out of everything that
+# follows, and the stamp checks below read both under their own zones.
+# shellcheck disable=SC2030  # deliberately scoped to this subshell
 (
     export TZ=Asia/Tokyo
     export SOURCE_DATE_EPOCH=1800000000
@@ -132,25 +135,40 @@ fi
 # epoch before it compiles the images, so a stamp names the epoch and never
 # the clock of the build that wrote it; a module left at its own mtime makes
 # two builds of one source differ, which no archive normalization reaches.
+#
+# Applied and read under a timezone neither pass exports as UTC, because
+# `touch -t` reads its argument in local time. Checked under TZ=UTC it passed
+# against a helper that rendered the stamp in UTC and applied it in local
+# time, which is the one thing that had to fail: on any host not running UTC
+# the stamp it produced was hours off, and the AppImage ships that stamp as
+# file content.
 if [[ "$HAVE_ZIG" -eq 1 ]]; then
     for pass in 1 2; do
         if [[ "$pass" -eq 1 ]]; then
             wasm="$tmp/core1.wasm"
             epoch=1000000000
+            zone=America/Los_Angeles
         else
             wasm="$tmp/core2.wasm"
             epoch=1800000000
+            zone=Asia/Tokyo
         fi
-        SOURCE_DATE_EPOCH="$epoch"
-        export SOURCE_DATE_EPOCH
-        appattic_touch_epoch "$wasm"
-        mtime="$(date -r "$wasm" +%s)"
-        echo "pass $pass stamp input: size $(wc -c <"$wasm" | tr -d ' ') mtime $mtime"
-        if [[ "$mtime" != "$epoch" ]]; then
-            echo "error: $wasm mtime is $mtime, not SOURCE_DATE_EPOCH $epoch" >&2
-            echo "       a .cwasm.stamp written from it would carry the build clock" >&2
-            fail=1
-        fi
+        # The subshell is the point: neither TZ nor SOURCE_DATE_EPOCH may
+        # escape a check that varies them per pass, and neither leak into the
+        # next pass or the next script that sources this one.
+        # shellcheck disable=SC2030,SC2031  # the subshell is what isolates them
+        (
+            export TZ="$zone"
+            export SOURCE_DATE_EPOCH="$epoch"
+            appattic_touch_epoch "$wasm"
+            mtime="$(date -r "$wasm" +%s)"
+            echo "pass $pass stamp input: size $(wc -c <"$wasm" | tr -d ' ') mtime $mtime (TZ=$zone)"
+            if [[ "$mtime" != "$epoch" ]]; then
+                echo "error: $wasm mtime is $mtime, not SOURCE_DATE_EPOCH $epoch (TZ=$zone)" >&2
+                echo "       a .cwasm.stamp written from it would carry the build clock" >&2
+                exit 1
+            fi
+        ) || fail=1
     done
 fi
 if [[ $fail -ne 0 ]]; then
