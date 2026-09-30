@@ -377,27 +377,78 @@ final class CacheTests: XCTestCase {
         XCTAssertEqual(androidSdkStamp(sdkDirs: [root.appendingPathComponent("empty").path]), "")
     }
 
-    func testRootInventoryStampIgnoresNestedWrites() throws {
+    func testRootInventoryStampMovesOnNestedWrite() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("root-stamp-\(UUID().uuidString)")
         let alpha = dir.appendingPathComponent("Alpha")
-        try FileManager.default.createDirectory(at: alpha, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: alpha.appendingPathComponent("inner"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let first = rootInventoryStamp("Caches", dir.path)
-        XCTAssertEqual(first, "root:Caches:Alpha")
-        try Data("nested".utf8).write(to: alpha.appendingPathComponent("inside.txt"))
-        XCTAssertEqual(rootInventoryStamp("Caches", dir.path), first)
+        XCTAssertTrue(first.hasPrefix("root:Caches:Alpha"), first)
+        // A write below the entry is what `applyRecentActivity` reads, so the
+        // stamp has to move with it: the orphan it reported has become active.
+        // The nested file is stamped into the future so the comparison against
+        // the directory's own mtime does not depend on filesystem timestamp
+        // granularity.
+        let nested = alpha.appendingPathComponent("inner/written.txt")
+        try Data("nested".utf8).write(to: nested)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(3600)], ofItemAtPath: nested.path
+        )
+        let second = rootInventoryStamp("Caches", dir.path)
+        XCTAssertNotEqual(first, second)
+        XCTAssertTrue(second.hasPrefix("root:Caches:Alpha"), second)
         try FileManager.default.createDirectory(at: dir.appendingPathComponent("Beta"), withIntermediateDirectories: true)
-        XCTAssertEqual(rootInventoryStamp("Caches", dir.path), "root:Caches:Alpha,Beta")
+        let withBeta = rootInventoryStamp("Caches", dir.path)
+        XCTAssertTrue(withBeta.contains(",Beta@"), withBeta)
         XCTAssertEqual(rootInventoryStamp("Caches", dir.appendingPathComponent("missing").path), "root:Caches:missing")
     }
 
-    func testStampJoinEscapesCommaAndNewline() {
+    /// A root too large to walk nested is stamped `partial:`, so a stamp that
+    /// did not walk cannot be read as one that did. The cutoff is on the entry
+    /// count and not on a clock, so the same root is stamped the same way on
+    /// every run and the two fingerprints of one scan still agree.
+    func testRootInventoryStampMarksRootsTooLargeToProbe() throws {
+        let big = FileManager.default.temporaryDirectory.appendingPathComponent("root-stamp-big-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: big) }
+        for i in 0...rootStampProbeEntries {
+            try FileManager.default.createDirectory(
+                at: big.appendingPathComponent("d\(i)"), withIntermediateDirectories: true
+            )
+        }
+        let over = rootInventoryStamp("Caches", big.path)
+        XCTAssertTrue(over.hasPrefix("root:Caches:partial:"), String(over.prefix(40)))
+        XCTAssertEqual(over, rootInventoryStamp("Caches", big.path))
+    }
+
+    /// A root the scan never probes nested (`skipNestedRoots`) keeps the stamp
+    /// it had: a nested write there cannot change any status the scan reports,
+    /// so paying for the walk would buy nothing.
+    func testRootInventoryStampSkipsNestedForSkippedRoots() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("root-stamp-skip-\(UUID().uuidString)")
+        let alpha = dir.appendingPathComponent("Alpha")
+        try FileManager.default.createDirectory(at: alpha, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let first = rootInventoryStamp("Containers", dir.path)
+        XCTAssertEqual(first, "root:Containers:Alpha", first)
+        let nested = alpha.appendingPathComponent("written.txt")
+        try Data("nested".utf8).write(to: nested)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: nested.path
+        )
+        XCTAssertEqual(rootInventoryStamp("Containers", dir.path), first)
+    }
+
+    func testStampJoinEscapesCommaNewlineAndBang() {
         XCTAssertEqual(stampEscape("Alpha,Beta"), "Alpha\\,Beta")
         XCTAssertEqual(stampEscape("a\\b"), "a\\\\b")
         XCTAssertEqual(stampEscape("wget 1\ncurl 2"), "wget 1\\ncurl 2")
+        XCTAssertEqual(stampEscape("A!5"), "A\\!5")
         XCTAssertEqual(stampJoin(["Alpha", "Beta"]), "Alpha,Beta")
         XCTAssertEqual(stampJoin(["Alpha,Beta"]), "Alpha\\,Beta")
         XCTAssertNotEqual(stampJoin(["Alpha,Beta"]), stampJoin(["Alpha", "Beta"]))
+        // The nested-mtime separator cannot be spelled by a name.
+        XCTAssertNotEqual(stampJoin(["A!5"]), stampJoin(["A"]) + "!5")
     }
 
     func testRootInventoryStampEscapesCommaInName() throws {
@@ -689,5 +740,35 @@ final class CacheTests: XCTestCase {
         // A real duration still rounds to one decimal rather than being dropped.
         XCTAssertEqual(scanResult(from: snapshot(1.25)).toScanData().duration_s, 1.3)
         XCTAssertEqual(scanResult(from: snapshot(0.04)).toScanData().duration_s, 0)
+    }
+
+    /// A fingerprint has to be a statement about the machine as it is now, not
+    /// about the toolchain list an earlier scan left behind. The macOS window
+    /// stamps once at launch and once before every rescan, and only the rescan
+    /// used to rebuild the list the default `which` walks, so a tool directory
+    /// installed in between was invisible to the stamp that decided whether the
+    /// snapshot was still current.
+    func testScanFingerprintRebuildsTheSearchListEveryTime() {
+        resetWhichSearchDirectories()
+        // Warm the list the way a launch does, then stamp again. With the
+        // fingerprint rebuilding the list, both stamps are made against the
+        // machine as it is and they agree; the count pins that the lookups ran
+        // rather than being answered from a list the first stamp left cached.
+        var lookups = 0
+        func stamp() -> String {
+            lookups = 0
+            return scanFingerprint(
+                which: { _ in
+                    lookups += 1
+                    return nil
+                },
+                run: { _, _ in (1, "", "") }
+            )
+        }
+        let first = stamp()
+        let afterFirst = lookups
+        let second = stamp()
+        XCTAssertEqual(first, second, "a stamp must not depend on a list an earlier one cached")
+        XCTAssertGreaterThan(afterFirst, 0, "the injected which must actually have been called")
     }
 }

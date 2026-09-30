@@ -12,6 +12,15 @@ public let scanCacheMaxAge: TimeInterval = 24 * 3600
 /// the whole thing into memory before the decoder could reject it.
 public let scanCacheMaxBytes: Int = 256 * 1024 * 1024
 
+/// How many entries of one root the fingerprint stamp walks nested before it
+/// gives up and stamps names and each entry's own mtime instead. The walk is
+/// `probeActivityMtime`, which bounds itself at 0.2s and 80 entries per call,
+/// so a root of this many entries can cost this many times that. The stamp
+/// exists to avoid a scan, so a stamp that costs more than the scan it replaces
+/// has lost; the ceiling is on the count rather than on a clock so the same
+/// machine is stamped the same way on every run.
+let rootStampProbeEntries = 128
+
 public struct ScanCacheFile: Codable, Sendable {
     public var fingerprint: String
     public var includeSystem: Bool
@@ -262,10 +271,21 @@ public func commitScanCache(
 
 /// Inventory stamp for cache invalidation: apps, brew lists, leftover roots, and package-manager state.
 /// Changing evaluator version (`eval:`) or packages collector version (`packages:`) also busts the cache.
+///
+/// The default `which` resolves through the search-directory list cached in
+/// `Process.swift`, and that list is only rebuilt by `performScan` and by
+/// `resetWhichSearchDirectories`. A fingerprint is not a scan, so the first
+/// stamp of a long-lived process (the macOS window computes one at launch, and
+/// one again before every rescan) read a list built by an earlier scan: a
+/// toolchain directory installed since, including a new nvm version, was not
+/// in it, so `which` answered from a machine that no longer exists. The reset
+/// here makes every stamp a statement about the machine as it is now, which is
+/// the only way two stamps of the same machine can be compared.
 public func scanFingerprint(
     which: WhichFn = whichCommand,
     run: CommandRun = runCommand
 ) -> String {
+    resetWhichSearchDirectories()
     var lines: [String] = ["ver:\(appAtticVersion)", "eval:20", "packages:1"]
     if PlatformOverride.isLinux {
         for dir in linuxDesktopDirs() {
@@ -379,6 +399,10 @@ func stampEscape(_ s: String) -> String {
         case ",": escaped = "\\,"
         case "\n": escaped = "\\n"
         case "\r": escaped = "\\r"
+        // The separator `inventoryEntryStamp` puts between an entry's own
+        // mtime and its nested activity mtime. Escaped like the others so a
+        // name that carries one cannot be read as a stamp with two mtimes.
+        case "!": escaped = "\\!"
         default:
             i = s.index(after: i)
             continue
@@ -402,13 +426,39 @@ func rootInventoryStamp(_ label: String, _ path: String) -> String {
         return "root:\(stampEscape(label)):missing"
     }
     let names = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
-    // Name *and* mtime, like every other inventory stamp in this file. Names
-    // alone miss a write inside an entry that already existed: `applyRecentActivity`
-    // re-reads a nested mtime to tell an orphaned leftover from an active one,
-    // so a cache touched after that change keeps serving the pre-change status.
-    let ents = stampJoin(names.filter { !$0.hasPrefix(".") }.sorted().map {
-        inventoryEntryStamp(dir: path, name: $0)
+    // Name *and* mtime, like every other inventory stamp in this file, plus the
+    // nested activity mtime for a directory entry. The entry's own mtime is not
+    // enough: `applyRecentActivity` decides orphaned-vs-active from
+    // `probeActivityMtime`, which walks two levels down, so a write to
+    // `~/Library/Caches/Foo/inner/file` flips the status to active without
+    // touching `Foo`'s own mtime. Stamping the value the scan actually reads
+    // (`probeActivityMtime`, the same bounded walk) is what makes the snapshot
+    // move when the status it reports can move. The `!` separator keeps the two
+    // components out of the name's `@mtime` and comma-escaped spelling, and the
+    // nested part is dropped for a root the scan never probes nested
+    // (`skipNestedRoots`), so those keep the stamp they had.
+    let nested = !skipNestedRoots.contains(label)
+    // A ceiling for the whole root, not one per entry: `probeActivityMtime`
+    // bounds each call at 0.2s and 80 entries, and a root like
+    // `~/Library/Application Support` holds hundreds of entries, so per-entry
+    // walk budgets would let the stamp cost more than the scan it exists to
+    // avoid.
+    //
+    // The decision is on the entry *count*, not on the clock, so the same root
+    // on the same machine is always stamped the same way. A wall-clock deadline
+    // would make the set of probed entries depend on how loaded the machine was,
+    // and the two fingerprints `commitScanCache` compares could then disagree
+    // about a machine that did not change, dropping a snapshot that is still
+    // current on every run of a large home. A root over the count is stamped
+    // `partial:` so a stamp that did not walk cannot be read as one that did.
+    let visible = names.filter { !$0.hasPrefix(".") }.sorted()
+    let probeAll = nested && visible.count <= rootStampProbeEntries
+    let ents = stampJoin(visible.map { name in
+        inventoryEntryStamp(dir: path, name: name, includeNestedActivity: probeAll)
     })
+    if nested && !probeAll {
+        return "root:\(stampEscape(label)):partial:\(ents)"
+    }
     return "root:\(stampEscape(label)):\(ents)"
 }
 
@@ -427,12 +477,26 @@ func stampName(dir: String, name: String) -> String {
     return name + "?"
 }
 
-func inventoryEntryStamp(dir: String, name: String) -> String {
+func inventoryEntryStamp(dir: String, name: String, includeNestedActivity: Bool = false) -> String {
     let path = (dir as NSString).appendingPathComponent(name)
     guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
           let mtime = attrs[.modificationDate] as? Date
     else { return name }
-    return "\(name.replacingOccurrences(of: "@", with: "\\@"))@\(mtime.timeIntervalSince1970.bitPattern)"
+    var stamp = "\(name.replacingOccurrences(of: "@", with: "\\@"))@\(mtime.timeIntervalSince1970.bitPattern)"
+    // The nested activity mtime, the value `applyRecentActivity` compares
+    // against `activeDays`, carried for a directory so a write below the entry
+    // moves the fingerprint. `probeActivityMtime` is the scan's own walk, to
+    // the same depth and with the same per-call bounds, so the stamp moves
+    // where the status it reports can move. The walk starts at the entry
+    // itself, so a directory whose own mtime is already the newest thing in
+    // it needs no second component and is stamped as it was.
+    if includeNestedActivity,
+       (attrs[.type] as? FileAttributeType) == .typeDirectory,
+       let nested = probeActivityMtime(path),
+       nested > mtime {
+        stamp += "!\(nested.timeIntervalSince1970.bitPattern)"
+    }
+    return stamp
 }
 
 func pathMtimeStamp(_ label: String, _ path: String) -> String {
