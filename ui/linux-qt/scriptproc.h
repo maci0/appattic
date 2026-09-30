@@ -8,6 +8,15 @@
 class QProcess;
 class QTimer;
 
+/// Delete a run's generated script, and say whether it went. `keepPath` takes
+/// the path when the file survived, so the caller can name it and try again;
+/// it is left alone when the removal landed. Not being there any more is the
+/// state the delete wanted, so a removal raced by something else is not a
+/// failure. Exposed for the helper tests, which pin the three cases: a
+/// survivor is reported and kept, a file that is gone is success, and an empty
+/// path is not a removal to fail.
+bool removeScriptFile(const QString &path, QString &keepPath);
+
 /// How long a generated cleanup, update, or mark-manual script may run before
 /// it is stopped, and the whole minutes the stop message reports. Exposed so
 /// the window cannot state a deadline the runner does not apply. See
@@ -48,6 +57,13 @@ public:
 
     /// The accumulated output, capped and cut on a UTF-8 boundary.
     const QByteArray &output() const { return m_output; }
+
+    /// A run's script that could not be removed from the temp directory, or
+    /// empty when the last one is gone. It is an executable holding the `rm`
+    /// lines the run was about to execute, so the window names it rather than
+    /// leaving the user to find it. Empty once the destructor's own attempt has
+    /// landed.
+    QString scriptLeftBehind() const { return m_path; }
 
 signals:
     /// The process is gone. `stopped` says the deadline, not the exit status,

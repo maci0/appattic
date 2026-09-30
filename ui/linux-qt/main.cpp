@@ -3037,8 +3037,29 @@ private:
                before it. The CLI and the macOS UI reuse one scan snapshot, and
                its inventory stamp does not move for a file deleted inside a
                scanned directory, so it is dropped here rather than left to serve
-               rows for what the script just removed. */
-            removeScanCacheFile(scanCacheFilePath());
+               rows for what the script just removed.
+               A removal that did not land is reported, not swallowed: a stale
+               snapshot left on disk is exactly what makes the next CLI run
+               list software that is gone. The two branches below build their
+               own banner, so it is appended rather than shown on its own. */
+            const bool cacheCleared = removeScanCacheFile(scanCacheFilePath());
+            const QString cacheWarn = cacheCleared
+                ? QString()
+                : redactHomePaths(QStringLiteral(
+                    "The scan snapshot at %1 could not be removed, so the next run may list items "
+                    "this script already removed."
+                ).arg(scanCacheFilePath()));
+            // The run's own script is an executable holding the very rm lines
+            // it just carried out, under a temp name the user has no way to
+            // guess. If its removal did not land it is named here, while there
+            // is still a window to name it in.
+            QString scriptWarn;
+            if (!m_script->scriptLeftBehind().isEmpty()) {
+                scriptWarn = redactHomePaths(QStringLiteral(
+                    "The generated script at %1 could not be removed. Nothing runs it by itself, "
+                    "but it holds the delete commands from this run, so you can delete it."
+                ).arg(m_script->scriptLeftBehind()));
+            }
             if (stopped || code != 0) {
                 QString err = redactHomePaths(QString::fromUtf8(output).trimmed());
                 if (err.size() > 400) {
@@ -3070,12 +3091,23 @@ private:
                         "The script failed (exit %1). Commands before the failure may have already run.\n%2"
                     ).arg(localeCount(code)).arg(err);
                 }
+                for (const QString &warn : {cacheWarn, scriptWarn}) {
+                    if (warn.isEmpty()) continue;
+                    err = err.isEmpty() ? warn : err + QStringLiteral("\n") + warn;
+                }
                 showError(err);
                 if (stopped) statusBar()->showMessage(QStringLiteral("Script stopped."));
                 refreshActionBar();
                 if (m_table->isVisible()) rebuildInspector();
             } else {
-                if (!m_settingsError) {
+                /* A successful run clears the error bar, and a removal that did
+                   not land is one the user has to act on, so it goes back up
+                   after the clear rather than being lost with it. */
+                if (!cacheWarn.isEmpty() || !scriptWarn.isEmpty()) {
+                    showError(cacheWarn.isEmpty()
+                        ? scriptWarn
+                        : cacheWarn + QStringLiteral("\n") + scriptWarn);
+                } else if (!m_settingsError) {
                     m_errorBar->hide();
                     m_error->clear();
                 }
@@ -3159,7 +3191,19 @@ private:
                 // name nothing reads any more. Delete it here rather than
                 // leaving it for the user to find: a migration that did not
                 // reach disk keeps it, because then it is the only copy.
-                removeLegacySettingsFile(legacyPath);
+                //
+                // A removal that did not land is reported: the file was
+                // written by QSettings at the umask default and holds the
+                // account's own ignore-list paths, so a copy that survived is
+                // a second set of paths on disk under a name nothing reads
+                // again. `migrateLegacyQSettings` has already narrowed its
+                // mode, so this is a file the user can delete by hand.
+                if (!removeLegacySettingsFile(legacyPath) && QFile::exists(legacyPath)) {
+                    showError(redactHomePaths(QStringLiteral(
+                        "The old settings file at %1 could not be removed. Nothing reads it any more, "
+                        "but it still holds your ignored-leftovers paths and you can delete it."
+                    ).arg(legacyPath)));
+                }
             }
             return;
         }

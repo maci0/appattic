@@ -280,12 +280,15 @@ endforeach()
 # anyway (corehost.cpp, embed.c, hostexec.c) because ScanWorker calls into it
 # for the cancel flag. settings.cpp is here, not only on the app target:
 # checkSettings() calls parseSettingsJson and legacyBoolValue, so the test
-# binary does not link without it.
+# binary does not link without it, and scriptproc.cpp for the same reason:
+# checkScriptFileRemoval() calls removeScriptFile.
 add_executable(appattic-qt-helper-tests
     tests/helper_tests.cpp
     $<TARGET_OBJECTS:appattic-qt-core>
     settings.cpp
     scanworker.h
+    scriptproc.h
+    scriptproc.cpp
     corehost.cpp
     "${APPATTIC_ROOT}/core/host/embed.c"
     "${APPATTIC_ROOT}/core/host/hostexec.c"

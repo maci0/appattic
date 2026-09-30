@@ -4,12 +4,15 @@
 #include "diskusage.h"
 #include "finding.h"
 #include "scanworker.h"
+#include "scriptproc.h"
 #include "settings.h"
 
 #include <QAtomicInt>
+#include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -23,6 +26,7 @@
 #include <QTemporaryDir>
 #include <QTime>
 #include <QTimeZone>
+#include <QTimer>
 #include <QVector>
 
 #include <atomic>
@@ -1790,14 +1794,136 @@ static int checkDurableWrite() {
     return 0;
 }
 
-int main() {
+/// A generated cleanup or update script is an executable holding the `rm`
+/// lines the run just carried out, under a temp name the user cannot guess. A
+/// removal that does not land has to be reported and the path kept, or the
+/// window tells the user the run is over while an executable it produced is
+/// still on disk with nothing pointing at it.
+static int checkScriptFileRemoval() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "script removal: temp dir failed\n");
+        return 1;
+    }
+    const QString file = tmp.filePath(QStringLiteral("run.sh"));
+    QString keep;
+    if (QFile::exists(file)) {
+        std::fprintf(stderr, "script removal: temp file already exists\n");
+        return 1;
+    }
+    if (writeFile(file, QByteArray("#!/bin/sh\nrm -rf /tmp/x\n"))) {
+        std::fprintf(stderr, "script removal: write failed\n");
+        return 1;
+    }
+    if (!removeScriptFile(file, keep) || !keep.isEmpty() || QFile::exists(file)) {
+        std::fprintf(stderr, "script removal: a file that was there did not go\n");
+        return 1;
+    }
+    // A file that is not there is the state the delete wanted, so a removal
+    // raced by something else cannot report a failure.
+    if (!removeScriptFile(file, keep)) {
+        std::fprintf(stderr, "script removal: a missing file reported a failure\n");
+        return 1;
+    }
+    // Nothing to remove is not a removal that failed either.
+    if (!removeScriptFile(QString(), keep) || !keep.isEmpty()) {
+        std::fprintf(stderr, "script removal: an empty path reported a failure\n");
+        return 1;
+    }
+    /* The survivor case: the removal does not land and the caller is told
+       which one, so the destructor has something to try again with and the
+       user has a path to delete by hand. A non-empty directory stands in for
+       the survivor: `QFile::remove` on a directory never unlinks it, and
+       unlike a read-only parent directory it fails the same way for root and
+       for an ordinary account, so this check does not decide who ran it. The
+       permissions case is the one that reaches a user, and it is the same
+       branch, so covering it here covers both. */
+    const QString dir = tmp.filePath(QStringLiteral("stuck"));
+    if (!QDir().mkpath(dir)) {
+        std::fprintf(stderr, "script removal: could not make the stuck dir\n");
+        return 1;
+    }
+    const QString occupant = dir + QStringLiteral("/run.sh");
+    if (writeFile(occupant, QByteArray("#!/bin/sh\nrm -rf /tmp/x\n"))) {
+        std::fprintf(stderr, "script removal: write failed\n");
+        return 1;
+    }
+    keep.clear();
+    if (removeScriptFile(dir, keep) || keep != dir) {
+        std::fprintf(stderr, "script removal: a survivor was not reported and named\n");
+        return 1;
+    }
+    if (!QFileInfo::exists(dir)) {
+        std::fprintf(stderr, "script removal: the survivor is not on disk\n");
+        return 1;
+    }
+    std::fprintf(stdout, "script removal: ok\n");
+    return 0;
+}
+
+/// A real run through ScriptProcess: the temp file the runner writes must be
+/// gone once the script has finished, and the runner must not report one left
+/// behind. The removal that did not land is pinned above against a path that
+/// cannot be unlinked; this is the other end of the same contract, that a
+/// removal which does land leaves nothing to report and nothing for the
+/// destructor to try again. Both halves matter: the first is what stops an
+/// executable full of rm lines surviving, this is what stops the run from
+/// claiming a leftover it does not have.
+static int checkScriptRunCleansUpItsFile() {
+    ScriptProcess proc;
+    QString err;
+    // `exit 0` with no commands: the test is about the temp file's lifetime,
+    // not about what a script does.
+    if (!proc.prepare(QStringLiteral("#!/bin/sh\nexit 0\n"), &err)) {
+        std::fprintf(stderr, "script run: prepare failed (%s)\n", qPrintable(err));
+        return 1;
+    }
+    const QString path = proc.scriptLeftBehind();
+    if (path.isEmpty() || !QFile::exists(path)) {
+        std::fprintf(stderr, "script run: the prepared script is not on disk\n");
+        return 1;
+    }
+    QEventLoop loop;
+    QObject::connect(&proc, &ScriptProcess::finished,
+                     &loop, [&loop](int, bool, const QByteArray &) { loop.quit(); });
+    proc.start();
+    /* Bounded well under the runner's own kScriptTimeoutMs, so this check
+       fails rather than waits out the deadline it is meant to sit inside. An
+       `exit 0` script finishes in milliseconds, so anything near the
+       production bound would only turn a regression into a hung test run. */
+    QTimer deadline;
+    QObject::connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
+    deadline.setSingleShot(true);
+    deadline.start(30000);
+    loop.exec();
+
+    if (QFile::exists(path)) {
+        std::fprintf(stderr, "script run: the script survived a finished run\n");
+        return 1;
+    }
+    if (!proc.scriptLeftBehind().isEmpty()) {
+        std::fprintf(stderr, "script run: a removed script is reported as left behind (%s)\n",
+                     qPrintable(proc.scriptLeftBehind()));
+        return 1;
+    }
+    std::fprintf(stdout, "script run: ok\n");
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    /* QProcess and QTimer need a running event dispatcher, and
+       checkScriptRunCleansUpItsFile() drives a real one. Constructed before
+       the checks, and it lives to the end of main, so a ScriptProcess built
+       inside a check still has one to deliver `finished` on. */
+    QCoreApplication app(argc, argv);
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
         checkRootDirDoneTotals(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
         checkSettingsBackup(), checkSettingsBackupRepeatedSave(), checkDurableWrite(),
         checkLocaleGrouping(),
-        checkLegacySettingsMigration(),
+        checkLegacySettingsMigration(), checkScriptFileRemoval(),
+        checkScriptRunCleansUpItsFile(),
     };
     for (const int rc : checks) {
         if (rc != 0) return rc;

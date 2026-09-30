@@ -8,6 +8,7 @@
 #include <QTimer>
 
 #include <csignal>
+#include <cstdio>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -59,6 +60,23 @@ static void signalScriptGroup(QProcess *proc, int sig) {
     else proc->terminate();
 }
 
+/// Delete a run's script and say whether it went.
+///
+/// The file is a mode-0700 shell script whose body is the `rm -rf` lines the
+/// user reviewed, and the name it has under the temp directory is not theirs
+/// to guess. A removal that does not land leaves an executable that deletes the
+/// listed paths, on disk, with nothing pointing at it, so the path is kept in
+/// `keepPath` for the destructor to try again and reported to the caller
+/// rather than dropped with the rest of the per-run state. Not being there any
+/// more is the state the delete wanted, so a removal raced by something else
+/// is not a failure.
+bool removeScriptFile(const QString &path, QString &keepPath) {
+    if (path.isEmpty()) return true;
+    if (QFile::remove(path) || !QFile::exists(path)) return true;
+    keepPath = path;
+    return false;
+}
+
 ScriptProcess::ScriptProcess(QObject *parent) : QObject(parent) {
     // One timer for the object's life, not one per run: `prepare` is the entry
     // point a caller reuses, and a `new QTimer(this)` in it left the previous
@@ -79,9 +97,15 @@ ScriptProcess::~ScriptProcess() {
     // The script is written with autoRemove off, so the terminal paths own the
     // delete. Quitting mid-script is the third exit, and without it every quit
     // in that window leaves an executable full of rm lines in the temp
-    // directory.
+    // directory. This last attempt is the only one left, so a survivor is
+    // named on stderr: the process is going away and there is no window to
+    // put a banner in.
     if (!m_path.isEmpty()) {
-        QFile::remove(m_path);
+        QString left;
+        if (!removeScriptFile(m_path, left)) {
+            std::fprintf(stderr, "appattic: could not remove the generated script %s\n",
+                         qPrintable(left));
+        }
         m_path.clear();
     }
 }
@@ -139,8 +163,17 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
         appendOutput(proc->readAll());
         if (m_reported) return;
         m_reported = true;
-        if (m_path == path) m_path.clear();
-        QFile::remove(path);
+        // Only forget the path once it is gone: a survivor stays in `m_path`
+        // so the destructor makes another attempt, and `scriptLeftBehind`
+        // tells the window there is an executable it should name.
+        if (m_path == path) {
+            QString left;
+            if (!removeScriptFile(path, left)) m_path = left;
+            else m_path.clear();
+        } else {
+            QString ignored;
+            removeScriptFile(path, ignored);
+        }
         m_timer->stop();
         const bool stopped = m_stopped;
         m_stopped = false;
@@ -156,8 +189,14 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
         m_reported = true;
         m_timer->stop();
         m_stopped = false;
-        if (m_path == path) m_path.clear();
-        QFile::remove(path);
+        if (m_path == path) {
+            QString left;
+            if (!removeScriptFile(path, left)) m_path = left;
+            else m_path.clear();
+        } else {
+            QString ignored;
+            removeScriptFile(path, ignored);
+        }
         m_proc = nullptr;
         proc->deleteLater();
         emit failed();

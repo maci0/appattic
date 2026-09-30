@@ -117,14 +117,21 @@ enum AppAtticCLI {
             }
             fputs("Updating \(localeCount(n)) package(s)…\n", stderr)
             let run = runShellScript(script)
+            // The update changed package state, so the snapshot no longer
+            // describes the machine. `clearScanCache` reports whether the
+            // removal landed; a snapshot that survived is a stale one the next
+            // run would serve rows from, so it is named rather than dropped.
+            let cacheCleared = clearScanCache()
+            let cacheNote = cacheCleared
+                ? ""
+                : "warning: the scan snapshot at \(redactHomePaths(defaultScanCacheURL().path)) "
+                    + "could not be removed, so a later run may list packages this update already replaced.\n"
             if run.status != 0 {
+                fputs(cacheNote, stderr)
                 fputs("error: \(terminalSafe(commandFailureMessage(status: run.status, stderr: run.stderr)))\n", stderr)
-                // The lines before the failing one already ran, so the cached
-                // snapshot no longer describes the machine.
-                clearScanCache()
                 Foundation.exit(1)
             }
-            clearScanCache()
+            fputs(cacheNote, stderr)
             return
         }
         switch opts.command {
