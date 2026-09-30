@@ -296,7 +296,9 @@ ignored fails instead of running: 'appattic stale --top 5' exits 2 rather than
 printing the full table. --help and --version are the exception: they ask a
 question and exit, so a bad token anywhere on the line does not suppress them.
 
-Progress and status go to stderr. Reports and --dry-run scripts go to stdout.
+Progress and status go to stderr. Reports, --dry-run scripts, and what a
+command reports (config's resolved settings, disk's tree, erase's result) go to
+stdout, so every command can be piped or redirected.
 
 exit codes:
   0  success

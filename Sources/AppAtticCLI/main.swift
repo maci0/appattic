@@ -177,8 +177,12 @@ func runEraseCommand(_ opts: CLIOptions) {
         fputs("error: \(terminalSafe(redactHomePaths(error.localizedDescription)))\n", stderr)
         Foundation.exit(1)
     }
-    let shown = redactHomePaths(url.path)
-    fputs(erased ? "removed \(shown)\n" : "no scan snapshot at \(shown)\n", stderr)
+    // The command's result goes to stdout, like every other command that
+    // reports one (report, config, disk, and update's "Nothing to update"), so
+    // `appattic erase` is pipeable and `appattic erase | grep removed` works.
+    // It used to go to stderr, which left the whole result off stdout.
+    let shown = terminalSafe(redactHomePaths(url.path))
+    print(erased ? "removed \(shown)" : "no scan snapshot at \(shown)")
     if let jsonPath = opts.json {
         writeJSONFile(EraseResult(path: url.path, erased: erased), to: jsonPath)
     }

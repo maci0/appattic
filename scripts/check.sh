@@ -23,6 +23,8 @@ for arg in "$@"; do
 Usage: bash scripts/check.sh [--core] [--qt]
 
   (default)  lint + Zig core tests + AppAtticScanTests + CLI debug build
+             and the built CLI's help/exit-code/stream contract
+             (scripts/cli-contract.sh)
   --core     lint + Zig core tests + reproducible artifacts, no Swift
              toolchain needed. For core/src/, core/host/ and packaging work.
              Not the CI gate: the Swift steps do not run, and the run says so.
@@ -79,6 +81,12 @@ if [[ "$RUN_SWIFT" -eq 1 ]]; then
 
     echo "== CLI debug =="
     swift build -c debug --product appattic --disable-automatic-resolution
+
+    # The built binary answers `--help`, exit codes, and which stream a result
+    # lands on. Running it is the only way to see a stream mix-up, and a
+    # script consuming this CLI breaks on one silently.
+    echo "== CLI contract =="
+    bash "$ROOT/scripts/cli-contract.sh"
 fi
 
 # Two builds of the same source, diffed. Cheap next to the Zig suite and it
