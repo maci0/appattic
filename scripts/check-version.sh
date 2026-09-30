@@ -3,8 +3,9 @@
 # the packaging copies that have to keep in step: the newest AppStream release,
 # the macOS bundle Info.plist, and the two man pages. CMakeLists.txt
 # reads the declaration, so this is the place that checks the copies, the
-# derivation, that the release has notes a user can read, and that the version
-# was not already released from another commit.
+# derivation, that the release has notes a user can read, that those notes do
+# not contradict the shipped help, and that the version was not already
+# released from another commit.
 # Usage: bash scripts/check-version.sh [--tag TAG]
 #   prints the declared version on stdout
 #   --tag  also requires TAG (a v* ref name or a bare version) to match it
@@ -14,6 +15,7 @@ _script_dir="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$_script_dir/.." && pwd)"
 
 VERSION_SRC="$ROOT/Sources/AppAtticScan/Version.swift"
+VERSION_DIR="$(dirname "$VERSION_SRC")"
 CMAKE="$ROOT/ui/linux-qt/CMakeLists.txt"
 METAINFO="$ROOT/packaging/org.appattic.AppAttic.metainfo.xml"
 PLIST="$ROOT/packaging/Info.plist"
@@ -37,9 +39,10 @@ Usage: bash scripts/check-version.sh [--tag TAG]
 
   Checks that the AppStream release, the macOS Info.plist, and both man
   pages match appAtticVersion, that the AppStream release
-  carries a date and a <description>, that CMakeLists.txt still derives
-  its version from Version.swift, and that the declared version is not a
-  release already published from a different commit.
+  carries a date and a <description>, that the release note does not
+  contradict cliHelpText on which flags win over a usage error, that
+  CMakeLists.txt still derives its version from Version.swift, and that the
+  declared version is not a release already published from a different commit.
   Prints the declared version. With --tag, the tag must match it too.
 EOF
             exit 0
@@ -189,6 +192,45 @@ if [[ -n "$release_defects" ]]; then
     echo "       it is the only release note the package ships" >&2
     exit 1
 fi
+
+# A note that describes behavior the binary does not have is worse than no note:
+# it is the text a caller migrates from, and it is published beside the download.
+# The `--help` and `--version` precedence is the one that drifted. 2.0.0 shipped
+# a note saying a bad token elsewhere on the line makes `--version` exit 2, and
+# the tree has since given `--version` the same precedence `--help` has, so the
+# note a reader was told to migrate against was the opposite of the code. The
+# precedence is read from both sides: the note has to name which flags win, and
+# cliHelpText has to name the same set.
+release_notes="$(bash "$_script_dir/release-notes.sh" "$swift_version" 2>/dev/null || true)"
+cli_help_text="$(sed -n '/^public let cliHelpText = """/,/^"""$/p' "$VERSION_DIR/CLIParse.swift" 2>/dev/null || true)"
+note_says_wins=""
+if [[ -n "$release_notes" ]]; then
+    for flag in --help --version; do
+        if grep -qF -- "$flag" <<<"$release_notes"; then
+            note_says_wins+=" $flag"
+        fi
+    done
+fi
+help_says_wins=""
+if [[ -n "$cli_help_text" ]]; then
+    for flag in --help --version; do
+        if grep -qF -- "$flag" <<<"$cli_help_text"; then
+            help_says_wins+=" $flag"
+        fi
+    done
+fi
+# Only a note that takes a position is compared. A release whose note never
+# mentions the precedence (a patch about a parser) says nothing here, which is
+# what the rule is meant to allow.
+if [[ -n "$note_says_wins" && "$note_says_wins" != "$help_says_wins" ]]; then
+    echo "error: the AppStream <release> for $swift_version in $METAINFO names" >&2
+    echo "       which flags win over a usage error as:$note_says_wins" >&2
+    echo "       cliHelpText names them as:$help_says_wins" >&2
+    echo "       a note that contradicts the binary is the text a caller migrates" >&2
+    echo "       from, so correct the note or the precedence, not both differently" >&2
+    exit 1
+fi
+
 # build.sh copies this plist into AppAttic.app unchanged, so its short version
 # is what Finder and macOS read, not appAtticVersion.
 if [[ "$plist_short" != "$swift_version" ]]; then
