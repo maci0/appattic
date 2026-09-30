@@ -130,7 +130,7 @@ Both runners now close the shared-temp-directory window, and the window used to 
 
 ### 7. Flatpak sandbox → host
 
-The Linux Flatpak build is not confined the way a sandbox is expected to be. `finish-args` grants `--filesystem=host` (read *and write* on every host path), `--share=ipc`, `--talk-name=org.freedesktop.Flatpak`, `--talk-name=org.freedesktop.FileManager1`, `--socket=wayland`, `--socket=fallback-x11`, `--device=dri` (`packaging/flatpak/org.appattic.AppAttic.yml:13` `finish-args`). The manifest comment says the host filesystem is needed because the scans walk real paths, but the grant is bidirectional and covers system paths, which is wider than the app's own behavior needs. `host.exec` leaves the sandbox through `flatpak-spawn --host` and passes its `PATH` with it (`hostexec.c:1082`), and `moveToTrash` leaves through the file-manager portal.
+The Linux Flatpak build is confined as far as the app's own behavior needs. `finish-args` grants `--filesystem=host:ro` (read on every host path, no write), `--share=ipc`, `--talk-name=org.freedesktop.Flatpak`, `--talk-name=org.freedesktop.FileManager1`, `--socket=wayland`, `--socket=fallback-x11`, `--device=dri` (`packaging/flatpak/org.appattic.AppAttic.yml:13` `finish-args`). The grant is read-only because no in-sandbox code path writes to a host path: settings and the scan cache go to `$XDG_DATA_HOME`, which Flatpak redirects into the sandbox, and the generated script is written to the sandbox temp directory. The confirmed cleanup and update scripts run under `flatpak-spawn --host`, outside the sandbox, so narrowing the grant does not stop a cleanup the user agreed to. `host.exec` leaves the sandbox through `flatpak-spawn --host` and passes its `PATH` with it (`hostexec.c:1082`). `moveToTrash` leaves through the file-manager portal.
 
 The macOS build has no equivalent confinement: `packaging/Info.plist` declares no `com.apple.security.app-sandbox` and no hardened-runtime exceptions, and `build.sh` only ad-hoc signs. An unsandboxed macOS app is bounded by the login session, which is a wider blast radius than the Flatpak description implies for the same scan.
 
@@ -150,7 +150,7 @@ Pinned SHA-256 for Zig, Wasmtime C API, Swift Linux tarball (x86_64 and aarch64)
 | Scan cache and settings | `last-scan.json`, `settings.json` | Hide leftovers (ignore list), skip confirm, poison findings. |
 | Host `PATH` binaries | `whichCommand` for scan queries; `augmentedProcessEnvironment` for the generated script | Fake `brew`/`flatpak` during scan or update; fake `rm`/`pkexec`/`sudo` inside a script the user already confirmed. |
 | WASM modules | `APPATTIC_CORE_OUT` / `usr/share/appattic` | Fake findings and `command` strings. |
-| Host filesystem under Flatpak | `--filesystem=host` (`org.appattic.AppAttic.yml:20`) | Read and write of every host path from inside the sandbox. |
+| Host filesystem under Flatpak | `--filesystem=host:ro` (`org.appattic.AppAttic.yml:32`) | Read of every host path from inside the sandbox. A host write needs the file-manager portal or a `flatpak-spawn --host` script. |
 | Availability of the user session | scan workers, `du`, plugin loops, a wedged network mount in a disk walk | Local DoS (CPU/IO), not a remote amp. |
 
 Impact is local and user-scoped, not a multi-tenant data breach. The concrete worst cases are irreversible delete of the operator's software and leftover data (including credential directories the classifier failed to mark `system`, and container volumes the engine reports as unreferenced), a trashed system path from the disk page, and a confirmed script whose `pkexec` resolved to a user-writable directory, which is the one path in this project from a local file to root.
@@ -193,7 +193,7 @@ Impact is local and user-scoped, not a multi-tenant data breach. The concrete wo
 
 ### Flatpak sandbox → host
 
-- **Tampering / elevation:** `--filesystem=host` is read *and* write on every host path, so anything the app, a loaded plugin, or a spawned host command does writes to the real filesystem with no portal in between. `moveToTrash` is the one action that does go through a portal.
+- **Tampering / elevation:** a loaded plugin inside the sandbox can read any host path and can write the sandbox's own `$XDG_DATA_HOME` and temp directory, but `--filesystem=host:ro` denies it writes anywhere on the real filesystem. A host write therefore needs either `moveToTrash` through the file-manager portal or a confirmed script run under `flatpak-spawn --host`, which happens outside the sandbox.
 - **Spoofing:** `flatpak-spawn --host` forwards the sandbox `PATH` to the host (`hostexec.c:1082`), so a user-writable directory that got into the in-sandbox `PATH` is also the host's resolution order for the query that runs there.
 - **DoS:** a query that is allowlisted in-sandbox can be expensive on the host, where it is not bounded by the sandbox's own cgroup.
 

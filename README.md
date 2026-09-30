@@ -272,7 +272,7 @@ bash scripts/linux-flatpak.sh
 flatpak run org.appattic.AppAttic
 ```
 
-The sandbox gets `--filesystem=host` so leftover and disk scans can see the machine. Plugin tags look under `/run/host` when `FLATPAK_ID` is set, because the sandbox PATH has no host pacman or apt. Scan plugins still cannot run `rm` or distro upgrades through `host.exec`. Manifest: `packaging/flatpak/org.appattic.AppAttic.yml`. It carries no `version` of its own: the manifest flatpak-builder gets is stamped with `appAtticVersion`, so the bundle reports the release it was built from.
+The sandbox gets `--filesystem=host:ro` so leftover and disk scans can see the machine. The grant is read-only on purpose: nothing the app does inside the sandbox writes to a host path, and the one action that does, "Move to Trash", goes through the file-manager portal. The generated cleanup and update scripts, which do remove host files, run under `flatpak-spawn --host`, outside the sandbox, so a narrower grant does not stop a cleanup you confirmed. Plugin tags look under `/run/host` when `FLATPAK_ID` is set, because the sandbox PATH has no host pacman or apt. Scan plugins still cannot run `rm` or distro upgrades through `host.exec`. Manifest: `packaging/flatpak/org.appattic.AppAttic.yml`. It carries no `version` of its own: the manifest flatpak-builder gets is stamped with `appAtticVersion`, so the bundle reports the release it was built from.
 
 Container builds:
 

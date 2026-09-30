@@ -15,9 +15,21 @@ finish-args:
   - --socket=fallback-x11
   - --socket=wayland
   - --device=dri
-  # Leftover and disk scans walk real paths; every package-manager query runs
-  # on the host through flatpak-spawn, so no in-sandbox network is needed.
-  - --filesystem=host
+  # Leftover and disk scans walk real paths, and every package-manager query
+  # runs on the host through flatpak-spawn, so no in-sandbox network is needed.
+  #
+  # `:ro`, not a bare `host`. Nothing this app does inside the sandbox writes to
+  # a host path: the settings and the scan cache go to $XDG_DATA_HOME, which
+  # Flatpak redirects into the sandbox, and the generated cleanup script is
+  # written to the sandbox temp directory. The one action that does change host
+  # state, "Move to Trash", leaves through the file-manager portal below. A
+  # bare --filesystem=host is read *and* write on every host path, so a bug or
+  # a hostile loaded plugin wrote the real filesystem with no portal in between
+  # — which is the whole point of shipping the Flatpak at all. The generated
+  # /bin/sh scripts that do remove host files run under flatpak-spawn --host,
+  # outside the sandbox, so narrowing this grant does not stop a cleanup the
+  # user confirmed.
+  - --filesystem=host:ro
   - --talk-name=org.freedesktop.Flatpak
   # QFile::moveToTrash goes through the file manager portal.
   - --talk-name=org.freedesktop.FileManager1

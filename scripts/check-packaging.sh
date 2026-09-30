@@ -142,6 +142,17 @@ window_desktop_file="$(sed -n 's/.*setDesktopFileName(QStringLiteral("\([^"]*\)"
 [[ "$window_desktop_file" == "$(basename "$DESKTOP" .desktop)" ]] \
     || fail "the window names desktop file '$window_desktop_file', the one that ships is $(basename "$DESKTOP" .desktop)"
 
+# Qt derives WM_CLASS from the setDesktopFileName name when that is set, so the
+# window's WM_CLASS is that basename, not the executable. An X11 panel matches
+# StartupWMClass against it to group the window and pick its icon, so a stale
+# value leaves the taskbar entry with no icon and no grouping while the file
+# still validates. Tying it to the basename the check above already ties to the
+# code is what keeps the two from disagreeing.
+startup_wm_class="$(desktop_value StartupWMClass)"
+[[ -n "$startup_wm_class" ]] || fail "$DESKTOP has no StartupWMClass"
+[[ "$startup_wm_class" == "$window_desktop_file" ]] \
+    || fail "$DESKTOP StartupWMClass=$startup_wm_class, but the window reports WM_CLASS=$window_desktop_file"
+
 # The binary ships a man page, so the install has to ship it: a page that only
 # exists in the repository documents an installed command that has none.
 grep -q "$MANPAGE" "$CMAKE" \

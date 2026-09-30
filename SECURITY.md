@@ -8,7 +8,7 @@ The living attack-surface model is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md
 
 AppAttic is a local CLI and desktop UI. It does not listen on a network port, authenticate users, or accept untrusted remote clients. It runs as the OS user who launched it and can generate `/bin/sh` scripts that delete leftover files or uninstall/upgrade packages.
 
-It is not confined by a sandbox in either build. The macOS app declares no App Sandbox entitlement and is ad-hoc signed only (`packaging/Info.plist`, `build.sh`). The Linux Flatpak build requests `--filesystem=host`, which is read *and* write on every host path, plus the session bus and the file-manager portal (`packaging/flatpak/org.appattic.AppAttic.yml`). Package-manager queries leave the sandbox through `flatpak-spawn --host` (`core/host/hostexec.c`).
+It is not confined by a sandbox in either build. The macOS app declares no App Sandbox entitlement and is ad-hoc signed only (`packaging/Info.plist`, `build.sh`). The Linux Flatpak build requests `--filesystem=host:ro`, which is read on every host path and no write, plus the session bus and the file-manager portal (`packaging/flatpak/org.appattic.AppAttic.yml`). Package-manager queries and the generated cleanup scripts leave the sandbox through `flatpak-spawn --host` (`core/host/hostexec.c`, `ui/linux-qt/scriptproc.cpp`).
 
 ## What the code actually does
 

@@ -10,4 +10,10 @@ Icon=appattic
 Categories=Utility;Filesystem;
 Keywords=cleanup;leftover;stale;disk;usage;packages;
 Terminal=false
-StartupWMClass=appattic-qt
+# main.cpp calls setDesktopFileName("org.appattic.AppAttic"), and Qt derives
+# WM_CLASS from that name when it is set, not from the executable. So the
+# window reports WM_CLASS=org.appattic.AppAttic on X11, and a StartupWMClass
+# of appattic-qt matched nothing: the panel grouped the window under a
+# launcher that is not there, so the taskbar entry had no icon and no
+# grouping. The name has to be the desktop file's own basename.
+StartupWMClass=org.appattic.AppAttic
