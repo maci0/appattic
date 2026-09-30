@@ -32,6 +32,7 @@
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QTreeWidgetItemIterator>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -264,6 +265,12 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->volumes->setRootIsDecorated(false);
     d->volumes->setUniformRowHeights(true);
     d->volumes->setSelectionMode(QAbstractItemView::SingleSelection);
+    // The column headers are read per cell, but the table itself had no name,
+    // so reaching it announced a bare "table".
+    d->volumes->setAccessibleName(QStringLiteral("Disks and folders to scan"));
+    d->volumes->setAccessibleDescription(
+        QStringLiteral("Select a disk or folder, then press Enter to scan it.")
+    );
     d->volumes->header()->setStretchLastSection(false);
     // Name takes the slack, like the overview panels: stretching Location too
     // left a wide hole between the two.
@@ -299,6 +306,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->crumb->setTextFormat(Qt::PlainText);
     d->crumb->setTextInteractionFlags(Qt::TextSelectableByMouse);
     d->crumb->setContentsMargins(kSpaceSm, 0, kSpaceSm, 0);
+    d->crumb->setAccessibleName(QStringLiteral("Folder shown"));
     d->devicesBtn = new QPushButton(QStringLiteral("Devices"));
     d->devicesBtn->setToolTip(QStringLiteral("Back to the device and folder list"));
     d->stopBtn = new QPushButton(QStringLiteral("Stop"));
@@ -308,12 +316,14 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->trashBtn = new QPushButton(QStringLiteral("Move to Trash"));
     d->chartMode = new QComboBox;
     d->chartMode->setToolTip(QStringLiteral("How the size chart draws the folders"));
+    d->chartMode->setAccessibleName(QStringLiteral("Chart style"));
     d->chartMode->addItem(QStringLiteral("Rings"), int(DiskChart::Mode::Rings));
     d->chartMode->addItem(QStringLiteral("Treemap"), int(DiskChart::Mode::Treemap));
     d->sizeMode = new QComboBox;
     d->sizeMode->setToolTip(
         QStringLiteral("Allocated counts blocks on disk; apparent counts file lengths")
     );
+    d->sizeMode->setAccessibleName(QStringLiteral("Size measured"));
     d->sizeMode->addItem(QStringLiteral("Allocated"), 1);
     d->sizeMode->addItem(QStringLiteral("Apparent"), 0);
     d->oneFs = new QCheckBox(QStringLiteral("This file system only"));
@@ -329,6 +339,10 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->search->setClearButtonEnabled(true);
     d->search->setFixedWidth(180);
     d->search->setToolTip(QStringLiteral("Filter the scanned folders by name or path"));
+    // A placeholder is a hint that disappears as soon as the box has text, so
+    // it names the field to a screen reader only while the field is empty.
+    // "Search" on its own also does not say what is searched.
+    d->search->setAccessibleName(QStringLiteral("Search scanned folders"));
     tools->addWidget(d->devicesBtn);
     tools->addWidget(d->crumb);
     auto *diskSpacer = new QWidget;
@@ -381,6 +395,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->tree->setFrameShape(QFrame::NoFrame);
     d->tree->setTextElideMode(Qt::ElideRight);
     d->tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    d->tree->setAccessibleName(QStringLiteral("Scanned folders"));
     if (QTreeWidgetItem *head = d->tree->headerItem()) {
         head->setTextAlignment(1, Qt::AlignTrailing | Qt::AlignVCenter);
         head->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
@@ -397,6 +412,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->status->setFont(aaSmallFont());
     d->status->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceSm);
     d->status->setForegroundRole(QPalette::PlaceholderText);
+    d->status->setAccessibleName(QStringLiteral("Disk scan status"));
     sv->addWidget(d->status);
     d->stack->addWidget(d->scanPage);
 
@@ -477,6 +493,21 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         selectNode(n);
         updateChrome();
     });
+    // The chart and the tree show the same folders. Driving one with the
+    // keyboard and reading the other is the norm (chart keys, tree for a
+    // screen reader), so moving the chart's cursor selects the matching tree
+    // row and vice versa; the two never disagree about what is selected.
+    connect(d->chart, &DiskChart::nodeFocused, this, [this](DiskNode *n) {
+        if (!n || d->filter.trimmed().isEmpty()) return;
+        QTreeWidgetItemIterator it(d->tree);
+        while (*it) {
+            if ((*it)->data(0, Qt::UserRole).value<void *>() == static_cast<void *>(n)) {
+                d->tree->setCurrentItem(*it);
+                return;
+            }
+            ++it;
+        }
+    });
     connect(d->worker, &DiskScanWorker::progress, this, [this](int token, qint64 dirs, const QString &path) {
         if (token != d->scanToken) return;
         // The scanned path is under the account home, so it carries the
@@ -489,6 +520,10 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         d->progressLabel->setText(label);
         d->status->setText(label);
         emit statusMessage(QStringLiteral("Scanning disk usage · ") + label);
+        // Progress lands in the status bar, which assistive tech already
+        // watches; the page's own status label is what a screen reader reads
+        // when focus is anywhere on this page.
+        d->status->setAccessibleDescription(label);
     });
     connect(d->worker, &DiskScanWorker::dirDone, this,
             [this](int token, const QString &path, const QString &name, qint64 apparent,
@@ -604,6 +639,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         fillTree();
         updateChrome();
         emit statusMessage(QStringLiteral("Disk scan finished"));
+        aaAnnounce(d->status, d->status->text().isEmpty()
+            ? QStringLiteral("Disk scan finished.") : d->status->text());
     });
     connect(d->worker, &DiskScanWorker::scanStopped, this, [this](int token) {
         if (token != d->scanToken) return;
@@ -621,6 +658,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 : QStringLiteral("Scan stopped before any folder finished.")
         );
         emit statusMessage(QStringLiteral("Disk scan stopped"));
+        aaAnnounce(d->status, d->status->text());
     });
 
     auto *volTimer = new QTimer(this);

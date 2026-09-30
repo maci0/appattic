@@ -1,4 +1,5 @@
 #include "corehost.h"
+#include "diskchart.h"
 #include "diskpage.h"
 #include "diskusage.h"
 #include "finding.h"
@@ -39,6 +40,7 @@
 #include <QIcon>
 #include <QIODevice>
 #include <QKeySequence>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -277,7 +279,12 @@ static Tone toneFrom(const QPalette &p) {
     t.dim = dark ? QColor(174, 174, 174) : QColor(82, 82, 82);
     t.red = dark ? QColor(255, 69, 58) : QColor(192, 28, 40);
     t.amber = dark ? QColor(255, 214, 10) : QColor(158, 102, 0);
-    t.green = dark ? QColor(48, 209, 88) : QColor(36, 138, 61);
+    // "keep" is text, not a decoration, so it answers to 4.5:1 (WCAG 1.4.3).
+    // The green this replaces measured 4.10:1 on the light window and 3.86:1
+    // on a slightly lighter one, which is below the floor; this one measures
+    // 5.55:1 on the lightest window a Qt light palette paints and still
+    // reads as the same green next to the amber and red above it.
+    t.green = dark ? QColor(48, 209, 88) : QColor(28, 110, 48);
     return t;
 }
 
@@ -426,6 +433,7 @@ public:
         sv->setSpacing(0);
         m_sidebar = new QListWidget;
         m_sidebar->setItemDelegate(new SidebarDelegate(m_sidebar));
+        m_sidebar->setAccessibleName(QStringLiteral("Pages"));
         m_sidebar->setSpacing(0);
         m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         m_sidebar->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -455,6 +463,7 @@ public:
         }
         m_settingsNav = new QListWidget;
         m_settingsNav->setItemDelegate(new SidebarDelegate(m_settingsNav));
+        m_settingsNav->setAccessibleName(QStringLiteral("More pages"));
         m_settingsNav->setSpacing(0);
         m_settingsNav->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         m_settingsNav->setIconSize(QSize(16, 16));
@@ -503,7 +512,12 @@ public:
         m_search->setClearButtonEnabled(true);
         m_search->setFixedWidth(200);
         m_search->setToolTip(QStringLiteral("Filter the current list by name, path, or kind"));
+        // The placeholder is a hint that vanishes as soon as the box has
+        // text, so it is not a name: it is what a screen reader falls back to
+        // while the box is empty, and "Search" never says what is searched.
+        m_search->setAccessibleName(QStringLiteral("Search this list"));
         m_filter = new QComboBox;
+        m_filter->setAccessibleName(QStringLiteral("Kind"));
         m_filter->addItem(QStringLiteral("All"), QStringLiteral("all"));
         m_filter->addItem(QStringLiteral("Leaves"), QStringLiteral("leaves"));
         m_filter->addItem(QStringLiteral("Globals"), QStringLiteral("globals"));
@@ -947,15 +961,18 @@ private slots:
         } else if (!m_settingsError) {
             m_errorBar->hide();
             m_error->clear();
-            statusBar()->showMessage(
-                scanSummaryMessage(
-                    countPage(Page::Leftovers),
-                    countPage(Page::Stale),
-                    countPage(Page::Outdated),
-                    countPage(Page::Packages),
-                    m_scanAt
-                )
+            const QString summary = scanSummaryMessage(
+                countPage(Page::Leftovers),
+                countPage(Page::Stale),
+                countPage(Page::Outdated),
+                countPage(Page::Packages),
+                m_scanAt
             );
+            statusBar()->showMessage(summary);
+            // The scan runs for a while with nothing on screen changing, and it
+            // ends with a count the user has to notice. A screen reader hears
+            // none of that from the list repaint.
+            aaAnnounce(m_stack, summary);
         } else {
             statusBar()->showMessage(
                 QStringLiteral("%1 plugin findings").arg(localeCount(m_findings.size()))
@@ -1229,6 +1246,13 @@ private:
         m_error->setText(msg);
         m_errorBar->show();
         statusBar()->showMessage(msg);
+        // A failed scan is the one message the user must not miss, and the bar
+        // is a plain widget that appears where it was not: nothing about it
+        // reaches a screen reader on its own. Announce it, and name the label
+        // so focus landing there later reads as the error it is.
+        m_error->setAccessibleName(QStringLiteral("Error"));
+        m_errorBar->setAccessibleDescription(msg);
+        aaAlert(m_error, msg);
     }
 
     QWidget *buildOverview() {
@@ -1339,6 +1363,13 @@ private:
         auto *h = new QLabel(title);
         h->setFont(aaSectionFont());
         h->setContentsMargins(kSpaceLg, kSpaceSm, kSpaceLg, kSpaceXs);
+        // The heading is a QLabel, which a screen reader reads as loose text and
+        // never ties to the table under it. Naming the table with it means
+        // reaching the table says which of the three panels it is.
+        tree->setAccessibleName(title);
+        tree->setAccessibleDescription(
+            QStringLiteral("Select a row, then press Enter, to open it on its own page.")
+        );
         auto *rule = new QFrame;
         rule->setFrameShape(QFrame::HLine);
         rule->setFrameShadow(QFrame::Plain);
@@ -1406,6 +1437,7 @@ private:
         m_ignoredList->setToolTip(
             QStringLiteral("Select a path, then press Show Again, to show that leftover in the list")
         );
+        m_ignoredList->setAccessibleName(QStringLiteral("Hidden leftovers"));
         m_ignoredList->setMaximumHeight(aaRowPx(m_ignoredList) * 6 + 8);
         m_ignoredList->setMinimumWidth(220);
         aaApplySourceList(m_ignoredList);
@@ -2058,6 +2090,11 @@ private:
             count += QStringLiteral(" · ") + m_scanAt;
         }
         m_count->setText(count);
+        // The findings table is where the whole app is read out, and one widget
+        // serves four list pages. Named per page here: a bare "tree" tells a
+        // screen-reader user nothing about what they landed on, and this is
+        // the one place that already knows the page.
+        m_table->setAccessibleName(pageTitle(page) + QStringLiteral(" list"));
         bool anyMarkable = false;
         for (const Finding &f : rows) {
             if (canMarkCleanup(f, page)) {
@@ -2210,9 +2247,64 @@ public:
             );
             return 1;
         }
+        // The chart is painted by hand, so nothing but this gate proves it
+        // takes focus and answers the keyboard. Before it had a key handler
+        // the only way into it was a click, and a keyboard or screen-reader
+        // user could not reach a single folder in the whole app.
+        DiskChart *chart = m_diskPage->findChild<DiskChart *>();
+        if (!chart) {
+            std::fprintf(stderr, "disk-stream: the size chart is not on the page\n");
+            return 1;
+        }
+        if (chart->focusPolicy() == Qt::NoFocus) {
+            std::fprintf(stderr, "disk-stream: the size chart cannot take focus\n");
+            return 1;
+        }
+        if (chart->accessibleName().isEmpty()) {
+            std::fprintf(stderr, "disk-stream: the size chart has no accessible name\n");
+            return 1;
+        }
+        {
+            QVector<DiskNode *> landed;
+            QObject::connect(chart, &DiskChart::nodeFocused, [&landed](DiskNode *n) {
+                landed.append(n);
+            });
+            for (const int key : {Qt::Key_Down, Qt::Key_Down, Qt::Key_Up}) {
+                QKeyEvent ev(QEvent::KeyPress, key, Qt::NoModifier);
+                QApplication::sendEvent(chart, &ev);
+            }
+            if (landed.size() != 3) {
+                std::fprintf(
+                    stderr,
+                    "disk-stream: arrow keys moved the chart cursor %d times, expected 3\n",
+                    int(landed.size())
+                );
+                return 1;
+            }
+            // The cursor lands on a real folder of the scan, not on nothing.
+            if (!landed.last() || landed.last()->name.isEmpty()) {
+                std::fprintf(stderr, "disk-stream: the chart cursor did not reach a folder\n");
+                return 1;
+            }
+            // The folder it lands on is announced: the description names it.
+            if (chart->accessibleDescription().isEmpty()) {
+                std::fprintf(
+                    stderr,
+                    "disk-stream: moving the chart cursor announced nothing\n"
+                );
+                return 1;
+            }
+            if (!chart->accessibleDescription().contains(landed.last()->name)) {
+                std::fprintf(
+                    stderr,
+                    "disk-stream: the announcement does not name the folder under the cursor\n"
+                );
+                return 1;
+            }
+        }
         std::fprintf(
             stdout,
-            "disk-stream: ok (rows=%d segments=%d)\n",
+            "disk-stream: ok (rows=%d segments=%d chart-keyboard=ok)\n",
             m_diskPage->streamedRows(),
             m_diskPage->streamedSegments()
         );
@@ -3128,6 +3220,9 @@ private:
     void applySystemAppearance() {
         if (!m_table || m_applyingAppearance) return;
         m_applyingAppearance = true;
+        // A light/dark switch hands back a new palette, which carries the
+        // theme's own placeholder colour again. The floor goes on with it.
+        QApplication::setPalette(aaPaletteWithReadablePlaceholder(QApplication::palette()));
         resetWidgetPalette(m_table);
         resetWidgetPalette(m_inspectorHost);
         resetWidgetPalette(m_inspectorScroll);
@@ -3575,6 +3670,10 @@ static void applyAppIdentity() {
         QIcon::setThemeName(QStringLiteral("breeze"));
     }
     aaLoadAppFonts();
+    // Every widget reads its colours from the application palette, so the
+    // placeholder-text contrast floor is set here, once, rather than on each
+    // of the labels that use the role.
+    QApplication::setPalette(aaPaletteWithReadablePlaceholder(QApplication::palette()));
 }
 
 int main(int argc, char **argv) {

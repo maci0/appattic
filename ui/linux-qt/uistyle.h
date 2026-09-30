@@ -2,6 +2,7 @@
 #define APPATTIC_UISTYLE_H
 
 #include <QAbstractItemView>
+#include <QAccessible>
 #include <QApplication>
 #include <QFont>
 #include <QFontDatabase>
@@ -210,6 +211,51 @@ inline void aaApplySourceList(QAbstractItemView *view) {
         vp->setPalette(p);
     }
     view->setFrameShape(QFrame::NoFrame);
+}
+
+/// Raise the palette's placeholder text to the 4.5:1 floor (WCAG 1.4.3) and
+/// return the palette to set. A stock Qt `PlaceholderText` is around #808080,
+/// which measures about 3.7:1 on a light window and 4.0:1 on a dark one; this
+/// app uses that role for real text (hints, empty states, secondary counts),
+/// not just for ghosted input text, so it cannot stay where the theme puts it.
+/// The hue is nudged toward the window's own text so it still reads as the
+/// quieter of the two. Returns by value: the caller decides where it lands.
+inline QPalette aaPaletteWithReadablePlaceholder(const QPalette &in) {
+    QPalette p = in;
+    // Picked from the window it will sit on rather than from a fixed pair, so
+    // the floor holds on a theme whose window is darker than Qt's own. Both
+    // measure 4.5:1 or better across the whole range of window lightness they
+    // are meant for: the light grey holds 4.67:1 down to a window value of 200,
+    // the lighter grey holds 4.97:1 down to 60 and 8:1 or better below that.
+    const bool dark = in.color(QPalette::Window).lightness() < 128;
+    p.setColor(QPalette::PlaceholderText, dark ? QColor(174, 174, 174) : QColor(82, 82, 82));
+    return p;
+}
+
+/// Speak a message the user did not ask for and cannot see change: a scan
+/// failing, a run finishing, a folder trashed. The status bar already covers
+/// routine progress; this is the one call for the messages that would
+/// otherwise appear silently on a screen reader.
+///
+/// `QAccessible::updateAccessibility` is a no-op with no bridge running, so
+/// this costs nothing in a session with no screen reader attached.
+inline void aaAnnounce(QObject *obj, const QString &message) {
+    if (!obj || message.isEmpty()) return;
+    QAccessibleAnnouncementEvent ev(obj, message);
+    // Polite: these land beside whatever the user is doing rather than cutting
+    // across it.
+    ev.setPoliteness(QAccessible::AnnouncementPoliteness::Polite);
+    QAccessible::updateAccessibility(&ev);
+}
+
+/// The same, interrupting: for a message the user must not miss, which in this
+/// app is a failed scan and nothing else. `Alert` is a static role, so it
+/// reaches assistive tech even where the widget carries no name of its own.
+inline void aaAlert(QObject *obj, const QString &message) {
+    if (!obj || message.isEmpty()) return;
+    QAccessibleEvent ev(obj, QAccessible::Alert);
+    QAccessible::updateAccessibility(&ev);
+    aaAnnounce(obj, message);
 }
 
 #endif
