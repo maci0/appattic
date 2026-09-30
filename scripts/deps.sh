@@ -348,6 +348,74 @@ check_urls() {
     done <<<"$ARTIFACTS"
 }
 
+# Every `uses:` in a workflow is third-party code the runner downloads and runs
+# with the job's token, so it belongs in the same review as every other pin: a
+# tag or a branch is a moving name, and a `uses:` on one is a dependency nobody
+# looked at. The commit SHA is the pin; the `# vX.Y.Z` comment is what makes a
+# bump reviewable, and Dependabot reads both (.github/dependabot.yml), so this
+# is what keeps a new action from joining the tree unmentioned.
+#
+# A local action (`uses: ./path`) needs no pin: it is this tree. A `uses:`
+# inside a comment is prose about a step rather than a step, and a `uses:` line
+# inside a `run: |` block is script text the runner passes to a shell, so
+# neither is a dependency.
+check_action_pins() {
+    local workflow line ref pin in_block block_indent line_indent
+    for workflow in "$ROOT"/.github/workflows/*.yml; do
+        [[ -f "$workflow" ]] || continue
+        in_block=0
+        block_indent=0
+        # The whole file, not a grep of it: a `run: |` line is what closes a
+        # block body, so filtering it out before the read would leave the
+        # state machine below with no way to open or close a block.
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line_indent="${line%%[![:space:]]*}"
+            [[ -n "$line_indent" ]] || line_indent="0"
+            line_indent="${#line_indent}"
+            # Block scalar body: a blank line, or one indented past the `run:`
+            # that opened the block. Nothing in it is a workflow key, and a
+            # gate that read a shell line as a step would fail a workflow over
+            # a command it never runs. A dedent closes the block, which is how
+            # the next step is reached.
+            if [[ "$in_block" -eq 1 ]]; then
+                if [[ -z "${line//[[:space:]]/}" ]] || [[ "$line_indent" -gt "$block_indent" ]]; then
+                    continue
+                fi
+                in_block=0
+            fi
+            if [[ "$line" =~ ^[[:space:]]*(-[[:space:]]+)?run:[[:space:]]*(\||>)[0-9+-]*[[:space:]]*$ ]]; then
+                in_block=1
+                block_indent="$line_indent"
+                continue
+            fi
+            [[ -n "$line" ]] || continue
+            # Indent and YAML list item off, then only a line whose first word
+            # is `uses:`.
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line#- }"
+            line="${line#"${line%%[![:space:]]*}"}"
+            [[ "$line" == "uses:"* ]] || continue
+            ref="${line#uses:}"
+            ref="${ref%%#*}"
+            ref="${ref#"${ref%%[![:space:]]*}"}"
+            ref="${ref%"${ref##*[![:space:]]}"}"
+            ref="${ref%\"}"
+            ref="${ref%\'}"
+            [[ -n "$ref" ]] || continue
+            [[ "$ref" == ./* ]] && continue
+            # 40 hex characters: GitHub's commit SHA-1. A length test rather
+            # than a bracket expression, which cannot be written portably for
+            # "exactly forty of these".
+            pin="${ref##*@}"
+            if [[ "${#pin}" -ne 40 || "$pin" == *[!0-9a-f]* ]]; then
+                fail "${workflow#"$ROOT"/}: $ref is not pinned to a 40-character commit SHA; a tag or branch moves and the job would run code this tree never reviewed"
+            elif [[ "$line" != *"#"* ]]; then
+                fail "${workflow#"$ROOT"/}: $ref carries no # vX.Y.Z comment, so the pin cannot be read back to a release and Dependabot has nothing to update"
+            fi
+        done < "$workflow"
+    done
+}
+
 # Zig and Swift versions are read from version files that must agree with the
 # pinned artifact names.
 check_version_anchors() {
@@ -690,6 +758,7 @@ run_check() {
     check_version_anchors
     check_artifact_versions_in_tree
     check_tool_pins
+    check_action_pins
     check_pinned_swift_versions
     check_swiftpm_pins
     if [[ "$FAILURES" -ne 0 ]]; then

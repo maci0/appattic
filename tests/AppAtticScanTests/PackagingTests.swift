@@ -408,6 +408,11 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(verify.contains("--tlsv1.2"), verify)
         XCTAssertTrue(verify.contains("BASH_SOURCE[0]"), verify)
         XCTAssertFalse(verify.contains("$ROOT/scripts/dep-checksums.sha256"), verify)
+        // The table is the file next to the script, not whatever the
+        // environment names: an override variable would let anything in the
+        // environment replace every digest, and a download checked against a
+        // table it supplied is not checked.
+        XCTAssertFalse(verify.contains("APPATTIC_CHECKSUMS"), verify)
         // shasum is the macOS spelling of the same digest. Without it neither
         // the inventory nor the pin check can run on the macOS runner.
         XCTAssertTrue(verify.contains("shasum -a 256"), verify)
@@ -751,5 +756,126 @@ final class PackagingTests: XCTestCase {
         for line in stdout.split(separator: "\n") where line.contains("present ") {
             XCTAssertFalse(line.contains("--install"), "install hint on a present tool: \(line)")
         }
+    }
+
+    /// A `uses:` is third-party code the runner downloads and runs with the
+    /// job's token, so it is a dependency like any other and a tag or a branch
+    /// is not a pin. Every workflow in the tree already names a commit SHA
+    /// with a `# vX.Y.Z` comment, so what is under test is the gate rather
+    /// than the state: the tree as it stands has to pass, and a workflow
+    /// rewritten to a floating tag has to fail.
+    ///
+    /// The check runs against a copy of the tree rather than the checkout, so
+    /// the failing case never puts a bad workflow where CI would run it. The
+    /// scripts are copied rather than linked because deps.sh derives its root
+    /// from its own path: a link resolves back to the checkout, and the check
+    /// would then run against the tree the test is editing a copy of.
+    func testWorkflowActionPinsAreEnforced() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let shell = try XCTUnwrap(whichCommand("bash"), "bash is needed to run scripts/deps.sh")
+        let fm = FileManager.default
+
+        /// A runnable copy: the scripts as files, the inputs they read as
+        /// links, the workflows as editable copies.
+        func stage() throws -> URL {
+            let tmp = fm.temporaryDirectory.appendingPathComponent("appattic-deps-\(UUID().uuidString)")
+            try fm.createDirectory(at: tmp.appendingPathComponent("scripts"), withIntermediateDirectories: true)
+            try fm.createDirectory(at: tmp.appendingPathComponent(".github/workflows"), withIntermediateDirectories: true)
+            // The whole scripts directory, not just the .sh files: dep-checksums.sha256
+            // is the input deps.sh reads by path, and a copy without it checks
+            // nothing.
+            for name in try fm.contentsOfDirectory(atPath: root.appendingPathComponent("scripts").path) {
+                try fm.copyItem(
+                    at: root.appendingPathComponent("scripts").appendingPathComponent(name),
+                    to: tmp.appendingPathComponent("scripts").appendingPathComponent(name)
+                )
+            }
+            for name in try fm.contentsOfDirectory(atPath: root.appendingPathComponent(".github/workflows").path) {
+                try fm.copyItem(
+                    at: root.appendingPathComponent(".github/workflows").appendingPathComponent(name),
+                    to: tmp.appendingPathComponent(".github/workflows").appendingPathComponent(name)
+                )
+            }
+            for name in ["packaging", "ui", "Package.swift", "Package.resolved", ".zig-version", ".swift-version"] {
+                let source = root.appendingPathComponent(name)
+                guard fm.fileExists(atPath: source.path) else {
+                    throw XCTSkip("\(name) is not in the tree")
+                }
+                try fm.createSymbolicLink(
+                    at: tmp.appendingPathComponent(name),
+                    withDestinationURL: source
+                )
+            }
+            return tmp
+        }
+
+        func check(_ tree: URL) throws -> (Int32, String) {
+            let (rc, _, stderr) = runCommand(
+                [shell, tree.appendingPathComponent("scripts/deps.sh").path, "check"],
+                timeout: 120
+            )
+            return (rc, stderr)
+        }
+
+        let clean = try stage()
+        defer { try? fm.removeItem(at: clean) }
+        let (cleanRc, cleanErr) = try check(clean)
+        XCTAssertEqual(cleanRc, 0, "deps.sh check fails on the tree as it stands: \(cleanErr)")
+
+        // The tree is only the harness if the failure comes from the edit:
+        // a staged copy of an unpinned workflow has to be what turns it red.
+        let broken = try stage()
+        defer { try? fm.removeItem(at: broken) }
+        let workflow = broken.appendingPathComponent(".github/workflows/linux.yml")
+        let original = try String(contentsOf: workflow, encoding: .utf8)
+        let pinned = try XCTUnwrap(
+            original.range(of: #"uses: actions/checkout@[0-9a-f]{40}"#,
+                            options: .regularExpression),
+            "linux.yml has no SHA-pinned checkout to rewrite"
+        )
+        let tag = original.replacingCharacters(
+            in: pinned,
+            with: "uses: actions/checkout@v7"
+        )
+        try tag.write(to: workflow, atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(tag, original, "the rewrite changed nothing")
+        let (tagRc, tagErr) = try check(broken)
+        XCTAssertNotEqual(tagRc, 0, "a workflow action on a floating tag passes the pin check")
+        XCTAssertTrue(
+            tagErr.contains("actions/checkout@v7"),
+            "the failure does not name the unpinned action: \(tagErr)"
+        )
+
+        // A `uses:` line inside a `run: |` block is shell text, not a step. A
+        // gate that read it would fail a workflow over a command it never
+        // runs, and the block-scalar form is the one place that mistake shows
+        // up, so it is pinned here rather than left to the next workflow that
+        // happens to print a line beginning with those letters.
+        let scripted = try stage()
+        defer { try? fm.removeItem(at: scripted) }
+        let runWorkflow = scripted.appendingPathComponent(".github/workflows/linux.yml")
+        let runOriginal = try String(contentsOf: runWorkflow, encoding: .utf8)
+        let anchor = try XCTUnwrap(
+            runOriginal.range(of: "      - name: Test scan library"),
+            "linux.yml has no step to insert before"
+        )
+        let withScript = runOriginal.replacingCharacters(
+            in: anchor,
+            with: """
+                      - name: a step that prints a line
+                        run: |
+                          uses: nope/action@v1
+                """
+        )
+        try withScript.write(to: runWorkflow, atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(withScript, runOriginal, "the run: block was not inserted")
+        let (scriptRc, scriptErr) = try check(scripted)
+        XCTAssertEqual(
+            scriptRc, 0,
+            "a uses: line inside a run: block fails the pin check: \(scriptErr)"
+        )
     }
 }

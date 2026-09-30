@@ -12,7 +12,13 @@ require_sha256sum() {
 checksums_file() {
     local here
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    printf '%s\n' "${APPATTIC_CHECKSUMS:-$here/dep-checksums.sha256}"
+    # The file next to this script, and no way to point it elsewhere: an
+    # override variable would let anything in the environment replace every
+    # digest in the table, and a download verified against a table the
+    # environment supplied is not verified. Nothing else in the tree set or
+    # read one; a caller that wants a different table copies this script next
+    # to that table.
+    printf '%s\n' "$here/dep-checksums.sha256"
 }
 
 checksum_for() {
