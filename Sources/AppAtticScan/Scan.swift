@@ -123,7 +123,6 @@ public final class ScanResult {
                     size_bytes: sw.sizeBytes,
                     size_measured: sw.sizeMeasured,
                     data_bytes: sw.dataBytes,
-                    data_measured: sw.dataMeasured,
                     data_paths: sw.dataPaths.isEmpty ? nil : sw.dataPaths,
                     last_used: isoString(sw.lastUsed),
                     installed_at: isoString(sw.installedAt),
@@ -139,7 +138,8 @@ public final class ScanResult {
                     summary: softwareDisplaySummary(sw),
                     steam_appid: sw.extra["steam_appid"],
                     pkg_id: sw.pkgId,
-                    bundle_id: sw.bundleId
+                    bundle_id: sw.bundleId,
+                    data_measured: sw.dataMeasured
                 )
             },
             outdated: outdated.map { $0.toEntry() },

@@ -162,7 +162,7 @@ func direntName(_ ent: UnsafeMutablePointer<dirent>) -> String? {
         // on macOS truncates a long name, and the truncated string names a
         // different entry for the `fstatat` that follows.
         let capacity = MemoryLayout.size(ofValue: ent.pointee.d_name)
-        ptr.withMemoryRebound(to: CChar.self, capacity: capacity) { chars in
+        return ptr.withMemoryRebound(to: CChar.self, capacity: capacity) { chars in
             decodeDirentName(UnsafeRawBufferPointer(start: chars, count: capacity))
         }
     }

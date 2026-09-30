@@ -102,9 +102,18 @@ final class FuzzXMLUsageTests: XCTestCase {
     /// key up in; against the raw bytes the check would fail on documents that
     /// are perfectly well formed.
     private static func attributeNormalized(_ text: String) -> String {
-        text.replacingOccurrences(of: "\t", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
+        var out = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            let v = scalar.value
+            if v == 0x09 || v == 0x0A || v == 0x0D {
+                out.append(" ")
+            } else if v < 0x20 {
+                out.append("\u{FFFD}")
+            } else {
+                out.append(scalar)
+            }
+        }
+        return String(out)
     }
 
     /// What both readers must hold for any document: a key is lowercased and

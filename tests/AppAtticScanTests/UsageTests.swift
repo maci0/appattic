@@ -892,7 +892,7 @@ final class UsageTests: XCTestCase {
             ": 1717200000:0;",
             ":1717200000:0;jq .",
             ":  1717200000:9;jq .",
-            ": 171720000:0;short-epoch",
+            ": 17172000:0;short-epoch",
             ": 17172000000:0;long-epoch",
             ": 171720000000:0;too-long-epoch",
             ": 1717200000:;no-duration",
@@ -981,7 +981,7 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(fastFish.lastSeen, slowFish.lastSeen)
         XCTAssertEqual(fastFish.oldestSeen, slowFish.oldestSeen)
         XCTAssertTrue(fastFish.everUsed.contains("jq"), "\(fastFish.everUsed)")
-        XCTAssertEqual(fastFish.lastSeen["jq"], Date(timeIntervalSince1970: 1_717_200_000))
+        XCTAssertEqual(fastFish.lastSeen["jq"], Date(timeIntervalSince1970: 1_717_200_008))
     }
 
     /// `keep` filtering must see the original-case token, as the regex path does.

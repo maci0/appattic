@@ -115,7 +115,7 @@ final class FuzzSteamVDFTests: XCTestCase {
                 for depth in 0...3 {
                     let pairs = vdfPairs(mutated, depth: depth)
                     XCTAssertEqual(vdfPairs(mutated, depth: depth).count, pairs.count, "not deterministic: \(where_) depth \(depth)")
-                    XCTAssertLessThanOrEqual(pairs.count, pairCapacity(mutated, depth: wanted: depth), "more pairs than lines: \(where_) depth \(depth)")
+                    XCTAssertLessThanOrEqual(pairs.count, pairCapacity(mutated, depth: depth), "more pairs than lines: \(where_) depth \(depth)")
                     for (key, value) in pairs {
                         assertCutFromFile(key, mutated, "\(where_) depth \(depth)")
                         assertCutFromFile(value, mutated, "\(where_) depth \(depth)")

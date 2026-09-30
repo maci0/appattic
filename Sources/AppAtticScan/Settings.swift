@@ -395,7 +395,7 @@ public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSett
         // app's own state directory, and a caller-supplied `to:` can name any
         // other parent. mkstemp creates at `0600`, so there is no window at any
         // destination.
-        try? keepSettingsBackup(at: url)
+        try? keepSettingsBackup(at: url, replacingWith: raw)
         try writeOwnerOnlyFile(raw, to: url)
     } catch {
         throw SettingsError.unwritable(path: url.path, reason: error.localizedDescription)
@@ -418,8 +418,9 @@ public func saveSettings(_ settings: AppAtticSettings, to url: URL = defaultSett
 /// nothing to copy; either way the write the caller asked for has to be the one
 /// that happens, and the older backup, if there is one, is still the last
 /// state the app wrote.
-private func keepSettingsBackup(at url: URL) throws {
+private func keepSettingsBackup(at url: URL, replacingWith raw: Data) throws {
     guard let previous = try? Data(contentsOf: url), !previous.isEmpty else { return }
+    if previous == raw { return }
     let backup = settingsBackupURL(url)
     if let kept = try? Data(contentsOf: backup), kept == previous { return }
     try writeOwnerOnlyFile(previous, to: backup)
