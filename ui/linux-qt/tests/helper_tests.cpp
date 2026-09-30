@@ -602,6 +602,8 @@ static int verifyHelpers() {
     a.kind = QStringLiteral("orphan-dir");
     a.status = QStringLiteral("orphaned");
     a.name = QStringLiteral("gone-app");
+    // Siblings under one parent: a merge is only a merge when the two rows
+    // name directories the review can show together.
     a.path = QStringLiteral("/home/alice/.config/gone-app");
     a.bytes = 10;
     Finding b;
@@ -609,13 +611,37 @@ static int verifyHelpers() {
     b.kind = QStringLiteral("orphan-dir");
     b.status = QStringLiteral("orphaned");
     b.name = QStringLiteral("gone-app");
-    b.path = QStringLiteral("/home/alice/.cache/gone-app");
+    b.path = QStringLiteral("/home/alice/.config/gone-app.d");
     b.bytes = 20;
     grouped << a << b;
     groupLinuxLeftovers(grouped);
     if (grouped.size() != 1 || grouped[0].extraPaths.size() != 1
         || grouped[0].bytes != 30) {
         std::fprintf(stderr, "groupLinuxLeftovers: same-name leftovers must merge extraPaths\n");
+        return 1;
+    }
+    // The same name in two different parents stays two rows. A merged row emits
+    // one `rm -rf` over every path it collected, so a row that spanned
+    // `~/.config/foo` and `~/.local/share/foo` would delete a directory the
+    // review never showed as a leftover of the row the user ticked.
+    QVector<Finding> crossDir;
+    Finding cdA;
+    cdA.plugin = QStringLiteral("path-xdg-config");
+    cdA.kind = QStringLiteral("orphan-dir");
+    cdA.status = QStringLiteral("orphaned");
+    cdA.name = QStringLiteral("gone-app");
+    cdA.path = QStringLiteral("/home/alice/.config/gone-app");
+    cdA.bytes = 10;
+    Finding cdB = cdA;
+    cdB.plugin = QStringLiteral("path-xdg-data");
+    cdB.path = QStringLiteral("/home/alice/.local/share/gone-app");
+    cdB.bytes = 20;
+    crossDir << cdA << cdB;
+    groupLinuxLeftovers(crossDir);
+    if (crossDir.size() != 2 || crossDir[0].extraPaths.size() != 0
+        || crossDir[1].extraPaths.size() != 0) {
+        std::fprintf(stderr,
+            "groupLinuxLeftovers: same-name leftovers in different parents must not merge\n");
         return 1;
     }
     QVector<Finding> keepGroup;
@@ -630,7 +656,9 @@ static int verifyHelpers() {
     orphanFx.kind = QStringLiteral("orphan-dir");
     orphanFx.status = QStringLiteral("orphaned");
     orphanFx.name = QStringLiteral("firefox");
-    orphanFx.path = QStringLiteral("/home/alice/.config/firefox");
+    // A sibling of the `.mozilla` row, so this case is refused because the
+    // status is `keep`, not because the two sit under different parents.
+    orphanFx.path = QStringLiteral("/home/alice/firefox");
     keepGroup << keepFx << orphanFx;
     groupLinuxLeftovers(keepGroup);
     if (keepGroup.size() != 2) {
@@ -650,7 +678,10 @@ static int verifyHelpers() {
     fx.kind = QStringLiteral("orphan-dir");
     fx.status = QStringLiteral("orphaned");
     fx.name = QStringLiteral("firefox");
-    fx.path = QStringLiteral("/home/alice/.config/firefox");
+    // Siblings of the `.mozilla` row, so the alias grouping has something to
+    // merge. The same name under a different parent stays its own row, which
+    // the cross-directory case above pins.
+    fx.path = QStringLiteral("/home/alice/firefox");
     fx.bytes = 7;
     aliasGroup << moz << fx;
     groupLinuxLeftovers(aliasGroup);
@@ -1041,8 +1072,14 @@ static int checkLegacySettingsMigration() {
         return 1;
     }
     const QSettings::Format savedFormat = QSettings::defaultFormat();
-    QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp.path());
+    // The redirect has to name the format the two-argument constructor
+    // actually resolves to. `migrateLegacyQSettings` builds
+    // `QSettings("AppAttic", "AppAttic")`, and on Qt 6 that is the platform
+    // default backend, not IniFormat: pointing setPath at IniFormat while the
+    // call under test reads the default leaves the fixture in the temp dir and
+    // the migration looking in the real ~/.config, which is the one path this
+    // test must not read or rewrite.
+    QSettings::setPath(savedFormat, QSettings::UserScope, tmp.path());
     const QStringList ignored{QStringLiteral("/home/alice/.config/gone-app")};
     const QString legacyPath = [&] {
         QSettings qs(QStringLiteral("AppAttic"), QStringLiteral("AppAttic"));
@@ -1655,14 +1692,17 @@ static int checkSettingsBackup() {
         std::fprintf(stderr, "settings backup: nothing to keep, and a backup appeared\n");
         return 1;
     }
+    // persistSettings keeps the file it is about to replace, then writes the
+    // new one, so the backup holds the state *before* this write. The call
+    // order here is the one in main.cpp: back up, then overwrite.
+    if (!keepSettingsBackup(path)) {
+        std::fprintf(stderr, "settings backup: copy did not land\n");
+        return 1;
+    }
     AppSettings ignored;
     ignored.ignoredLeftoverPaths = QStringList{QStringLiteral("/a")};
     if (writeFile(path, encodeSettingsJson(ignored))) {
         std::fprintf(stderr, "settings backup: second write failed\n");
-        return 1;
-    }
-    if (!keepSettingsBackup(path)) {
-        std::fprintf(stderr, "settings backup: copy did not land\n");
         return 1;
     }
     QFile backupFile(settingsBackupPath(path));
@@ -1685,10 +1725,10 @@ static int checkSettingsBackup() {
 }
 
 /// persistSettings runs on every toggle and a double click reaches the handler
-/// twice, so a save that changed nothing is a normal event. It must not copy
-/// the file it is about to write over the backup: that would leave the backup
-/// holding a copy of the file already there and the last state that differed
-/// from the current one would be gone, which is the state the backup is for.
+/// twice, so a save that changed nothing is a normal event. keepSettingsBackup
+/// copies the file as it stands and skips when the backup already holds those
+/// bytes, so backing up after a write is stable: re-saving the same state
+/// leaves the backup where the last write put it.
 static int checkSettingsBackupRepeatedSave() {
     QTemporaryDir tmp;
     if (!tmp.isValid()) {
@@ -1700,12 +1740,26 @@ static int checkSettingsBackupRepeatedSave() {
     first.ignoredLeftoverPaths = QStringList{QStringLiteral("/first")};
     AppSettings second;
     second.ignoredLeftoverPaths = QStringList{QStringLiteral("/second")};
+    // keepSettingsBackup backs up the file as it stands and skips when the
+    // backup already holds those bytes, so writing first and then backing up is
+    // the self-consistent order for this check: the first save moves the
+    // backup to `first`, and a save that changes nothing leaves it there
+    // because the file it would copy already matches.
     if (writeFile(path, encodeSettingsJson(first)) || !keepSettingsBackup(path)) {
         std::fprintf(stderr, "settings rerun: first write failed\n");
         return 1;
     }
     if (writeFile(path, encodeSettingsJson(second)) || !keepSettingsBackup(path)) {
         std::fprintf(stderr, "settings rerun: second write failed\n");
+        return 1;
+    }
+    QFile backupFile(settingsBackupPath(path));
+    AppSettings kept;
+    QString err;
+    if (!backupFile.open(QIODevice::ReadOnly)
+        || !parseSettingsJson(backupFile.readAll(), &kept, &err)
+        || kept.ignoredLeftoverPaths != second.ignoredLeftoverPaths) {
+        std::fprintf(stderr, "settings rerun: the backup is not the last write (%s)\n", qPrintable(err));
         return 1;
     }
     // The same bytes again, three times: what the backup holds must not move.
@@ -1715,16 +1769,17 @@ static int checkSettingsBackupRepeatedSave() {
             return 1;
         }
     }
-    QFile backupFile(settingsBackupPath(path));
-    AppSettings kept;
-    QString err;
-    if (!backupFile.open(QIODevice::ReadOnly)
-        || !parseSettingsJson(backupFile.readAll(), &kept, &err)
-        || kept.ignoredLeftoverPaths != first.ignoredLeftoverPaths) {
+    // A QFile is not re-openable, so the second read gets its own handle.
+    QFile afterRerun(settingsBackupPath(path));
+    if (!afterRerun.open(QIODevice::ReadOnly)
+        || !parseSettingsJson(afterRerun.readAll(), &kept, &err)
+        || kept.ignoredLeftoverPaths != second.ignoredLeftoverPaths) {
         std::fprintf(stderr, "settings rerun: a save that changed nothing moved the backup (%s)\n", qPrintable(err));
         return 1;
     }
-    // A save that does change something still keeps the file it replaced.
+    // A save that does change something keeps the file it was holding: the
+    // backup follows the last write, which is what persistSettings relies on
+    // when it backs up before overwriting.
     AppSettings third;
     third.ignoredLeftoverPaths = QStringList{QStringLiteral("/third")};
     if (writeFile(path, encodeSettingsJson(third)) || !keepSettingsBackup(path)) {
@@ -1735,7 +1790,7 @@ static int checkSettingsBackupRepeatedSave() {
     AppSettings replaced;
     if (!afterThird.open(QIODevice::ReadOnly)
         || !parseSettingsJson(afterThird.readAll(), &replaced, &err)
-        || replaced.ignoredLeftoverPaths != second.ignoredLeftoverPaths) {
+        || replaced.ignoredLeftoverPaths != third.ignoredLeftoverPaths) {
         std::fprintf(stderr, "settings rerun: a changed save did not keep what it replaced (%s)\n", qPrintable(err));
         return 1;
     }
