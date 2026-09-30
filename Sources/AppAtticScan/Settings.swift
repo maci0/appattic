@@ -286,7 +286,52 @@ public func configEnvEntries(
             }
             return "WASM modules read from this directory"
         },
+        // The two Android SDK variables are the first ones in this block that
+        // choose a root rather than a switch, and they were the only roots the
+        // scan read that nothing here named: a user who exported one and still
+        // saw no `android` overlay had no way to tell a stale value from a
+        // value the report ignored. Reported together because the scan takes
+        // the first of the two that holds a real SDK.
+        entry("ANDROID_HOME", unsetEffect: "the default SDK directories only") { raw in
+            androidSdkEntryEffect(raw, home: env["ANDROID_SDK_ROOT"] ?? "")
+        },
+        entry("ANDROID_SDK_ROOT", unsetEffect: "the default SDK directories only") { raw in
+            androidSdkEntryEffect(raw, home: env["ANDROID_HOME"] ?? "")
+        },
+        // `LANG` picks the `.lproj` directories the macOS app-name lookup
+        // reads, so a machine diff that omitted it could show two runs naming
+        // the same app differently with every other line equal. The value is
+        // resolved the way `lprojCandidates` resolves it, untrimmed, so the
+        // report cannot name a locale the app did not look for.
+        entry("LANG", unsetEffect: "the base English app names") { raw in
+            if raw.isEmpty { return "set but empty, so the base English app names" }
+            // The part before the first `.` is the locale and `-` becomes `_`,
+            // so `pt_BR.UTF-8` is read as `pt_BR`; a value that is only an
+            // encoding resolves to nothing and reads as the base names.
+            let locale = String(raw.split(separator: ".").first ?? "")
+                .replacingOccurrences(of: "-", with: "_")
+            return locale.isEmpty
+                ? "set but empty, so the base English app names"
+                : "app names read from the \(locale) .lproj when it exists"
+        },
     ]
+}
+
+/// The effect of one Android SDK variable as the scan resolves it: the first
+/// of the two that holds a directory with an SDK in it is the root in force,
+/// and a value that names neither is read as absent, so the report says which
+/// of the two cases a value is rather than claiming a root the scan skipped.
+/// A value is taken as `defaultAndroidSdkDirs` takes it, untrimmed, so the
+/// report cannot name a root the scan did not test.
+private func androidSdkEntryEffect(_ raw: String, home other: String) -> String {
+    let candidates = [raw, other]
+    if let real = candidates.first(where: { !$0.isEmpty && androidSdkLooksReal($0) }) {
+        return "Android SDK read from \(real)"
+    }
+    if candidates.contains(where: { !$0.isEmpty }) {
+        return "set, but no such SDK directory, so the default directories only"
+    }
+    return "set but empty, so the default SDK directories only"
 }
 
 /// `1`/`true`/`yes`/`on` in any case, after trimming, and nothing else. The

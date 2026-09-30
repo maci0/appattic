@@ -78,6 +78,9 @@ FLATPAK_ID: unset [host run]
 APPATTIC_HOST_EXEC_LIVE: unset [off: fixtures unless the platform forces them]
 APPATTIC_HOST_EXEC_FIXTURE: unset [off: live package queries]
 APPATTIC_CORE_OUT: unset [searched next to the binary]
+ANDROID_HOME: unset [the default SDK directories only]
+ANDROID_SDK_ROOT: unset [the default SDK directories only]
+LANG: unset [the base English app names]
 ```
 
 Each ignored path is listed under its count, one per line, so a wrong entry is visible rather than a leftover that quietly never hides. The environment switches a run reads are listed the same way, each with the effect its value has and `unset` when it is not set, so a diff of two machines shows an override that is set as well as one that is not.
@@ -125,6 +128,9 @@ Environment:
 | `XDG_STATE_HOME` | Linux | Absolute state root scanned for leftovers, by the CLI and by the Linux window. |
 | `XDG_DATA_DIRS` | Linux | Colon-separated absolute data roots searched for desktop entries. Unset, empty, or a list whose entries are all relative uses `/usr/local/share:/usr/share`; relative entries in a longer list are dropped, and `appattic config` prints the list that survives. |
 | `XDG_RUNTIME_DIR` | Linux Qt | Runtime root of the session, read for the `gvfs` directory the network-folder scan opens at. Unset, empty, relative, or naming a root with no `gvfs` uses `~/.gvfs`. The CLI scans nothing with it; `appattic config` prints the root it resolves to. |
+| `ANDROID_HOME` | CLI and Linux Qt | An Android SDK root the scan treats as a user tool directory. The first of `ANDROID_HOME` and `ANDROID_SDK_ROOT` that holds a real SDK (one with `emulator`, `platform-tools`, `cmdline-tools`, or `platforms` in it) is the root in force; a value that names no such directory is read as unset, and the fixed default roots are searched instead. |
+| `ANDROID_SDK_ROOT` | CLI and Linux Qt | The other spelling of the same Android SDK root, searched after `ANDROID_HOME`. A value here that holds no SDK is reported by `appattic config` as ignored rather than as the root in force. |
+| `LANG` | CLI and macOS UI | The locale whose `.lproj` directory the macOS app-name lookup reads for an app's localized name. Unset, empty, or a value that is only an encoding opens the base English names. `appattic config` prints the locale it resolved to, so a diff of two machines shows why the same app is named differently. |
 | `FLATPAK_ID` | Linux Qt and the core host | Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags and package-manager queries go through `/run/host` and `flatpak-spawn --host`. Unset or empty is a normal host run. |
 
 Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used. A trailing separator is dropped from a root that ends in one, so `XDG_CONFIG_HOME=/srv/config/` and `XDG_CONFIG_HOME=/srv/config` name the same directory to the CLI, to the Linux window, and to the core host.

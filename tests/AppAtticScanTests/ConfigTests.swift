@@ -264,6 +264,32 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    /// The README quotes a full `appattic config` run, and a quoted run whose
+    /// order no longer matches the order the command prints is a second copy
+    /// of the config surface, kept in step by hand. The env block is compared
+    /// name by name against the array that produces it, so a switch added to
+    /// the code and not to the example fails here rather than reading as a
+    /// complete run that is missing a line.
+    func testReadmeConfigExampleMatchesTheOrderConfigPrints() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let readme = try String(contentsOf: root.appendingPathComponent("README.md"), encoding: .utf8)
+        let all = readme.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let first = try XCTUnwrap(all.firstIndex { $0.hasPrefix("NO_COLOR: ") })
+        let tail = Array(all[first...])
+        // The block ends at the fence that closes the fenced example.
+        let stop = try XCTUnwrap(tail.firstIndex { $0.hasPrefix("```") })
+        // The XDG roots print above the switches as bare `NAME: path` lines;
+        // the switches are the ones whose value carries an effect in brackets.
+        let quoted = tail[0..<stop].compactMap { line -> String? in
+            guard line.hasSuffix("]"), let colon = line.range(of: ": ") else { return nil }
+            return String(line[..<colon.lowerBound])
+        }
+        XCTAssertEqual(quoted, configEnvEntries(env: [:]).map(\.name), "\(quoted)")
+    }
+
     /// An unset switch is reported, not absent: the difference between no
     /// override and an override nobody remembered setting is the whole point
     /// of diffing two machines.
@@ -362,5 +388,81 @@ final class ConfigTests: XCTestCase {
             source.contains("Valid values: \(StartPage.nameList)."),
             "the Qt valid-values list differs from StartPage.nameList"
         )
+    }
+
+    /// The two Android SDK variables choose a root the scan walks, and they
+    /// were the only such roots `appattic config` did not name: a user who
+    /// exported one and still saw no `android` overlay had no way to tell a
+    /// stale value from a value the report ignored. The root in force is the
+    /// first of the two that holds a real SDK, and a value holding none is
+    /// reported as ignored rather than as the root.
+    func testConfigNamesTheAndroidSdkRootInForce() throws {
+        func effect(_ env: [String: String], _ name: String) throws -> String {
+            let entries = EffectiveConfig(settings: .default, env: env).environment
+            return try XCTUnwrap(entries.first { $0.name == name }).effect
+        }
+        XCTAssertEqual(
+            try effect(["ANDROID_HOME": "  "], "ANDROID_HOME"),
+            "set, but no such SDK directory, so the default directories only"
+        )
+        XCTAssertEqual(
+            try effect(["ANDROID_HOME": ""], "ANDROID_HOME"),
+            "set but empty, so the default SDK directories only"
+        )
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-config-sdk-\(UUID().uuidString)")
+        let sdk = root.appendingPathComponent("Android")
+        try FileManager.default.createDirectory(
+            at: sdk.appendingPathComponent("emulator"),
+            withIntermediateDirectories: true
+        )
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        XCTAssertEqual(
+            try effect(["ANDROID_HOME": sdk.path], "ANDROID_HOME"),
+            "Android SDK read from \(sdk.path)"
+        )
+        // The second spelling is read after the first, so a first value that
+        // holds no SDK does not hide the one that does.
+        XCTAssertEqual(
+            try effect(["ANDROID_HOME": root.path, "ANDROID_SDK_ROOT": sdk.path], "ANDROID_SDK_ROOT"),
+            "Android SDK read from \(sdk.path)"
+        )
+        // A value naming no SDK directory is not the root in force, and saying
+        // so is the whole point of the line.
+        let empty = root.appendingPathComponent("Empty")
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        XCTAssertEqual(
+            try effect(["ANDROID_HOME": empty.path], "ANDROID_HOME"),
+            "set, but no such SDK directory, so the default directories only"
+        )
+    }
+
+    /// `LANG` picks the `.lproj` the macOS app-name lookup reads, so two runs
+    /// can name the same app differently with every other config line equal.
+    /// The reported locale is the one `lprojCandidates` resolves it to: the
+    /// part before the first `.`, with `-` folded to `_`. It is resolved
+    /// untrimmed, the way the app resolves it, so the line cannot name a
+    /// locale the app did not look for.
+    func testConfigNamesTheLocaleTheAppNamesAreReadIn() throws {
+        func effect(_ raw: String?) throws -> String {
+            var env: [String: String] = [:]
+            if let raw { env["LANG"] = raw }
+            let entries = EffectiveConfig(settings: .default, env: env).environment
+            return try XCTUnwrap(entries.first { $0.name == "LANG" }).effect
+        }
+        XCTAssertEqual(try effect(nil), "the base English app names")
+        XCTAssertEqual(try effect(""), "set but empty, so the base English app names")
+        XCTAssertEqual(
+            try effect("pt_BR.UTF-8"),
+            "app names read from the pt_BR .lproj when it exists"
+        )
+        XCTAssertEqual(
+            try effect("pt-BR"),
+            "app names read from the pt_BR .lproj when it exists"
+        )
+        // The part before the encoding is the locale; a value that is only an
+        // encoding resolves to nothing, so it reads as the base names.
+        XCTAssertEqual(try effect(".UTF-8"), "set but empty, so the base English app names")
     }
 }
