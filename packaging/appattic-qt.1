@@ -150,6 +150,21 @@ Confirm-before-running and ignored leftover paths. Include-system-apps is a macO
 .I ignoredLeftoverPaths
 entry is not the full path a report prints, is named in an error and left unoverwritten, and the window opens with no settings until it is corrected.
 .TP
+.I ~/.local/share/appattic/settings.json.bak
+The settings file as it was before the last change, written owner-only by every
+settings save that changed the file. It is what the window's "Restore settings
+from backup" puts back, and
+.B appattic restore
+puts back from the command line, after checking it loads. Nothing reads it while
+the window runs.
+.TP
+.I ~/.local/share/appattic/settings.json.bad
+The settings file a restore replaced, kept so a restore that turns out to be the
+wrong one is not a second loss. Nothing reads it while the window runs, and
+.B appattic erase
+leaves it. The procedure is
+.IR docs/runbooks/state-recovery.md .
+.TP
 .I ~/.local/share/appattic/last-scan.json
 The scan cache, a full list of the app and leftover paths the last scan found
 under your home directory. It is owner-only. A run that removes or updates

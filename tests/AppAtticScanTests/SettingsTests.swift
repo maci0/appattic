@@ -484,6 +484,47 @@ final class SettingsTests: XCTestCase {
         )
     }
 
+    /// `appattic restore --json FILE` writes this, and a script that checks
+    /// where the state landed reads the paths out of it, so they are the real
+    /// paths rather than the redacted text the command prints. The settings
+    /// ride along, which is what makes the file a record of what was restored
+    /// and not only of where.
+    func testRestoreResultEncodesThePathsAndTheRestoredSettings() throws {
+        let settings = AppAtticSettings(
+            includeSystem: true,
+            confirmDelete: false,
+            ignoredLeftoverPaths: ["/tmp/Kept"]
+        )
+        let result = RestoreResult(
+            path: "/tmp/dir/settings.json",
+            restoredFrom: "/tmp/dir/settings.json.bak",
+            replacedPath: "/tmp/dir/settings.json.bad",
+            settings: settings
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let raw = try encoder.encode(result)
+        let back = try JSONDecoder().decode(RestoreResult.self, from: raw)
+        XCTAssertEqual(back.path, "/tmp/dir/settings.json")
+        XCTAssertEqual(back.restoredFrom, "/tmp/dir/settings.json.bak")
+        XCTAssertEqual(back.replacedPath, "/tmp/dir/settings.json.bad")
+        XCTAssertEqual(back.settings, settings)
+        // An empty `replacedPath` is how "there was no file to keep" is said,
+        // and it has to stay a value rather than a missing key, so a reader
+        // asking for the field is asking about the restore and not about its
+        // schema.
+        let none = RestoreResult(
+            path: "/tmp/dir/settings.json",
+            restoredFrom: "/tmp/dir/settings.json.bak",
+            replacedPath: "",
+            settings: .default
+        )
+        let rawNone = try encoder.encode(none)
+        let obj = try JSONSerialization.jsonObject(with: rawNone) as? [String: Any]
+        XCTAssertEqual(obj?["replacedPath"] as? String, "")
+        XCTAssertEqual(obj?["settings"] is [String: Any], true)
+    }
+
     func testClearIgnoredLeftovers() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-clear-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }

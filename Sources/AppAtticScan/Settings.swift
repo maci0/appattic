@@ -501,6 +501,25 @@ public func settingsRejectedURL(_ url: URL = defaultSettingsURL()) -> URL {
     url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + ".bad")
 }
 
+/// What a settings restore did, as the `--json` payload: the settings file it
+/// wrote, the backup it came from, the file it replaced (kept as `.bad`, or
+/// absent when there was nothing to keep), and the values it restored. The
+/// paths are the real ones, not the redacted text the CLI prints, so a script
+/// can check where the state landed.
+public struct RestoreResult: Codable, Sendable {
+    public let path: String
+    public let restoredFrom: String
+    public let replacedPath: String
+    public let settings: AppAtticSettings
+
+    public init(path: String, restoredFrom: String, replacedPath: String, settings: AppAtticSettings) {
+        self.path = path
+        self.restoredFrom = restoredFrom
+        self.replacedPath = replacedPath
+        self.settings = settings
+    }
+}
+
 /// Put `settings.json.bak` back in place of `settings.json`, after checking
 /// that the backup is a file the app will actually load.
 ///

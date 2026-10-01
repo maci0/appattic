@@ -115,7 +115,7 @@ public struct CLIOptions {
     }
 }
 
-let cliCommands: Set<String> = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk", "erase"]
+let cliCommands: Set<String> = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk", "erase", "restore"]
 
 /// Options that stand alone: the flag name and the field it sets. `cliHelpText`
 /// lists these; `parseCLIArguments` walks the table.
@@ -255,6 +255,10 @@ commands:
                 home. PATH is a path: it carries a separator, it is . or .., or
                 it is a name that starts with a dash and came behind `--`
   erase         delete the stored scan snapshot (the paths the last scan recorded)
+  restore       put settings.json.bak back in place of settings.json, after
+                checking the backup loads; the file it replaces is kept as
+                settings.json.bad. It reads no current settings first, so it
+                works on a machine whose settings.json no longer parses
   update        named package upgrades (prompts on a TTY; --dry-run prints the script). Not a full distro upgrade
 
   `--` ends the options: `appattic disk -- -backup` reads `-backup` as the PATH.
@@ -262,12 +266,13 @@ commands:
 options:
   --json FILE         also write this command's result as JSON to FILE, which
                       has to end in .json. The report commands write the whole
-                      scan, disk the disk tree, config and erase what they
-                      reported. On the report commands --top, --category,
-                      --leftovers-only, and --stale-only shape what is printed,
-                      not what is written. A value that names no JSON file is a
-                      usage error, so `appattic --json erase` cannot write a
-                      file named erase instead of running the erase command
+                      scan, disk the disk tree, config, erase and restore write what
+                      those commands reported. On the report commands
+                      --top, --category, --leftovers-only, and --stale-only
+                      shape what is printed, not what is written. A value that
+                      names no JSON file is a usage error, so `appattic --json
+                      erase` cannot write a file named erase instead of running
+                      the erase command
   --include-system    on report, leftovers, stale, outdated, packages, update, config:
                       include OS system apps in the stale list
   --fresh             on report, leftovers, stale, outdated, packages, update: ignore
@@ -297,8 +302,8 @@ printing the full table. --help and --version are the exception: they ask a
 question and exit, so a bad token anywhere on the line does not suppress them.
 
 Progress and status go to stderr. Reports, --dry-run scripts, and what a
-command reports (config's resolved settings, disk's tree, erase's result) go to
-stdout, so every command can be piped or redirected.
+command reports (config's resolved settings, disk's tree, erase's result,
+restore's result) go to stdout, so every command can be piped or redirected.
 
 exit codes:
   0  success
@@ -316,6 +321,7 @@ examples:
   appattic update --yes
   appattic config
   appattic erase
+  appattic restore
   appattic help
 
 settings.json (includeSystem, confirmDelete, ignored leftover paths):
@@ -327,6 +333,8 @@ settings.json (includeSystem, confirmDelete, ignored leftover paths):
   --include-system turns includeSystem on for this run.
   It cannot turn includeSystem off when the file already has true.
   'appattic config' prints the values and paths this machine resolves.
+  A settings file that does not parse is an error on those commands, and so
+  is a reason to run 'appattic restore', which does not read it first.
 """
 
 /// The line the CLI prints after a usage error, separate from the error's own

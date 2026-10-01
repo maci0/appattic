@@ -31,10 +31,16 @@ enum AppAtticCLI {
             return
         }
         // Before the settings load, which can exit 2: erasing what the last
-        // scan stored is the one thing a user must still be able to do on a
-        // machine whose settings.json no longer parses.
+        // scan stored and putting the settings backup back are the two things
+        // a user must still be able to do on a machine whose settings.json no
+        // longer parses. A restore that read the settings first could not run
+        // on exactly the machine it exists for.
         if opts.command == "erase" {
             runEraseCommand(opts)
+            return
+        }
+        if opts.command == "restore" {
+            runRestoreCommand(opts)
             return
         }
         let settings: AppAtticSettings
@@ -201,6 +207,67 @@ func runEraseCommand(_ opts: CLIOptions) {
     print(erased ? "removed \(shown)" : "no scan snapshot at \(shown)")
     if let jsonPath = opts.json {
         writeJSONFile(EraseResult(path: url.path, erased: erased), to: jsonPath)
+    }
+}
+
+/// Put `settings.json.bak` back in place of `settings.json`, and say what was
+/// restored. The read is `restoreSettingsBackup`'s, so the backup is checked
+/// through the app's own loader before anything is written and a backup that
+/// does not load leaves the disk alone; the file it replaces is kept as
+/// `settings.json.bad` first. Like `erase`, this runs before the settings load,
+/// so it is reachable on the machine whose settings file is what is broken.
+///
+/// The reported lines go to stdout with every other command's result, and the
+/// paths are redacted so they can be pasted into a bug report; `--json FILE`
+/// writes the real paths for a script.
+func runRestoreCommand(_ opts: CLIOptions) {
+    let url = defaultSettingsURL()
+    let backup = settingsBackupURL(url)
+    let rejected = settingsRejectedURL(url)
+    // What was in `settings.json` before the restore. It is the same read the
+    // restore makes, and the question it answers is what this restore replaced,
+    // not what `.bad` happens to hold: a `.bad` already on disk from an earlier
+    // restore is not this command's output, and a restore that writes back what
+    // was already there keeps nothing.
+    let replaced: Data? = try? Data(contentsOf: url)
+    let restored: AppAtticSettings
+    do {
+        restored = try restoreSettingsBackup(from: url)
+    } catch {
+        // Exit 1, not 2: a backup that does not load is a failure of the
+        // machine's state, not a usage error, and the runbook tells the user to
+        // stop and leave the files alone rather than treat it as a bad command.
+        // Nothing on disk has changed by the time this prints.
+        fputs("error: \(terminalSafe(redactHomePaths(error.localizedDescription)))\n", stderr)
+        fputs("nothing was changed; docs/runbooks/state-recovery.md says what to do next\n", stderr)
+        Foundation.exit(1)
+    }
+    // These are the rules `restoreSettingsBackup` keeps a replaced file under,
+    // so the file named below is one this restore actually wrote. `encoded` is
+    // what it wrote as settings.json: the backup's settings, normalized.
+    let written = restored.normalized()
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    let encoded = (try? encoder.encode(written)) ?? Data()
+    let keptThisRestore = replaced != nil && !replaced!.isEmpty && replaced != encoded
+    print("restored \(terminalSafe(redactHomePaths(url.path))) from \(terminalSafe(redactHomePaths(backup.path)))")
+    print(
+        "includeSystem: \(written.includeSystem), confirmDelete: \(written.confirmDelete), "
+            + "ignoredLeftoverPaths: \(localeCount(written.ignoredLeftoverPaths.count))"
+    )
+    if keptThisRestore {
+        print("the settings file this restore replaced is at \(terminalSafe(redactHomePaths(rejected.path)))")
+    }
+    if let jsonPath = opts.json {
+        writeJSONFile(
+            RestoreResult(
+                path: url.path,
+                restoredFrom: backup.path,
+                replacedPath: keptThisRestore ? rejected.path : "",
+                settings: written
+            ),
+            to: jsonPath
+        )
     }
 }
 

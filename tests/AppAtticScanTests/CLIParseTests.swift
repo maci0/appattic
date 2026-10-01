@@ -32,7 +32,7 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertEqual(serve.parseError, .unknownCommand("serve"))
         XCTAssertEqual(
             serve.error,
-            "unknown command: serve; try one of: config, disk, erase, leftovers, outdated, packages, report, stale, update"
+            "unknown command: serve; try one of: config, disk, erase, leftovers, outdated, packages, report, restore, stale, update"
         )
         let leaves = parseCLIArguments(["brew-leaves"])
         XCTAssertEqual(leaves.parseError, .unknownCommand("brew-leaves"))
@@ -85,6 +85,49 @@ final class CLIFlagTests: XCTestCase {
             .optionNeedsCommand(option: "--top", commands: ["report", "leftovers", "disk"])
         )
         XCTAssertTrue(cliHelpText.contains("erase"), cliHelpText)
+    }
+
+    /// `restore` puts the settings backup back, and it exists for the machine
+    /// whose `settings.json` no longer reads: it reads no setting first, so it
+    /// takes no positional argument and no scan flag either. `--json` is the one
+    /// flag it accepts, because what a restore did is worth having as a file
+    /// for a script that checks it.
+    func testRestoreCommand() {
+        XCTAssertEqual(parseCLIArguments(["restore"]).command, "restore")
+        XCTAssertNil(parseCLIArguments(["restore"]).error)
+        XCTAssertEqual(parseCLIArguments(["restore", "--json", "/tmp/r.json"]).json, "/tmp/r.json")
+        XCTAssertEqual(
+            parseCLIArguments(["restore", "extra"]).parseError,
+            .unexpectedArgument("extra")
+        )
+        XCTAssertEqual(
+            parseCLIArguments(["restore", "--top", "5"]).parseError,
+            .optionNeedsCommand(option: "--top", commands: ["report", "leftovers", "disk"])
+        )
+        // The help has to name the command and say it reads no setting first,
+        // since that is the whole reason it exists beside the two windows'
+        // restore button.
+        XCTAssertTrue(cliHelpText.contains("restore"), cliHelpText)
+        XCTAssertTrue(cliHelpText.contains("settings.json.bak"), cliHelpText)
+    }
+
+    /// `restore` and `erase` are the two commands that run before the settings
+    /// load, so a scan flag on either of them is a usage error rather than a
+    /// flag that changed nothing. The command-scoped table lists neither under
+    /// the flags it accepts, and a table that drifted from that list would let
+    /// the flag through.
+    func testRestoreAndEraseTakeNoScanFlags() {
+        for command in ["restore", "erase"] {
+            for flag in [
+                "--fresh", "--include-system", "--dry-run",
+                "--leftovers-only", "--stale-only", "--allocated", "--all-file-systems",
+            ] {
+                XCTAssertNotNil(
+                    parseCLIArguments([command, flag]).parseError,
+                    "\(command) \(flag) was accepted"
+                )
+            }
+        }
     }
 
     func testUpdateCommand() {

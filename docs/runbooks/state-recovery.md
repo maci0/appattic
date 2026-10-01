@@ -19,7 +19,9 @@ rather than in someone's head.
 `<data dir>` is `$XDG_DATA_HOME/appattic` on Linux (usually
 `~/.local/share/appattic`) and `~/Library/Application Support/AppAttic` on
 macOS. `appattic config` prints the resolved paths and says whether the backup
-is there.
+is there. `appattic restore` puts the backup back, and runs before the
+settings are read so it is reachable on the machine whose settings file is
+what is broken.
 
 The Qt window on Linux keeps no scan snapshot of its own: it scans live and
 deletes the shared `last-scan.json` after a run that removes files or changes
@@ -30,7 +32,7 @@ written leaves the old file as the only copy of those paths.
 ## RPO and RTO
 
 - `settings.json`: RPO is one save. A change the app has written is on disk
-  before the window reports it. RTO is one `cp`.
+  before the window reports it. RTO is one `appattic restore` (or one `cp`).
 - `last-scan.json`: RPO is one scan. It is a cache, so losing it costs a rescan
   and nothing else. RTO is the length of one scan.
 - User data (the files AppAttic reports and, on request, deletes): RPO and RTO
@@ -55,17 +57,32 @@ written leaves the old file as the only copy of those paths.
    `~/.local/share/appattic/` on Linux and
    `~/Library/Application Support/AppAttic/` on macOS.
 
-2. **In the window: press "Restore settings from backup"**, on the Settings
-   page under Ignored leftovers. It is the checked restore: the backup is read
-   with the same loader the window reads settings with, and nothing on disk
-   changes if the backup does not read. The macOS window offers the same button
-   on its settings error screen, which is where a settings file that does not
-   parse leaves you. The button is disabled, with the reason on its tooltip,
-   when there is no backup.
+2. **From the command line: `appattic restore`.** It is the checked restore:
+   the backup is read with the same loader the app reads settings with, and
+   nothing on disk changes if the backup does not read. The file it replaces is
+   kept as `settings.json.bad` first, so a restore that turns out to be the
+   wrong state is one `cp` from being undone.
 
-   By hand, if the window is not what you have, the same restore is three
-   steps. The check comes first, because a copy overwrites the file it replaces
-   and cannot tell a backup that still reads from one that was truncated by a
+   ```bash
+   appattic restore
+   ```
+
+   It runs before the settings are read, so it works on exactly the machine
+   this page is for, and it is the same code the two windows' button runs
+   (`restoreSettingsBackup`). It reports the settings it restored on stdout,
+   and exits 1 with the reason on stderr when the backup is missing or does not
+   load, having changed nothing. Add `--json FILE` to have the paths and the
+   values written as JSON.
+
+   **In a window: press "Restore settings from backup"**, on the Settings page
+   under Ignored leftovers. It is the same restore by the same function. The
+   macOS window offers the same button on its settings error screen, which is
+   where a settings file that does not parse leaves you. The button is
+   disabled, with the reason on its tooltip, when there is no backup.
+
+   By hand, if neither is what you have, the same restore is three steps. The
+   check comes first, because a copy overwrites the file it replaces and
+   cannot tell a backup that still reads from one that was truncated by a
    failing disk: on a machine whose settings file is already unreadable it can
    trade a file you can still read by hand for one you cannot.
 

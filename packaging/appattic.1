@@ -69,6 +69,20 @@ before the settings are read, so it works on a machine whose
 .I settings.json
 no longer parses.
 .TP
+.TP
+.B restore
+Put
+.I settings.json.bak
+back in place of
+.IR settings.json .
+The backup is read with the app's own loader first, so a backup that does not
+load changes nothing on disk and the command exits 1; the file it replaces is
+kept as
+.IR settings.json.bad .
+It reads no current settings first, so it works on a machine whose
+.I settings.json
+no longer parses.
+.TP
 .BI "update " [ \-\-yes ]
 Upgrade the named packages the scan found. It prompts on a terminal and exits
 2 without one unless
@@ -88,9 +102,10 @@ Also write this command's result to FILE, which has to end in
 The report commands write the whole scan;
 .B disk
 writes the disk tree, and
-.B config
-and
+.BR config ,
 .B erase
+and
+.B restore
 write what those commands reported.
 .BR \-\-top ,
 .BR \-\-category ,
@@ -228,18 +243,21 @@ malformed file is an error, and the run exits 2 without overwriting it.
 The settings file as it was before the last change, kept so an emptied or
 mangled
 .I settings.json
-can be put back with a
+can be put back with
+.B appattic restore
+or, by hand, with a
 .BR "cp" .
 Nothing reads it while AppAttic runs.
 .TP
 .I ~/.local/share/appattic/settings.json.bad
 The settings file a restore replaced, kept so a restore that turns out to be
-the wrong one is not a second loss. Written by a window's "Restore settings
-from backup". Like
+the wrong one is not a second loss. Written by
+.B appattic restore
+and by a window's "Restore settings from backup". Like
 .IR settings.json.bak ,
 nothing reads it while AppAttic runs, and
 .B appattic erase
-removes it. The procedure is
+leaves it: that command removes the scan snapshot only. The procedure is
 .IR docs/runbooks/state-recovery.md .
 .TP
 .I ~/.local/share/appattic/last-scan.json
@@ -288,6 +306,14 @@ See what an update would run, then run it unattended:
 .nf
 appattic update --dry-run
 appattic update --yes
+.fi
+.RE
+.PP
+Put a settings file back after it was emptied, truncated, or hand-mangled:
+.PP
+.RS
+.nf
+appattic restore
 .fi
 .RE
 .SH SEE ALSO

@@ -174,6 +174,69 @@ want_err "disk missing root says so" "no such directory"
 run 0 "erase" erase
 want_out "erase reports its result on stdout" "no scan snapshot at"
 
+# `restore` puts the settings backup back and reports on stdout like every
+# other command that reports a result. There is no backup in the temp XDG tree,
+# so it exits 1 with the reason on stderr and nothing on stdout, and nothing on
+# the disk of the real account is touched. Both halves are the contract: a
+# recovery command that fails has to say so and say what is safe now.
+run 1 "restore with no backup" restore
+want_err "restore names the missing backup" "no settings backup to restore"
+want_err "restore says nothing changed" "nothing was changed"
+if [[ -z "$OUT" ]]; then ok "a failed restore writes nothing to stdout"; else bad "a failed restore wrote to stdout: $OUT"; fi
+
+# With a backup in the temp tree, the restore puts it in place and keeps the
+# file it replaced as settings.json.bad, all inside that tree.
+mkdir -p "$TMP/xdg-data/appattic"
+printf '{ "confirmDelete": false }\n' > "$TMP/xdg-data/appattic/settings.json.bak"
+printf 'not settings\n' > "$TMP/xdg-data/appattic/settings.json"
+run 0 "restore" restore
+want_out "restore reports on stdout" "restored"
+want_out "restore names the file it kept" "settings.json.bad"
+if grep -qE '"confirmDelete" *: *false' "$TMP/xdg-data/appattic/settings.json"; then
+    ok "restore wrote the settings the backup holds"
+else
+    bad "restore did not write the backup's settings"
+fi
+if grep -q 'not settings' "$TMP/xdg-data/appattic/settings.json.bad"; then
+    ok "restore kept the file it replaced as settings.json.bad"
+else
+    bad "restore did not keep the file it replaced"
+fi
+
+# The file this restore replaced is reported as kept only when this restore
+# wrote settings.json.bad, not whenever a .bad is on disk. A restore that
+# writes back exactly what was already in place keeps nothing, and an older
+# restore's .bad lying beside it is not this command's output.
+#
+# The settings to restore are the bytes the restore above already wrote, so the
+# "replaces nothing" case cannot drift from what the app considers its own
+# normalized output.
+cp "$TMP/xdg-data/appattic/settings.json" "$TMP/xdg-data/appattic/settings.json.bak"
+cp "$TMP/xdg-data/appattic/settings.json" "$TMP/xdg-data/appattic/settings.json.bad"
+run 0 "restore over identical settings" restore
+want_out "restore over identical settings reports the restore" "restored"
+if [[ "$OUT" == *"settings.json.bad"* ]]; then
+    bad "restore claimed to keep a file it did not replace"
+else
+    ok "a restore that replaces nothing claims to keep nothing"
+fi
+
+# Same bytes before and after: a .bad already there from an earlier restore, and
+# this restore replacing a file with exactly those bytes. A copy is kept, so the
+# command has to say so. Reading .bad before and after instead of comparing
+# what the restore replaced reports nothing here, because the bytes match.
+printf 'the old settings\n' > "$TMP/xdg-data/appattic/settings.json.bad"
+printf 'the old settings\n' > "$TMP/xdg-data/appattic/settings.json"
+printf '{ "includeSystem": true }\n' > "$TMP/xdg-data/appattic/settings.json.bak"
+run 0 "restore over a file matching an older .bad" restore
+want_out "restore over a file matching an older .bad reports the restore" "restored"
+want_out "restore names the kept file when its bytes match an older .bad" "settings.json.bad"
+if grep -q 'the old settings' "$TMP/xdg-data/appattic/settings.json.bad"; then
+    ok "the replaced settings are still recoverable"
+else
+    bad "the file this restore replaced was lost"
+fi
+
 if [[ "$fails" -eq 0 ]]; then
     echo "cli-contract: ok"
     exit 0
