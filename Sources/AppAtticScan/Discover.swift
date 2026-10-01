@@ -209,9 +209,19 @@ func loadPlist(_ path: String) -> [String: Any] {
     return obj
 }
 
-private func lprojCandidates() -> [String] {
+/// The `.lproj` locale a `LANG` value names: the part before the first `.`,
+/// with `-` folded to `_`, so `pt_BR.UTF-8` and `pt-BR` both name `pt_BR`.
+/// Empty when the value names no locale, including one that is only an
+/// encoding (`.UTF-8`): the split keeps the empty part before the dot, where
+/// the default split would drop it and read the encoding as the locale.
+func lprojLocale(lang: String) -> String {
+    String(lang.split(separator: ".", omittingEmptySubsequences: false).first ?? "")
+        .replacingOccurrences(of: "-", with: "_")
+}
+
+func lprojCandidates(lang raw: String) -> [String] {
     var out: [String] = []
-    let lang = (ProcessInfo.processInfo.environment["LANG"] ?? "").split(separator: ".").first.map(String.init)?.replacingOccurrences(of: "-", with: "_") ?? ""
+    let lang = lprojLocale(lang: raw)
     if !lang.isEmpty {
         out.append(lang)
         if lang.contains("_") { out.append(String(lang.split(separator: "_")[0])) }
@@ -235,9 +245,9 @@ func readInfoPlist(_ appPath: String, bases: [String]? = nil) -> [String: Any] {
         }
         if !data.isEmpty { break }
     }
-    // `lprojCandidates` copies the whole process environment to read `LANG`.
+    // Reading `LANG` copies the whole process environment.
     // Resolved once per app instead of once per base and resource directory.
-    let locs = lprojCandidates()
+    let locs = lprojCandidates(lang: ProcessInfo.processInfo.environment["LANG"] ?? "")
     for base in resolved {
         for resName in ["Contents/Resources", "Resources"] {
             let res = (base as NSString).appendingPathComponent(resName)

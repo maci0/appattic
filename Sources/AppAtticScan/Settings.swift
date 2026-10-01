@@ -301,15 +301,11 @@ public func configEnvEntries(
         // `LANG` picks the `.lproj` directories the macOS app-name lookup
         // reads, so a machine diff that omitted it could show two runs naming
         // the same app differently with every other line equal. The value is
-        // resolved the way `lprojCandidates` resolves it, untrimmed, so the
+        // resolved by `lprojLocale`, the helper `lprojCandidates` uses, so the
         // report cannot name a locale the app did not look for.
         entry("LANG", unsetEffect: "the base English app names") { raw in
             if raw.isEmpty { return "set but empty, so the base English app names" }
-            // The part before the first `.` is the locale and `-` becomes `_`,
-            // so `pt_BR.UTF-8` is read as `pt_BR`; a value that is only an
-            // encoding resolves to nothing and reads as the base names.
-            let locale = String(raw.split(separator: ".").first ?? "")
-                .replacingOccurrences(of: "-", with: "_")
+            let locale = lprojLocale(lang: raw)
             return locale.isEmpty
                 ? "set but empty, so the base English app names"
                 : "app names read from the \(locale) .lproj when it exists"

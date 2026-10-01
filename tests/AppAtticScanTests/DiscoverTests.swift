@@ -472,4 +472,16 @@ final class DiscoverTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: td) }
         return try XCTUnwrap(makeApp(from: appPath.path))
     }
+
+    /// A `LANG` that is only an encoding names no locale. The default split
+    /// drops the empty part before the dot, so `.UTF-8` used to be read as a
+    /// `UTF_8` locale: the app-name lookup tried `UTF_8.lproj` and `UTF.lproj`
+    /// first, and `appattic config` named a locale nothing reads.
+    func testLprojCandidatesReadAnEncodingOnlyLangAsNoLocale() {
+        let base = ["en", "English", "Base"]
+        XCTAssertEqual(lprojCandidates(lang: ".UTF-8"), base)
+        XCTAssertEqual(lprojCandidates(lang: ""), base)
+        XCTAssertEqual(lprojCandidates(lang: "pt_BR.UTF-8"), ["pt_BR", "pt"] + base)
+        XCTAssertEqual(lprojCandidates(lang: "pt-BR"), ["pt_BR", "pt"] + base)
+    }
 }
