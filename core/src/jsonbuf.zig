@@ -119,21 +119,53 @@ pub const W = struct {
     }
 };
 
-/// A leading `-` would let a name from a hostile registry or tap be read by
-/// the package manager as an option: `shQuote` returns `--force` unquoted
-/// (every byte is shell-safe), so `apt-get purge -y --force` parses as a flag
-/// rather than a name. No real package or formula is named that way, so the
-/// name is dropped rather than the command disambiguated. Path components
-/// use `isSafeIdent` instead: they are always joined onto a constant root, so
-/// a leading `-` there is inert.
+/// A package name that may reach a manager as its argument and as a row in the
+/// confirm dialog the operator reads before approving a removal.
+///
+/// Stricter than `isSafeIdent` on two counts, and both are needed by every
+/// manager this core queries:
+///
+/// - a leading `-`, so `shQuote` cannot hand the manager an option. `shQuote`
+///   returns `--force` unquoted, because every byte of it is shell-safe, so
+///   `apt-get purge -y --force` would parse as a flag rather than a name. No
+///   real package or formula is named that way, so the name is dropped rather
+///   than the command disambiguated. Path components use `isSafeIdent`
+///   instead: they are always joined onto a constant root, so a leading `-`
+///   there is inert; and
+/// - no non-ASCII scalar at all. `isSafeIdent` allows one because it also
+///   gates overlay file names, where an accented binary is real. A package name
+///   is different: it is identity-bearing, and U+202E RIGHT-TO-LEFT OVERRIDE
+///   renders the rest of the name in reverse, so `libfoo` + U+202E + `dwp`
+///   reads as `p w d` next to the checkbox about to be ticked while the script
+///   removes something else. The zero-width and tag ranges (U+200B..U+200F,
+///   U+2060..U+2064, U+2066..U+206F, U+E0100..U+E01EF) drop letters without
+///   changing the name's length, so two packages render as one row and the
+///   row's `grep -F` matches only one of them.
+///
+/// Refusing the whole non-ASCII range rather than enumerating today's
+/// spoofing scalars closes the class instead of the instance. It costs nothing:
+/// every manager this core queries (apt, pacman, dnf, zypper, npm, pnpm, bun,
+/// pip, pipx, uv, deno, flatpak, snap, docker, podman) restricts a package name
+/// to `[A-Za-z0-9._+-]`. The Swift side filters rather than refuses, so a
+/// non-ASCII name still reads in a report there; see `sanitizedPackageName`.
 pub fn isSafeCmdIdent(s: []const u8) bool {
-    return s.len > 0 and s[0] != '-' and isSafeIdent(s);
+    if (s.len == 0 or s[0] == '-') return false;
+    for (s) |c| {
+        if (c >= 0x80) return false;
+    }
+    return isSafeIdent(s);
 }
 
 pub fn isSafeIdent(s: []const u8) bool {
     if (s.len == 0) return false;
     if (!std.unicode.utf8ValidateSlice(s)) return false;
     for (s) |c| {
+        // A non-ASCII scalar is allowed here, and only here. This predicate
+        // also gates overlay and store file names (`path_store.listingNames`,
+        // `path_shadow`, `path_listing`), which are joined onto a constant
+        // root and so carry no shell meaning: a binary named `cafe` with an
+        // accent in `~/.local/bin` is a real one that shadows a packaged file,
+        // and refusing it hides the row.
         if (c >= 0x80) continue;
         const ok = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
             (c >= '0' and c <= '9') or c == '-' or c == '_' or c == '.' or c == '+';
@@ -505,11 +537,34 @@ test "isSafeIdent rejects empty and shell metacharacters" {
     try std.testing.expect(!isSafeIdent("foo bar"));
 }
 
-test "isSafeIdent accepts utf8 letters and rejects invalid bytes" {
+test "isSafeIdent keeps non-ascii and rejects invalid bytes" {
+    // `isSafeIdent` gates overlay file names as well as command arguments, and
+    // an accented binary in `~/.local/bin` is real: refusing the name would
+    // hide the shadowing row rather than secure it.
     try std.testing.expect(isSafeIdent("café"));
     try std.testing.expect(isSafeIdent("日本語"));
+    try std.testing.expect(isSafeIdent("libfoo\u{202E}dwp"));
     try std.testing.expect(!isSafeIdent(&[_]u8{0xff}));
     try std.testing.expect(!isSafeIdent("foo\nbar"));
+}
+
+test "a package name carries no spoofing scalar" {
+    // `isSafeCmdIdent` is the gate every manager's name passes, and a package
+    // name is identity-bearing: it is printed in the confirm dialog the
+    // operator reads before approving a removal, and the row's `grep -F` has to
+    // match the one package the script removes. U+202E reverses the rest of the
+    // name on screen; the zero-width ranges drop letters without changing its
+    // length. No manager this core queries installs a name with a non-ASCII
+    // scalar, so the whole range is refused rather than enumerated.
+    try std.testing.expect(!isSafeCmdIdent("libfoo\u{202E}dwp"));
+    try std.testing.expect(!isSafeCmdIdent("lib\u{200B}foo"));
+    try std.testing.expect(!isSafeCmdIdent("café"));
+    try std.testing.expect(!isSafeCmdIdent("日本語"));
+    try std.testing.expect(!isSafeCmdIdent("libfoo\u{E0100}bar"));
+    // The filesystem-name predicate is unchanged for the same inputs.
+    try std.testing.expect(isSafeIdent("café"));
+    // And an ordinary name still passes.
+    try std.testing.expect(isSafeCmdIdent("libfoo-1.2"));
 }
 
 test "a name starting with a dash is not a command name" {

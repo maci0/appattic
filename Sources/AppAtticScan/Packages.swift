@@ -38,6 +38,35 @@ public func packageWhyText(manager: String, kind: String) -> String {
     return "\(label) reports this as an orphan: installed as a dependency, nothing installed still requires it."
 }
 
+/// The name a row is shown and scripted under.
+///
+/// Every package name enters through here, so this is the one place the
+/// identity-bearing sanitizing happens. A name is read off a registry, a tap,
+/// or a manager listing, and two channels follow it: it is printed in the
+/// confirm dialog the operator reads before approving a removal, and it is
+/// spliced into the generated script as `grep -F -- '<name>'` and as the
+/// package manager's own argument. A name carrying U+202E RIGHT-TO-LEFT
+/// OVERRIDE renders its tail in reverse, so `libfoo<U+202E>dwp` reads as
+/// `pw d` and a reviewer approves a different package than the script removes;
+/// the same class of zero-width and tag scalars drops letters out of the name
+/// without changing its length, and a C0 control is executed by whatever
+/// terminal runs `appattic update --dry-run`.
+///
+/// Stripped, not escaped: `stripBidiControls` already removes every one of
+/// these from app bundle names, Steam manifest names, LaunchAgent labels, and
+/// leftover path components, so this makes the package rows match. A name that
+/// loses a scalar this way is not a name any manager installed, so the leftover
+/// `isSafeCommandArgument` and `isSafePkgName` gates, and the Zig
+/// `isSafeCmdIdent`, drop the row; where a report shows it anyway, the scalar is
+/// gone rather than reversed, which is the property that matters to a reader
+/// comparing the row against the command.
+/// Quotes and shell metacharacters are deliberately left alone: they are data
+/// for `shellQuote` to quote, and `isSafeCommandArgument` and the Zig
+/// `isSafeCmdIdent` are the gates that refuse them outright.
+func sanitizedPackageName(_ name: String) -> String {
+    stripBidiControls(terminalSafe(name))
+}
+
 func makePackage(
     name: String,
     manager: String,
@@ -47,7 +76,7 @@ func makePackage(
     children: [String]? = nil
 ) -> PackageEntry {
     PackageEntry(
-        name: name,
+        name: sanitizedPackageName(name),
         manager: manager,
         kind: kind,
         version: version,

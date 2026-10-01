@@ -127,6 +127,15 @@ public func uninstallCommand(
         if isProtectedPackagedPath(path) {
             return "# skipped packaged path \(shellComment(path))"
         }
+        // The same two checks `leftoverRemoveCommand` makes, and for the same
+        // reasons. The packaged-root deny alone let a relative spelling through:
+        // an AppImage path is the `Exec=` token of a `.desktop` record, and
+        // `shellQuote` leaves a leading `-` unquoted, so `rm` read it as an
+        // option. Both branches below share one helper so the two `rm` sites
+        // cannot drift apart again.
+        guard isRemovableLeftoverPath(path) else {
+            return "# skipped path \(shellComment(path)): not an absolute path a removal may name"
+        }
         return "rm -rf \(shellQuote(path))"
     }
     if source == "steam", let id = steamAppId, !id.isEmpty, !isCrossOverPath(path) {
@@ -143,6 +152,9 @@ public func uninstallCommand(
     }
     if isProtectedPackagedPath(path) {
         return "# skipped packaged path \(shellComment(path))"
+    }
+    guard isRemovableLeftoverPath(path) else {
+        return "# skipped path \(shellComment(path)): not an absolute path a removal may name"
     }
     return "rm -rf \(shellQuote(path))"
 }

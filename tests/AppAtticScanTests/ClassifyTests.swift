@@ -1806,6 +1806,50 @@ final class ClassifyTests: XCTestCase {
         XCTAssertFalse(agent.contains("launchctl"), agent)
     }
 
+    func testUninstallCommandRefusesAPathRemovalsMayNotName() {
+        // `leftoverRemoveCommand` required both the packaged-root deny and
+        // `isRemovableLeftoverPath`. `uninstallCommand` checked only the first,
+        // so its two `rm -rf` branches emitted whatever the packaged-root test
+        // let through. The path is the `Exec=` token of a `.desktop` record, and
+        // `shellQuote` leaves a leading `-` unquoted, so `rm` read it as an
+        // option instead of as a path.
+        for path in ["-rf", "--no-preserve-root", "-v", "Foo.AppImage", "./Foo.AppImage"] {
+            for source in ["appimage", "pkg/other"] {
+                let cmd = uninstallCommand(
+                    source: source,
+                    name: "Foo",
+                    path: path,
+                    caskName: nil,
+                    steamAppId: nil
+                )
+                XCTAssertFalse(cmd.contains("rm -rf"), "\(source) \(path): \(cmd)")
+                XCTAssertTrue(cmd.hasPrefix("#"), "\(source) \(path): \(cmd)")
+            }
+        }
+        // The absolute spelling still removes, so the new guard is not a
+        // blanket refusal.
+        XCTAssertEqual(
+            uninstallCommand(
+                source: "appimage",
+                name: "Foo",
+                path: "/home/u/Apps/Foo.AppImage",
+                caskName: nil,
+                steamAppId: nil
+            ),
+            "rm -rf /home/u/Apps/Foo.AppImage"
+        )
+        XCTAssertEqual(
+            uninstallCommand(
+                source: "pkg/other",
+                name: "Firefox",
+                path: "/home/u/Apps/Firefox",
+                caskName: nil,
+                steamAppId: nil
+            ),
+            "rm -rf /home/u/Apps/Firefox"
+        )
+    }
+
     func testScriptCommentsCannotInjectASecondLine() {
         // A newline ends a `#` comment, so an app or folder carrying one used to
         // append a command to the script the UI runs after a single preview.

@@ -643,6 +643,22 @@ static int verifyHelpers() {
         std::fprintf(stderr, "packageChildCommand: metacharacters in child name\n");
         return 1;
     }
+    // A child name is identity-bearing: the row is shown, ticked, and turned
+    // into the script's `apt-get purge -y '<child>'` by this function. U+202E
+    // reverses the rest of the name on screen, and the zero-width ranges drop
+    // letters without changing the length, so the name beside the checkbox and
+    // the name the script removes can differ. The plugin refuses these at the
+    // source; this is the second gate, and it matches Zig `isSafeCmdIdent`.
+    for (const QString &spoofed : {
+             QString::fromUtf8("libfoo\xE2\x80\xAE" "dwp"),  // U+202E RLO
+             QString::fromUtf8("lib\xE2\x80\x8B" "foo"),    // U+200B ZWSP
+             QString::fromUtf8("caf\xC3\xA9"),                // accented letter
+         }) {
+        if (!packageChildCommand(pkg, spoofed).isEmpty()) {
+            std::fprintf(stderr, "packageChildCommand: accepted a spoofed child name\n");
+            return 1;
+        }
+    }
     QVector<Finding> grouped;
     Finding a;
     a.plugin = QStringLiteral("path-xdg-config");

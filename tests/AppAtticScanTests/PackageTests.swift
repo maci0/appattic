@@ -2,6 +2,47 @@ import XCTest
 @testable import AppAtticScan
 
 final class PackageTests: XCTestCase {
+    func testPackageNameStripsBidiAndControlScalars() {
+        // A package name is identity-bearing: it is printed in the confirm
+        // dialog the operator reads before approving a removal, and it is
+        // spliced into the generated script as a grep row and as the package
+        // manager's own argument. Every other name source already strips these
+        // (`makeApp`, the Steam manifest name, LaunchAgent labels, leftover
+        // path components); the package rows did not, so U+202E rendered a
+        // name's tail reversed next to the checkbox about to be ticked.
+        XCTAssertEqual(sanitizedPackageName("libfoo\u{202E}dwp"), "libfoodwp")
+        XCTAssertEqual(sanitizedPackageName("lib\u{200B}foo"), "libfoo")
+        XCTAssertEqual(
+            sanitizedPackageName("caf\u{00E9}"),
+            "caf\u{00E9}",
+            "an accented name is not a spoofing scalar"
+        )
+        XCTAssertEqual(
+            sanitizedPackageName("lib\u{0007}foo"),
+            "lib\u{FFFD}foo",
+            "a C0 control is replaced, not dropped"
+        )
+        // Quotes and metacharacters stay: they are data for `shellQuote` to
+        // quote, and `isSafeCommandArgument` and the Zig `isSafeCmdIdent` are
+        // the gates that refuse them outright.
+        XCTAssertEqual(sanitizedPackageName("foo'; reboot; '"), "foo'; reboot; '")
+
+        // The funnel every package row enters, so a name parsed out of a
+        // manager listing is filtered where it is built.
+        let row = makePackage(name: "libfoo\u{202E}dwp", manager: "npm", kind: "global", version: "1.0.0")
+        XCTAssertEqual(row.name, "libfoodwp")
+        let cmd = packageRemoveCommand(row)
+        XCTAssertTrue(cmd.contains("libfoodwp"), cmd)
+
+        let outdated = OutdatedPkg(
+            name: "libfoo\u{202E}dwp", manager: "apt", currentVersion: "1", latestVersion: "2"
+        )
+        XCTAssertEqual(outdated.name, "libfoodwp")
+        let upgrade = updateCommand(outdated)
+        XCTAssertNotNil(upgrade)
+        XCTAssertTrue(upgrade.map { $0.contains("libfoodwp") } ?? false, String(describing: upgrade))
+    }
+
     func testParsePacmanOrphansNameVersionAndQuiet() {
         let qdt = """
         libfoo 1.2.3-1

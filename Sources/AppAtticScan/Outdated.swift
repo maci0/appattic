@@ -61,7 +61,7 @@ public final class OutdatedPkg {
         bundleId: String? = nil,
         kind: String? = nil
     ) {
-        self.name = name
+        self.name = sanitizedPackageName(name)
         self.manager = manager
         self.currentVersion = currentVersion
         self.latestVersion = latestVersion
