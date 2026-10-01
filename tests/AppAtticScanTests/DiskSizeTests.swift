@@ -47,10 +47,12 @@ final class DiskSizeTests: XCTestCase {
     /// old `timeout: -1` call always reported 0 and every bound below it held
     /// for free. The clock is injected instead, and the read sequence is
     /// counted rather than guessed: one read builds the deadline, one more is
-    /// taken on entering the walk, and one follows each entry the walk accepts
-    /// (`.` and `..` are skipped before that check). Letting the fifth read
-    /// pass the deadline therefore stops the walk with exactly three 1 KiB
-    /// files counted, whatever order `readdir` hands them over in.
+    /// taken on entering the walk, and one heads every `readdir` call, `.` and
+    /// `..` included, so that an entry the loop `continue`s past still meets
+    /// the deadline (024bca2). Where the dot entries fall is up to the
+    /// filesystem, so the test reads the directory's own order and lets the
+    /// clock pass the deadline on the read before the fourth file: exactly
+    /// three 1 KiB files are counted, whatever order `readdir` hands them in.
     func testDirectoryByteSizeKeepsPartialTotalOnTimeout() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("du-timeout-\(UUID().uuidString)")
@@ -59,10 +61,22 @@ final class DiskSizeTests: XCTestCase {
         for i in 0..<8 {
             try Data(repeating: 0x61, count: 1024).write(to: root.appendingPathComponent("f\(i).bin"))
         }
+        let dirp = try XCTUnwrap(opendir(root.path))
+        var order: [String] = []
+        while let ent = readdir(dirp) {
+            order.append(try XCTUnwrap(direntName(ent)))
+        }
+        closedir(dirp)
+        let fourthFile = try XCTUnwrap(
+            order.indices.filter { order[$0] != "." && order[$0] != ".." }.dropFirst(3).first
+        )
+        // Reads 1 and 2 are the deadline and the walk's entry; read 3 + i heads
+        // the `readdir` that returns entry i.
+        let readsBeforeFourthFile = 2 + fourthFile
         var reads = 0
         let clock: MonotonicFn = {
             reads += 1
-            return reads <= 4 ? 0 : 100
+            return reads <= readsBeforeFourthFile ? 0 : 100
         }
         let (partialBytes, partialOK) = directoryByteSize(root.path, timeout: 10, clock: clock)
         XCTAssertFalse(partialOK, "a deadline overrun is a partial measurement")
