@@ -387,7 +387,10 @@ QString DiskChart::cursorDescription() const {
     const qint64 total = m_view ? qMax(qint64(0), m_view->metric(m_allocated)) : qint64(0);
     if (total > 0) {
         const int pct = qRound(100.0 * double(bytes) / double(total));
-        s += QStringLiteral(", %1 percent of this folder").arg(pct);
+        // `localeCount` for the digits and grouping: the raw `int` in `arg`
+        // stayed in the C locale, so an Arabic window read "42 percent" in
+        // Latin digits beside a size column printed in Arabic-Indic ones.
+        s += QStringLiteral(", %1 percent of this folder").arg(localeCount(pct));
     }
     if (m_cursor->isDir) s += QStringLiteral(", opens on Enter");
     return s;

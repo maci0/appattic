@@ -237,12 +237,26 @@ bool scriptHasCommands(const QString &script) {
     return false;
 }
 
-/// One decimal place with the locale's decimal separator. `QString::number`
-/// and `QString::toString` stay in the C locale, which reads as thousands
-/// punctuation in German and French ("1.5 GB").
+/// One decimal place in the user's own digits.
+///
+/// `QString::number` and `QString::toString` stay in the C locale, so both the
+/// decimal point and the digits were ASCII: a German window read "1.5 GB"
+/// (thousands punctuation where a decimal comma belongs) and an Arabic one read
+/// "1.5 GB" in Latin digits, where every other number in the same row came out
+/// in Arabic-Indic digits. `QLocale::toString` writes the locale's own digit
+/// set, decimal separator and negative sign, so the fraction matches the
+/// `localeCount` whole part beside it.
+///
+/// The thousands grouping it adds is dropped: a size is at most the leading
+/// mantissa (humanSize stops at EB), and "1.024,0 KB" in a column labelled
+/// "size" reads as a different number from the one the table sorts on. Removing
+/// the group separator cannot touch a digit run, since the mantissa is always
+/// below 1000.
 static QString fixed1(double value) {
-    QString s = QString::number(value, 'f', 1);
-    s.replace(QLatin1Char('.'), QLocale().decimalPoint());
+    const QLocale loc;
+    QString s = loc.toString(value, 'f', 1);
+    const QString group = loc.groupSeparator();
+    if (!group.isEmpty()) s.remove(group);
     return s;
 }
 

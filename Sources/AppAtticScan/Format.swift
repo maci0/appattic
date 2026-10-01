@@ -11,33 +11,47 @@ public func mulBytes(_ a: Int, _ b: Int) -> Int {
     return overflow ? Int.max : product
 }
 
-/// Decimal separator of `Locale.current`. `String(format:)` pays for locale
-/// setup on every call (~1.2 µs), so the separator is cached, but only against
-/// the locale it was read from: a `NumberFormatter` keeps the locale it was
-/// built with, so a value read once at startup would keep the old separator
-/// for the rest of the session after the user switches language.
-private let decimalSeparatorLock = NSLock()
+/// Decimal separator of `Locale.current`, cached against the locale it was
+/// read from: a `NumberFormatter` keeps the locale it was built with, so a
+/// value read once at startup would keep the old separator for the rest of the
+/// session after the user switches language. It is the locale's separator of
+/// record for the tests, which build their own formatter to check the labels
+/// against; `oneDecimal` reads its separator from its own formatter instead.
+///
+/// A `NumberFormatter` is not safe to drive from two threads at once, so this
+/// shares the count formatter's lock and cache below rather than holding a
+/// second mutable formatter of its own.
 private var cachedDecimalSeparator: (locale: String, separator: String)?
 
 var localeDecimalSeparator: String {
-    decimalSeparatorLock.lock()
-    defer { decimalSeparatorLock.unlock() }
+    localeNumberFormatLock.lock()
+    defer { localeNumberFormatLock.unlock() }
     let id = Locale.current.identifier
     if let cached = cachedDecimalSeparator, cached.locale == id { return cached.separator }
-    let f = NumberFormatter()
-    f.locale = .current
-    f.numberStyle = .decimal
-    f.usesGroupingSeparator = false
-    let separator = f.decimalSeparator ?? "."
+    let separator = localeDecimalNumberFormatter().decimalSeparator ?? "."
     cachedDecimalSeparator = (id, separator)
     return separator
 }
 
 /// Cached against the locale it was built from, for the reason
-/// `localeDecimalSeparator` above gives, and used under the same lock since a
+/// `localeDecimalSeparator` above gives, and under the same lock since a
 /// `NumberFormatter` is not safe to drive from two threads at once.
-private let countFormatterLock = NSLock()
 private var cachedCountFormatter: (locale: String, formatter: NumberFormatter)?
+
+private let localeNumberFormatLock = NSLock()
+
+/// A decimal-style formatter for `Locale.current`, with grouping off so the
+/// caller decides whether a value carries separators. Built fresh; the caches
+/// above hold the only long-lived instance.
+private func localeDecimalNumberFormatter() -> NumberFormatter {
+    let f = NumberFormatter()
+    f.locale = .current
+    f.numberStyle = .decimal
+    f.usesGroupingSeparator = false
+    f.maximumFractionDigits = 1
+    f.minimumFractionDigits = 1
+    return f
+}
 
 /// A whole count in `Locale.current`'s own grouping. `"\(n)"` interpolates
 /// without reading the locale, so a German report prints "1234 items" where
@@ -45,8 +59,8 @@ private var cachedCountFormatter: (locale: String, formatter: NumberFormatter)?
 /// what its own number formatting uses. The Qt shell has the same helper
 /// under the same name, so both windows label one scan the same way.
 public func localeCount(_ n: Int) -> String {
-    countFormatterLock.lock()
-    defer { countFormatterLock.unlock() }
+    localeNumberFormatLock.lock()
+    defer { localeNumberFormatLock.unlock() }
     let id = Locale.current.identifier
     let formatter: NumberFormatter
     if let cached = cachedCountFormatter, cached.locale == id {
@@ -62,13 +76,19 @@ public func localeCount(_ n: Int) -> String {
     return formatter.string(from: NSNumber(value: n)) ?? "\(n)"
 }
 
-/// One decimal place without `String(format:)` (~1.2 µs/call from locale +
-/// varargs overhead). Rounds half away from zero, where `%.1f` rounds half to
-/// even, so the two differ on an exact tie and agree everywhere else.
+/// One decimal place in the locale's own digits, separator and sign.
+///
+/// The digits and the minus were interpolated as ASCII, so an Arabic or Farsi
+/// window read "1.5 MB" in Latin digits (and, in Farsi, a hyphen where the
+/// locale writes U+2212) while the `localeCount` whole part of the same label
+/// came out localized. The `fixed1` twin in the Qt shell formats through
+/// `QLocale` and keeps no ASCII literals at all, and this is what makes the two
+/// windows label one value the same way.
+///
+/// Grouping is off: a size prints one mantissa and a unit, and a "1.024,0" in
+/// a column the table sorts on reads as a different number than the one it is.
 func oneDecimal(_ n: Double) -> String {
-    let neg = n < 0
-    let tenths = Int((abs(n) * 10).rounded())
-    return (neg ? "-" : "") + "\(tenths / 10)\(localeDecimalSeparator)\(tenths % 10)"
+    return localeDecimalNumberFormatter().string(from: NSNumber(value: n)) ?? "\(n)"
 }
 
 /// Binary-unit size, one decimal above KB. Bytes print as an exact integer.
@@ -91,7 +111,12 @@ public func humanSize(_ bytes: Int) -> String {
                 unit += 1
                 continue
             }
-            if unit == 0 { return "\(bytes) B" }
+            // `localeCount`, not `"\(bytes)"`: the byte unit is the one every
+            // locale groups ("1.023 B" in German, "1٬٠٢٣ B" in Arabic), and
+            // the Qt `humanSize` twin prints the same helper for the same
+            // value, so an ungrouped count here made the two windows disagree
+            // about one scan.
+            if unit == 0 { return localeCount(bytes) + " B" }
             return oneDecimal(n) + " " + units[unit]
         }
         n /= 1024
@@ -177,5 +202,9 @@ private func duration(_ unit: Calendar.Component, _ count: Int) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if !trimmed.isEmpty { return trimmed }
     }
-    return "\(count) \(asciiDurationUnits[unit] ?? "")"
+    // `localeCount`, not `"\(count)"`: this path is the one that runs on
+    // swift-corelibs-foundation, where the formatter table above is empty, so
+    // every count on Linux came out in ASCII digits while the sizes beside it
+    // came out in the locale's own.
+    return "\(localeCount(count)) \(asciiDurationUnits[unit] ?? "")"
 }

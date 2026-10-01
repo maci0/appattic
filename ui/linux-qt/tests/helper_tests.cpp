@@ -1423,6 +1423,63 @@ static int checkLocaleGrouping() {
     return 0;
 }
 
+/// A size fraction carries the locale's own digits and separator, not the C
+/// locale's. Both used to come out of `QString::number` with only the decimal
+/// point swapped, so an Arabic or Farsi window printed "1.5 MB" in Latin digits
+/// while the count beside it printed in Arabic-Indic ones, and a German window
+/// printed "1.5 MB" where a decimal comma belongs.
+///
+/// The expectation is read back from the locale rather than hardcoded, so the
+/// check still holds on a build whose CLDR data has no entry and falls back to
+/// the C locale's digits.
+static int checkSizeLocaleDigits() {
+    struct Case { QLocale::Language lang; QLocale::Country country; };
+    const Case cases[] = {
+        {QLocale::C, QLocale::AnyCountry},
+        {QLocale::German, QLocale::Germany},
+        {QLocale::Arabic, QLocale::Egypt},
+        {QLocale::Persian, QLocale::Iran},
+    };
+    for (const Case &c : cases) {
+        const QLocale loc(c.lang, c.country);
+        const QLocale saved = QLocale();
+        QLocale::setDefault(loc);
+        const QString size = humanSize(1024LL * 1024LL);
+        QLocale::setDefault(saved);
+        // Rebuild the expectation the way the label is built: the locale's
+        // `toString`, minus the grouping a size column must not carry.
+        QString want = loc.toString(1.0, 'f', 1);
+        const QString group = loc.groupSeparator();
+        if (!group.isEmpty()) want.remove(group);
+        want += QLatin1String(" MB");
+        if (size != want) {
+            std::fprintf(stderr, "size: %s printed %s, want %s\n",
+                qPrintable(loc.name()), qPrintable(size), qPrintable(want));
+            return 1;
+        }
+    }
+    // A locale whose digits are not ASCII must actually reach a different
+    // label, or the loop above is passing for the wrong reason: it compares
+    // each locale against itself and would agree even if every one of them
+    // printed ASCII.
+    const QLocale arabic(QLocale::Arabic, QLocale::Egypt);
+    const QLocale latin(QLocale::C, QLocale::AnyCountry);
+    if (arabic.zeroDigit() != latin.zeroDigit()) {
+        const QLocale saved = QLocale();
+        QLocale::setDefault(arabic);
+        const QString arabicSize = humanSize(1024LL * 1024LL);
+        QLocale::setDefault(latin);
+        const QString latinSize = humanSize(1024LL * 1024LL);
+        QLocale::setDefault(saved);
+        if (arabicSize == latinSize) {
+            std::fprintf(stderr, "size: Arabic and Latin labels agree (%s)\n",
+                qPrintable(arabicSize));
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int checkDiskUsage() {
     QTemporaryDir tmp;
     if (!tmp.isValid()) {
@@ -2112,7 +2169,7 @@ int main(int argc, char **argv) {
         checkRootDirDoneTotals(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
         checkSettingsBackup(), checkSettingsBackupRepeatedSave(), checkDurableWrite(),
-        checkLocaleGrouping(),
+        checkLocaleGrouping(), checkSizeLocaleDigits(),
         checkLegacySettingsMigration(), checkScriptFileRemoval(),
         checkScriptRunCleansUpItsFile(), checkScriptDeadlineStartsAtSpawn(),
     };

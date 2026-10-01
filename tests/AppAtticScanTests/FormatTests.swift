@@ -30,18 +30,66 @@ final class FormatTests: XCTestCase {
         return f.string(from: NSNumber(value: value)) ?? String(value)
     }
 
+    /// One decimal place as the current locale writes it, grouping off. The
+    /// size fraction is formatted through a locale-aware formatter now, so the
+    /// expectation has to be one too: a hand-built "1.0" would only hold on a
+    /// machine whose locale uses an ASCII dot and Latin digits.
+    private func expectedOneDecimal(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.locale = .current
+        f.numberStyle = .decimal
+        f.usesGroupingSeparator = false
+        f.maximumFractionDigits = 1
+        f.minimumFractionDigits = 1
+        return f.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
     func testHumanSize() {
         // Sizes print the locale's decimal separator, so the fraction is
-        // rebuilt from it rather than hardcoded as ".".
+        // rebuilt from it rather than hardcoded as ".". 1023 bytes is past the
+        // grouping threshold in most locales, so the byte case is the grouped
+        // count rather than a literal: under a German or English locale it
+        // reads "1.023 B" / "1,023 B", and an ungrouped assertion there would
+        // be a claim about the C locale the suite is pinned to, not about the
+        // code.
         let dot = expectedDecimalSeparator()
         XCTAssertEqual(localeDecimalSeparator, dot)
         XCTAssertEqual(humanSize(0), "0 B")
-        XCTAssertEqual(humanSize(1023), "1023 B")
+        XCTAssertEqual(humanSize(1023), localeCount(1023) + " B")
         XCTAssertEqual(humanSize(1024), "1\(dot)0 KB")
         XCTAssertEqual(humanSize(1_048_576), "1\(dot)0 MB")
         // 1048525 / 1024 = 1023.95, which %.1f would print as "1024.0 KB".
         XCTAssertEqual(humanSize(1_048_525), "1\(dot)0 MB")
         XCTAssertEqual(humanSize(1023 * 1024), "1023\(dot)0 KB")
+    }
+
+    func testHumanSizeFractionUsesTheLocaleDigits() {
+        // The fraction used to be interpolated as ASCII while the whole part
+        // beside it came out localized, so an Arabic window read "1.0 MB" in
+        // Latin digits next to a count in Arabic-Indic ones. The expectation
+        // comes from a formatter built for the same locale, so the check holds
+        // on a machine whose locale is not Latin-digit.
+        XCTAssertEqual(humanSize(1_048_576), expectedOneDecimal(1.0) + " MB")
+        XCTAssertEqual(humanSize(1023 * 1024), expectedOneDecimal(1023.0) + " KB")
+    }
+
+    func testHumanSizeByteCaseIsGroupedLikeEveryOtherCount() {
+        // The byte unit is the one every locale groups ("1.023 B" in German,
+        // "1,023 B" in English, "١٬٠٢٣ B" in Arabic), and the Qt `humanSize`
+        // twin prints the same grouped count for the same value, so an
+        // ungrouped byte count here made the two windows disagree about one
+        // scan. 1023 is past the grouping threshold in most locales and under
+        // it in a few (Polish), so the expectation is the grouped count read
+        // back from a formatter rather than a literal that is only true in the
+        // C locale the suite is pinned to.
+        XCTAssertEqual(humanSize(0), localeCount(0) + " B")
+        XCTAssertEqual(humanSize(1023), localeCount(1023) + " B")
+        // Below the threshold the value is its own digits, which is the check
+        // that grouping did not leak into the low range on a locale that does
+        // not group there.
+        if localeCount(999) == "999" {
+            XCTAssertEqual(humanSize(999), "999 B")
+        }
     }
 
     func testLocaleCount() {
