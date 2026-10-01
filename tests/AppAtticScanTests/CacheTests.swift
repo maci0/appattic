@@ -423,15 +423,20 @@ final class CacheTests: XCTestCase {
 
     /// A root the scan never probes nested (`skipNestedRoots`) keeps the stamp
     /// it had: a nested write there cannot change any status the scan reports,
-    /// so paying for the walk would buy nothing.
+    /// so paying for the walk would buy nothing. The write lands one level
+    /// below the entry, as in `testRootInventoryStampMovesOnNestedWrite`, so
+    /// the entry's own mtime (which every root stamps) does not move with it.
     func testRootInventoryStampSkipsNestedForSkippedRoots() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("root-stamp-skip-\(UUID().uuidString)")
         let alpha = dir.appendingPathComponent("Alpha")
-        try FileManager.default.createDirectory(at: alpha, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: alpha.appendingPathComponent("inner"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
+        let alphaMtime = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: alpha.path)[.modificationDate] as? Date
+        )
         let first = rootInventoryStamp("Containers", dir.path)
-        XCTAssertEqual(first, "root:Containers:Alpha", first)
-        let nested = alpha.appendingPathComponent("written.txt")
+        XCTAssertEqual(first, "root:Containers:Alpha@\(alphaMtime.timeIntervalSince1970.bitPattern)", first)
+        let nested = alpha.appendingPathComponent("inner/written.txt")
         try Data("nested".utf8).write(to: nested)
         try FileManager.default.setAttributes(
             [.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: nested.path
@@ -451,11 +456,20 @@ final class CacheTests: XCTestCase {
         XCTAssertNotEqual(stampJoin(["A!5"]), stampJoin(["A"]) + "!5")
     }
 
+    /// Every entry carries its own `@mtime`, so the escaped name is followed
+    /// by the entry's mtime bits.
     func testRootInventoryStampEscapesCommaInName() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("root-comma-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir.appendingPathComponent("Alpha,Beta"), withIntermediateDirectories: true)
+        let entry = dir.appendingPathComponent("Alpha,Beta")
+        try FileManager.default.createDirectory(at: entry, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        XCTAssertEqual(rootInventoryStamp("Caches", dir.path), "root:Caches:Alpha\\,Beta")
+        let mtime = try XCTUnwrap(
+            FileManager.default.attributesOfItem(atPath: entry.path)[.modificationDate] as? Date
+        )
+        XCTAssertEqual(
+            rootInventoryStamp("Caches", dir.path),
+            "root:Caches:Alpha\\,Beta@\(mtime.timeIntervalSince1970.bitPattern)"
+        )
     }
 
     func testIncompleteCacheIsAlwaysStale() {
