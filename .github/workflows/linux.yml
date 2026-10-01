@@ -135,6 +135,14 @@ jobs:
         run: |
           echo /opt/zig >> "$GITHUB_PATH"
           echo /usr/local/bin >> "$GITHUB_PATH"
+      # The threaded code (core/host's PATH apply/restore and the Qt disk walk
+      # and leftover-size pools) under ThreadSanitizer, before the Swift build
+      # so a data race fails fast rather than after a full compile. Both the C
+      # host and the Qt worker-pool checks run here: this job has cc, Qt 6 and
+      # the Wasmtime C API that scripts/race-check.sh needs to configure the Qt
+      # target. scripts/check.sh --qt runs the same script locally.
+      - name: ThreadSanitizer
+        run: bash scripts/race-check.sh --qt
       # Last on the list is first on PATH, and `scripts/linux-deps.sh --install`
       # and the zig step above both append /usr/local/bin to it. The runner
       # image ships a newer Swift in that directory and `scripts/find-swift.sh`

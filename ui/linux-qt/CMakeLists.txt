@@ -228,8 +228,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
     foreach(_path IN LISTS _appattic_ui_cxx)
         get_filename_component(_name "${_path}" NAME)
-        # tests/helper_tests.cpp carries -Werror on its own target below.
-        if(_name MATCHES "^helper_tests\\.cpp$" OR
+        # The two test sources carry -Werror on their own targets below.
+        if(_name MATCHES "^(helper|race)_tests\\.cpp$" OR
            _name IN_LIST _appattic_werror_cxx)
             continue()
         endif()
@@ -314,6 +314,39 @@ if(_appattic_compile_options)
     target_compile_options(appattic-qt-helper-tests PRIVATE ${_appattic_compile_options})
 endif()
 set_property(SOURCE tests/helper_tests.cpp APPEND PROPERTY COMPILE_OPTIONS -Werror)
+
+# Concurrency coverage for the two places this UI runs its own threads: the
+# deferred-subtree walk in diskusage.cpp and the leftover-size pool in
+# finding.cpp. Split out from the helper tests on purpose. helper_tests.cpp
+# links the wasm host, so its binary carries the whole host; this target does
+# not, so a change to the threading in either file can be checked without
+# building that host. Configuring the project still resolves the Wasmtime C API
+# above, before any target is defined, so Wasmtime remains a configure-time
+# dependency either way.
+#
+# A plain build proves nothing about the memory ordering: the walk partitions
+# work with an atomic index and folds each parent's totals in only after the
+# pool is joined, and both facts hold by construction whether or not the
+# happens-before edges are there. scripts/race-check.sh builds this target
+# under ThreadSanitizer, which is what turns them into evidence.
+add_executable(appattic-qt-race-tests
+    tests/race_tests.cpp
+    finding.cpp
+    diskusage.cpp
+)
+target_include_directories(appattic-qt-race-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_link_libraries(appattic-qt-race-tests PRIVATE
+    Qt6::Widgets Threads::Threads
+)
+target_compile_definitions(appattic-qt-race-tests PRIVATE APPATTIC_VERSION="${APPATTIC_VERSION}")
+# Same flags as the app, so the tests cannot compile under a looser policy.
+get_target_property(_appattic_compile_options appattic-qt COMPILE_OPTIONS)
+if(_appattic_compile_options)
+    target_compile_options(appattic-qt-race-tests PRIVATE ${_appattic_compile_options})
+endif()
+set_property(SOURCE tests/race_tests.cpp APPEND PROPERTY COMPILE_OPTIONS -Werror)
 
 if(EXISTS "${APPATTIC_ROOT}/packaging/org.appattic.AppAttic.desktop")
     install(FILES "${APPATTIC_ROOT}/packaging/org.appattic.AppAttic.desktop"

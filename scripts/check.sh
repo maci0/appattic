@@ -22,16 +22,19 @@ for arg in "$@"; do
             cat <<'EOF'
 Usage: bash scripts/check.sh [--core] [--qt]
 
-  (default)  lint + Zig core tests + AppAtticScanTests + CLI debug build
+  (default)  lint + Zig core tests + the C host under ThreadSanitizer
+             (scripts/race-check.sh) + AppAtticScanTests + CLI debug build
              and the built CLI's help/exit-code/stream contract
              (scripts/cli-contract.sh), then both double-build checks
              (scripts/verify-reproducible.sh for the WASM modules and the
              C host, scripts/verify-swift-reproducible.sh for the CLI)
-  --core     lint + Zig core tests + reproducible artifacts, no Swift
-             toolchain needed. For core/src/, core/host/ and packaging work.
-             Not the CI gate: the Swift steps do not run, and the run says so.
-  --qt       full Linux CI parity, including bash scripts/linux-qt-link.sh
-             and the scripts/verify-qt-link.sh proof checks
+  --core     lint + Zig core tests + ThreadSanitizer + reproducible
+             artifacts, no Swift toolchain needed. For core/src/, core/host/
+             and packaging work. Not the CI gate: the Swift steps do not run,
+             and the run says so.
+  --qt       full Linux CI parity, including the Qt worker pools under
+             ThreadSanitizer, bash scripts/linux-qt-link.sh and the
+             scripts/verify-qt-link.sh proof checks
 
   One test class instead of the suite: bash scripts/test.sh DiskSizeTests
 EOF
@@ -77,6 +80,13 @@ if appattic_require_zig; then
     bash "$ROOT/core/build.sh" test-core
 fi
 
+# The host applies and restores the process PATH from the thread that runs a
+# scan, so core/host has threaded code, and a sanitizer run is the only thing
+# that sees an interleaving the assertions happen to survive. It needs a C
+# compiler and nothing else, which is what --core already assumes.
+echo "== ThreadSanitizer (C host) =="
+bash "$ROOT/scripts/race-check.sh"
+
 if [[ "$RUN_SWIFT" -eq 1 ]]; then
     # shellcheck source=swift-build.sh
     . "$ROOT/scripts/swift-build.sh"
@@ -109,6 +119,12 @@ if [[ "$RUN_SWIFT" -eq 1 ]]; then
 fi
 
 if [[ "$RUN_QT" -eq 1 ]]; then
+    # The Qt window walks disk directories on a worker pool and measures
+    # leftover sizes on another, so it has the same threaded code under the
+    # same argument. Reuses the Qt 6 and Wasmtime already required here.
+    echo "== ThreadSanitizer (Qt worker pools) =="
+    bash "$ROOT/scripts/race-check.sh" --qt
+
     echo "== Qt UI link =="
     bash "$ROOT/scripts/linux-qt-link.sh"
     bash "$ROOT/scripts/verify-qt-link.sh"
@@ -119,6 +135,7 @@ fi
 # A green --core must never be read as a full pass, so the skipped steps are
 # named on the last line of the run rather than only in --help.
 if [[ "$RUN_SWIFT" -eq 0 ]]; then
-    echo "note: --core did NOT run AppAtticScanTests or the CLI build. That is the CI gate;"
+    echo "note: --core did NOT run AppAtticScanTests or the CLI build, and did not run"
+    echo "      the Qt worker pools under ThreadSanitizer (pass --qt). That is the CI gate;"
     echo "      run 'bash scripts/check.sh' once Swift is installed, or push and let CI run it."
 fi
