@@ -437,10 +437,13 @@ func printLeftovers(_ result: ScanResult, limit: Int?, category: [String]) {
 
 func printStale(_ result: ScanResult, includeSystem: Bool) {
     var verdicts = staleVerdicts(result.verdicts, includeSystem: includeSystem)
-    let order: [StaleTier: Int] = [.remove: 0, .review: 1, .keep: 2]
+    // `StaleTier.staleSortRank` owns the order, so a tier this table used to
+    // miss (`.system`, reachable under `--include-system`) ranks from the tier
+    // set itself rather than from a table one case short of it. The label
+    // switch below covers the same set.
     verdicts.sort { lhs, rhs in
-        let a = lhs.tierKind.flatMap { tier in order[tier] } ?? 3
-        let b = rhs.tierKind.flatMap { tier in order[tier] } ?? 3
+        let a = StaleTier.staleSortRank(lhs.tierKind)
+        let b = StaleTier.staleSortRank(rhs.tierKind)
         if a != b { return a < b }
         return addBytes(lhs.software.sizeBytes, lhs.software.dataBytes)
             > addBytes(rhs.software.sizeBytes, rhs.software.dataBytes)

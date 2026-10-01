@@ -108,10 +108,15 @@ extension LeftoverItem {
 }
 
 /// Stale tiers, as they appear on JSON `tier` fields and `Verdict.tier`.
+///
+/// The cases are declared in the order a stale list prints them, most
+/// actionable first, and `order` below reads that declaration: a tier added to
+/// the middle takes its place in the order with no second table to update, and
+/// one added at the end is report-only by default.
 public enum StaleTier: String, Codable, Sendable, Hashable, CaseIterable {
-    case keep
-    case review
     case remove
+    case review
+    case keep
     case system
 
     /// Tiers a user can opt into cleanup.
@@ -125,6 +130,24 @@ public enum StaleTier: String, Codable, Sendable, Hashable, CaseIterable {
     /// Tiers the stale list shows. KEEP is never listed, `system` only with `includeSystem`.
     public func isVisibleStale(includeSystem: Bool) -> Bool {
         self == .review || self == .remove || (includeSystem && self == .system)
+    }
+
+    /// Print order for a stale list, taken from the declaration order.
+    ///
+    /// Derived from `allCases` rather than written out as a rank table, so a
+    /// tier added to this enum cannot be left out of one and quietly sort with
+    /// the unknown ones. `order` is the whole list, so the rank is total: no two
+    /// tiers collide, and ordering never depends on input order.
+    public static func order(_ tier: StaleTier?) -> Int? {
+        guard let tier else { return nil }
+        return allCases.firstIndex(of: tier)
+    }
+
+    /// Sort rank for a stale row. An unset or unknown tier sorts after every
+    /// known one, so a row whose `tier` this build does not know lands last
+    /// rather than ahead of the rows a caller can act on.
+    public static func staleSortRank(_ tier: StaleTier?) -> Int {
+        order(tier) ?? allCases.count
     }
 }
 

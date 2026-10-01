@@ -416,6 +416,65 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(visibleStaleSoftware([item], includeSystem: false).count, 1)
     }
 
+    /// The CLI's stale table ranks rows with `staleSortRank`, which used to be a
+    /// hand-written `[StaleTier: Int]` in `printStale`. It listed `remove`,
+    /// `review`, and `keep` but not `system`, so a SYSTEM row under
+    /// `--include-system` ranked as an unset tier rather than as itself. The
+    /// rank is now derived from `allCases`, so this asserts the whole set at
+    /// once: a case with no rank of its own fails here rather than sharing a
+    /// bucket with the unknown ones.
+    func testStaleSortRankCoversEveryTier() {
+        let sw = Software(name: "Foo", kind: "app", path: "/tmp/Foo.app", source: "mac")
+
+        // Most actionable first, the order the printed Verdict column uses.
+        XCTAssertEqual(StaleTier.staleSortRank(.remove), 0)
+        XCTAssertEqual(StaleTier.staleSortRank(.review), 1)
+        XCTAssertLessThan(StaleTier.staleSortRank(.keep), StaleTier.staleSortRank(.system))
+
+        // Every case has a rank of its own, and none shares one.
+        let ranks = StaleTier.allCases.map { StaleTier.staleSortRank($0) }
+        XCTAssertEqual(Set(ranks).count, StaleTier.allCases.count)
+        XCTAssertEqual(ranks, Array(0..<StaleTier.allCases.count))
+
+        // An unset or unknown tier sorts after every known one, so a row this
+        // build cannot read lands last rather than ahead of an actionable row.
+        XCTAssertNil(StaleTier.order(nil))
+        XCTAssertNil(StaleTier.order(StaleTier(rawValue: "not-a-tier")))
+        XCTAssertGreaterThan(
+            StaleTier.staleSortRank(nil),
+            StaleTier.allCases.map { StaleTier.staleSortRank($0) }.max() ?? 0
+        )
+
+        // The set the CLI can actually print: staleVerdicts filters on
+        // isVisibleStale, so `system` reaches the sort only with the flag.
+        // Ranking every row it lets through is the property the report needs.
+        for includeSystem in [false, true] {
+            let visible = StaleTier.allCases.filter { $0.isVisibleStale(includeSystem: includeSystem) }
+            XCTAssertEqual(visible.count, includeSystem ? 3 : 2)
+            for tier in visible {
+                XCTAssertNotNil(StaleTier.order(tier))
+            }
+            let sorted = visible.sorted { StaleTier.staleSortRank($0) < StaleTier.staleSortRank($1) }
+            XCTAssertEqual(sorted.first, .remove, "REMOVE must lead a stale list")
+            XCTAssertEqual(sorted.last, includeSystem ? .system : .review)
+        }
+
+        // End to end through the real comparator the CLI sorts with.
+        let rows = [
+            Verdict(software: sw, tier: "system"),
+            Verdict(software: sw, tier: "review"),
+            Verdict(software: sw, tier: "remove"),
+            Verdict(software: sw, tier: "keep"),
+            Verdict(software: sw, tier: ""),
+        ]
+        let ordered = rows.sorted {
+            let a = StaleTier.staleSortRank($0.tierKind)
+            let b = StaleTier.staleSortRank($1.tierKind)
+            return a == b ? false : a < b
+        }.map(\.tier)
+        XCTAssertEqual(ordered, ["remove", "review", "keep", "system", ""])
+    }
+
     func testUpgradableManagerMatchesOutdatableManagers() {
         for raw in ["brew-formula", "brew-cask", "flatpak", "apt", "pacman", "aur", "dnf", "yum", "zypper"] {
             let entry = OutdatedEntry(name: "foo", manager: raw)
