@@ -212,7 +212,23 @@ void markOwnedPathLeftovers(QVector<Finding> &findings, const QSet<QString> &ste
 bool isPackage(const Finding &f);
 bool matchPage(const Finding &f, Page page);
 int countPageRows(const QVector<Finding> &findings, Page page);
-void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line);
+/// One plugin's result blob, one line at a time.
+///
+/// `notes`, when given, is appended to with one entry per blob that carried a
+/// `note`. A note is a fact about the scan, not about any one row, so it is
+/// collected here rather than only read out of a row: a plugin that answers
+/// with an empty `findings` list and a note (`path_listing` when every query
+/// command refused, a render that could not fit a single row) produced no row
+/// to carry it, and the omission was then invisible on a page that read as
+/// clean. Swift makes the same fact scan-level: `ScanData.incomplete`, not a
+/// per-item string. `main.cpp` renders this list in the status bar, which is
+/// where a count a user has to notice is already announced.
+void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line,
+                            QStringList *notes = nullptr);
+/// The status-bar clause for the notes a scan collected, empty when every
+/// plugin answered completely. Redacted: a note names the command that failed,
+/// and a command line carries a home path.
+QString scanNoteClause(const QStringList &notes);
 bool isGlobalKind(const Finding &f);
 QString distroManager(const Finding &f);
 bool canMarkManual(const Finding &f);

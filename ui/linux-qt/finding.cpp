@@ -1322,7 +1322,8 @@ int countPageRows(const QVector<Finding> &findings, Page page) {
     return n;
 }
 
-void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line) {
+void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line,
+                            QStringList *notes) {
     const QJsonDocument doc = QJsonDocument::fromJson(line);
     if (!doc.isObject()) return;
     const QJsonObject obj = doc.object();
@@ -1340,11 +1341,19 @@ void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line) {
     // appended to the row's own reason, because the reason is what the user
     // reads next to the checkbox they are about to tick, and burying the note
     // under it is how an incomplete list gets confirmed as a complete one.
+    QString noteBody;
     if (!note.isEmpty()) {
+        noteBody = QStringLiteral("Scan incomplete: ") + note;
+        if (notes) {
+            /* The raw plugin id, not `pluginScanLabel`: that is the running
+               "Scanning leftover caches" the progress bar shows, which reads
+               as an instruction after the scan has already finished. */
+            notes->append(plugin.isEmpty() ? noteBody : plugin + QStringLiteral(": ") + note);
+        }
         if (!dialogBody.isEmpty()) {
             dialogBody += QLatin1Char('\n');
         }
-        dialogBody += QStringLiteral("Scan incomplete: ") + note;
+        dialogBody += noteBody;
     }
     const QJsonArray findings = obj.value(QStringLiteral("findings")).toArray();
     for (const QJsonValue &v : findings) {
@@ -1405,6 +1414,24 @@ void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line) {
         }
         out.push_back(row);
     }
+}
+
+/* One clause for the notes a scan collected, joined so the status bar carries
+   them beside the counts. A plugin that answered with an empty list and a note
+   (every query command refused, or a render that could not fit a single row)
+   has said the page is short of the machine and produced no row to carry the
+   word, so this is the only place the claim can still be read. Empty when
+   every plugin answered completely, so the common case says nothing extra.
+
+   `localeCount` for the count and not a hardcoded digit: this bar already
+   prints locale digits for the counts beside it, and one ASCII number among
+   Arabic-Indic ones is the bug `localeCount` exists to fix. */
+QString scanNoteClause(const QStringList &notes) {
+    if (notes.isEmpty()) return QString();
+    const QString joined = redactHomePaths(notes.join(QStringLiteral("; ")));
+    return notes.size() == 1
+        ? QStringLiteral("Scan incomplete: %1").arg(joined)
+        : QStringLiteral("%1 scans incomplete: %2").arg(localeCount(notes.size()), joined);
 }
 
 bool isGlobalKind(const Finding &f) {

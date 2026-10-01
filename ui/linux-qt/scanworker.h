@@ -46,12 +46,13 @@ public slots:
            clear. */
         clearCoreWasmCancel();
         if (isCancelled()) {
-            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
+            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1, QStringList());
             return;
         }
         ScanAccum acc;
         acc.worker = this;
         m_partial.clear();
+        m_notes.clear();
         char err[1024];
         err[0] = '\0';
         const int rc = runCoreWasm(
@@ -64,17 +65,22 @@ public slots:
             scanOnProgress
         );
         if (isCancelled()) {
-            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1);
+            emit finished(QVector<Finding>(), QStringLiteral("Scan cancelled."), 1, QStringList());
             return;
         }
-        emit finished(m_partial, QString::fromUtf8(err), rc);
+        emit finished(m_partial, QString::fromUtf8(err), rc, m_notes);
     }
 signals:
     void progress(const QString &pluginId, int index, int total);
     /// The rows that exist so far, after every plugin that just reported. The
     /// window draws them while the rest of the plugins are still running.
     void partial(const QVector<Finding> &findings);
-    void finished(const QVector<Finding> &findings, const QString &err, int rc);
+    /// The run's rows, its stderr, its exit status, and the plugin-level notes
+    /// it collected. The notes ride on the signal rather than being read off
+    /// the worker from the window thread: the argument copy is what publishes
+    /// the run's writes, the same way `findings` is published.
+    void finished(const QVector<Finding> &findings, const QString &err, int rc,
+                  const QStringList &notes);
 
 private:
     /// Enrich one plugin's findings and publish the running total. The order
@@ -82,7 +88,10 @@ private:
     /// list never disagrees with the final one on the rows it already has.
     void ingestBlob(const char *json, size_t len) {
         QVector<Finding> batch;
-        appendFindingsFromBlob(batch, QByteArray(json, int(len)));
+        appendFindingsFromBlob(batch, QByteArray(json, int(len)), &m_notes);
+        /* A note is collected before the empty-batch return: a plugin that
+           answers with no findings and a note has said the page is short of
+           the machine, and returning first is how that word was dropped. */
         if (batch.isEmpty()) return;
         enrichFindingsUsageTiming(batch, m_scanNow);
         bool anyLeftover = false;
@@ -131,6 +140,11 @@ private:
     /// same synchronous `runCoreWasm` touch it, so no lock is needed.
     QSet<QString> m_desktopStems;
     QVector<Finding> m_partial;
+    /// The plugin-level notes this run collected, read by the window when it
+    /// takes the `finished` signal this same thread emits. Scan-level, like
+    /// Swift's `ScanData.incomplete`: it says the run as a whole is short of
+    /// the machine, not that any one row is.
+    QStringList m_notes;
 };
 
 #endif

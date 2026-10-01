@@ -950,7 +950,8 @@ private slots:
         fillCurrent();
     }
 
-    void scanFinished(const QVector<Finding> &findings, const QString &err, int rc) {
+    void scanFinished(const QVector<Finding> &findings, const QString &err, int rc,
+                      const QStringList &notes) {
         m_scanning = false;
         m_scanPhase.clear();
         m_scanIndex = 0;
@@ -977,11 +978,18 @@ private slots:
                 countPage(Page::Packages),
                 m_scanAt
             );
-            statusBar()->showMessage(summary);
+            /* One line that carries the counts and, when any plugin came back
+               short, the reason. The screen reader hears the same text, so an
+               incomplete run is announced rather than only drawn. */
+            const QString noteClause = scanNoteClause(notes);
+            const QString line = noteClause.isEmpty()
+                ? summary
+                : summary + QLatin1String(" · ") + noteClause;
+            statusBar()->showMessage(line);
             // The scan runs for a while with nothing on screen changing, and it
             // ends with a count the user has to notice. A screen reader hears
             // none of that from the list repaint.
-            aaAnnounce(m_stack, summary);
+            aaAnnounce(m_stack, line);
         } else {
             statusBar()->showMessage(
                 QStringLiteral("%1 plugin findings").arg(localeCount(m_findings.size()))

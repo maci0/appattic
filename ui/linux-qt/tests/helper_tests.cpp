@@ -482,6 +482,65 @@ static int verifyHelpers() {
         return 1;
     }
 
+    /* The note is a fact about the scan, so it is collected beside the rows
+       and not only out of one. A plugin that answers with an empty findings
+       list and a note -- `path_listing` when every query command refused, or a
+       render that could not fit a single row -- produced no row to carry the
+       word, and the page it governs then read as a clean scan. This is the
+       scan-level shape Swift already has: `ScanData.incomplete`, not a string
+       on each item. */
+    QStringList notes;
+    rows.clear();
+    appendFindingsFromBlob(rows, QByteArrayLiteral(
+        "{\"plugin\":\"path-xdg-cache\",\"note\":\"ls -b refused: exit 1\","
+        "\"findings\":[]}"), &notes);
+    if (rows.size() != 0 || notes.size() != 1
+        || !notes[0].contains(QLatin1String("path-xdg-cache"))
+        || !notes[0].contains(QLatin1String("ls -b refused"))) {
+        std::fprintf(stderr, "note: a note on an empty list must survive with no row to carry it\n");
+        return 1;
+    }
+
+    /* A complete blob adds nothing; a second short blob adds its own. */
+    notes.clear();
+    appendFindingsFromBlob(rows, QByteArrayLiteral(
+        "{\"plugin\":\"path-xdg-data\",\"findings\":[]}"), &notes);
+    if (!notes.isEmpty()) {
+        std::fprintf(stderr, "note: a complete blob must add no note\n");
+        return 1;
+    }
+    appendFindingsFromBlob(rows, QByteArrayLiteral(
+        "{\"plugin\":\"path-var-app\",\"note\":\"2 lists hit the row limit\","
+        "\"findings\":[]}"), &notes);
+    if (notes.size() != 1 || !notes[0].contains(QLatin1String("row limit"))) {
+        std::fprintf(stderr, "note: each short blob must add its own note\n");
+        return 1;
+    }
+
+    /* The clause the status bar shows: silent when nothing was short, so a
+       complete scan says nothing extra, and it says "incomplete" when there
+       is something. */
+    if (!scanNoteClause(QStringList()).isEmpty()) {
+        std::fprintf(stderr, "note: a complete scan must not claim to be incomplete\n");
+        return 1;
+    }
+    const QString one = scanNoteClause(QStringList{QStringLiteral("path-xdg-cache: ls refused")});
+    if (!one.contains(QLatin1String("Scan incomplete"))
+        || !one.contains(QLatin1String("ls refused"))) {
+        std::fprintf(stderr, "note: one short plugin must name itself in the clause\n");
+        return 1;
+    }
+    const QString many = scanNoteClause(
+        QStringList{QStringLiteral("path-xdg-cache: ls refused"),
+                    QStringLiteral("path-var-app: row limit")});
+    /* The count is locale-formatted, the same way the counts beside it on that
+       bar are, so the expectation is built rather than hardcoded. */
+    if (!many.contains(QLatin1String("2 scans incomplete"))
+        && !many.contains(localeCount(2) + QLatin1String(" scans incomplete"))) {
+        std::fprintf(stderr, "note: several short plugins must be counted, not dropped\n");
+        return 1;
+    }
+
     Finding leftover;
     leftover.plugin = QStringLiteral("path-home-dot");
     leftover.status = QStringLiteral("orphaned");
