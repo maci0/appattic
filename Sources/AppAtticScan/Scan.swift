@@ -174,12 +174,47 @@ public func applyPrefsFallback(_ apps: inout [AppRecord], items: [DataItem]) {
     }
 }
 
-/// A scan resets and reads the process-global `failedCheckSources` set and
-/// stamps the single scan cache file. Two scans in one process interleave both, so one
+/// Checks that ran and failed during the scan now in flight, by tool name:
+/// an update check (`Outdated.swift`), a package listing (`Packages.swift`),
+/// or a Homebrew query (`BrewInfo.swift`).
+/// A check that failed is not the answer "nothing is outdated" or "no unused
+/// packages", it is an unknown, and the two collapse into the same empty list.
+/// The scan cache keeps a scan for `scanCacheMaxAge`, so an unknown written to
+/// it is served as a verified answer for a day. `performScan` reads the set and
+/// marks the scan incomplete, which is the flag `commitScanCache` already
+/// refuses to keep and `isScanCacheStale` already refuses to serve. Reset per
+/// scan, so a long lived process (the UI) cannot carry one scan's failure into
+/// the next. A tool that is not installed never reaches the query and is
+/// therefore never recorded: absent is known, failed is not.
+/// It lives beside `scanLock`, the other process-global a scan resets, because
+/// splitting the two across files sends a reader looking in the wrong place.
+private let scanFailureLock = NSLock()
+nonisolated(unsafe) private var failedCheckSources: Set<String> = []
+
+func noteScanCheckFailed(_ source: String) {
+    scanFailureLock.lock()
+    failedCheckSources.insert(source)
+    scanFailureLock.unlock()
+}
+
+func scanCheckFailures() -> [String] {
+    scanFailureLock.lock()
+    defer { scanFailureLock.unlock() }
+    return failedCheckSources.sorted()
+}
+
+func resetScanCheckFailures() {
+    scanFailureLock.lock()
+    failedCheckSources.removeAll()
+    scanFailureLock.unlock()
+}
+
+/// One scan at a time. Two scans in one process interleave both this lock's
+/// state (the failure set above, and the single scan cache file), so one
 /// scan's failures are attributed to the other and a cache commit can mix
-/// them. One scan at a time, enforced here rather than left to each caller. The
-/// lock is not recursive, so a `progress` callback must not start a scan: it
-/// would block forever on the scan already in flight.
+/// them. Enforced here rather than left to each caller. The lock is not
+/// recursive, so a `progress` callback must not start a scan: it would block
+/// forever on the scan already in flight.
 private let scanLock = NSLock()
 
 /// Serialises `progress`. Collectors emit from `pmap` worker threads (up to 16

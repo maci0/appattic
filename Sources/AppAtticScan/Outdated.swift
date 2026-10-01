@@ -3,38 +3,6 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Checks that ran and failed during the scan now in flight, by tool name:
-/// an update check (`Outdated.swift`) or a package listing (`Packages.swift`).
-/// A check that failed is not the answer "nothing is outdated" or "no unused
-/// packages", it is an unknown, and the two collapse into the same empty list.
-/// The scan cache keeps a scan for `scanCacheMaxAge`, so an unknown written to
-/// it is served as a verified answer for a day. `performScan` reads the set and
-/// marks the scan incomplete, which is the flag `commitScanCache` already
-/// refuses to keep and `isScanCacheStale` already refuses to serve. Reset per
-/// scan, so a long lived process (the UI) cannot carry one scan's failure into
-/// the next. A tool that is not installed never reaches the query and is
-/// therefore never recorded: absent is known, failed is not.
-private let scanFailureLock = NSLock()
-nonisolated(unsafe) private var failedCheckSources: Set<String> = []
-
-func noteScanCheckFailed(_ source: String) {
-    scanFailureLock.lock()
-    failedCheckSources.insert(source)
-    scanFailureLock.unlock()
-}
-
-func scanCheckFailures() -> [String] {
-    scanFailureLock.lock()
-    defer { scanFailureLock.unlock() }
-    return failedCheckSources.sorted()
-}
-
-func resetScanCheckFailures() {
-    scanFailureLock.lock()
-    failedCheckSources.removeAll()
-    scanFailureLock.unlock()
-}
-
 // Compiled once. NSRegularExpression is immutable and safe to share across threads.
 private let localeRegionRE = try! NSRegularExpression(pattern: #"rg=([a-z]{2})"#, options: [.caseInsensitive])
 private let localeCountryRE = try! NSRegularExpression(pattern: #"_([A-Z]{2})"#)
