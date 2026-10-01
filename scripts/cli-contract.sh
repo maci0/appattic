@@ -140,7 +140,10 @@ if [[ -n "$OUT" ]]; then ok "config prints its result on stdout"; else bad "conf
 # SGR escape despite colour being available on a TTY.
 mkdir -p "$TMP/tree/sub"; echo hi > "$TMP/tree/sub/f.txt"
 run 0 "disk tree" disk "$TMP/tree"
-want_out "disk prints the tree on stdout" "$TMP/tree"
+# The root row is the folder's name, like every row below it; the full path is
+# on the stderr "scanning" line.
+want_out "disk prints the root row on stdout" 'tree  '
+want_out "disk prints the nested file on stdout" '    f.txt  '
 want_err "disk progress goes to stderr" "scanning"
 if [[ "$OUT" == *$'\033['* ]]; then
     bad "disk piped: ANSI escape on stdout despite TERM=dumb"
