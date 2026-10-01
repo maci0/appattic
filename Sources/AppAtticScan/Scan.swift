@@ -251,7 +251,7 @@ public func performScan(
     resetWhichSearchDirectories()
 
     progress("Scanning installed applications…")
-    var found = apps ?? findApps(progress: progress)
+    var found = apps ?? findApps(progress: progress, clock: clock)
     let leftoverApps = found
     if !includeSystem {
         found = found.filter { !$0.isSystem }
@@ -306,7 +306,8 @@ public func performScan(
         dataItems: result.dataItems,
         progress: progress,
         history: history,
-        now: now
+        now: now,
+        clock: clock
     )
     applyOutdated(result.software, pkgs: result.outdated)
     attachSummariesFromSoftware(result.software, pkgs: result.outdated)

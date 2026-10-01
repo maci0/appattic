@@ -34,7 +34,12 @@ public func fileSize(_ path: String) -> Int {
 /// walk. Only a path all of those fail on comes back as `(0, false)`, which is
 /// not the same as an empty directory. Rows carry that flag, so an unmeasured
 /// size is never shown as a size of zero.
-public func duSize(_ path: String, timeout: TimeInterval = 8, run: CommandRun = runCommand) -> (Int, Bool) {
+public func duSize(
+    _ path: String,
+    timeout: TimeInterval = 8,
+    run: CommandRun = runCommand,
+    clock: MonotonicFn = monotonicSeconds
+) -> (Int, Bool) {
     // One `attributesOfItem` answers both "does it exist" and "is it a
     // directory"; the previous `fileExists` + `fileSize` pair stat'ed twice.
     guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else {
@@ -53,7 +58,7 @@ public func duSize(_ path: String, timeout: TimeInterval = 8, run: CommandRun = 
             if pair.1, pair.0 > 0 { return pair }
         }
     }
-    return directoryByteSize(path, timeout: timeout)
+    return directoryByteSize(path, timeout: timeout, clock: clock)
 }
 
 public func spotlightFSSize(_ path: String, run: CommandRun = runCommand) -> Int? {
@@ -87,7 +92,8 @@ func parseDuKB(_ out: String) -> (Int, Bool) {
 public func duSizes(
     _ paths: [String],
     timeout: TimeInterval = 8,
-    run: CommandRun = runCommand
+    run: CommandRun = runCommand,
+    clock: MonotonicFn = monotonicSeconds
 ) -> [String: (Int, Bool)] {
     var out: [String: (Int, Bool)] = [:]
     var dirs: [String] = []
@@ -131,7 +137,7 @@ public func duSizes(
             if parsedAny || rc == 0 { break }
         }
         for path in missing {
-            out[path] = directoryByteSize(path, timeout: timeout)
+            out[path] = directoryByteSize(path, timeout: timeout, clock: clock)
         }
     }
     return out
@@ -145,7 +151,8 @@ public func pathSizes(
     _ paths: [String],
     timeout: TimeInterval = 8,
     du: ((String) -> (Int, Bool))? = nil,
-    run: CommandRun = runCommand
+    run: CommandRun = runCommand,
+    clock: MonotonicFn = monotonicSeconds
 ) -> [String: (Int, Bool)] {
     if let du {
         var out: [String: (Int, Bool)] = [:]
@@ -153,7 +160,7 @@ public func pathSizes(
         for path in paths { out[path] = du(path) }
         return out
     }
-    return duSizes(paths, timeout: timeout, run: run)
+    return duSizes(paths, timeout: timeout, run: run, clock: clock)
 }
 
 /// Logical file bytes for a directory tree: sum of regular-file `st_size`,

@@ -384,7 +384,7 @@ public func scanLeftovers(
         let toMeasure = items.filter { isListedLeftoverStatus($0.status) && !skipNestedProbe($0) }
         progress("  · measuring sizes for \(toMeasure.count) leftover folders…")
         // One `du -sk` per chunk, not one spawn per folder.
-        let sizes = duSizes(toMeasure.map(\.path), timeout: 6, run: run)
+        let sizes = duSizes(toMeasure.map(\.path), timeout: 6, run: run, clock: clock)
         let measuredIds = Set(toMeasure.map { ObjectIdentifier($0) })
         var dirPaths = Set<String>()
         dirPaths.reserveCapacity(items.count)

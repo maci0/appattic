@@ -50,13 +50,20 @@ enum AppAtticCLI {
             return
         }
         let now = Date()
+        // One clock for the fingerprint stamps and for the scan between them:
+        // the two stamps have to be cut from the same elapsed-time source, or a
+        // large home is walked further on the second than on the first and the
+        // snapshot is dropped for a machine that did not change.
+        let clock = monotonicSeconds
         let resolved = resolveScan(
             includeSystem: includeSystem,
             fresh: opts.fresh,
             forceLive: opts.command == "update",
             now: now,
+            clock: clock,
+            fingerprintFn: { scanFingerprint(clock: clock) },
             liveScan: { includeSystem in
-                runFullScan(includeSystem: includeSystem, now: now) { msg in
+                runFullScan(includeSystem: includeSystem, now: now, clock: clock) { msg in
                     fputs(msg + "\n", stderr)
                     fflush(stderr)
                 }

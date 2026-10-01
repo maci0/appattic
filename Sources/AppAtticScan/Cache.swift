@@ -284,11 +284,12 @@ public func commitScanCache(
 public func scanFingerprint(
     which: WhichFn = whichCommand,
     run: CommandRun = runCommand,
-    fileStamps: (() -> [String])? = nil
+    fileStamps: (() -> [String])? = nil,
+    clock: MonotonicFn = monotonicSeconds
 ) -> String {
     resetWhichSearchDirectories()
     var lines: [String] = ["ver:\(appAtticVersion)", "eval:20", "packages:1"]
-    lines.append(contentsOf: fileStamps?() ?? fingerprintFileStamps(which: which))
+    lines.append(contentsOf: fileStamps?() ?? fingerprintFileStamps(which: which, clock: clock))
     if let brew = which("brew") {
         let (_, formulas, _) = run([brew, "list", "--formula", "--versions"], 30)
         let (_, casks, _) = run([brew, "list", "--cask", "--versions"], 30)
@@ -304,14 +305,14 @@ public func scanFingerprint(
     return lines.joined(separator: "\n")
 }
 
-private func fingerprintFileStamps(which: WhichFn) -> [String] {
+private func fingerprintFileStamps(which: WhichFn, clock: MonotonicFn) -> [String] {
     var lines: [String] = []
     if PlatformOverride.isLinux {
         for dir in linuxDesktopDirs() {
             guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
             let desktops = names.filter { $0.hasSuffix(".desktop") }.sorted()
             if !desktops.isEmpty {
-                lines.append("desk:\(stampEscape(dir)):\(stampJoin(desktops.map { inventoryEntryStamp(dir: dir, name: $0) }))")
+                lines.append("desk:\(stampEscape(dir)):\(stampJoin(desktops.map { inventoryEntryStamp(dir: dir, name: $0, clock: clock) }))")
             }
         }
     } else {
@@ -321,7 +322,8 @@ private func fingerprintFileStamps(which: WhichFn) -> [String] {
             let names = iterApps(in: root).map {
                 inventoryEntryStamp(
                     dir: URL(fileURLWithPath: $0).deletingLastPathComponent().path,
-                    name: URL(fileURLWithPath: $0).lastPathComponent
+                    name: URL(fileURLWithPath: $0).lastPathComponent,
+                    clock: clock
                 )
             }.sorted()
             lines.append("apps:\(stampEscape(root)):\(stampJoin(names))")
@@ -356,14 +358,14 @@ private func fingerprintFileStamps(which: WhichFn) -> [String] {
         lines.append(android)
     }
     for (label, path, _) in scanRootsForPlatform() {
-        lines.append(rootInventoryStamp(label, path))
+        lines.append(rootInventoryStamp(label, path, clock: clock))
     }
     for (path, _) in homeDataLeaves() {
         let name = URL(fileURLWithPath: path).lastPathComponent
-        lines.append(rootInventoryStamp("home-\(name)", path))
+        lines.append(rootInventoryStamp("home-\(name)", path, clock: clock))
     }
     if PlatformOverride.isDarwin {
-        lines.append(rootInventoryStamp("launchagents-system", "/Library/LaunchAgents"))
+        lines.append(rootInventoryStamp("launchagents-system", "/Library/LaunchAgents", clock: clock))
     }
     let homeShare = FileManager.default.homeDirectoryForCurrentUser.path
     for (label, path) in linuxPkgStampPaths(home: homeShare) {
@@ -427,7 +429,11 @@ func stampJoin(_ names: [String]) -> String {
     names.map(stampEscape).joined(separator: ",")
 }
 
-func rootInventoryStamp(_ label: String, _ path: String) -> String {
+func rootInventoryStamp(
+    _ label: String,
+    _ path: String,
+    clock: MonotonicFn = monotonicSeconds
+) -> String {
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
         return "root:\(stampEscape(label)):missing"
@@ -461,7 +467,7 @@ func rootInventoryStamp(_ label: String, _ path: String) -> String {
     let visible = names.filter { !$0.hasPrefix(".") }.sorted()
     let probeAll = nested && visible.count <= rootStampProbeEntries
     let ents = stampJoin(visible.map { name in
-        inventoryEntryStamp(dir: path, name: name, includeNestedActivity: probeAll)
+        inventoryEntryStamp(dir: path, name: name, includeNestedActivity: probeAll, clock: clock)
     })
     if nested && !probeAll {
         return "root:\(stampEscape(label)):partial:\(ents)"
@@ -484,7 +490,12 @@ func stampName(dir: String, name: String) -> String {
     return name + "?"
 }
 
-func inventoryEntryStamp(dir: String, name: String, includeNestedActivity: Bool = false) -> String {
+func inventoryEntryStamp(
+    dir: String,
+    name: String,
+    includeNestedActivity: Bool = false,
+    clock: MonotonicFn = monotonicSeconds
+) -> String {
     let path = (dir as NSString).appendingPathComponent(name)
     guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
           let mtime = attrs[.modificationDate] as? Date
@@ -499,7 +510,7 @@ func inventoryEntryStamp(dir: String, name: String, includeNestedActivity: Bool 
     // it needs no second component and is stamped as it was.
     if includeNestedActivity,
        (attrs[.type] as? FileAttributeType) == .typeDirectory,
-       let nested = probeActivityMtime(path),
+       let nested = probeActivityMtime(path, clock: clock),
        nested > mtime {
         stamp += "!\(nested.timeIntervalSince1970.bitPattern)"
     }
@@ -561,13 +572,19 @@ public struct ResolvedScan: Sendable {
 /// the one-scan-at-a-time rule there applies here too. The default
 /// `fingerprintFn` shells out to the package managers twice per call, once
 /// before the scan and once after, which is what makes a mid-scan change to
-/// the inventory drop the snapshot instead of caching a mixture.
+/// the inventory drop the snapshot instead of caching a mixture. `clock` is
+/// the walk budget's elapsed-time source, used by the fingerprint's nested
+/// activity probes and by the live scan: the two stamps have to be cut from
+/// the same clock, or a large home is probed further on the second stamp than
+/// on the first and `commitScanCache` drops a snapshot of a machine that did
+/// not change.
 public func resolveScan(
     includeSystem: Bool,
     fresh: Bool,
     forceLive: Bool,
     cacheURL: URL = defaultScanCacheURL(),
     now: Date = Date(),
+    clock: MonotonicFn = monotonicSeconds,
     fingerprintFn: () -> String = { scanFingerprint() },
     liveScan: ((Bool) -> ScanData)? = nil
 ) -> ResolvedScan {
@@ -580,7 +597,7 @@ public func resolveScan(
         }
         deleteExpiredScanCache(cache, now: now, at: cacheURL)
     }
-    let data = (liveScan ?? { runFullScan(includeSystem: $0, now: now) })(includeSystem)
+    let data = (liveScan ?? { runFullScan(includeSystem: $0, now: now, clock: clock) })(includeSystem)
     let after = fingerprintFn()
     var cacheWriteFailure: String?
     do {

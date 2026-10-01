@@ -76,4 +76,84 @@ final class ClockDeterminismTests: XCTestCase {
         XCTAssertGreaterThan(reads, 0, "the probe must read the injected clock, not the host's uptime")
         XCTAssertNotNil(found)
     }
+
+    // `duSize`, `duSizes` and `pathSizes` are the batch and single entry points
+    // a full scan measures with, and all three fall back to the in-process
+    // walk when `du` cannot answer. That fallback carries a deadline, so the
+    // clock has to reach it: a scan that measures sizes with an injected clock
+    // and falls back to the host's uptime reports a different partial size on a
+    // loaded host than on an idle one, and the replay diverges.
+    private func makeTree(_ tag: String, subdirs: Int, filesPer: Int, bytes: Int) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clock-batch-\(tag)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for d in 0..<subdirs {
+            let sub = root.appendingPathComponent("d\(d)")
+            try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+            for f in 0..<filesPer {
+                try Data(repeating: 0x61, count: bytes)
+                    .write(to: sub.appendingPathComponent("f\(f).bin"))
+            }
+        }
+        return root
+    }
+
+    /// Every `du` invocation fails with empty output, so the caller must fall
+    /// back to the in-process walk, which is the only path that reads a clock.
+    private func noDu(_: [String], _: TimeInterval) -> (Int32, String, String) {
+        (1, "", "")
+    }
+
+    func testDuSizesWalkFallbackReadsTheInjectedClock() throws {
+        let root = try makeTree("du-batch", subdirs: 2, filesPer: 3, bytes: 1024)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = (0..<2).map { root.appendingPathComponent("d\($0)").path }
+        var reads = 0
+        let sizes = duSizes(paths, timeout: 0.5, run: noDu, clock: {
+            reads += 1
+            return 0
+        })
+        XCTAssertGreaterThan(
+            reads, 0,
+            "the du fallback must read the injected clock, not the host's uptime"
+        )
+        for p in paths {
+            XCTAssertEqual(sizes[p]?.0, 3 * 1024)
+        }
+    }
+
+    func testDuSizesWalkFallbackStopsOnInjectedDeadline() throws {
+        let root = try makeTree("du-deadline", subdirs: 1, filesPer: 6, bytes: 1024)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("d0").path
+        let pair = duSizes([path], timeout: 0.5, run: noDu, clock: jumpingClock())[path] ?? (0, true)
+        XCTAssertFalse(pair.1, "a walk past the injected deadline is partial")
+        XCTAssertLessThan(pair.0, 6 * 1024)
+    }
+
+    func testDuSizeWalkFallbackReadsTheInjectedClock() throws {
+        let root = try makeTree("du-single", subdirs: 1, filesPer: 2, bytes: 512)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var reads = 0
+        let (bytes, measured) = duSize(root.appendingPathComponent("d0").path, timeout: 0.5, run: noDu, clock: {
+            reads += 1
+            return 0
+        })
+        XCTAssertGreaterThan(reads, 0, "duSize's walk fallback must read the injected clock")
+        XCTAssertTrue(measured)
+        XCTAssertEqual(bytes, 2 * 512)
+    }
+
+    func testPathSizesForwardsTheInjectedClockToItsWalk() throws {
+        let root = try makeTree("path-sizes", subdirs: 1, filesPer: 2, bytes: 256)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("d0").path
+        var reads = 0
+        let sizes = pathSizes([path], timeout: 0.5, run: noDu, clock: {
+            reads += 1
+            return 0
+        })
+        XCTAssertGreaterThan(reads, 0, "pathSizes must forward its clock to duSizes")
+        XCTAssertEqual(sizes[path]?.0, 2 * 256)
+    }
 }

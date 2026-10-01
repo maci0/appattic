@@ -609,19 +609,23 @@ public func parseDesktopFile(_ path: String, sourceDir: String = "") -> AppRecor
 /// `appendSteamApps` and `appendCrossOverBottles` already take, forwarded so a
 /// caller that scopes the desktop directories can scope the game libraries too:
 /// otherwise the games installed on the machine running the caller land in a
-/// result that was asked to describe one directory.
+/// result that was asked to describe one directory. `clock` is the size
+/// walk's elapsed-time source: without it the `du` fallback bounds itself
+/// against the host uptime and a replayed scan of a slow tree reports a
+/// different size on a loaded host than on an idle one.
 private func finishAppDiscovery(
     _ apps: inout [AppRecord],
     seen: inout Set<String>,
     progress: (String) -> Void,
     steamLibraryRoots: [String]? = nil,
-    bottlesDir: String? = nil
+    bottlesDir: String? = nil,
+    clock: MonotonicFn = monotonicSeconds
 ) {
     progress("  · discovering Steam games…")
     appendSteamApps(&apps, seen: &seen, libraryRoots: steamLibraryRoots)
     appendCrossOverBottles(&apps, seen: &seen, bottlesDir: bottlesDir)
     progress("  · measuring sizes for \(apps.count) apps…")
-    let sizes = duSizes(apps.filter { !skipLiveDu($0) }.map(\.path))
+    let sizes = duSizes(apps.filter { !skipLiveDu($0) }.map(\.path), clock: clock)
     for i in apps.indices {
         if skipLiveDu(apps[i]) { continue }
         let pair = sizes[apps[i].path] ?? (0, false)
@@ -633,18 +637,22 @@ private func finishAppDiscovery(
     }
 }
 
-public func findApps(progress: (String) -> Void = { _ in }) -> [AppRecord] {
+public func findApps(
+    progress: (String) -> Void = { _ in },
+    clock: MonotonicFn = monotonicSeconds
+) -> [AppRecord] {
     if PlatformOverride.isLinux {
-        return findLinuxApps(progress: progress)
+        return findLinuxApps(progress: progress, clock: clock)
     }
-    return findMacApps(progress: progress)
+    return findMacApps(progress: progress, clock: clock)
 }
 
 func findLinuxApps(
     progress: (String) -> Void,
     desktopDirs: [String]? = nil,
     steamLibraryRoots: [String]? = nil,
-    bottlesDir: String? = nil
+    bottlesDir: String? = nil,
+    clock: MonotonicFn = monotonicSeconds
 ) -> [AppRecord] {
     progress("  · discovering .desktop applications…")
     var apps: [AppRecord] = []
@@ -666,7 +674,8 @@ func findLinuxApps(
         seen: &seen,
         progress: progress,
         steamLibraryRoots: steamLibraryRoots,
-        bottlesDir: bottlesDir
+        bottlesDir: bottlesDir,
+        clock: clock
     )
     return apps
 }
@@ -689,7 +698,7 @@ func findViaMdfind(existing: Set<String>) -> [String] {
     return found
 }
 
-func findMacApps(progress: (String) -> Void) -> [AppRecord] {
+func findMacApps(progress: (String) -> Void, clock: MonotonicFn = monotonicSeconds) -> [AppRecord] {
     progress("  · discovering installed apps…")
     var paths: [String] = []
     var seen = Set<String>()
@@ -706,7 +715,7 @@ func findMacApps(progress: (String) -> Void) -> [AppRecord] {
         if seen.insert(p).inserted { paths.append(p) }
     }
     var apps = pmap(paths, workers: 16) { makeApp(from: $0) }.compactMap { $0 }
-    finishAppDiscovery(&apps, seen: &seen, progress: progress)
+    finishAppDiscovery(&apps, seen: &seen, progress: progress, clock: clock)
     return apps
 }
 

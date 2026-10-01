@@ -218,14 +218,19 @@ final class ScannerViewModel {
         progressMessage = scanData == nil ? "Starting scan…" : "Refreshing scan…"
         let vm = self
         DispatchQueue.global(qos: .userInitiated).async {
-            let before = scanFingerprint()
+            // One clock for both stamps and for the scan between them: a walk
+            // budget read from a different source on each call probes further
+            // on one stamp than on the other, and `commitScanCache` then drops
+            // a snapshot of a machine that did not change.
+            let clock = monotonicSeconds
+            let before = scanFingerprint(clock: clock)
             let now = Date()
-            let result = runFullScan(includeSystem: includeSystem, now: now) { msg in
+            let result = runFullScan(includeSystem: includeSystem, now: now, clock: clock) { msg in
                 DispatchQueue.main.async {
                     vm.progressMessage = msg
                 }
             }
-            let after = scanFingerprint()
+            let after = scanFingerprint(clock: clock)
             if before == after, result.incomplete != true {
                 DispatchQueue.main.async {
                     vm.progressMessage = "Saving scan cache…"

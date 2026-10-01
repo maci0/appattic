@@ -444,6 +444,39 @@ final class CacheTests: XCTestCase {
         XCTAssertEqual(rootInventoryStamp("Containers", dir.path), first)
     }
 
+    /// `commitScanCache` drops the snapshot unless the two stamps of one scan
+    /// are equal, so both have to be cut from the same elapsed-time source. The
+    /// nested probe inside `inventoryEntryStamp` is bounded by a clock; a stamp
+    /// that reads the host's uptime instead of the injected one walks further on
+    /// a loaded host than on an idle one, and the pair disagrees about a machine
+    /// that did not change.
+    func testInventoryEntryStampProbeReadsTheInjectedClock() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("stamp-clock-\(UUID().uuidString)")
+        let entry = dir.appendingPathComponent("Alpha")
+        try FileManager.default.createDirectory(at: entry.appendingPathComponent("inner"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data("nested".utf8).write(to: entry.appendingPathComponent("inner/written.txt"))
+        var reads = 0
+        _ = inventoryEntryStamp(dir: dir.path, name: "Alpha", includeNestedActivity: true, clock: {
+            reads += 1
+            return 0
+        })
+        XCTAssertGreaterThan(reads, 0, "the nested probe must read the injected clock, not the host's uptime")
+    }
+
+    func testRootInventoryStampForwardsTheInjectedClock() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("root-stamp-clock-\(UUID().uuidString)")
+        let entry = dir.appendingPathComponent("Alpha")
+        try FileManager.default.createDirectory(at: entry.appendingPathComponent("inner"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var reads = 0
+        _ = rootInventoryStamp("Caches", dir.path, clock: {
+            reads += 1
+            return 0
+        })
+        XCTAssertGreaterThan(reads, 0, "rootInventoryStamp must forward its clock to the nested probe")
+    }
+
     func testStampJoinEscapesCommaNewlineAndBang() {
         XCTAssertEqual(stampEscape("Alpha,Beta"), "Alpha\\,Beta")
         XCTAssertEqual(stampEscape("a\\b"), "a\\\\b")

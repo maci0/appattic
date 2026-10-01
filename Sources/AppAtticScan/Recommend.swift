@@ -304,7 +304,9 @@ func brewHistoryKeep(_ brew: BrewSnapshot) -> Set<String> {
 /// `history` is the shell-history index; leaving it nil reads the history of
 /// the current user, which is slow, so a caller that already has one passes
 /// it in. `du` is the `(bytes, measured)` size function; leaving it nil measures
-/// with `duSizes`, one `du` per path. `includeDarwinNonApp` and `nonAppPaths`
+/// with `duSizes`, one `du` per path. `clock` is the walk budget's elapsed-time
+/// source, forwarded so a replayed scan bounds its own walk instead of racing
+/// the host's uptime. `includeDarwinNonApp` and `nonAppPaths`
 /// are the non-`.app` inclusions the macOS UI opts into; `includeDarwinNonApp`
 /// defaults to whether this is a Darwin host.
 public func buildSoftware(
@@ -316,7 +318,8 @@ public func buildSoftware(
     includeDarwinNonApp: Bool? = nil,
     nonAppPaths: [String]? = nil,
     du: ((String) -> (Int, Bool))? = nil,
-    now: Date = Date()
+    now: Date = Date(),
+    clock: MonotonicFn = monotonicSeconds
 ) -> [Software] {
     let history = history ?? (brew.available && !brew.formulas.isEmpty
         ? loadHistory(keep: brewHistoryKeep(brew), now: now)
@@ -422,7 +425,7 @@ public func buildSoftware(
         // One `du -sk` per chunk, not one spawn per entry: the old per-path
         // `measure` cost ~50 ms a spawn, and /Applications holds hundreds of
         // entries.
-        let sizes = pathSizes(candidates.map(\.path), du: du)
+        let sizes = pathSizes(candidates.map(\.path), du: du, clock: clock)
         for c in candidates {
             let (size, measured) = sizes[c.path] ?? (0, false)
             let caskName = caskNames[c.key]
@@ -454,7 +457,7 @@ public func buildSoftware(
     }
     // One `du -sk` per chunk, not one spawn per cask: a full caskroom is
     // hundreds of casks, so the per-cask `du` was hundreds of spawns.
-    let caskSizes = pathSizes(pendingCasks.filter { $0.exists }.map(\.path), du: du)
+    let caskSizes = pathSizes(pendingCasks.filter { $0.exists }.map(\.path), du: du, clock: clock)
     for entry in pendingCasks {
         var size = 0
         var measured = true
