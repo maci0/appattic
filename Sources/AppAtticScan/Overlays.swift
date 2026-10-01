@@ -13,47 +13,6 @@ func byNameThenPath(_ lhs: DataItem, _ rhs: DataItem) -> Bool {
     return byName == .orderedSame ? lhs.path < rhs.path : byName == .orderedAscending
 }
 
-/// The entries of `root`, as paths, dot files excluded.
-///
-/// Reads `d_name` as raw bytes rather than through
-/// `FileManager.contentsOfDirectory`, which decodes with the platform default
-/// and substitutes U+FFFD. The paths returned here are the arguments of the
-/// guarded `rm -rf` the leftover scan generates, so a lossy name is not a
-/// cosmetic loss: the U+FFFD path names a *different* entry, and the report
-/// claims an entry was removed that is still on disk. An entry whose bytes are
-/// not UTF-8 has no path a UTF-8 API can name, so `direntName` returns nil for
-/// it and it is left out, the same rule the disk walk follows.
-func listEntries(_ root: String) -> [String] {
-    directoryEntryNames(root).map { (root as NSString).appendingPathComponent($0) }
-}
-
-/// The entry *names* of `root`, dot files excluded, sorted.
-///
-/// The name-only twin of `listEntries`, for the readers that build a path by
-/// appending a name to a root they already hold. `FileManager
-/// .contentsOfDirectory(atPath:)` is not an equivalent reader: on Linux and
-/// macOS it decodes `d_name` with the platform default encoding and substitutes
-/// U+FFFD for a byte that is not text, and every caller here hands the result
-/// straight back to `stat`, `realpath`, or the generated `rm -rf`. The U+FFFD
-/// spelling names a *different* entry, so one file's size is attributed to
-/// another, a shadow row names a packaged file that is not there, and a removal
-/// line reports a file removed that is still on disk. `direntName` reads the raw
-/// bytes and refuses the entry whose bytes are not UTF-8, the same rule the disk
-/// walk follows.
-///
-/// A directory that cannot be opened is an empty list, which is what a caller
-/// already got from `contentsOfDirectory` failing.
-func directoryEntryNames(_ root: String) -> [String] {
-    guard let dir = opendir(root) else { return [] }
-    defer { closedir(dir) }
-    var names: [String] = []
-    while let ent = readdir(dir) {
-        guard let name = direntName(ent), !name.hasPrefix(".") else { continue }
-        names.append(name)
-    }
-    return names.sorted()
-}
-
 func shouldScanUserBinDir(
     _ dir: String,
     brewPrefixBin: String? = nil,

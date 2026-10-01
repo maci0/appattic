@@ -137,37 +137,6 @@ private func unixMeta(_ path: String, follow: Bool = false) -> UnixMeta? {
     return unixMetaFromStat(st)
 }
 
-/// A `d_name` byte buffer, up to its NUL terminator, as a String. Nil when
-/// the bytes are not UTF-8.
-func decodeDirentName(_ bytes: UnsafeRawBufferPointer) -> String? {
-    let name = bytes.prefix { $0 != 0 }
-    // Every real name is ASCII, and the stdlib decode is the only one of the
-    // two that does not go through NSString on a per-entry path.
-    if name.allSatisfy({ $0 < 0x80 }) { return String(decoding: name, as: UTF8.self) }
-    return String(bytes: name, encoding: .utf8)
-}
-
-/// A directory entry name, or nil when its bytes are not UTF-8.
-///
-/// `d_name` is raw bytes: a POSIX filesystem holds any byte except NUL and `/`,
-/// so a name can be invalid UTF-8. `String(cString:)` decodes with the platform
-/// default and substitutes U+FFFD, and the caller hands that lossy string back
-/// to `fstatat`/`openat` as UTF-8, which names a *different* entry: the walk
-/// would then attribute one file's size to another, or drop the entry when the
-/// replacement names nothing. A name that cannot be reproduced byte for byte
-/// has no usable path, so the entry is reported as unaccounted instead.
-func direntName(_ ent: UnsafeMutablePointer<dirent>) -> String? {
-    withUnsafePointer(to: &ent.pointee.d_name) { ptr in
-        // 256 on Linux, `__DARWIN_MAXDIRNAMLEN` on Darwin. Reading a fixed 256
-        // on macOS truncates a long name, and the truncated string names a
-        // different entry for the `fstatat` that follows.
-        let capacity = MemoryLayout.size(ofValue: ent.pointee.d_name)
-        return ptr.withMemoryRebound(to: CChar.self, capacity: capacity) { chars in
-            decodeDirentName(UnsafeRawBufferPointer(start: chars, count: capacity))
-        }
-    }
-}
-
 public enum DiskRootError: Error, Equatable, CustomStringConvertible, LocalizedError, Sendable {
     case missing(path: String)
     case notADirectory(path: String)

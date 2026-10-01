@@ -1,4 +1,10 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
 /// XDG Base Directory: unset, empty, or non-absolute values use `home/fallback`.
 /// A trailing separator is dropped, so the value reads as the directory the
 /// scan opens. `core/host/hostexec.c` and `ui/linux-qt/finding.cpp` normalize
@@ -289,6 +295,89 @@ private func isHomeBoundary(_ c: Character) -> Bool {
     if c == "/" || c == " " || c == "\t" || c == "\n" || c == "\r" { return true }
     return !c.isLetter && !c.isNumber && c != "." && c != "-" && c != "_"
         && c != "~" && c != "+" && c != "="
+}
+
+// MARK: - Directory entries
+//
+// The d_name readers, shared by every walk in the library: the disk trees,
+// the leftover scan, the cache stamp, and the overlay and app discovery
+// reads all name a directory entry from these rather than from
+// FileManager.contentsOfDirectory, and they do so for the reason spelled
+// on direntName below. They live here, with the other path and filesystem
+// primitives, because a low-level reader owned by one feature module would
+// put every other caller on a wrong-direction dependency of that feature.
+//
+
+/// A `d_name` byte buffer, up to its NUL terminator, as a String. Nil when
+/// the bytes are not UTF-8.
+func decodeDirentName(_ bytes: UnsafeRawBufferPointer) -> String? {
+    let name = bytes.prefix { $0 != 0 }
+    // Every real name is ASCII, and the stdlib decode is the only one of the
+    // two that does not go through NSString on a per-entry path.
+    if name.allSatisfy({ $0 < 0x80 }) { return String(decoding: name, as: UTF8.self) }
+    return String(bytes: name, encoding: .utf8)
+}
+
+/// A directory entry name, or nil when its bytes are not UTF-8.
+///
+/// `d_name` is raw bytes: a POSIX filesystem holds any byte except NUL and `/`,
+/// so a name can be invalid UTF-8. `String(cString:)` decodes with the platform
+/// default and substitutes U+FFFD, and the caller hands that lossy string back
+/// to `fstatat`/`openat` as UTF-8, which names a *different* entry: the walk
+/// would then attribute one file's size to another, or drop the entry when the
+/// replacement names nothing. A name that cannot be reproduced byte for byte
+/// has no usable path, so the entry is reported as unaccounted instead.
+func direntName(_ ent: UnsafeMutablePointer<dirent>) -> String? {
+    withUnsafePointer(to: &ent.pointee.d_name) { ptr in
+        // 256 on Linux, `__DARWIN_MAXDIRNAMLEN` on Darwin. Reading a fixed 256
+        // on macOS truncates a long name, and the truncated string names a
+        // different entry for the `fstatat` that follows.
+        let capacity = MemoryLayout.size(ofValue: ent.pointee.d_name)
+        return ptr.withMemoryRebound(to: CChar.self, capacity: capacity) { chars in
+            decodeDirentName(UnsafeRawBufferPointer(start: chars, count: capacity))
+        }
+    }
+}
+
+/// The entries of `root`, as paths, dot files excluded.
+///
+/// Reads `d_name` as raw bytes rather than through
+/// `FileManager.contentsOfDirectory`, which decodes with the platform default
+/// and substitutes U+FFFD. The paths returned here are the arguments of the
+/// guarded `rm -rf` the leftover scan generates, so a lossy name is not a
+/// cosmetic loss: the U+FFFD path names a *different* entry, and the report
+/// claims an entry was removed that is still on disk. An entry whose bytes are
+/// not UTF-8 has no path a UTF-8 API can name, so `direntName` returns nil for
+/// it and it is left out, the same rule the disk walk follows.
+func listEntries(_ root: String) -> [String] {
+    directoryEntryNames(root).map { (root as NSString).appendingPathComponent($0) }
+}
+
+/// The entry *names* of `root`, dot files excluded, sorted.
+///
+/// The name-only twin of `listEntries`, for the readers that build a path by
+/// appending a name to a root they already hold. `FileManager
+/// .contentsOfDirectory(atPath:)` is not an equivalent reader: on Linux and
+/// macOS it decodes `d_name` with the platform default encoding and substitutes
+/// U+FFFD for a byte that is not text, and every caller here hands the result
+/// straight back to `stat`, `realpath`, or the generated `rm -rf`. The U+FFFD
+/// spelling names a *different* entry, so one file's size is attributed to
+/// another, a shadow row names a packaged file that is not there, and a removal
+/// line reports a file removed that is still on disk. `direntName` reads the raw
+/// bytes and refuses the entry whose bytes are not UTF-8, the same rule the disk
+/// walk follows.
+///
+/// A directory that cannot be opened is an empty list, which is what a caller
+/// already got from `contentsOfDirectory` failing.
+func directoryEntryNames(_ root: String) -> [String] {
+    guard let dir = opendir(root) else { return [] }
+    defer { closedir(dir) }
+    var names: [String] = []
+    while let ent = readdir(dir) {
+        guard let name = direntName(ent), !name.hasPrefix(".") else { continue }
+        names.append(name)
+    }
+    return names.sorted()
 }
 
 public func cleanupPathDirectories(home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [String] {
