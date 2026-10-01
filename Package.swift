@@ -18,11 +18,15 @@ let uiDeps: [Package.Dependency] = []
 // Sources/AppAtticScan/Settings.swift accepts, and the ones
 // `core/host/hostexec.c` applies to the two host-exec switches: `1`, `true`,
 // `yes`, `on`, case-insensitive, surrounding blanks ignored, and nothing else.
-// `scripts/lint.sh` compares the two lists so they cannot drift. A manifest
-// cannot import the scan library, so the rule is restated here.
+// The blanks are U+0020 and U+0009 and no others, because that is the pair
+// `env_flag` skips; `.whitespaces` and `.whitespacesAndNewlines` also strip
+// newlines and Unicode spaces, so a value carrying one would be on here and off
+// in the host. `scripts/lint.sh` compares both the spellings and the trim set
+// across all three trees so neither can drift. A manifest cannot import the
+// scan library, so the rule is restated here.
 private func envSwitchIsOn(_ name: String) -> Bool {
     guard let raw = ProcessInfo.processInfo.environment[name] else { return false }
-    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let value = raw.trimmingCharacters(in: CharacterSet(charactersIn: " \t")).lowercased()
     return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 

@@ -162,10 +162,23 @@ static int exec_answered(const char *cmd, char *out, size_t cap) {
 /* APPATTIC_HOST_EXEC_LIVE picks between canned fixtures and a live execvp, so
    a value that reads as false has to leave it off. Reading it as "non-empty
    and not 0" made LIVE=false the sandbox downgrade it exists to avoid, and
-   put real apt output in front of a caller expecting the fixture. */
+   put real apt output in front of a caller expecting the fixture.
+
+   The off list also names the values that separate env_flag from the two
+   report-side readers of the same switch, `configBoolSwitch` in
+   Sources/AppAtticScan/Settings.swift and envSwitchIsOn in Package.swift.
+   env_flag strips a space and a tab off each end and compares what is left, so
+   a value carrying a newline, a carriage return, or a vertical tab is not a
+   boolean here. Those readers used to trim .whitespaces and
+   .whitespacesAndNewlines, which strip all of them, so `appattic config` named
+   LIVE as on for a host that served fixtures: the report claiming a live
+   execvp that never happened. `scripts/lint.sh` now compares the trim set
+   across the three trees, and this list is the C side of what that set means. */
 static int check_host_exec_live_flag(void) {
-    static const char *const kOff[] = {"false", "FALSE", "no", "off", "0", "", " 1x "};
-    static const char *const kOn[] = {"1", "true", "yes", "on", " ON "};
+    static const char *const kOff[] = {
+        "false", "FALSE", "no", "off", "0", "", " 1x ",
+        "\n1\n", "1\n", "\n1", "\r1\r", "\0131\013", "\0141\014", "\302\2401\302\240"};
+    static const char *const kOn[] = {"1", "true", "yes", "on", " ON ", "\t1\t", " \t1\t "};
     const char *cmd = "apt-get -s autoremove";
     const char *fixture = "Remv libfoo0";
     char out[4096];

@@ -372,6 +372,28 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(byName["APPATTIC_HOST_EXEC_FIXTURE"]?.effect, "off: live package queries")
     }
 
+    /// `configBoolSwitch` exists to say what `core/host/hostexec.c` will do,
+    /// so the two have to agree on what "surrounding blanks" means as well as
+    /// on the spellings. `env_flag` trims a space and a tab and nothing else;
+    /// `.whitespaces` also trims a newline, a carriage return, a form feed, a
+    /// vertical tab, and every Unicode space, so `APPATTIC_HOST_EXEC_LIVE`
+    /// holding `"\n1\n"` read as on here and as off there. The report then
+    /// said a Linux run would exec the real package managers against a host
+    /// that served it fixtures, which is the whole failure this function is
+    /// written to prevent.
+    func testBoolSwitchTrimsOnlyWhatTheCoreHostTrims() {
+        // Both trees trim these, so the value is on in both.
+        for on in [" 1 ", "\t1\t", " \t1\t "] {
+            XCTAssertTrue(configBoolSwitch(on), on.debugDescription)
+        }
+        // `env_flag` leaves these in the value it compares, so the core host
+        // reads them as off and prints "is not a boolean".
+        for off in ["\n1\n", "\r1\r", "\u{0B}1\u{0B}", "\u{0C}1\u{0C}",
+                    "\u{00A0}1\u{00A0}", "1\n", "\n1"] {
+            XCTAssertFalse(configBoolSwitch(off), off.debugDescription)
+        }
+    }
+
     /// `NO_COLOR` disables on a non-empty value only, and `APPATTIC_PAGE` falls
     /// back to the overview on a name it does not know, the same as the windows.
     func testSwitchesWithASetButUnusableValueSaySo() {

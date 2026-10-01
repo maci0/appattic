@@ -271,6 +271,57 @@ if [[ -z "$swift_on" || "$swift_on" != "$c_on" || "$swift_on" != "$manifest_on" 
 fi
 echo "switch spellings: ok"
 
+# The same rule names what "surrounding blanks" means, and the three trees had
+# three different answers: env_flag skips a space and a tab, the scan library
+# trimmed .whitespaces (which is also a newline, a carriage return, a form
+# feed, a vertical tab, and every Unicode space), and the manifest trimmed
+# .whitespacesAndNewlines. A value like a newline-wrapped "1" was therefore read
+# as on by the report and as off by the core host that runs the query, so the
+# check above passed on the spellings while the two disagreed on the value. The
+# set is now U+0009 and U+0020 in all three; the C host is the authority because
+# it is what decides between canned fixtures and a live execvp.
+#
+# The C host spells the two blanks as the C escapes ' ' and '\t' on one line;
+# the manifest and the library spell them as a `charactersIn:` literal holding
+# the same two characters. Each side is decoded to its raw bytes and shown as
+# hex, so the comparison is on the characters and not on how they are written.
+# `|| true` so a moved or renamed line reaches the error below naming both
+# empty sets, rather than aborting the whole lint on a bare grep miss.
+c_trim_line="$(sed -n '/^static int env_flag/,/^}/p' "$ROOT/core/host/hostexec.c" \
+    | grep -m1 "raw == ' '" || true)"
+# `while (*raw == ' ' || *raw == '\t')` -> the two char literals after `== `.
+c_trim="$(grep -oE "== '[^']*'" <<<"$c_trim_line" | cut -d "'" -f2 \
+    | while IFS= read -r lit; do printf '%b' "$lit"; done \
+    | od -An -tx1 | tr -d ' \n' | fold -w2 | LC_ALL=C sort -u | tr '\n' ' ')"
+# The library keeps the set in configBoolSwitchTrimSet; the manifest inlines the
+# same two characters, so that literal is read when the binding is not there.
+swift_trim_src="$(sed -n '/^let configBoolSwitchTrimSet/,+0p' \
+    "$ROOT/Sources/AppAtticScan/Settings.swift")"
+# `|| true` so a moved or renamed line reaches the error below naming both
+# empty sets, rather than aborting the whole lint on a bare grep miss.
+[[ -n "$swift_trim_src" ]] || swift_trim_src="$(sed -n '/^private func envSwitchIsOn/,/^}/p' \
+    "$ROOT/Package.swift" | grep 'charactersIn' || true)"
+# A \t in the Swift literal is the two characters backslash-t; printf %b turns
+# the escapes back into the byte they name before they are compared.
+swift_trim="$(printf '%s' "$swift_trim_src" | cut -d '"' -f2 \
+    | while IFS= read -r lit; do printf '%b' "$lit"; done \
+    | od -An -tx1 | tr -d ' \n' | fold -w2 | LC_ALL=C sort -u | tr '\n' ' ')"
+if [[ -z "$c_trim" || "$c_trim" != "$swift_trim" ]]; then
+    echo "error: the on/off switch trim sets differ between the trees" >&2
+    echo "       swift (configBoolSwitchTrimSet): $swift_trim" >&2
+    echo "       c      (env_flag):               $c_trim" >&2
+    exit 1
+fi
+# The set the check accepts is the C host's, named here so a future change there
+# is a deliberate edit in all three trees rather than a silent disagreement.
+if [[ "$c_trim" != "09 20 " ]]; then
+    echo "error: env_flag no longer trims exactly a tab and a space" >&2
+    echo "       got: $c_trim" >&2
+    echo "       the switch rule, Package.swift, and the report must move with it" >&2
+    exit 1
+fi
+echo "switch trim set: ok"
+
 # One plugin list, three trees. `wasm_sources` in core/build.sh is the
 # declaration the spec names, and the argv the build derives from it is copied
 # into core/README.md and into the spec's Host load list. The two documents are

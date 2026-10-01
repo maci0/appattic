@@ -66,6 +66,40 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(checkVersion.contains("appattic-qt.1"), checkVersion)
     }
 
+    /// `appattic erase` prints its result on stdout, like every other command
+    /// that reports one, so it pipes. The Qt man page said stderr, which is
+    /// what the command used to do: `appattic erase | grep removed` is the use
+    /// the stream exists for, and a page naming the other stream tells a
+    /// script author the command writes nothing they can read. The man page is
+    /// prose no test read, so the wrong stream sat there after the change.
+    func testQtManPageNamesTheStreamEraseReportsOn() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let page = try String(
+            contentsOf: root.appendingPathComponent("packaging/appattic-qt.1"),
+            encoding: .utf8
+        )
+        // The sentence after the command name, which is the one naming the
+        // stream. `split` on the name is what locates it, so a man page that
+        // stops documenting erase fails here rather than passing on absence.
+        let rest = page
+            .components(separatedBy: "appattic erase")
+            .dropFirst()
+            .first
+            .map { String($0.prefix(400)) } ?? ""
+        XCTAssertFalse(rest.isEmpty, "the Qt man page no longer documents appattic erase")
+        XCTAssertTrue(
+            rest.contains("standard output"),
+            "the Qt man page does not say erase reports on standard output"
+        )
+        XCTAssertFalse(
+            rest.contains("standard error"),
+            "the Qt man page still says erase reports on standard error"
+        )
+    }
+
     /// The AppStream `<description>` is the only release note the package
     /// ships, so a `<release>` with a version and no note is a silent release.
     /// The gate that stops it lives in check-version.sh; this pins both the

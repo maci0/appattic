@@ -339,12 +339,29 @@ private func androidSdkEntryEffect(_ raw: String, home other: String) -> String 
     return "set but empty, so the default SDK directories only"
 }
 
-/// `1`/`true`/`yes`/`on` in any case, after trimming, and nothing else. The
-/// same rule `core/host/hostexec.c` applies to its two switches, so the report
-/// cannot call a value on that the core host then reads as off.
+/// `1`/`true`/`yes`/`on` in any case, after trimming, and nothing else.
+///
+/// The trim set is the C host's, not Foundation's: `env_flag` in
+/// `core/host/hostexec.c` strips a space and a tab off each end and compares
+/// what is left, so that is all a value may carry here. `trimmingCharacters(in:
+/// .whitespaces)` also strips a newline, a carriage return, a form feed, a
+/// vertical tab, and every Unicode space, and an `APPATTIC_HOST_EXEC_LIVE`
+/// holding `"\n1\n"` then read as on in this report and as off in the host that
+/// actually runs the query — the report claiming a live execvp that never
+/// happened. `Package.swift` trims the same set for `APPATTIC_NO_MAC_UI`, and
+/// `scripts/lint.sh` compares all three so the sets cannot drift again.
 func configBoolSwitch(_ raw: String) -> Bool {
-    let value = raw.trimmingCharacters(in: .whitespaces).lowercased()
+    let value = configBoolSwitchTrimmed(raw).lowercased()
     return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
+/// The blanks `configBoolSwitch` removes, and no others: U+0020 and U+0009,
+/// the two `env_flag` skips. Named so the lint check can read the literals out
+/// of the one place that applies them.
+let configBoolSwitchTrimSet = " \t"
+
+func configBoolSwitchTrimmed(_ raw: String) -> String {
+    raw.trimmingCharacters(in: CharacterSet(charactersIn: configBoolSwitchTrimSet))
 }
 
 /// Load settings.json. A missing file is defaults. Empty JSON, unknown keys, wrong

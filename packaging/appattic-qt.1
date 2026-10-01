@@ -156,8 +156,8 @@ under your home directory. It is owner-only. A run that removes or updates
 something drops it, so the next run scans again, and so does a run more than 24
 hours after the one that wrote it.
 .B appattic erase
-removes it on demand, whatever its age, and reports on standard error whether
-there was one.
+removes it on demand, whatever its age, and reports on standard output whether
+there was one, so the result is pipeable like every other command's.
 .TP
 .I $XDG_CONFIG_HOME/AppAttic/AppAttic.conf
 Settings the window used before
