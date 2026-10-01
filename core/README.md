@@ -18,7 +18,7 @@ Every manager and leftover path is a plugin: one `<id>.zig` compiled to `<id>.wa
 > `scripts/lint.sh` fails when the two copies differ.
 >
 > Which argv the host will run, and which findings it refuses to run at all,
-> is `appattic_host_exec_allowed` (`core/host/hostexec.h:46`) and the
+> is `appattic_host_exec_allowed` (`core/host/hostexec.h`) and the
 > per-manager Inventory table in the spec. Read those rather than a list
 > restated here.
 >

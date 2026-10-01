@@ -21,6 +21,7 @@ Usage: bash scripts/lint.sh
   hostexec warnings-as-errors, dependency pin consistency,
   the system-name list matches across the Zig core and the Swift library,
   the host plugin argv matches the list core/build.sh emits,
+  no `path:line` citation in the markdown, since line numbers rot silently,
   desktop entry, AppStream metainfo, man page, Flatpak manifest,
   zig fmt --check, no AI tool credit in commit messages
 EOF
@@ -266,6 +267,40 @@ for _doc in "${plugin_argv_docs[@]}"; do
     fi
 done
 echo "host plugin argv: ok"
+
+# No `path:line` citation in a markdown doc. A line number in prose rots
+# silently: nothing fails when an edit shifts one, and the doc still reads as
+# though it had been checked, so a reader following a stale citation lands on
+# whatever moved onto that line. The symbol is what a reader greps for, and it
+# does not go stale. The spec cited twelve of these and six had already drifted
+# by the time this check landed.
+doc_cite_files=(
+    "$ROOT/README.md"
+    "$ROOT/DESIGN.md"
+    "$ROOT/CONTRIBUTING.md"
+    "$ROOT/core/README.md"
+    "$ROOT/docs/specs/README.md"
+    "$ROOT/docs/specs/2026-08-26-zig-wasm-core-design.md"
+    "$ROOT/docs/privacy.md"
+    "$ROOT/docs/tmog-design-language.md"
+    "$ROOT/docs/runbooks/state-recovery.md"
+)
+cite_bad=0
+for _cite_src in "${doc_cite_files[@]}"; do
+    while IFS= read -r _cite; do
+        echo "error: ${_cite_src#"$ROOT"/} cites a line number: $_cite" >&2
+        cite_bad=1
+    done < <(rg -N -o '`[A-Za-z0-9_./-]+\.(zig|swift|cpp|h|c|sh|sh):[0-9]+`' "$_cite_src" 2>/dev/null \
+        | sort -u || true)
+done
+if [[ "$cite_bad" -ne 0 ]]; then
+    echo "       fix: name the symbol and the file, without the line:" >&2
+    # The backticks are the form being asked for, not a command.
+    # shellcheck disable=SC2016
+    echo '             (`groupLinuxLeftovers`, `ui/linux-qt/finding.cpp`)' >&2
+    exit 1
+fi
+echo "doc citations: ok (no line numbers to go stale)"
 
 # The desktop entry, the AppStream metainfo, the man page, and the Flatpak
 # manifest have to name the same app, the same binary, and the same icon, and
