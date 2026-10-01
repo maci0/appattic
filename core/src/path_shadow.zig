@@ -129,14 +129,14 @@ var pkg_store: [pkg_listing_store_len]u8 = undefined;
 /// for every (overlay name x package dir) probe.
 ///
 /// The linear scan cost `overlay_names x package_dirs x listing_lines`, and
-/// each of the four packaged bin roots this plugin declares carries thousands
+/// each of the five packaged bin roots this plugin declares carries thousands
 /// of names (`ls -1 /usr/bin` reports 5 443 on the machine this was measured
-/// on): 100 overlay names against six such roots measured 37 ms of pure CPU
-/// per scan, before any command ran. The set answers each probe in O(1), the
-/// same 37 ms measured 27 us, and a name the index does not hold is a name
-/// the listing does not carry, so it could only have failed the `test -f` that
-/// follows. The `test -f` stays: `ls` lists directories too and only the test
-/// knows which it was.
+/// on): 100 overlay names against the six such roots this plugin declared at
+/// the time measured 37 ms of pure CPU per scan, before any command ran. The
+/// set answers each probe in O(1), the same 37 ms measured 27 us, and a name
+/// the index does not hold is a name the listing does not carry, so it could
+/// only have failed the `test -f` that follows. The `test -f` stays: `ls` lists
+/// directories too and only the test knows which it was.
 ///
 /// Offsets are stored as `offset + 1` so a zero slot reads as empty. A listing
 /// with more names than slots cannot be indexed, and a name it did not hold
@@ -370,7 +370,7 @@ const overlay_cargo_bin = pstore.home_sentinel ++ "/.cargo/bin";
 const overlay_applications = pstore.home_sentinel ++ "/.local/share/applications";
 
 // The packaged roots, in the same order `defaultPackageShadowDirs` lists the
-// ones that need no discovery: the four FHS bin dirs and the two desktop
+// ones that need no discovery: the five FHS bin dirs and the two desktop
 // dirs first, so the finding a user sees is the one under a real packaged
 // tree. `max_package_dirs` bounds how many are prefiltered, and a root past
 // the bound is dropped with no note, so the bound is checked at compile time

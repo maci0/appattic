@@ -6,7 +6,8 @@
 #   (default)  build core/out WASM, link Qt binary, ldd gate, --smoke gate
 #   --smoke    skip cmake rebuild; re-run ldd + binary --smoke on existing build
 #   release    link the Release binary, into ui/linux-qt/build-release
-# Binary flags: --smoke / --version / --help (strict WASM load on --smoke only).
+# Binary flags: --smoke, and --dev-check <check> on a debug build
+# (strict WASM load on --smoke only).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,7 +34,8 @@ Usage: scripts/linux-qt-link.sh [--smoke] [release|debug]
   --smoke    skip cmake rebuild; re-run ldd + binary --smoke on existing build
   release    link the Release binary, into ui/linux-qt/build-release
 
-Binary flags: --smoke / --version / --help (strict WASM load on --smoke only).
+Binary flags: --smoke, and --dev-check <check> on a debug build
+(strict WASM load on --smoke only).
 Exit 3 on non-Linux. Homebrew Qt on macOS is not a Linux Qt link.
 EOF
             exit 0

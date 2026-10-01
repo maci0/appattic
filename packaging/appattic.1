@@ -34,8 +34,9 @@ shows ten rows and no status lines.
 .SH COMMANDS
 .TP
 .B config
-Print the settings file, its values, the path of the settings backup and
-whether it is there, and the XDG paths this machine resolves, then exit.
+Print the settings file, its values, the path of the settings backup and of
+the file a restore replaced (each with whether it is there), the scan cache
+path, and the XDG paths this machine resolves, then exit.
 Nothing is scanned, so it is safe to run anywhere.
 .TP
 .B report
@@ -230,6 +231,16 @@ mangled
 can be put back with a
 .BR "cp" .
 Nothing reads it while AppAttic runs.
+.TP
+.I ~/.local/share/appattic/settings.json.bad
+The settings file a restore replaced, kept so a restore that turns out to be
+the wrong one is not a second loss. Written by a window's "Restore settings
+from backup". Like
+.IR settings.json.bak ,
+nothing reads it while AppAttic runs, and
+.B appattic erase
+removes it. The procedure is
+.IR docs/runbooks/state-recovery.md .
 .TP
 .I ~/.local/share/appattic/last-scan.json
 The scan cache, a full list of the app and leftover paths the last scan found

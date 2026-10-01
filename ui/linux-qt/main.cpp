@@ -3760,7 +3760,7 @@ static int runHelp() {
 #ifndef NDEBUG
     usage += " [--dev-check <check>]";
     options +=
-        "  --dev-check <table|stream|disk|shot> [dir]\n"
+        "  --dev-check <table|stream|disk|overview|shot> [dir]\n"
         "              debug build only: run one check and exit\n";
 #endif
     std::fprintf(stdout, "%s\n\n%s", usage.c_str(), options.c_str());

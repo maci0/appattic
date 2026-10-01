@@ -125,7 +125,10 @@ void groupLinuxLeftovers(QVector<Finding> &findings);
 /// reading of anything outside it.
 ///
 /// Mirrors `LeftoverStatus` in Sources/AppAtticScan/Models.swift, which the CLI
-/// and the macOS UI share with the JSON this shell parses. It was a bare
+/// and the macOS UI share with the JSON this shell parses, and is a superset of
+/// it: Swift names `orphaned`, `shadow`, `owned`, `system`, and `active`, and
+/// this shell adds `review`, which the apt and container-runtime plugins write
+/// for a row that is listed and cleanable, and `keep`. It was a bare
 /// `QString` here, compared against a literal at each site, so the vocabulary
 /// lived once per language and nothing checked the two against each other: the
 /// Qt shell wrote `"keep"`, which is in no `LeftoverStatus` case and in no Zig

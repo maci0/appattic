@@ -1,6 +1,11 @@
 import Foundation
 
 /// Leftover classification stored as a string on JSON models so unknown values stay round-trippable.
+///
+/// The Linux Qt shell reads the same wire vocabulary through its own
+/// `LeftoverStatus` (`ui/linux-qt/finding.h`), which is a superset of this
+/// enum: it also names `review` and `keep`, so a row this half cannot produce
+/// is still decided there rather than read as an orphan.
 public enum LeftoverStatus: String, Codable, Sendable, Hashable, CaseIterable {
     case orphaned
     case shadow
