@@ -39,7 +39,12 @@ jobs:
 
   lint:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # 30, not 15: this job is a full-history checkout (scripts/lint.sh reads
+    # every commit message), shellcheck over every script in the tree, and the
+    # three C passes GCC -fanalyzer, clang --analyze and ASan+UBSan. On a
+    # loaded runner the 15 the job used to carry expired on the analyzer, so
+    # the run failed on a timeout that says nothing about the tree.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
