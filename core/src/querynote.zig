@@ -2,6 +2,26 @@ const std = @import("std");
 const jsonbuf = @import("jsonbuf.zig");
 const host_exec = @import("host_exec.zig");
 
+/// Call a plugin's render through the shrinkers below.
+///
+/// Most renders are a bare `fn(list)` or `fn(a, b)`. A render that also needs
+/// something beside its lists — the engine name `container_runtime` renders
+/// with, or the comptime `Spec` the path plugins render with — is handed in as
+/// a value carrying that, with a `render` method that takes the lists alone,
+/// so the shrink order and the note latch stay written once here rather than
+/// once per plugin.
+inline fn callRender(comptime Render: type, render: Render, args: anytype) bool {
+    if (@typeInfo(Render) == .@"fn") return @call(.auto, render, args);
+    // A wrapped render is a method, so the value it carries is its first
+    // argument and the lists follow it. The method may take it by value or by
+    // pointer, so the wrapper type is unwrapped either way.
+    const Wrapped = switch (@typeInfo(Render)) {
+        .pointer => |p| p.child,
+        else => Render,
+    };
+    return @call(.auto, Wrapped.render, .{render} ++ args);
+}
+
 /// Failures kept per plugin run. Past this the rest are counted, not listed.
 pub const max_logged = 8;
 
@@ -89,7 +109,7 @@ pub const Log = struct {
     /// machine.
     pub fn renderShrinking(
         self: *Log,
-        comptime render: anytype,
+        render: anytype,
         list: anytype,
         n: *usize,
     ) i32 {
@@ -97,7 +117,7 @@ pub const Log = struct {
         // the render reads the same way whichever shrinker reported it.
         var noted = false;
         while (true) {
-            if (render(list[0..n.*])) return 0;
+            if (callRender(@TypeOf(render), render, .{list[0..n.*]})) return 0;
             if (n.* == 0) return 1;
             if (!noted) {
                 self.addDroppedRows(1);
@@ -111,7 +131,7 @@ pub const Log = struct {
     /// trimmed first, so the shorter-lived list of the two is what survives.
     pub fn renderShrinkingPair(
         self: *Log,
-        comptime render: anytype,
+        render: anytype,
         first: anytype,
         n_first: *usize,
         second: anytype,
@@ -119,7 +139,7 @@ pub const Log = struct {
     ) i32 {
         var noted = false;
         while (true) {
-            if (render(first[0..n_first.*], second[0..n_second.*])) return 0;
+            if (callRender(@TypeOf(render), render, .{ first[0..n_first.*], second[0..n_second.*] })) return 0;
             if (n_second.* > 0) {
                 n_second.* -= 1;
             } else if (n_first.* > 0) {
@@ -134,12 +154,12 @@ pub const Log = struct {
         }
     }
 
-    /// `renderShrinkingPair` for a plugin that parses four lists, trimmed
+    /// `renderShrinkingTriple` for a plugin that parses four lists, trimmed
     /// `second`, then `fourth`, then `third`, then `first`: the order apt
     /// wants, so an outdated list never survives at the cost of an orphan.
     pub fn renderShrinkingQuad(
         self: *Log,
-        comptime render: anytype,
+        render: anytype,
         first: anytype,
         n_first: *usize,
         second: anytype,
@@ -151,18 +171,56 @@ pub const Log = struct {
     ) i32 {
         var noted = false;
         while (true) {
-            if (render(
+            if (callRender(@TypeOf(render), render, .{
                 first[0..n_first.*],
                 second[0..n_second.*],
                 third[0..n_third.*],
                 fourth[0..n_fourth.*],
-            )) return 0;
+            })) return 0;
             if (n_second.* > 0) {
                 n_second.* -= 1;
             } else if (n_fourth.* > 0) {
                 n_fourth.* -= 1;
             } else if (n_third.* > 0) {
                 n_third.* -= 1;
+            } else if (n_first.* > 0) {
+                n_first.* -= 1;
+            } else {
+                return 1;
+            }
+            if (!noted) {
+                self.addDroppedRows(1);
+                noted = true;
+            }
+        }
+    }
+
+    /// `renderShrinkingPair` for a plugin that parses three lists, trimmed
+    /// `third`, then `second`, then `first`. `container-runtime` wants that
+    /// order: a machine over its row limit keeps a dangling image or a
+    /// leftover volume in the list before a stopped container.
+    pub fn renderShrinkingTriple(
+        self: *Log,
+        render: anytype,
+        first: anytype,
+        n_first: *usize,
+        second: anytype,
+        n_second: *usize,
+        third: anytype,
+        n_third: *usize,
+    ) i32 {
+        var noted = false;
+        while (true) {
+            const sliced = .{
+                first[0..n_first.*],
+                second[0..n_second.*],
+                third[0..n_third.*],
+            };
+            if (callRender(@TypeOf(render), render, sliced)) return 0;
+            if (n_third.* > 0) {
+                n_third.* -= 1;
+            } else if (n_second.* > 0) {
+                n_second.* -= 1;
             } else if (n_first.* > 0) {
                 n_first.* -= 1;
             } else {
@@ -333,6 +391,43 @@ test "truncated lists and failed commands share one note" {
     const note = w.slice().?;
     try std.testing.expect(std.mem.indexOf(u8, note, "apt list --upgradable did not answer") != null);
     try std.testing.expect(std.mem.indexOf(u8, note, "2 lists hit the row limit") != null);
+}
+
+test "the triple shrinker drains the third list before the second, and a wrapped render carries its own state" {
+    // The shrink order `container-runtime` depends on: the containers drain
+    // whole, then the volumes, then the images, so a machine over its row
+    // limit spends the shortfall on the stopped containers before it spends it
+    // on the dangling images and leftover volumes. Starting at 3/2/1 and
+    // stopping at one row per list leaves both other lists empty too, because
+    // a list only moves on once the one before it is empty. The wrapped render
+    // is how a plugin hands the shrinker something the lists do not carry: the
+    // engine name, the path plugin's `Spec`.
+    var first = [_]u32{ 1, 2, 3 };
+    var second = [_]u32{ 10, 20 };
+    var third = [_]u32{100};
+    var n_first: usize = 3;
+    var n_second: usize = 2;
+    var n_third: usize = 1;
+    var log = Log{};
+    // Refuse while any list is longer than one row, and record the slice the
+    // render was handed, so the order is observable in the last call.
+    const Recorder = struct {
+        last: [3]usize,
+        pub fn render(self: *@This(), a: []const u32, b: []const u32, c: []const u32) bool {
+            self.last = .{ a.len, b.len, c.len };
+            return a.len <= 1 and b.len <= 1 and c.len <= 1;
+        }
+    };
+    var rec = Recorder{ .last = .{ 0, 0, 0 } };
+    try std.testing.expectEqual(
+        @as(i32, 0),
+        log.renderShrinkingTriple(&rec, &first, &n_first, &second, &n_second, &third, &n_third),
+    );
+    try std.testing.expectEqual([3]usize{ 1, 0, 0 }, rec.last);
+    // Five rows went and one list paid for them: the note counts lists, and
+    // the latch is what makes that one.
+    try std.testing.expectEqual(@as(usize, 1), log.dropped_rows);
+    try std.testing.expectEqual(@as(usize, 0), log.dropped);
 }
 
 test "rows shed from one list are one list, not one list each" {

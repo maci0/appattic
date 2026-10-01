@@ -337,7 +337,7 @@ var result_nbytes: u32 = 0;
 var exec_buf: [65536]u8 = undefined;
 var none_json_buf: [512]u8 = undefined;
 
-fn render(comptime spec: Spec, hits: []const Orphan) bool {
+fn renderRows(spec: Spec, hits: []const Orphan) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
     w.raw("{\"plugin\":");
@@ -405,6 +405,16 @@ fn missingJson(comptime spec: Spec) []const u8 {
     return w.slice() orelse "{}";
 }
 
+/// The `Spec` a render needs beside its list, so the shared single-list
+/// shrinker can call `render` and every path plugin does not keep its own copy
+/// of the shrink loop. See `querynote.callRender`.
+const WithSpec = struct {
+    spec: Spec,
+    pub fn render(self: WithSpec, hits: []const Orphan) bool {
+        return renderRows(self.spec, hits);
+    }
+};
+
 pub fn query(comptime spec: Spec, present: i32) i32 {
     note = .{};
     if (present == 0) {
@@ -416,7 +426,7 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     const nexec = host_exec.run(queryCommand(spec), &exec_buf);
     note.add(queryCommand(spec), nexec);
     if (nexec < 0) {
-        if (!render(spec, &.{})) return 1;
+        if (!renderRows(spec, &.{})) return 1;
         return 0;
     }
     var hits: [256]Orphan = undefined;
@@ -425,16 +435,7 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     var n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths, spec.allow, &store_dropped);
     note.addTruncatedRows(n, hits.len);
     note.addDroppedRows(store_dropped);
-    // `render` takes the spec as a comptime parameter, so the shared
-    // single-list shrinker cannot call it. The drop is recorded as the first
-    // row goes, not once the render succeeds: `render` writes the note itself.
-    const n_parsed = n;
-    while (true) {
-        if (render(spec, hits[0..n])) return 0;
-        if (n == 0) return 1;
-        if (n == n_parsed) note.addDroppedRows(1);
-        n -= 1;
-    }
+    return note.renderShrinking(WithSpec{ .spec = spec }, &hits, &n);
 }
 
 pub fn resultSlice() []const u8 {
@@ -463,7 +464,7 @@ test "a note lands inside the result object" {
     };
     note = .{};
     note.add("ls -1 /home/user/.config", host_exec.fail);
-    try std.testing.expect(render(spec, &.{}));
+    try std.testing.expect(renderRows(spec, &.{}));
     note = .{};
     try std.testing.expect(jsonbuf.isValidJson(resultSlice()));
 }
@@ -633,7 +634,7 @@ test "render keeps a large leftover list" {
         const p = std.fmt.bufPrint(&paths[i], "/home/user/.config/{s}", .{n}) catch unreachable;
         hits[i] = .{ .name = n, .path = p };
     }
-    try std.testing.expect(render(spec, &hits));
+    try std.testing.expect(renderRows(spec, &hits));
     try std.testing.expect(std.mem.indexOf(u8, resultSlice(), "app-00") != null);
     try std.testing.expect(std.mem.indexOf(u8, resultSlice(), "app-79") != null);
 }

@@ -768,7 +768,11 @@ static bool isSafePackageName(const QString &n) {
     // than quote it into a different command.
     if (n.startsWith(QLatin1Char('-'))) return false;
     for (const QChar c : n) {
-        // ASCII only, so this matches Zig `jsonbuf.isSafeCmdIdent` exactly.
+        // ASCII only, and a superset of Zig `jsonbuf.isSafeCmdIdent`: this also
+        // allows `@` and `/`, which a scoped npm name (`@scope/pkg`) needs and
+        // which a child dependency carries on the platforms that have them.
+        // Nothing outside ASCII is allowed, so the two gates cannot disagree
+        // about a future scalar.
         // `QChar::isLetterOrNumber` is Unicode-wide, so it accepted any letter
         // or digit: that is harmless for the shell, but a name is
         // identity-bearing. U+202E RIGHT-TO-LEFT OVERRIDE renders the rest of a

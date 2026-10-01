@@ -255,6 +255,20 @@ fn parseBuf(nexec: i32, buf: []const u8) []const u8 {
     return buf[0..@intCast(nexec)];
 }
 
+/// `renderCtr` plus the engine name it renders with, so the shared triple
+/// shrinker can call it.
+const WithEngine = struct {
+    engine: []const u8,
+    pub fn render(
+        self: WithEngine,
+        images: []const Hit,
+        volumes: []const Hit,
+        containers: []const Hit,
+    ) bool {
+        return renderCtr(self.engine, images, volumes, containers);
+    }
+};
+
 fn query_impl(present: i32) i32 {
     note = .{};
     if (present != EngineDocker and present != EnginePodman) {
@@ -276,26 +290,18 @@ fn query_impl(present: i32) i32 {
     note.addTruncatedRows(nvol, volumes.len);
     var nps = parseExitedContainers(parseBuf(np, &ps_buf), &containers);
     note.addTruncatedRows(nps, containers.len);
-    // `renderCtr` takes the engine name beside the three lists, so the shared
-    // shrinkers cannot call it. The drop is recorded as the first row goes,
-    // not once the render succeeds: `renderCtr` writes the note itself.
-    var noted = false;
-    while (true) {
-        if (renderCtr(engine, images[0..nimg], volumes[0..nvol], containers[0..nps])) return 0;
-        if (nps > 0) {
-            nps -= 1;
-        } else if (nvol > 0) {
-            nvol -= 1;
-        } else if (nimg > 0) {
-            nimg -= 1;
-        } else {
-            return 1;
-        }
-        if (!noted) {
-            note.addDroppedRows(1);
-            noted = true;
-        }
-    }
+    // `renderCtr` takes the engine name beside the three lists, so it reaches
+    // the shrinker through `WithEngine` rather than this file keeping a second
+    // copy of the shrink loop. See `querynote.callRender`.
+    return note.renderShrinkingTriple(
+        WithEngine{ .engine = engine },
+        &images,
+        &nimg,
+        &volumes,
+        &nvol,
+        &containers,
+        &nps,
+    );
 }
 
 comptime {

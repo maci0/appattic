@@ -648,7 +648,8 @@ static int verifyHelpers() {
     // reverses the rest of the name on screen, and the zero-width ranges drop
     // letters without changing the length, so the name beside the checkbox and
     // the name the script removes can differ. The plugin refuses these at the
-    // source; this is the second gate, and it matches Zig `isSafeCmdIdent`.
+    // source; this is the second gate, and it is ASCII-only, the same range as
+    // Zig `isSafeCmdIdent`.
     for (const QString &spoofed : {
              QString::fromUtf8("libfoo\xE2\x80\xAE" "dwp"),  // U+202E RLO
              QString::fromUtf8("lib\xE2\x80\x8B" "foo"),    // U+200B ZWSP

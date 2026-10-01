@@ -167,12 +167,12 @@ void ScriptProcess::appendOutput(const QByteArray &chunk) {
     m_output = m_output.right(kScriptOutputCap);
     // The cut can land mid-character; the partial one at the front would decode
     // to a replacement character in the report.
-    int start = 0;
-    while (start < m_output.size()
-           && (static_cast<unsigned char>(m_output.at(start)) & 0xC0) == 0x80) {
-        ++start;
+    int lead = 0;
+    while (lead < m_output.size()
+           && (static_cast<unsigned char>(m_output.at(lead)) & 0xC0) == 0x80) {
+        ++lead;
     }
-    m_output.remove(0, start);
+    m_output.remove(0, lead);
 }
 
 // Only forget the path once it is gone: a survivor stays in `m_path` so the
