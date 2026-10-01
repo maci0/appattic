@@ -77,6 +77,75 @@ Michroma-Regular.ttf|ui/linux-qt/fonts/Michroma-Regular.ttf|b62301163788bc5b7f8f
 EOF
 )
 
+# One row per SwiftPM pin: identity|SPDX license id. A pin is third-party code
+# SwiftPM compiles into a shipped binary (AppAtticUI links SwiftCrossUI, which
+# links everything below it), so its grant ships with it exactly as the vendored
+# font's does, and `sbom` records it for the same reason. Without this a
+# consumer reading the inventory cannot tell whether what is in the binary is
+# MIT, Apache-2.0, or the one weak-copyleft package in the set, which is the
+# question a licence review opens the file to answer.
+#
+# Read from each package's LICENSE at its pinned revision, not from its
+# homepage: a fork can relicense, and the pin is what decides what is compiled.
+# `check` fails when a pin has no row, so a new transitive pin cannot join the
+# tree with its licence silently unrecorded, and fails when a row names a pin
+# Package.resolved no longer carries, so a removed dependency cannot leave a
+# licence on record for code that is gone.
+#
+# The ids here are SPDX short identifiers, which is the vocabulary CycloneDX
+# licenses[].license.id takes. jpeg is MPL-2.0, which is weak copyleft at
+# file level: it obliges a modified copy of that package's own files to stay
+# MPL, not the whole binary, so it does not reach the rest of AppAttic. It is
+# recorded rather than omitted because it is the one row a reviewer has to read
+# twice, and because a future pin under a copyleft licence is a question worth
+# answering out loud instead of discovering in the inventory.
+SWIFTPM_LICENSES=$(cat <<'EOF'
+jpeg|MPL-2.0
+libpng|Libpng
+libwebp|BSD-3-Clause
+swift-cross-ui|MIT
+swift-cwinrt|BSD-3-Clause
+swift-image-formats|MIT
+swift-log|Apache-2.0
+swift-macro-toolkit|Apache-2.0
+swift-mutex|MIT
+swift-syntax|Apache-2.0
+swift-uwp|BSD-3-Clause
+swift-webview2core|BSD-3-Clause
+swift-windowsappsdk|BSD-3-Clause
+swift-windowsfoundation|BSD-3-Clause
+swift-winui|BSD-3-Clause
+zlib|Zlib
+EOF
+)
+
+# The SPDX id for one pin, or nonzero when the table has no row for it, names
+# the same identity twice with different ids, or carries a blank id.
+#
+# A blank id counts as no row rather than as the empty string. The two read the
+# same way in the table and mean different things here: a pin whose row is
+# absent is a licence nobody wrote down, and a pin whose row is present but
+# blank is the same mistake left just visible enough to slip past. Neither may
+# become a component carrying licenses[].license.id "", which would record a
+# grant nobody granted as though it had been checked. Two spellings of one pin
+# are a table bug too, and picking either silently would record a licence
+# nobody chose.
+swiftpm_license() {
+    local want="$1" identity license found=""
+    while IFS='|' read -r identity license; do
+        [[ -n "$identity" ]] || continue
+        [[ "$identity" == "$want" ]] || continue
+        license="${license//[[:space:]]/}"
+        [[ -n "$license" ]] || continue
+        if [[ -n "$found" && "$found" != "$license" ]]; then
+            return 1
+        fi
+        found="$license"
+    done <<<"$SWIFTPM_LICENSES"
+    [[ -n "$found" ]] || return 1
+    printf '%s\n' "$found"
+}
+
 FAILURES=0
 fail() {
     echo "error: $1" >&2
@@ -601,9 +670,42 @@ check_swiftpm_pins() {
         if [[ -z "$revision" ]]; then
             fail "SwiftPM pin $identity carries no revision; a branch pin is not a pin"
         fi
+        check_swiftpm_license "$identity"
     done < <(swiftpm_pins)
+    check_swiftpm_license_spelling
     check_swiftpm_pin_spelling
     check_swiftpm_declarations
+}
+
+# Every pin's grant, in both directions. A pin with no row is third-party code
+# SwiftPM compiles into the shipped binary whose licence nobody recorded, and a
+# row with no pin is a licence on record for code that is no longer there. One
+# gate on both, so neither drift is something a reader has to notice.
+check_swiftpm_license() {
+    local identity="$1" license
+    if ! license="$(swiftpm_license "$identity")"; then
+        fail "SwiftPM pin $identity has no row in SWIFTPM_LICENSES; add the SPDX id its LICENSE grants, read at the pinned revision"
+        return
+    fi
+    assert_json_safe "swiftpm license" "$license"
+}
+
+# A row naming a pin Package.resolved does not carry. Removing a dependency
+# leaves its licence behind otherwise, and the inventory keeps claiming a
+# grant for code no build links.
+check_swiftpm_license_spelling() {
+    local identity license
+    while IFS='|' read -r identity license; do
+        [[ -n "$identity" ]] || continue
+        if [[ -z "$license" ]]; then
+            fail "SWIFTPM_LICENSES row $identity has no SPDX id; an unpinned licence is not a licence"
+            continue
+        fi
+        if ! swiftpm_pins | awk -F'\t' -v i="$identity" '$1 == i { found = 1 } END { exit !found }'; then
+            fail "SWIFTPM_LICENSES names $identity, which Package.resolved does not pin"
+        fi
+        assert_json_safe "swiftpm license" "$license"
+    done <<<"$SWIFTPM_LICENSES"
 }
 
 # swiftpm_declared() reads one spelling: .package(url: "...", .exact("x")) with
@@ -803,19 +905,28 @@ run_sbom() {
         components+=("$(artifact_component "$name" "$version" "$purl" "$url" "$hash" SHA-256 "$(artifact_arch_qualifier "$name" "$url")")")
     done < <(parse_checksums | awk -F'\t' '$1 == "OK" { print $2 }' | sort)
 
-    local identity rev location purl
+    local identity rev location purl license
     while IFS=$'\t' read -r identity version location rev; do
         [[ -n "$identity" ]] || continue
         if [[ -z "$rev" ]]; then
             fail "cannot build SBOM: $identity has no pinned revision"
             return 1
         fi
+        # The licence is what the package grants at the revision being shipped,
+        # not a guess from its owner: it is the field a compliance reader opens
+        # this file for, and it comes from SWIFTPM_LICENSES, which `check`
+        # keeps in step with the pins.
+        if ! license="$(swiftpm_license "$identity")"; then
+            fail "cannot build SBOM: $identity has no recorded SPDX licence"
+            return 1
+        fi
         assert_json_safe "sbom swiftpm identity" "$identity"
         assert_json_safe "sbom swiftpm version" "$version"
         assert_json_safe "sbom swiftpm location" "$location"
+        assert_json_safe "sbom swiftpm license" "$license"
         purl="$(swiftpm_purl "$location")"
         assert_json_safe "sbom swiftpm purl" "$purl"
-        components+=("$(artifact_component "$identity" "$version" "$purl" "$location" "$rev" SHA-1 "")")
+        components+=("$(swiftpm_component "$identity" "$version" "$purl" "$location" "$rev" "$license")")
     done < <(swiftpm_pins | sort)
 
     # The runtime the Flatpak bundle carries, which the other two loops cannot
@@ -923,6 +1034,28 @@ artifact_component() {
     printf '      "purl": "%s@%s%s",\n' "$purl" "$version" "$qualifier"
     printf '      "hashes": [\n'
     printf '        { "alg": "%s", "content": "%s" }\n' "$alg" "$hash"
+    printf '      ],\n'
+    printf '      "externalReferences": [\n'
+    printf '        { "type": "distribution", "url": "%s" }\n' "$url"
+    printf '      ]\n'
+    printf '    }'
+}
+
+# A Swift package: artifact_component's shape, plus the SPDX licence, because
+# unlike a downloaded toolchain this code is compiled into the binary the
+# release ships, so its grant travels with it the way the vendored font's does.
+swiftpm_component() {
+    local name="$1" version="$2" purl="$3" url="$4" rev="$5" license="$6"
+    printf '    {\n'
+    printf '      "type": "library",\n'
+    printf '      "name": "%s",\n' "$name"
+    printf '      "version": "%s",\n' "$version"
+    printf '      "purl": "%s@%s",\n' "$purl" "$version"
+    printf '      "hashes": [\n'
+    printf '        { "alg": "SHA-1", "content": "%s" }\n' "$rev"
+    printf '      ],\n'
+    printf '      "licenses": [\n'
+    printf '        { "license": { "id": "%s" } }\n' "$license"
     printf '      ],\n'
     printf '      "externalReferences": [\n'
     printf '        { "type": "distribution", "url": "%s" }\n' "$url"

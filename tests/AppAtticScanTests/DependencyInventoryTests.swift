@@ -240,4 +240,120 @@ final class DependencyInventoryTests: XCTestCase {
             )
         }
     }
+
+    /// The identity|SPDX-id rows scripts/deps.sh keeps for the pins, read out of
+    /// that table the way `deps.sh check` reads it, so the table this asserts
+    /// against is the one the gate uses rather than a second copy that could
+    /// agree with itself and disagree with the script.
+    private func swiftpmLicenses() throws -> [String: String] {
+        let deps = try String(
+            contentsOf: root.appendingPathComponent("scripts/deps.sh"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(
+            deps.range(of: "SWIFTPM_LICENSES=$(cat <<'EOF'\n"),
+            "scripts/deps.sh has no SWIFTPM_LICENSES table"
+        )
+        let rest = deps[start.upperBound...]
+        let end = try XCTUnwrap(
+            rest.range(of: "\nEOF\n"),
+            "the SWIFTPM_LICENSES table is not terminated by EOF"
+        )
+        var licenses: [String: String] = [:]
+        for line in rest[..<end.lowerBound].split(separator: "\n") {
+            let parts = line.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else {
+                XCTFail("SWIFTPM_LICENSES row '\(line)' is not identity|SPDX-id")
+                continue
+            }
+            let identity = parts[0].trimmingCharacters(in: .whitespaces)
+            let id = parts[1].trimmingCharacters(in: .whitespaces)
+            // A blank id is not an entry. deps.sh treats a row with no usable
+            // id as no row at all, so storing one here would let a pin look
+            // licensed to this test while the gate and the SBOM agree it is
+            // not, which is the one disagreement this file exists to prevent.
+            guard !id.isEmpty else {
+                XCTFail("SWIFTPM_LICENSES row \(identity) has no SPDX id")
+                continue
+            }
+            XCTAssertNil(licenses[identity], "\(identity) is listed more than once")
+            licenses[identity] = id
+        }
+        return licenses
+    }
+
+    /// A Swift package is third-party code SwiftPM compiles into a shipped
+    /// binary, so its grant ships with it and the inventory has to carry it.
+    /// The field a compliance reader opens this file for is `licenses`, and a
+    /// pin without one is code that is in the artifact under a grant nobody
+    /// recorded.
+    ///
+    /// The expected ids are read out of SWIFTPM_LICENSES rather than written
+    /// here again, so the assertion is that the generator emits what the table
+    /// records, and the table is what the table test below keeps honest.
+    func testEverySwiftPMPinCarriesItsLicence() throws {
+        let pins = try resolvedPins()
+        XCTAssertFalse(pins.isEmpty)
+        let licenses = try swiftpmLicenses()
+        let components = try sbomComponents()
+
+        for pin in pins {
+            let expected = try XCTUnwrap(
+                licenses[pin.identity],
+                "\(pin.identity) is pinned but has no SPDX licence in SWIFTPM_LICENSES"
+            )
+            let matches = components.filter { $0["name"] as? String == pin.identity }
+            XCTAssertEqual(matches.count, 1, "\(pin.identity) is not exactly one SBOM component")
+            let entries = matches.first?["licenses"] as? [[String: [String: String]]] ?? []
+            let ids = entries.compactMap { $0["license"]?["id"] }
+            XCTAssertEqual(
+                ids, [expected],
+                "\(pin.identity) is licensed \(expected) at its pinned revision; the SBOM says \(ids)"
+            )
+        }
+    }
+
+    /// Both directions of the same invariant, on the table itself: a pin with no
+    /// row is code whose grant nobody wrote down, and a row with no pin is a
+    /// licence on record for code no build links. `deps.sh check` fails the
+    /// build on either; this fails the test suite, which is what a contributor
+    /// runs before CI.
+    func testSwiftPMLicenseTableMatchesTheLockfile() throws {
+        let licenses = try swiftpmLicenses()
+        XCTAssertFalse(licenses.isEmpty)
+        let pinned = Set(try resolvedPins().map(\.identity))
+        for identity in pinned {
+            XCTAssertNotNil(licenses[identity], "\(identity) is pinned with no SPDX licence recorded")
+        }
+        for identity in licenses.keys {
+            XCTAssertTrue(
+                pinned.contains(identity),
+                "SWIFTPM_LICENSES names \(identity), which Package.resolved does not pin"
+            )
+        }
+    }
+
+    /// A component that carries an empty `licenses[].license.id` looks
+    /// licensed to anything scanning shape rather than content, which is worse
+    /// than a component with no `licenses` key at all: the absence is visible,
+    /// the blank is not. Asserting on every component rather than on one keeps
+    /// the check from passing because the one package someone thought to look at
+    /// happened to be filled in.
+    func testNoComponentCarriesAnEmptyLicenceId() throws {
+        let components = try sbomComponents()
+        for component in components {
+            guard let name = component["name"] as? String else { continue }
+            guard let licenses = component["licenses"] as? [[String: [String: String]]] else {
+                continue  // build toolchains and the Flatpak runtime carry none
+            }
+            let ids = licenses.compactMap { $0["license"]?["id"] }
+            XCTAssertEqual(ids.count, licenses.count, "\(name) has a licence entry with no id")
+            for id in ids {
+                XCTAssertFalse(
+                    id.trimmingCharacters(in: .whitespaces).isEmpty,
+                    "\(name) is a component with an empty SPDX licence id"
+                )
+            }
+        }
+    }
 }
