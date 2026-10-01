@@ -34,6 +34,29 @@ public func isSafeCommandArgument(_ value: String) -> Bool {
     !value.isEmpty && !value.hasPrefix("-")
 }
 
+/// The ASCII bytes of the Zig core's `jsonbuf.isIdentByte`, byte for byte:
+/// `a-z A-Z 0-9 - _ . +` and nothing else. A byte at or above 0x80 is not one
+/// of them, so a non-ASCII name is refused here exactly as it is there.
+@inline(__always)
+private func isSafeIdentByte(_ c: UInt8) -> Bool {
+    (c >= 0x61 && c <= 0x7A) || (c >= 0x41 && c <= 0x5A) || (c >= 0x30 && c <= 0x39) ||
+        c == 0x2D || c == 0x5F || c == 0x2E || c == 0x2B
+}
+
+/// The twin of the Zig core's `jsonbuf.isSafeCmdIdent`: an ASCII identifier
+/// that is not an option.
+///
+/// `isSafeCommandArgument` above refuses only a leading `-`, which is all a
+/// shell needs; a name that also feeds a *manager listing* needs the whole
+/// identifier set, because the two readers of that listing are this one and
+/// the core's, and a row one of them drops and the other keeps is a report
+/// that changes with the build that produced it. `@` is deliberately absent
+/// here, matching `isIdentByte`: the core callers that accept a scope spelling
+/// (`brew.isSafeBrewName`) add that check themselves.
+public func isSafeCmdIdent(_ value: String) -> Bool {
+    !value.isEmpty && !value.hasPrefix("-") && value.utf8.allSatisfy(isSafeIdentByte)
+}
+
 /// The ` >/dev/null 2>&1` the guard wrapper puts behind the query, and the one
 /// `parseGuardedRemove` takes back off it.
 let guardSilence = " >/dev/null 2>&1"

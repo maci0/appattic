@@ -269,8 +269,7 @@ public func parseGnomeApplicationState(_ path: String, now: Date = Date()) -> [S
 
 public func parseFlatpakVarAppMtimes(_ root: String, now: Date = Date()) -> [String: Date] {
     var hits: [String: Date] = [:]
-    guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return hits }
-    for name in names {
+    for name in directoryEntryNames(root) {
         let path = (root as NSString).appendingPathComponent(name)
         // One `attributesOfItem` answers existence, kind and mtime: the
         // `fileExists` + `attributesOfItem` pair stat'ed every app twice.

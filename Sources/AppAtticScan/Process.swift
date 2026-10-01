@@ -76,13 +76,11 @@ private func whichSearchDirectories() -> [String] {
         "/sbin",
     ]
     let nvmRoot = home + "/.nvm/versions/node"
-    if let vers = try? FileManager.default.contentsOfDirectory(atPath: nvmRoot) {
-        // Sorted: `contentsOfDirectory` returns readdir order, so an unsorted
-        // list searches the node versions in a different order per process and
-        // two installs of the same tool resolve to whichever came first.
-        for v in vers.sorted() where !v.hasPrefix(".") {
-            extras.append(nvmRoot + "/" + v + "/bin")
-        }
+    // `directoryEntryNames` sorts, so the node versions are searched in a
+    // stable order and two installs of the same tool resolve to the same one
+    // on every process.
+    for v in directoryEntryNames(nvmRoot) {
+        extras.append(nvmRoot + "/" + v + "/bin")
     }
     let pathDirs = (ProcessInfo.processInfo.environment["PATH"] ?? "")
         .split(separator: ":")

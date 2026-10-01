@@ -17,9 +17,8 @@ func isCrossOverPath(_ path: String) -> Bool {
 
 func listCrossOverBottleDirs(bottlesDir: String? = nil) -> [String] {
     guard let root = bottlesDir ?? defaultCrossOverBottlesDir() else { return [] }
-    guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
     var out: [String] = []
-    for name in names where !name.hasPrefix(".") {
+    for name in directoryEntryNames(root) {
         let dir = (root as NSString).appendingPathComponent(name)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else { continue }

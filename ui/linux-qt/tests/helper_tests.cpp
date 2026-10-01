@@ -2264,6 +2264,74 @@ static int checkDurableWrite() {
     return 0;
 }
 
+/// The same durable write, at a path whose directory is not ASCII, and the
+/// rename beside it.
+///
+/// `writeDurableFile` writes through `QSaveFile` and then reopens the path to
+/// fsync it and to open the directory for the final rename. Qt encodes a file
+/// name as UTF-8 on every platform this ships on, so both of those have to be
+/// handed the *same* bytes, or the `::open` and `::mkdir` name a different
+/// file than the one just written and the write reports itself durable when
+/// nothing was flushed. A path that is only ASCII cannot tell the two
+/// encodings apart, so this check writes into a directory whose name carries a
+/// non-ASCII scalar and reads the result back.
+///
+/// It does not currently discriminate on every machine: `QString::toLocal8Bit`
+/// returns UTF-8 wherever the system locale is UTF-8, which is the case for
+/// every locale a CI runner normally has, and this suite has no latin-1 locale
+/// to run under. It is here so a regression in the sync/rename path is caught
+/// on a machine that does have one, and so the non-ASCII path keeps being
+/// exercised at all; `syncWrittenFile` uses `toUtf8` for the reason above
+/// whether or not this check can observe it.
+static int checkDurableWriteNonASCIIPath() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "durable write (non-ascii): temp dir failed\n");
+        return 1;
+    }
+    // U+00E9 precomposed followed by U+0301, so the directory name is both
+    // non-ASCII and a spelling of a composed character that does not match it.
+    const QString dir = tmp.filePath(QString::fromUtf8("writable-\xC3\xA9\xCC\x81"));
+    if (!QDir().mkpath(dir)) {
+        std::fprintf(stderr, "durable write (non-ascii): mkpath failed\n");
+        return 1;
+    }
+    const QString path = QDir(dir).filePath(QStringLiteral("settings.json"));
+    AppSettings first;
+    first.ignoredLeftoverPaths = QStringList{QStringLiteral("/first")};
+    if (writeFile(path, encodeSettingsJson(first))) {
+        std::fprintf(stderr, "durable write (non-ascii): the starting file was not written\n");
+        return 1;
+    }
+    AppSettings second;
+    second.ignoredLeftoverPaths = QStringList{QStringLiteral("/second")};
+    if (!writeDurableFile(encodeSettingsJson(second), path)) {
+        std::fprintf(stderr, "durable write (non-ascii): the write did not land\n");
+        return 1;
+    }
+    QFile written(path);
+    AppSettings s;
+    QString err;
+    if (!written.open(QIODevice::ReadOnly)
+        || !parseSettingsJson(written.readAll(), &s, &err)
+        || s.ignoredLeftoverPaths != second.ignoredLeftoverPaths) {
+        std::fprintf(stderr, "durable write (non-ascii): the file is not what was written (%s)\n",
+                     qPrintable(err));
+        return 1;
+    }
+    // The atomic replace leaves the target and nothing else. If the write path
+    // and the sync/rename path disagreed on the encoding, the temp file is
+    // still sitting there under the name the *other* encoding produced.
+    const QStringList left = QDir(dir).entryList(QDir::Files | QDir::Hidden);
+    if (left.size() != 1) {
+        std::fprintf(stderr, "durable write (non-ascii): %d files left, expected 1 (%s)\n",
+                     int(left.size()), qPrintable(left.join(QLatin1Char(','))));
+        return 1;
+    }
+    std::fprintf(stdout, "durable write (non-ascii): ok\n");
+    return 0;
+}
+
 /// A generated cleanup or update script is an executable holding the `rm`
 /// lines the run just carried out, under a temp name the user cannot guess. A
 /// removal that does not land has to be reported and the path kept, or the
@@ -2622,6 +2690,7 @@ int main(int argc, char **argv) {
         checkRootDirDoneTotals(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
         checkSettingsBackup(), checkSettingsBackupRepeatedSave(), checkDurableWrite(),
+        checkDurableWriteNonASCIIPath(),
         checkSettingsRestore(),
         checkLocaleGrouping(), checkSizeLocaleDigits(),
         checkLegacySettingsMigration(), checkScriptFileRemoval(),

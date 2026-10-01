@@ -224,12 +224,12 @@ func skipLiveDu(_ a: AppRecord) -> Bool {
 }
 
 func steamBundles(in dir: String, depth: Int) -> [String] {
-    guard depth >= 1, let entries = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [] }
+    guard depth >= 1 else { return [] }
     var out: [String] = []
-    // Sorted: `contentsOfDirectory` hands back readdir order, and
-    // `steamGameBundle` takes the first bundle matching a manifest name, so
-    // an unsorted read picks a different survivor on every process.
-    for name in entries.sorted() where !name.hasPrefix(".") {
+    // `directoryEntryNames` sorts, which `steamGameBundle` needs: it takes the
+    // first bundle matching a manifest name, and readdir order would pick a
+    // different survivor on every process.
+    for name in directoryEntryNames(dir) {
         let child = (dir as NSString).appendingPathComponent(name)
         if name.hasSuffix(".app") {
             if !name.posixLowercased().contains("helper") {
@@ -327,11 +327,10 @@ public func findSteamApps(libraryRoots: [String]? = nil) -> [AppRecord] {
             apps.append(client)
         }
         let steamapps = (real as NSString).appendingPathComponent("steamapps")
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: steamapps) else { return }
-        // Sorted: `contentsOfDirectory` hands back readdir order, and
-        // `seenIds` keeps the first record of an app id, so an unsorted walk
-        // picks a different library's copy of a shared app on each run.
-        for name in names.sorted() where name.hasPrefix("appmanifest_") && name.hasSuffix(".acf") {
+        // `directoryEntryNames` sorts, which `seenIds` needs: it keeps the
+        // first record of an app id, and readdir order would pick a different
+        // library's copy of a shared app on each run.
+        for name in directoryEntryNames(steamapps) where name.hasPrefix("appmanifest_") && name.hasSuffix(".acf") {
             let acf = (steamapps as NSString).appendingPathComponent(name)
             guard let text = readUTF8File(acf),
                   let manifest = parseSteamAppManifest(text),
@@ -352,9 +351,8 @@ func steamManifestStamp(libraryRoots: [String]? = nil) -> String {
     var lines: [String] = []
     visitSteamLibraries(libraryRoots: libraryRoots) { real in
         let steamapps = (real as NSString).appendingPathComponent("steamapps")
-        let acfs = ((try? FileManager.default.contentsOfDirectory(atPath: steamapps)) ?? [])
+        let acfs = directoryEntryNames(steamapps)
             .filter { $0.hasPrefix("appmanifest_") && $0.hasSuffix(".acf") }
-            .sorted()
         lines.append("steam:\(stampEscape(real)):\(stampJoin(acfs))")
     }
     return lines.sorted().joined(separator: "\n")

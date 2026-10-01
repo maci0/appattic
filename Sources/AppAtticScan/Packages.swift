@@ -854,13 +854,14 @@ public func parsePipUserList(_ text: String) -> [PackageEntry] {
 func listDenoGlobals() -> [PackageEntry] {
     let bin = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".deno/bin")
-    guard let names = try? FileManager.default.contentsOfDirectory(atPath: bin.path) else {
-        return []
-    }
-    // Sorted: readdir order varies per process, and the list is reported and
-    // written to the cache in the order it is built.
-    return names.sorted().compactMap { name -> PackageEntry? in
+    // Read as raw `d_name` bytes and gated by `isSafeCmdIdent`, the same pair
+    // the Zig core's `parseDenoGlobalList` uses. The name is spliced into a
+    // generated `deno remove` command, and a lossy decode or a non-ASCII
+    // spelling that the core refuses made the two readers disagree about which
+    // globals exist: the core dropped the row the CLI listed, or the reverse.
+    return directoryEntryNames(bin.path).compactMap { name -> PackageEntry? in
         if name.isEmpty || name.hasPrefix(".") || name == "deno" || name == "deno.exe" { return nil }
+        guard isSafeCmdIdent(name) else { return nil }
         return makePackage(name: name, manager: "deno", kind: "global")
     }
 }

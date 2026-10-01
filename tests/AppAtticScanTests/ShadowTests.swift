@@ -1,5 +1,10 @@
 import XCTest
 @testable import AppAtticScan
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Darwin)
+import Darwin
+#endif
 
 final class ShadowTests: XCTestCase {
     func testLocalBinFileShadowingPackageBinIsListed() throws {
@@ -392,6 +397,93 @@ final class ShadowTests: XCTestCase {
         XCTAssertTrue(leftoverMatchesCategory(exported, categories: ["/usr/bin/python3"]))
         XCTAssertTrue(leftoverMatchesCategory(exported, categories: ["shadow"]))
         XCTAssertFalse(leftoverMatchesCategory(exported, categories: ["firefox"]))
+    }
+
+    /// A directory entry whose name is not valid UTF-8, written through
+    /// `open` because no Foundation path API can spell it.
+    ///
+    /// `0xFF` can never appear in a UTF-8 sequence, so `python3-\xFF` has no
+    /// UTF-8 spelling at all. `FileManager.contentsOfDirectory` decodes
+    /// `d_name` with the platform default encoding and substitutes U+FFFD, so
+    /// it hands back `python3-\u{FFFD}` — a name no file has. The shadow scan
+    /// then built `path` and `shadows` from it, the two `stat` calls resolved
+    /// to nothing, and the generated `rm -rf` was handed a path that does not
+    /// exist while the row claimed a file was shadowed.
+
+    /// The raw bytes of `dir + "/" + name`, NUL terminated, for a `CChar*`
+    /// path. A `String` cannot hold this spelling: `0xFF` decodes to U+FFFD,
+    /// which re-encodes to two bytes and names a *different* file, which is
+    /// the very loss under test. Same shape as `DiskSizeTests`' raw-name case.
+    private func rawPath(_ dir: String, _ name: [UInt8]) -> [UInt8] {
+        Array((dir + "/").utf8) + name + [0x00]
+    }
+
+    private func writeNonUTF8Exec(_ path: [UInt8]) throws {
+        let fd = path.withUnsafeBufferPointer { buf in
+            buf.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buf.count) {
+                open($0, O_WRONLY | O_CREAT | O_EXCL, 0o755)
+            }
+        }
+        try XCTSkipIf(fd < 0, "filesystem refuses a name that is not UTF-8")
+        close(fd)
+    }
+
+    private func unlinkRaw(_ path: [UInt8]) {
+        _ = path.withUnsafeBufferPointer { buf in
+            buf.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buf.count) { unlink($0) }
+        }
+    }
+
+    func testNonUTF8FileNameIsNotReportedAsShadowingAPackageFile() throws {
+        let td = FileManager.default.temporaryDirectory.appendingPathComponent("shadow-nonutf8-\(UUID().uuidString)")
+        let overlay = td.appendingPathComponent("overlay")
+        let packaged = td.appendingPathComponent("usr").appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: overlay, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: packaged, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: td) }
+        // The same base name in both dirs, one spelling UTF-8 and one not, so a
+        // lossy decode maps the two onto a single name.
+        try writeExec(packaged.appendingPathComponent("python3"), body: "#!/bin/sh\necho distro\n")
+        let bad = rawPath(overlay.path, Array("python3".utf8) + [0xFF])
+        try writeNonUTF8Exec(bad)
+        // unlink(2) through the raw bytes: the name holds 0xFF, so the only
+        // `String` spelling of it carries U+FFFD and names a different file,
+        // and the `defer` that removes the temp tree would leave this one
+        // behind on every run.
+        defer { unlinkRaw(bad) }
+
+        let hits = listShadowingOverlays(
+            overlays: [(overlay.path, ".local/bin", "file")],
+            packageDirs: [packaged.path]
+        )
+        // The entry has no path a UTF-8 API can name, so it is left out rather
+        // than reported under a spelling that names a different file.
+        XCTAssertEqual(hits.map(\.name), [], "a U+FFFD name would be an rm -rf of another file")
+        for hit in hits {
+            XCTAssertFalse(hit.path.unicodeScalars.contains("\u{FFFD}"))
+            XCTAssertFalse((hit.shadows ?? "").unicodeScalars.contains("\u{FFFD}"))
+        }
+    }
+
+    func testUTF8FileNameWithNonASCIIScalarIsStillReported() throws {
+        // The other half of the same gate: a name that *is* UTF-8, carrying a
+        // multi-byte scalar, has to keep reaching the report.
+        let td = FileManager.default.temporaryDirectory.appendingPathComponent("shadow-utf8-\(UUID().uuidString)")
+        let overlay = td.appendingPathComponent("overlay")
+        let packaged = td.appendingPathComponent("usr").appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: overlay, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: packaged, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: td) }
+        let name = "python3-\u{00E9}"  // precomposed é
+        try writeExec(packaged.appendingPathComponent(name), body: "#!/bin/sh\necho distro\n")
+        try writeExec(overlay.appendingPathComponent(name), body: "#!/bin/sh\necho mine\n")
+
+        let hits = listShadowingOverlays(
+            overlays: [(overlay.path, ".local/bin", "file")],
+            packageDirs: [packaged.path]
+        )
+        XCTAssertEqual(hits.map(\.name), [name])
+        XCTAssertEqual(hits[0].path, overlay.appendingPathComponent(name).path)
     }
 
     private func writeExec(_ url: URL, body: String) throws {

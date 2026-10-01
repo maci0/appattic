@@ -109,12 +109,10 @@ public func appBundleBases(_ appPath: String) -> [String] {
     let wrapper = (appPath as NSString).appendingPathComponent("Wrapper")
     var isDir: ObjCBool = false
     if FileManager.default.fileExists(atPath: wrapper, isDirectory: &isDir), isDir.boolValue {
-        if let names = try? FileManager.default.contentsOfDirectory(atPath: wrapper) {
-            // Sorted: readdir order decides which of several wrapped bundles
-            // is reported first, and it varies between processes.
-            for name in names.sorted() where name.hasSuffix(".app") {
-                add((wrapper as NSString).appendingPathComponent(name))
-            }
+        // Sorted: readdir order decides which of several wrapped bundles
+        // is reported first, and it varies between processes.
+        for name in directoryEntryNames(wrapper) where name.hasSuffix(".app") {
+            add((wrapper as NSString).appendingPathComponent(name))
         }
     }
     return out
@@ -661,8 +659,7 @@ func findLinuxApps(
     for root in desktopDirs ?? linuxDesktopDirs() {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: root, isDirectory: &isDir), isDir.boolValue else { continue }
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { continue }
-        for name in names.sorted() where name.hasSuffix(".desktop") {
+        for name in directoryEntryNames(root) where name.hasSuffix(".desktop") {
             if name.hasPrefix("steam_app_") { continue }
             let path = (root as NSString).appendingPathComponent(name)
             guard let app = parseDesktopFile(path, sourceDir: root) else { continue }
@@ -730,8 +727,7 @@ func findMacApps(
 }
 
 func dirContainsAppBundle(_ path: String) -> Bool {
-    guard let names = try? FileManager.default.contentsOfDirectory(atPath: path) else { return false }
-    return names.contains { $0.hasSuffix(".app") }
+    directoryEntryNames(path).contains { $0.hasSuffix(".app") }
 }
 
 /// Drops leading and trailing `/` without allocating a `CharacterSet`.
@@ -763,9 +759,8 @@ func strictAncestorDirs(of paths: [String]) -> Set<String> {
 public func nonAppEntriesIn(_ root: String) -> [String] {
     let skip: Set<String> = ["utilities"]
     var out: [String] = []
-    guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
-    for name in names.sorted() {
-        if name.hasSuffix(".app") || name.hasPrefix(".") { continue }
+    for name in directoryEntryNames(root) {
+        if name.hasSuffix(".app") { continue }
         if skip.contains(name.posixLowercased()) { continue }
         let path = (root as NSString).appendingPathComponent(name)
         var isDir: ObjCBool = false
@@ -779,25 +774,30 @@ public func nonAppEntriesIn(_ root: String) -> [String] {
 
 func iterApps(in root: String, maxDepth: Int = 3) -> [String] {
     var out: [String] = []
-    let fm = FileManager.default
-    guard let enumerator = fm.enumerator(atPath: root) else { return out }
-    while let rel = enumerator.nextObject() as? String {
-        let depth = rel.split(separator: "/").count
-        if depth > maxDepth {
-            enumerator.skipDescendants()
-            continue
-        }
-        if rel.contains(".app/") {
-            enumerator.skipDescendants()
-            continue
-        }
-        if rel.hasSuffix(".app") {
-            out.append((root as NSString).appendingPathComponent(rel))
-            enumerator.skipDescendants()
+    // `FileManager.enumerator(atPath:)` decodes each `d_name` with the platform
+    // default and substitutes U+FFFD for a byte that is not text, so a bundle
+    // under a directory that is not UTF-8 came back named by its replacement
+    // and every `stat` and `realpath` below resolved to a path that is not it.
+    // `directoryEntryNames` reads the raw bytes and drops the one entry that has
+    // no UTF-8 spelling, the same rule `direntName` gives the disk walk.
+    func walk(_ dir: String, _ depth: Int) {
+        for name in directoryEntryNames(dir) {
+            let path = (dir as NSString).appendingPathComponent(name)
+            var isDir: ObjCBool = false
+            let isDirectory = FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+            if name.hasSuffix(".app") {
+                out.append(path)
+                continue
+            }
+            // A bundle deeper than the ceiling is not found at all, and one
+            // inside a bundle is not a separate app.
+            guard isDirectory, depth < maxDepth else { continue }
+            walk(path, depth + 1)
         }
     }
-    // The enumerator yields in filesystem order, which differs between runs and
-    // between filesystems. Callers dedup on first sight, so an unsorted walk
-    // picks a different survivor of the same bundle name each time.
+    walk(root, 1)
+    // The walk reads readdir order, which differs between runs and between
+    // filesystems. Callers dedup on first sight, so an unsorted walk picks a
+    // different survivor of the same bundle name each time.
     return out.sorted()
 }

@@ -23,6 +23,31 @@ final class ShellScriptTests: XCTestCase {
         XCTAssertTrue(isSafeCommandArgument("a-b"))
     }
 
+    /// `isSafeCmdIdent` is the tighter gate `listDenoGlobals` applies, and its
+    /// twin in the core is `jsonbuf.isSafeCmdIdent`. The two readers of
+    /// `~/.deno/bin` have to agree on which globals exist, or the CLI lists a
+    /// package the core's removal script does not know.
+    ///
+    /// The byte set is `a-z A-Z 0-9 - _ . +`, so both sides of every range are
+    /// pinned, along with the non-ASCII and shell-metacharacter refusals.
+    /// `isSafeCommandArgument` above would accept all of them.
+    func testIsSafeCmdIdentMatchesTheZigIdentByteSet() {
+        for ok in ["a", "z", "A", "Z", "0", "9", "-", "_", ".", "+", "eslint",
+                   "libwebkit2gtk-4.1", "a+b", "a_b", "a.b", "a-b"] {
+            XCTAssertTrue(isSafeCmdIdent(ok), ok)
+        }
+        for bad in ["", "-", "--force", "/", "a/b", "a b", "a'b", "a;b", "a$b",
+                    "@scope/pkg", "a:b", "a@b", "a=b", "a,b", "a%", "a~", "a|b",
+                    "caf\u{00E9}", "\u{65E5}\u{672C}\u{8A9E}", "a\u{0301}"] {
+            XCTAssertFalse(isSafeCmdIdent(bad), bad)
+        }
+        // A non-ASCII name is refused here exactly as `jsonbuf.isSafeCmdIdent`
+        // refuses it, byte by byte: a multi-byte scalar is several bytes, none
+        // of which is in the set, so the first one already fails.
+        XCTAssertTrue(isSafeCommandArgument("caf\u{00E9}"))
+        XCTAssertFalse(isSafeCmdIdent("caf\u{00E9}"))
+    }
+
     /// A row with no name is refused, not scripted as `apt remove `.
     func testPackageRemoveRefusesAnEmptyName() {
         XCTAssertEqual(

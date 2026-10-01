@@ -309,8 +309,7 @@ private func fingerprintFileStamps(which: WhichFn, clock: MonotonicFn) -> [Strin
     var lines: [String] = []
     if PlatformOverride.isLinux {
         for dir in linuxDesktopDirs() {
-            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
-            let desktops = names.filter { $0.hasSuffix(".desktop") }.sorted()
+            let desktops = directoryEntryNames(dir).filter { $0.hasSuffix(".desktop") }
             if !desktops.isEmpty {
                 lines.append("desk:\(stampEscape(dir)):\(stampJoin(desktops.map { inventoryEntryStamp(dir: dir, name: $0, clock: clock) }))")
             }
@@ -438,7 +437,6 @@ func rootInventoryStamp(
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
         return "root:\(stampEscape(label)):missing"
     }
-    let names = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
     // Name *and* mtime, like every other inventory stamp in this file, plus the
     // nested activity mtime for a directory entry. The entry's own mtime is not
     // enough: `applyRecentActivity` decides orphaned-vs-active from
@@ -464,7 +462,12 @@ func rootInventoryStamp(
     // about a machine that did not change, dropping a snapshot that is still
     // current on every run of a large home. A root over the count is stamped
     // `partial:` so a stamp that did not walk cannot be read as one that did.
-    let visible = names.filter { !$0.hasPrefix(".") }.sorted()
+    //
+    // `directoryEntryNames` reads `d_name` as raw bytes, so an entry whose name
+    // is not UTF-8 leaves the stamp instead of entering it as U+FFFD: the
+    // U+FFFD spelling names a different file on each run for a name that is
+    // not even text, and two such files would share one stamp.
+    let visible = directoryEntryNames(path)
     let probeAll = nested && visible.count <= rootStampProbeEntries
     let ents = stampJoin(visible.map { name in
         inventoryEntryStamp(dir: path, name: name, includeNestedActivity: probeAll, clock: clock)
@@ -476,8 +479,7 @@ func rootInventoryStamp(
 }
 
 func dirNameStamp(_ label: String, _ dir: String) -> String {
-    guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return "" }
-    let ents = stampJoin(names.filter { !$0.hasPrefix(".") }.sorted().map { stampName(dir: dir, name: $0) })
+    let ents = stampJoin(directoryEntryNames(dir).map { stampName(dir: dir, name: $0) })
     if ents.isEmpty { return "" }
     return "\(stampEscape(label)):\(ents)"
 }

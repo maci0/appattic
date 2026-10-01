@@ -24,14 +24,34 @@ func byNameThenPath(_ lhs: DataItem, _ rhs: DataItem) -> Bool {
 /// not UTF-8 has no path a UTF-8 API can name, so `direntName` returns nil for
 /// it and it is left out, the same rule the disk walk follows.
 func listEntries(_ root: String) -> [String] {
+    directoryEntryNames(root).map { (root as NSString).appendingPathComponent($0) }
+}
+
+/// The entry *names* of `root`, dot files excluded, sorted.
+///
+/// The name-only twin of `listEntries`, for the readers that build a path by
+/// appending a name to a root they already hold. `FileManager
+/// .contentsOfDirectory(atPath:)` is not an equivalent reader: on Linux and
+/// macOS it decodes `d_name` with the platform default encoding and substitutes
+/// U+FFFD for a byte that is not text, and every caller here hands the result
+/// straight back to `stat`, `realpath`, or the generated `rm -rf`. The U+FFFD
+/// spelling names a *different* entry, so one file's size is attributed to
+/// another, a shadow row names a packaged file that is not there, and a removal
+/// line reports a file removed that is still on disk. `direntName` reads the raw
+/// bytes and refuses the entry whose bytes are not UTF-8, the same rule the disk
+/// walk follows.
+///
+/// A directory that cannot be opened is an empty list, which is what a caller
+/// already got from `contentsOfDirectory` failing.
+func directoryEntryNames(_ root: String) -> [String] {
     guard let dir = opendir(root) else { return [] }
     defer { closedir(dir) }
-    var paths: [String] = []
+    var names: [String] = []
     while let ent = readdir(dir) {
         guard let name = direntName(ent), !name.hasPrefix(".") else { continue }
-        paths.append((root as NSString).appendingPathComponent(name))
+        names.append(name)
     }
-    return paths.sorted()
+    return names.sorted()
 }
 
 func shouldScanUserBinDir(
@@ -81,8 +101,10 @@ public func listBrokenUserBinLinks(dirs: [String]? = nil) -> [DataItem] {
     let fm = FileManager.default
     var grouped: [String: [(path: String, name: String, dest: String)]] = [:]
     for dir in dirs ?? defaultUserBinDirs() {
-        guard let names = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-        for name in names where !name.hasPrefix(".") {
+        // `directoryEntryNames`, not `contentsOfDirectory`: the name becomes
+        // the `path` a generated `rm -f` runs on, and a lossy decode there
+        // makes the script remove a different file than the row names.
+        for name in directoryEntryNames(dir) {
             let path = (dir as NSString).appendingPathComponent(name)
             guard let dest = try? fm.destinationOfSymbolicLink(atPath: path) else { continue }
             if fm.fileExists(atPath: path) { continue }
@@ -186,8 +208,10 @@ public func listShadowingOverlays(
     for (dir, label, kind) in overlayRoots {
         let dirStd = URL(fileURLWithPath: dir).standardizedFileURL.path
         if pkgSet.contains(dirStd) { continue }
-        guard let names = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-        for name in names.sorted() where !name.hasPrefix(".") {
+        // `directoryEntryNames`, not `contentsOfDirectory`: this name becomes
+        // the `path` and the `shadows` a generated `rm -rf` runs on, so a lossy
+        // decode makes the row name one file and the script remove another.
+        for name in directoryEntryNames(dir) {
             let path = (dir as NSString).appendingPathComponent(name)
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: path, isDirectory: &isDir) else { continue }
@@ -225,8 +249,8 @@ public func listShadowingOverlays(
 }
 
 func preferredBrokenLinkName(_ names: [String], toolFolder: String) -> String {
-    // Callers hand in `contentsOfDirectory` order, which the filesystem is
-    // free to vary; the first-match and longest-name picks below must not.
+    // Callers hand in `directoryEntryNames` order, which is sorted, so the
+    // first-match and longest-name picks below cannot drift between runs.
     let names = names.sorted()
     let variants = [
         toolFolder,
@@ -281,12 +305,11 @@ func executableToolEntries(in dirs: [String]?) -> [ToolEntry] {
     let fm = FileManager.default
     var out: [ToolEntry] = []
     for dir in dirs ?? defaultUserToolDirs() {
-        guard let names = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-        // `contentsOfDirectory` hands back readdir order, which the filesystem
-        // is free to vary between runs. Callers below keep the first entry per
-        // bundle or per name, so an unsorted read picks a different survivor
-        // on every process.
-        for name in names.sorted() where !name.hasPrefix(".") {
+        // `directoryEntryNames` sorts, which callers below need: they keep the
+        // first entry per bundle or per name, and readdir order would pick a
+        // different survivor on every process. It also reads the raw `d_name`
+        // bytes, so the path it builds names the entry it found.
+        for name in directoryEntryNames(dir) {
             let path = (dir as NSString).appendingPathComponent(name)
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { continue }

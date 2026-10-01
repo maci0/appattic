@@ -29,7 +29,14 @@ namespace {
 /// `writeOwnerOnlyFile` does this for the same file from the CLI and the macOS
 /// window.
 bool syncWrittenFile(const QString &path) {
-    const QByteArray cPath = path.toLocal8Bit();
+    // `toUtf8`, not `toLocal8Bit`. `QSaveFile` above opens this same path
+    // through Qt, which encodes a file name as UTF-8 on every platform Qt
+    // supports on Linux; `toLocal8Bit` encodes it in the *system locale*, so
+    // under a latin-1 locale the two name two different bytes and this
+    // `::open` reaches a file that is not the one just written — or none. The
+    // fsync then reports success for a path that was never flushed, or fails
+    // and deletes a settings file that is correct on disk.
+    const QByteArray cPath = path.toUtf8();
     const int fd = ::open(cPath.constData(), O_RDONLY);
     if (fd < 0) return false;
     const bool synced = ::fsync(fd) == 0;
@@ -42,7 +49,7 @@ bool syncWrittenFile(const QString &path) {
     // would make a durable write look like a failed one. A directory that
     // cannot be opened for fsync at all (some network mounts) is as durable as
     // that filesystem can make it.
-    const QByteArray cDir = QFileInfo(path).absolutePath().toLocal8Bit();
+    const QByteArray cDir = QFileInfo(path).absolutePath().toUtf8();
     const int dir = ::open(cDir.constData(), O_RDONLY | O_DIRECTORY);
     if (dir < 0) return true;
     ::fsync(dir);

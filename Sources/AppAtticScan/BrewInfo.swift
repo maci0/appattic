@@ -288,10 +288,9 @@ func formulaBins(prefix: String, name: String) -> [String] {
         .appendingPathComponent(name)
         .appendingPathComponent("bin")
         .path
-    guard let names = try? FileManager.default.contentsOfDirectory(atPath: binDir) else { return [] }
-    return names.filter { base in
-        !base.hasPrefix(".") && !base.hasSuffix(".dylib") && !base.hasSuffix(".prl")
-    }.sorted()
+    return directoryEntryNames(binDir).filter { base in
+        !base.hasSuffix(".dylib") && !base.hasSuffix(".prl")
+    }
 }
 
 public func collectBrew(
