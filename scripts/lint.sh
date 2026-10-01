@@ -60,12 +60,53 @@ fi
 # them: shellcheck lists each by name, and the group keyword is not a list of
 # them. So the ones the tree passes are named one by one below. The rest stay
 # off because the tree does not pass them: masked return (SC2312) and
-# suppressed set -e (SC2310) want 120 and 81 rewrites, and ${var} braces
-# (SC2250) and [[ ]] (SC2292) are the two style rewrites, at 1502 and 32.
-# `shellcheck --enable=all` on the list above is what the four numbers are.
+# suppressed set -e (SC2310) want 131 and 76 rewrites, and ${var} braces
+# (SC2250) and [[ ]] (SC2292) are the two style rewrites, at 1690 and 36.
+# SC2317 is not listed on its own: shellcheck pulls in SC2312 with it, so
+# enabling it here would fail the gate on the masked returns named above.
+# Every name below is one `--list-optional` prints, and the gate below proves
+# it rather than trusting it: shellcheck accepts an unknown --enable name
+# silently and exits 0, so a misspelled rule reads as a passing gate that never
+# ran the check it claims to. `ban-eval` is the shape of name that reads
+# right and buys nothing: this shellcheck implements 11 optional rules and
+# `ban-eval` is not one of them, and a bare `eval` draws nothing from it at
+# all. `--list-optional` is where a name comes from.
+# `shellcheck --enable=all` on this list is what the numbers above are.
 shellcheck -x -P SCRIPTDIR \
     --enable=add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat \
     "${shell_files[@]}"
+
+# Every name the flag above carries is a rule this shellcheck implements. Read
+# the list from the invocation rather than from a grep over this file: the
+# comments here discuss --enable=all and the word "optional", and a free-text
+# match picks those up instead of the flag list.
+mapfile -t enabled_checks < <(
+    # shellcheck disable=SC2016  # the pattern names the literal ${shell_files[@]}
+    sed -n '/^shellcheck -x -P SCRIPTDIR/,/^ *"\${shell_files\[@\]}"/p' \
+        "${BASH_SOURCE[0]}" | grep -o -- '--enable=[a-z0-9,-]*' \
+        | sed 's/--enable=//' | tr ',' '\n' | LC_ALL=C sort -u
+)
+mapfile -t known_checks < <(
+    shellcheck --list-optional | grep -o 'name: *[a-z0-9-]*' | sed 's/name: *//' \
+        | LC_ALL=C sort -u
+)
+if [[ "${#enabled_checks[@]}" -eq 0 ]]; then
+    echo "error: could not read the --enable list off the shellcheck line above" >&2
+    exit 1
+fi
+bogus=0
+for _check in "${enabled_checks[@]}"; do
+    if ! printf '%s\n' "${known_checks[@]}" | grep -qx "$_check"; then
+        echo "error: '$_check' is not an optional rule this shellcheck implements" >&2
+        echo "       fix: take the name from: shellcheck --list-optional" >&2
+        echo "             an unknown name is ignored silently and the gate stays green" >&2
+        bogus=1
+    fi
+done
+if [[ "$bogus" -ne 0 ]]; then
+    exit 1
+fi
+echo "shellcheck rule names: ok (${#enabled_checks[@]} of ${#known_checks[@]} optional rules)"
 
 # Every runnable script answers --help. A contributor who cannot list a
 # script's arguments has to read it, and a script that reaches its dependency
