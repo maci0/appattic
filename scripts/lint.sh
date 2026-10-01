@@ -451,6 +451,13 @@ for flag in -ffile-prefix-map= -fdebug-prefix-map= -fmacro-prefix-map=; do
 done
 # The helper is the only spelling of the Swift build, so a bare `swift build`
 # left anywhere is a build that skips the mapping and the resolution pin.
+#
+# The docs are in scope too, and the reason is not tidiness: a README that
+# hands a contributor `swift build --product appattic-bench` is the only place
+# in the tree where the rule is not enforced on them. A script with a bare
+# `swift build` fails this gate when it is written; a documented one is copied
+# into a shell by whoever is benchmarking, and the drift ships in the answer a
+# new contributor copies before they ever read scripts/swift-build.sh.
 while IFS= read -r stray; do
     echo "error: $stray" >&2
     echo "       runs swift build directly. Use appattic_swift_build from" >&2
@@ -459,7 +466,8 @@ while IFS= read -r stray; do
     exit 1
 done < <(grep -rnE '^[[:space:]]*(\||&&[[:space:]]*|;[[:space:]]*)?swift build ' \
              "$ROOT/build.sh" "$ROOT/run.sh" "$ROOT/scripts" "$ROOT/Dockerfile" \
-             "$ROOT/.github/workflows" 2>/dev/null \
+             "$ROOT/.github/workflows" \
+             "${doc_cite_files[@]}" 2>/dev/null \
          | grep -v -e 'scripts/swift-build.sh' -e 'verify-swift-reproducible.sh' || true)
 echo "swift build flags: ok (build path mapped out of every swift build)"
 

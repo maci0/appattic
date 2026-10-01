@@ -52,9 +52,13 @@ RUN rm -rf .build .swiftpm .zig-cache .zig-cache-local core/out dist \
         ui/linux-qt/build ui/linux-qt/build-release
 # AppAttic Qt 6 link is proven by scripts/linux-qt-link.sh (ldd libQt6Widgets + --smoke).
 # The CLI build goes through scripts/swift-build.sh so the checkout path is
-# mapped out of the binary, the same way every other build does it.
+# mapped out of the binary, the same way every other build does it. The test
+# run calls scripts/test.sh rather than a hand-written `swift test`: that is
+# what CI calls, and it adds the .swift-version toolchain check and the
+# refusal to report a pass over zero tests, so the image cannot go green on a
+# filter that matched nothing.
 RUN . scripts/swift-build.sh \
-    && swift test --filter AppAtticScanTests --disable-automatic-resolution \
+    && bash scripts/test.sh \
     && appattic_swift_build debug --product appattic \
     && bash scripts/linux-qt-link.sh \
     && bash scripts/verify-qt-link.sh

@@ -67,7 +67,8 @@ if [[ ! -x "$BIN" ]]; then
     BIN="$ROOT/.build/release/appattic"
 fi
 if [[ ! -x "$BIN" ]]; then
-    echo "error: no built appattic CLI found (run 'bash scripts/check.sh' or 'swift build -c debug --product appattic')" >&2
+    echo "error: no built appattic CLI found (run 'bash scripts/check.sh', or" >&2
+    echo "       '. scripts/swift-build.sh && appattic_swift_build debug --product appattic')" >&2
     exit 1
 fi
 
