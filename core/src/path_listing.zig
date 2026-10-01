@@ -293,13 +293,31 @@ pub fn isSystemLeftoverName(name: []const u8) bool {
 /// Parse `ls -1b` / `ls -1Ab` of a leftover root. Skip `.` and `..`,
 /// Linux/snap system names, and names in `keep` (newline list).
 ///
+/// `listing` is the listing as `ls -b` printed it, still escaped. It is
+/// unescaped in place, one line at a time, rather than once over the whole
+/// listing before it is read, and that order is the whole point of `-b`.
+///
+/// `ls -1` prints a directory holding one entry called `we<LF>ird` as the two
+/// lines `we` and `ird`: both pass `jsonbuf.isSafeIdent`, both are joined onto
+/// the root, and both become `rm -rf` rows naming paths that are not there.
+/// `ls -b` keeps that name on one line as `we\nird`, but unescaping the whole
+/// listing first puts a real LF back inside the name, and a reader that splits
+/// on LF then cuts it in two again and reproduces the original two rows.
+/// Splitting the escaped text on the LFs `ls` wrote and unescaping each line
+/// after the cut keeps the decoded LF inside the name, where `isSafeIdent`
+/// refuses it, so the row is dropped instead of doubled.
+///
+/// The listing is taken as mutable and is left unescaped: every name a row
+/// records is a slice of it, which is the invariant the fuzz test here pins,
+/// and a caller reads nothing out of it afterwards.
+///
 /// `dropped` counts the rows the path store could not hold. A name that is a
 /// leftover but has nowhere to put its joined path is still a leftover, so it
 /// belongs in the note: `addTruncatedRows` covers the `out` array running
 /// full, and a full store used to shorten the list in the same silent way until
 /// `addDroppedRows` gave it the same `note` field.
 pub fn parseListing(
-    listing: []const u8,
+    listing: []u8,
     keep: []const u8,
     root: []const u8,
     out: []Orphan,
@@ -310,10 +328,25 @@ pub fn parseListing(
     var n: usize = 0;
     var used: usize = 0;
     dropped.* = 0;
+    // Each line is unescaped in place, inside the caller's listing buffer, and
+    // only after the listing has been cut into lines. Unescaping has to wait
+    // until after the cut for the reason the doc comment above gives, and it
+    // has to happen in the caller's buffer because the name a row records is a
+    // slice of it: `path_store.basenameOf` hands back a slice, and the fuzz
+    // invariant this module pins is that a recorded name lies inside the
+    // listing rather than inside a buffer the parser has since reused.
+    //
+    // Unescaping a line in place can only shrink it, so it never overwrites a
+    // byte of the next line, and the split offsets stay valid.
+    // `splitScalar` hands back const parts whatever the input's mutability, so
+    // the line is taken back as mutable before it is unescaped in place. It
+    // points into `listing`, which the caller handed over for this.
     var lines = std.mem.splitScalar(u8, listing, '\n');
-    while (lines.next()) |raw| {
+    while (lines.next()) |const_line| {
         if (n == out.len) break;
-        const line = std.mem.trim(u8, raw, " \t\r");
+        const raw: []u8 = @constCast(const_line);
+        const line_len = pstore.unescapeLsB(raw);
+        const line = std.mem.trim(u8, raw[0..line_len], " \t\r");
         if (line.len == 0) continue;
         // The row is still `ls -b` text here. Unescaping it before the split
         // put a name carrying a newline back across a line boundary, so one
@@ -355,6 +388,25 @@ pub fn parseListing(
         n += 1;
     }
     return n;
+}
+
+/// `parseListing` for a listing written as a literal in a test. The listing is
+/// unescaped in place, so it has to be mutable and a literal is not: this
+/// copies one into a buffer the caller owns and parses that, which is what the
+/// production callers do with the buffer `host.exec` filled.
+fn parseLiteral(
+    store: []u8,
+    listing: []const u8,
+    keep: []const u8,
+    root: []const u8,
+    out: []Orphan,
+    path_store: []u8,
+    allow: []const u8,
+    dropped: *usize,
+) usize {
+    std.debug.assert(listing.len <= store.len);
+    @memcpy(store[0..listing.len], listing);
+    return parseListing(store[0..listing.len], keep, root, out, path_store, allow, dropped);
 }
 
 var result_buf: [65536]u8 = undefined;
@@ -457,10 +509,13 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     var hits: [256]Orphan = undefined;
     var paths: [32768]u8 = undefined;
     var store_dropped: usize = 0;
-    // The listing is handed to parseListing with `ls -b` escaping still on it.
-    // Unescaping it here instead would put a name holding a newline back across
-    // a line boundary before the split, which is the bug parseListing now
-    // handles: it splits first and unescapes each name as it reads it.
+    // The listing is handed to `parseListing` with `ls -b` escaping still on
+    // it, and the escaping comes off there, one line at a time, not over the
+    // whole listing before it is read: unescaping it here instead would put a
+    // name holding a newline back across a line boundary before the split, and
+    // splitting the listing on newline then cuts that name in two, which is
+    // the `ls -1` hazard `-b` exists to prevent. `parseListing` splits first
+    // and unescapes each name as it reads it.
     var n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths, spec.allow, &store_dropped);
     note.addTruncatedRows(n, hits.len);
     note.addDroppedRows(store_dropped);
@@ -502,7 +557,9 @@ test "parseListing orphans names not in keep" {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
     var dropped: usize = 0;
-    const n = parseListing(
+    var dropbuf: [64]u8 = undefined;
+    const n = parseLiteral(
+        &dropbuf,
         "dconf\ngone-app\nhtop\n",
         "dconf\nhtop\n",
         "/home/user/.local/share",
@@ -520,7 +577,9 @@ test "parseListing keeps home-dot leftovers and skips only . and .." {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
     var dropped: usize = 0;
-    const n = parseListing(
+    var dropbuf: [64]u8 = undefined;
+    const n = parseLiteral(
+        &dropbuf,
         ".mozilla\n.wine\n.\n..\ndconf\n",
         "dconf\n",
         "/home/user",
@@ -540,7 +599,9 @@ test "parseListing accepts full paths, skips . and .., keeps other dots" {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
     var dropped: usize = 0;
-    const n = parseListing(
+    var dropbuf: [64]u8 = undefined;
+    const n = parseLiteral(
+        &dropbuf,
         "/home/user/.cache/gone-app\n.cache-secret\n.\n..\n\n",
         "",
         "/home/user/.cache",
@@ -562,7 +623,9 @@ test "parseListing drops an absolute line that is not root joined with the name"
     var dropped: usize = 0;
     // The basename validates, so only the path spelling can keep
     // `/home/user/.cache/../../etc` from becoming an `rm -rf` argument.
-    const n = parseListing(
+    var dropbuf: [64]u8 = undefined;
+    const n = parseLiteral(
+        &dropbuf,
         "/home/user/.cache/../../etc\n/home/user/.cache/gone-app\n",
         "",
         "/home/user/.cache",
@@ -586,7 +649,9 @@ test "parseListing keeps utf8 leftover names" {
     var hits: [4]Orphan = undefined;
     var paths: [512]u8 = undefined;
     var dropped: usize = 0;
-    const n = parseListing(
+    var dropbuf: [64]u8 = undefined;
+    const n = parseLiteral(
+        &dropbuf,
         "café\ngone-app\n",
         "",
         "/home/user/.config",
@@ -602,39 +667,56 @@ test "parseListing keeps utf8 leftover names" {
 }
 
 test "a name holding a newline is one row, not two" {
-    // `we` and `ird`, both passed `isSafeIdent` and were joined onto the root,
-    // so one leftover became two `rm -rf` rows naming paths that do not exist.
-    // The listing is handed over still escaped, exactly as the reader does:
-    // the row is one line, and unescaping the name inside it is what exposes
-    // the newline to `isSafeIdent`, which drops the row.
+    // What `ls -1b` prints for a directory whose one entry is called
+    // `we<LF>ird`: the escaping keeps it on one line, so the reader below sees
+    // one name. With plain `ls -1` the same directory listed as the two lines
+    // `we` and `ird`, both passed `isSafeIdent`, and both were joined onto the
+    // root, so one leftover became two `rm -rf` rows naming paths that do not
+    // exist. The listing is handed over still escaped, exactly as the reader
+    // does, and the escaping comes off inside `parseListing`, after the listing
+    // has been cut into lines: the row is one line, and unescaping the name
+    // inside it is what exposes the newline to `isSafeIdent`, which drops the
+    // row.
     const listing = "we\\nird\n";
+    var buf: [64]u8 = undefined;
+    // `we\\nird\n` is eight bytes: `we`, the two-character escape `\n`, `ird`,
+    // and the LF `ls` wrote to end the line. The slice has to be that length
+    // and not one more: `@memcpy` into a longer slice reads uninitialized
+    // memory, and that byte would reach the parser as if it were part of the
+    // listing. This is the length Zig rejected the file over before, so the
+    // test never ran at all.
+    @memcpy(buf[0..8], listing);
 
     var hits: [4]Orphan = undefined;
     var paths: [512]u8 = undefined;
     var dropped: usize = 0;
-    const n = parseListing(listing, "", "/home/user/.config", &hits, &paths, "", &dropped);
+    const n = parseListing(buf[0..8], "", "/home/user/.config", &hits, &paths, "", &dropped);
     try std.testing.expectEqual(@as(usize, 0), n);
 
     // The escaped form is what the name unescapes to, kept honest here rather
     // than only through `parseListing`: `\n` is the two bytes `ls -b` writes
     // for one LF, and a listing carrying the real LF is two rows again.
-    var buf: [64]u8 = undefined;
     @memcpy(buf[0..8], "we\\nird\n");
     try std.testing.expectEqualStrings("we\nird\n", buf[0..pstore.unescapeLsB(buf[0..8])]);
 
     // A name whose only escape is a backslash is a real entry too, and
     // `isSafeIdent` refuses the backslash, so it is dropped rather than
     // turned into a path that names something else.
-    const n2 = parseListing("a\\\\b\n", "", "/home/user/.config", &hits, &paths, "", &dropped);
+    var buf2: [32]u8 = undefined;
+    // `a\\b\n` is five bytes, by the same count as the listing above.
+    @memcpy(buf2[0..5], "a\\\\b\n");
+    const n2 = parseListing(buf2[0..5], "", "/home/user/.config", &hits, &paths, "", &dropped);
     try std.testing.expectEqual(@as(usize, 0), n2);
 
-    var buf2: [32]u8 = undefined;
     @memcpy(buf2[0..5], "a\\\\b\n");
     try std.testing.expectEqualStrings("a\\b\n", buf2[0..pstore.unescapeLsB(buf2[0..5])]);
 
     // The names around it are untouched: escaping only ever shrinks, so a
     // listing with nothing to unescape is the text `ls -1` printed.
     var buf3: [64]u8 = undefined;
+    // `gone-app\nplain-name\n\n` is 21 bytes, and the slice carries that same
+    // length: the last byte is the newline that ends the record, and a
+    // 20-byte slice would stop one short of it.
     @memcpy(buf3[0..21], "gone-app\nplain-name\n\n");
     try std.testing.expectEqual(@as(usize, 21), pstore.unescapeLsB(buf3[0..21]));
     const n3 = parseListing(buf3[0..21], "", "/home/user/.config", &hits, &paths, "", &dropped);
@@ -642,6 +724,15 @@ test "a name holding a newline is one row, not two" {
     try std.testing.expectEqualStrings("gone-app", hits[0].name);
     try std.testing.expectEqualStrings("/home/user/.config/gone-app", hits[0].path);
     try std.testing.expectEqualStrings("plain-name", hits[1].name);
+
+    // The escaped name still unescapes to the text it stands for, one line at
+    // a time. This is the step `parseListing` now owns: the listing is cut
+    // first and unescaped after, so the two halves of `we\nird` cannot be read
+    // as two lines on the way in.
+    var line_buf: [64]u8 = undefined;
+    @memcpy(line_buf[0..8], "we\\nird\n");
+    const one_line = line_buf[0..pstore.unescapeLsB(line_buf[0..7])];
+    try std.testing.expectEqualStrings("we\nird", one_line);
 }
 
 test "queryCommand always names the root" {
@@ -715,7 +806,9 @@ test "parseListing skips system names even without keep" {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
     var dropped: usize = 0;
-    const n = parseListing(
+    var dropbuf: [128]u8 = undefined;
+    const n = parseLiteral(
+        &dropbuf,
         "gtk-3.0\n.git\n.ssh\n.aws\n.docker\ngnome-42\ncore22\ngone-app\n",
         "",
         "/home/user/.config",
@@ -750,7 +843,9 @@ test "parseListing home-dot allowlist skips .config and shell rc" {
     var hits: [8]Orphan = undefined;
     var paths: [512]u8 = undefined;
     var dropped: usize = 0;
-    const n = parseListing(
+    var dropbuf: [128]u8 = undefined;
+    const n = parseLiteral(
+        &dropbuf,
         ".mozilla\n.config\n.bashrc\n.local\n.cache\n.wine\n.profile\n",
         "dconf\n",
         "/home/user",
@@ -940,7 +1035,9 @@ test "a path store that fills is a dropped row, not a short scan" {
     var hits: [16]Orphan = undefined;
     var paths: [64]u8 = undefined;
     var dropped: usize = 0;
-    const n = parseListing(
+    var dropbuf: [128]u8 = undefined;
+    const n = parseLiteral(
+        &dropbuf,
         "gone-app-one\ngone-app-two\ngone-app-three\n",
         "",
         "/home/user/.local/share",

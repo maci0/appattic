@@ -65,7 +65,7 @@ out="$tmp/zigbench"
 # zig 0.16 writes -femit-bin relative to the working directory; an absolute
 # path outside it fails in the linker, so link from inside the scratch dir.
 (cd "$tmp" && zig build-exe -OReleaseFast bench.zig -femit-bin=zigbench)
-if [ -n "${1:-}" ]; then
+if [[ -n "${1:-}" ]]; then
     "$out" | grep -F -- "${1}" || true
 else
     "$out"

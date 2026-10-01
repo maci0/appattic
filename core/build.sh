@@ -6,7 +6,7 @@ export LC_ALL=C
 export LANG=C
 export TZ=UTC
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     echo "Usage: $0 [test <name.zig> [testName] | test-core]"
     echo "  (no args)              WASM + all zig tests + host (needs wasmtime C API)"
     echo "  test brew.zig          one module (fast edit loop)"
@@ -15,14 +15,14 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     exit 0
 fi
 
-if [ "$#" -gt 1 ] && [ "${1:-}" != "test" ]; then
+if [[ "$#" -gt 1 && "${1:-}" != "test" ]]; then
     echo "error: expected at most one argument, got $#" >&2
     echo "Usage: $0 [test <name.zig> [testName] | test-core]" >&2
     echo "       $0 --help" >&2
     exit 2
 fi
 
-if [ "${1:-}" = "test" ] && [ -z "${2:-}" ]; then
+if [[ "${1:-}" == "test" && -z "${2:-}" ]]; then
     echo "error: missing plugin name" >&2
     echo "Usage: $0 test <name.zig> [testName]" >&2
     echo "example: $0 test brew.zig" >&2
@@ -31,13 +31,13 @@ fi
 
 # test takes a name and an optional filter; anything past the filter is a typo
 # rather than a name to guess at.
-if [ "${1:-}" = "test" ] && [ "$#" -gt 3 ]; then
+if [[ "${1:-}" == "test" && "$#" -gt 3 ]]; then
     echo "error: expected at most a module and a test name, got $#" >&2
     echo "Usage: $0 test <name.zig> [testName]" >&2
     exit 2
 fi
 
-if [ -n "${1:-}" ] && [ "${1:-}" != "test" ] && [ "${1:-}" != "test-core" ]; then
+if [[ -n "${1:-}" && "${1:-}" != "test" && "${1:-}" != "test-core" ]]; then
     echo "error: unknown argument: $1" >&2
     echo "Usage: $0 [test <name.zig> [testName] | test-core]" >&2
     echo "       $0 --help" >&2
@@ -67,31 +67,31 @@ if ! appattic_find_zig; then
     echo "Then re-run $0" >&2
     exit 1
 fi
-if [ ! -f "$root/../.zig-version" ]; then
+if [[ ! -f "$root/../.zig-version" ]]; then
     echo "error: missing $root/../.zig-version; the required Zig version is declared there, not guessed here" >&2
     exit 1
 fi
 zig_need="$(tr -d '[:space:]' < "$root/../.zig-version")"
-if [ -z "$zig_need" ]; then
+if [[ -z "$zig_need" ]]; then
     echo "error: empty $root/../.zig-version" >&2
     exit 1
 fi
 zig_ver="$(zig version)"
-if [ "$zig_ver" != "$zig_need" ]; then
+if [[ "$zig_ver" != "$zig_need" ]]; then
     echo "error: need zig $zig_need from .zig-version (have $zig_ver). scripts/linux-deps.sh --install" >&2
     exit 1
 fi
 
-if [ "${1:-}" = "test" ]; then
+if [[ "${1:-}" == "test" ]]; then
     name="${2##*/}"
     name="${name%.zig}.zig"
-    if [ ! -f "$root/src/$name" ]; then
+    if [[ ! -f "$root/src/$name" ]]; then
         echo "error: no $root/src/$name" >&2
         exit 1
     fi
     zig fmt --check "$root/src/$name"
     filter="${3:-}"
-    if [ -n "$filter" ]; then
+    if [[ -n "$filter" ]]; then
         # A module's tests are named <module>.test.<name>, and `zig test` on
         # one file runs the tests of every file it imports. An unqualified
         # filter therefore reaches the imported tree: `test brew.zig
@@ -137,7 +137,7 @@ test_modules=(
 # Every WASM artifact is unit-tested too, derived from wasm_sources so adding a
 # plugin cannot silently skip its tests.
 for src in "${wasm_sources[@]}"; do
-    if [ "$src" != "core.zig" ]; then test_modules+=("$src"); fi
+    if [[ "$src" != "core.zig" ]]; then test_modules+=("$src"); fi
 done
 
 zig_test() {
@@ -160,7 +160,7 @@ detect_jobs() {
         # A plain count: nproc's own answer.
         *) ;;
     esac
-    if [ "$n" -gt 2 ]; then
+    if [[ "$n" -gt 2 ]]; then
         printf '%s\n' "$((n - 1))"
     else
         printf '1\n'
@@ -181,7 +181,7 @@ case "${APPATTIC_BUILD_JOBS:-}" in
         ;;
     * ) JOBS="$APPATTIC_BUILD_JOBS" ;;
 esac
-[ -n "$JOBS" ] || JOBS="$(detect_jobs)"
+[[ -n "$JOBS" ]] || JOBS="$(detect_jobs)"
 
 # Run "$1" once per remaining argument, at most $JOBS in flight, and report
 # failures in the order the list declared them. Each module writes its own
@@ -202,7 +202,7 @@ run_modules() {
         "$fn" "$m" &
         pids+=("$!")
         names+=("$m")
-        while [ "$(( ${#pids[@]} - reaped ))" -ge "$JOBS" ]; do
+        while [[ "$(( ${#pids[@]} - reaped ))" -ge "$JOBS" ]]; do
             if ! wait "${pids[$reaped]}"; then
                 echo "error: ${names[$reaped]} failed" >&2
                 rc=1
@@ -210,7 +210,7 @@ run_modules() {
             reaped=$((reaped + 1))
         done
     done
-    while [ "$reaped" -lt "${#pids[@]}" ]; do
+    while [[ "$reaped" -lt "${#pids[@]}" ]]; do
         if ! wait "${pids[$reaped]}"; then
             echo "error: ${names[$reaped]} failed" >&2
             rc=1
@@ -222,7 +222,7 @@ run_modules() {
 
 # zig fmt plus every zig test, with no WASM or host build: the gate a
 # contributor runs when editing core/src, and what scripts/check.sh calls.
-if [ "${1:-}" = "test-core" ]; then
+if [[ "${1:-}" == "test-core" ]]; then
     zig fmt --check "$root/src" "$root/bench"
     run_modules zig_test "${test_modules[@]}"
     echo "zig: ${#test_modules[@]} modules ok"
@@ -246,7 +246,7 @@ zig fmt --check "$root/src" "$root/bench"
 # full build on top of the old one, so an artifact from a removed plugin
 # shipped in a green release.
 rm -rf "${out:?}"/* "${out:?}"/.[!.]* 2>/dev/null || true
-if [ -n "$(ls -A "$out" 2>/dev/null)" ]; then
+if [[ -n "$(ls -A "$out" 2>/dev/null)" ]]; then
     echo "error: $out still holds files after the clean; cannot guarantee the" >&2
     echo "       build below emits every artifact it ships" >&2
     ls -A "$out" >&2
@@ -257,7 +257,7 @@ fi
 # and the host's try line. core.zig is the one source whose artifact is not
 # named after it, because the host loads it as appattic_core.wasm.
 wasm_artifact_name() {
-    if [ "${1%.zig}" = "core" ]; then
+    if [[ "${1%.zig}" == "core" ]]; then
         printf 'appattic_core.wasm\n'
     else
         printf '%s.wasm\n' "${1%.zig}"
@@ -289,9 +289,9 @@ run_modules zig_test "${test_modules[@]}"
 
 wasmtime_libdir() {
     prefix=$1
-    if [ -d "$prefix/lib" ]; then
+    if [[ -d "$prefix/lib" ]]; then
         echo "$prefix/lib"
-    elif [ -d "$prefix/lib64" ]; then
+    elif [[ -d "$prefix/lib64" ]]; then
         echo "$prefix/lib64"
     else
         return 1
@@ -301,20 +301,20 @@ wasmtime_libdir() {
 wasmtime_from_prefix() {
     prefix=$1
     libdir=$(wasmtime_libdir "$prefix") || return 1
-    [ -f "$prefix/include/wasmtime.h" ] || return 1
+    [[ -f "$prefix/include/wasmtime.h" ]] || return 1
     wasmtime_cflags=(-I"$prefix/include")
     wasmtime_libs=(-L"$libdir" "-Wl,-rpath,$libdir" -lwasmtime)
 }
 
 wasmtime_cflags=()
 wasmtime_libs=(-lwasmtime)
-if [ -f /opt/homebrew/include/wasmtime.h ]; then
+if [[ -f /opt/homebrew/include/wasmtime.h ]]; then
     wasmtime_from_prefix /opt/homebrew
-elif [ -n "${WASMTIME_DIR:-}" ] && wasmtime_from_prefix "$WASMTIME_DIR"; then
+elif [[ -n "${WASMTIME_DIR:-}" ]] && wasmtime_from_prefix "$WASMTIME_DIR"; then
     :
-elif [ -f /opt/wasmtime-c-api/include/wasmtime.h ]; then
+elif [[ -f /opt/wasmtime-c-api/include/wasmtime.h ]]; then
     wasmtime_from_prefix /opt/wasmtime-c-api
-elif [ -f "$root/../.deps/wasmtime-c-api/include/wasmtime.h" ]; then
+elif [[ -f "$root/../.deps/wasmtime-c-api/include/wasmtime.h" ]]; then
     wasmtime_from_prefix "$root/../.deps/wasmtime-c-api"
 elif command -v pkg-config >/dev/null 2>&1 && pkg-config --exists wasmtime; then
     # shellcheck disable=SC2206,SC2207  # pkg-config output is a flag list to word-split

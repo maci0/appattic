@@ -154,7 +154,7 @@ case "$JOBS" in
     '' | *[!0-9]*) JOBS=1 ;;
     *) ;;
 esac
-[ "$JOBS" -gt 1 ] || JOBS=1
+[[ "$JOBS" -gt 1 ]] || JOBS=1
 
 build_all() {
     local root="$1" tag="$2"
@@ -164,7 +164,7 @@ build_all() {
         build_wasm "$root" "$tmp/${m%.zig}.$tag.wasm" "$m" &
         pids+=("$!")
         names+=("$m")
-        while [ "$(( ${#pids[@]} - reaped ))" -ge "$JOBS" ]; do
+        while [[ "$(( ${#pids[@]} - reaped ))" -ge "$JOBS" ]]; do
             if ! wait "${pids[$reaped]}"; then
                 echo "error: ${names[$reaped]} failed to build" >&2
                 rc=1
@@ -172,7 +172,7 @@ build_all() {
             reaped=$((reaped + 1))
         done
     done
-    while [ "$reaped" -lt "${#pids[@]}" ]; do
+    while [[ "$reaped" -lt "${#pids[@]}" ]]; do
         if ! wait "${pids[$reaped]}"; then
             echo "error: ${names[$reaped]} failed to build" >&2
             rc=1

@@ -284,9 +284,12 @@ fn query_impl(present: i32) i32 {
     if (keep) |keep_list| {
         if (nls >= 0) {
             var store_dropped: usize = 0;
-            const snap_home_len = pstore.unescapeLsB(snap_home_exec_buf[0..@intCast(nls)]);
+            // Still escaped: `parseListing` unescapes each line after it has
+            // cut the listing into lines, which is what keeps a name holding a
+            // newline on one line. Unescaping here first would put the newline
+            // back and let the split below cut the name in two.
             n_orphans = listing.parseListing(
-                snap_home_exec_buf[0..snap_home_len],
+                snap_home_exec_buf[0..@intCast(nls)],
                 keep_list,
                 snap_home_root,
                 &orphans,

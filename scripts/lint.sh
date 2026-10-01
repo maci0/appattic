@@ -60,8 +60,11 @@ fi
 # them: shellcheck lists each by name, and the group keyword is not a list of
 # them. So the ones the tree passes are named one by one below. The rest stay
 # off because the tree does not pass them: masked return (SC2312) and
-# suppressed set -e (SC2310) want 131 and 76 rewrites, and ${var} braces
-# (SC2250) and [[ ]] (SC2292) are the two style rewrites, at 1690 and 36.
+# suppressed set -e (SC2310) want 150 and 87 rewrites, and ${var} braces
+# (SC2250) is the one style rewrite left, at 1891. The other style rewrite,
+# [[ ]] over [ ] (SC2292), used to be the second off-name at 36; the tree has
+# been converted to [[ ]] everywhere the shebang is bash, so it is enabled here
+# and 36 reads clean.
 # SC2317 is not listed on its own: shellcheck pulls in SC2312 with it, so
 # enabling it here would fail the gate on the masked returns named above.
 # Every name below is one `--list-optional` prints, and the gate below proves
@@ -73,7 +76,7 @@ fi
 # all. `--list-optional` is where a name comes from.
 # `shellcheck --enable=all` on this list is what the numbers above are.
 shellcheck -x -P SCRIPTDIR \
-    --enable=add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat \
+    --enable=add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,require-double-brackets,useless-use-of-cat \
     "${shell_files[@]}"
 
 # Every name the flag above carries is a rule this shellcheck implements. Read
