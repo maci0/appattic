@@ -367,6 +367,14 @@ int main(void) {
     rc |= expect_allow("ls -a");
     rc |= expect_allow("ls -A");
     rc |= expect_allow("ls -1 -A /home/user/.config");
+    /* -b escapes a name holding a newline so the listing keeps one name per
+       line. The path plugins ask for it by name; a host that refused it left
+       them splitting one entry into two. */
+    rc |= expect_allow("ls -1b");
+    rc |= expect_allow("ls -1b /home/user/.config");
+    rc |= expect_allow("ls -1Ab /home/user");
+    rc |= expect_allow("/bin/ls -1b /home/user/.local/bin");
+    rc |= expect_allow("ls -1 -A -b /home/user/.config");
     rc |= expect_allow("readlink -f /tmp/foo");
     rc |= expect_allow("readlink -n /tmp/foo");
     rc |= expect_allow("readlink /tmp/foo");

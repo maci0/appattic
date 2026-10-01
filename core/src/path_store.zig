@@ -58,11 +58,100 @@ pub fn joinPath(dir: []const u8, name: []const u8, store: []u8, used: *usize) ?[
     return store[start..used.*];
 }
 
-/// Names an `ls -1` listing carries: one basename per line. Dot names, empty
-/// names, and names outside `jsonbuf.isSafeIdent` are dropped. A leading `-` is
-/// kept: these names are always joined onto a constant root before they reach a
-/// command, so a dash there is inert. A name a package manager reads as its own
-/// argument needs `jsonbuf.isSafeCmdIdent` instead.
+/// One octal digit, or null when the byte is not one. `ls -b` spells every
+/// byte it does not have a short form for as a backslash and three of these,
+/// with no `0` prefix: ESC is `\033`, DEL is `\177`.
+fn octalDigit(c: u8) ?u8 {
+    if (c >= '0' and c <= '7') return c - '0';
+    return null;
+}
+
+/// The short forms `ls -b` uses, each two bytes for one. Everything else it
+/// escapes goes out as `\NNN`, and the caller handles that.
+///
+/// `\e` is deliberately absent. `ls -b` writes ESC as `\033`, so decoding
+/// `\e` here would turn a name that really does spell those two characters
+/// into a control character the listing never carried.
+fn lsBEscapeByte(b: u8) ?u8 {
+    return switch (b) {
+        'n' => 0x0A,
+        't' => 0x09,
+        'r' => 0x0D,
+        'a' => 0x07,
+        'b' => 0x08,
+        'f' => 0x0C,
+        'v' => 0x0B,
+        '\\' => '\\',
+        else => null,
+    };
+}
+
+/// Undo `ls -b`'s escaping across a whole listing, in place, and return the
+/// length the text now occupies.
+///
+/// Every escape `ls -b` writes is at least two bytes and stands for exactly
+/// one, so the text only ever shrinks and unescaping into the same buffer
+/// cannot overwrite a byte it has yet to read. The result is the listing
+/// `ls -1` would have printed for names holding no such byte, and a name
+/// holding one is back on a single line, which is what every reader here
+/// assumes.
+///
+/// The alternative was splitting `ls -1` output on `\n` and treating each
+/// line as a name, and a directory holding one entry called `we<LF>ird` then
+/// listed as the two names `we` and `ird`: both pass `jsonbuf.isSafeIdent`,
+/// both are joined onto the root, and both become `rm -rf` rows naming paths
+/// that do not exist. The Swift tree reads directories with `readdir` and
+/// never sees this; it is the `ls` the guest plugins run that turns one name
+/// into two.
+///
+/// A backslash that begins no escape `ls` writes is kept as a backslash and
+/// the byte after it is kept too, so an unrecognised pair stays text rather
+/// than losing a byte.
+pub fn unescapeLsB(buf: []u8) usize {
+    var r: usize = 0;
+    var i: usize = 0;
+    while (i < buf.len) {
+        if (buf[i] != '\\') {
+            buf[r] = buf[i];
+            r += 1;
+            i += 1;
+            continue;
+        }
+        if (i + 1 < buf.len) {
+            if (lsBEscapeByte(buf[i + 1])) |v| {
+                buf[r] = v;
+                r += 1;
+                i += 2;
+                continue;
+            }
+            // `\NNN`, three octal digits and nothing else. A backslash is not
+            // among them, so a name spelled `\102` arrives here as `\0102`
+            // and is read as the `\010` `ls` escaped it to, followed by `2`.
+            if (i + 3 < buf.len) {
+                const d0 = octalDigit(buf[i + 1]);
+                const d1 = octalDigit(buf[i + 2]);
+                const d2 = octalDigit(buf[i + 3]);
+                if (d0 != null and d1 != null and d2 != null) {
+                    buf[r] = d0.? * 64 + d1.? * 8 + d2.?;
+                    r += 1;
+                    i += 4;
+                    continue;
+                }
+            }
+        }
+        buf[r] = '\\';
+        r += 1;
+        i += 1;
+    }
+    return r;
+}
+
+/// Names an `ls -1b` listing carries, after `unescapeLsB`: one basename per
+/// line. Dot names, empty names, and names outside `jsonbuf.isSafeIdent` are
+/// dropped. A leading `-` is kept: these names are always joined onto a
+/// constant root before they reach a command, so a dash there is inert. A name
+/// a package manager reads as its own argument needs `jsonbuf.isSafeCmdIdent`
+/// instead.
 /// `keep` is a newline name list to skip as well; pass "" for none.
 pub fn listingNames(listing: []const u8, names: [][]const u8, keep: []const u8) usize {
     var n: usize = 0;
@@ -142,4 +231,53 @@ test "joinPath appends to the store and stops at its bound" {
     var small_used: usize = 0;
     try std.testing.expectEqual(@as(?[]const u8, null), joinPath("/home/user", "gone-app", &small, &small_used));
     try std.testing.expectEqual(@as(usize, 0), small_used);
+}
+
+test "unescapeLsB takes ls -b escaping back off in place" {
+    const Case = struct {
+        escaped: []const u8,
+        plain: []const u8,
+    };
+    const cases = [_]Case{
+        // A name `ls -1` printed as two lines. One line, one name again.
+        .{ .escaped = "we\\nird\n", .plain = "we\nird\n" },
+        .{ .escaped = "a\\\\b\n", .plain = "a\\b\n" },
+        .{ .escaped = "c\\td\n", .plain = "c\td\n" },
+        .{ .escaped = "\\102\\033\\177\n", .plain = "B\x1B\x7F\n" },
+        .{ .escaped = "\\001ctl\n", .plain = "\x01ctl\n" },
+        .{ .escaped = "caf\u{00e9}\nplain-name\n", .plain = "caf\u{00e9}\nplain-name\n" },
+        // A name that really does spell `\102` reaches the listing with its
+        // backslash escaped first, so the decoder reads `\010` and the `2`
+        // after it as two separate things, which is what the name is.
+        .{ .escaped = "a\\0102\n", .plain = "a\x082\n" },
+        // A backslash that begins no escape ls writes stays a backslash, and
+        // the byte after it is not swallowed with it.
+        .{ .escaped = "a\\qb\n", .plain = "a\\qb\n" },
+        .{ .escaped = "trailing\\\n", .plain = "trailing\\\n" },
+        .{ .escaped = "\\", .plain = "\\" },
+        .{ .escaped = "", .plain = "" },
+    };
+    for (cases) |c| {
+        var buf: [64]u8 = undefined;
+        @memcpy(buf[0..c.escaped.len], c.escaped);
+        const len = unescapeLsB(buf[0..c.escaped.len]);
+        // The text only ever shrinks, which is what makes the in-place pass
+        // safe: every escape is at least two bytes and stands for one.
+        try std.testing.expect(len <= c.escaped.len);
+        try std.testing.expectEqualStrings(c.plain, buf[0..len]);
+    }
+}
+
+test "unescapeLsB decodes every escape ls -b writes" {
+    const pairs = [_][2][]const u8{
+        .{ "\\n", "\n" },   .{ "\\t", "\t" },   .{ "\\r", "\r" },
+        .{ "\\a", "\x07" }, .{ "\\b", "\x08" }, .{ "\\f", "\x0C" },
+        .{ "\\v", "\x0B" }, .{ "\\\\", "\\" },
+    };
+    for (pairs) |p| {
+        var buf: [4]u8 = undefined;
+        @memcpy(buf[0..p[0].len], p[0]);
+        try std.testing.expectEqual(@as(usize, 1), unescapeLsB(buf[0..p[0].len]));
+        try std.testing.expectEqual(p[1][0], buf[0]);
+    }
 }

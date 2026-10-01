@@ -215,8 +215,9 @@ const NameIndex = struct {
 /// matching `pkg_listings` null keeps it from being read.
 var pkg_indexes: [max_package_dirs]NameIndex = undefined;
 
-/// `ls -1` names are whole lines, so membership is a line compare and never a
-/// substring hit on a longer name.
+/// `ls -1b` names are whole lines once `pstore.unescapeLsB` has taken the
+/// escaping off, so membership is a line compare and never a substring hit on a
+/// longer name.
 fn listingHasName(listing: []const u8, name: []const u8) bool {
     if (name.len == 0) return false;
     var lines = std.mem.splitScalar(u8, listing, '\n');
@@ -249,13 +250,16 @@ fn findShadowsExec(
     var pkg_listings: [max_package_dirs]?[]const u8 = .{null} ** max_package_dirs;
     const pkg_count = @min(packageDirs.len, max_package_dirs);
     for (packageDirs[0..pkg_count], 0..) |pdir, i| {
-        const cmd = std.fmt.bufPrint(&pkg_cmd_buf, "ls -1 {s}", .{pdir}) catch continue;
+        // `-b`, so a name holding a newline stays on one line instead of
+        // splitting into two names that both pass `isSafeIdent`.
+        const cmd = std.fmt.bufPrint(&pkg_cmd_buf, "ls -1b {s}", .{pdir}) catch continue;
         const m = host_exec.run(cmd, pkg_store[pkg_used..]);
         note.add(cmd, m);
         // A dir that could not be listed keeps a null prefilter, so its names
         // are probed the way they were before rather than dropped.
         if (m < 0) continue;
-        const listing = pkg_store[pkg_used .. pkg_used + @as(usize, @intCast(m))];
+        const listed = pstore.unescapeLsB(pkg_store[pkg_used .. pkg_used + @as(usize, @intCast(m))]);
+        const listing = pkg_store[pkg_used .. pkg_used + listed];
         pkg_listings[i] = listing;
         // Index this listing once. Its lines point into `pkg_store`, and the
         // next dir writes past `pkg_used` rather than over this slice, so
@@ -266,11 +270,12 @@ fn findShadowsExec(
 
     for (overlayDirs) |odir| {
         var cmd_buf: [512]u8 = undefined;
-        const ls_cmd = std.fmt.bufPrint(&cmd_buf, "ls -1 {s}", .{odir}) catch continue;
+        const ls_cmd = std.fmt.bufPrint(&cmd_buf, "ls -1b {s}", .{odir}) catch continue;
         const ls_n = host_exec.run(ls_cmd, &ls_buf);
         note.add(ls_cmd, ls_n);
         if (ls_n < 0) continue;
-        const raw_n = pstore.listingNames(ls_buf[0..@intCast(ls_n)], &names, "");
+        const ls_len = pstore.unescapeLsB(ls_buf[0..@intCast(ls_n)]);
+        const raw_n = pstore.listingNames(ls_buf[0..ls_len], &names, "");
         // `name_store` is reset per root, not per scan: `listingNames` hands
         // back names pointing into `ls_buf`, which the next root's `run`
         // overwrites, so each root needs its own stable copy. Carrying the
@@ -716,7 +721,7 @@ test "plugin_query missing is empty findings" {
 }
 
 test "a note from one run does not reach the next" {
-    note.add("ls -1 /home/user/.local/bin", host_exec.fail);
+    note.add("ls -1b /home/user/.local/bin", host_exec.fail);
     try std.testing.expectEqual(@as(i32, 0), query_impl(1));
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(jsonbuf.isValidJson(json));

@@ -48,11 +48,14 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8, dropped: *usize) usize {
 
     for (roots) |root| {
         var cmd_buf: [512]u8 = undefined;
-        const ls_cmd = std.fmt.bufPrint(&cmd_buf, "ls -1 {s}", .{root.path}) catch continue;
+        // `-b`, so a name holding a newline stays on one line instead of splitting
+        // into two names that are both joined onto the root.
+        const ls_cmd = std.fmt.bufPrint(&cmd_buf, "ls -1b {s}", .{root.path}) catch continue;
         const ls_n = host_exec.run(ls_cmd, &ls_buf);
         note.add(ls_cmd, ls_n);
         if (ls_n < 0) continue;
-        const name_n = pstore.listingNames(ls_buf[0..@intCast(ls_n)], &names, keep);
+        const ls_len = pstore.unescapeLsB(ls_buf[0..@intCast(ls_n)]);
+        const name_n = pstore.listingNames(ls_buf[0..ls_len], &names, keep);
 
         for (names[0..name_n]) |name| {
             if (n >= out.len) return n;

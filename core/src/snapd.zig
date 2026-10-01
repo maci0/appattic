@@ -5,11 +5,14 @@ const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const listing = @import("path_listing.zig");
+const pstore = @import("path_store.zig");
 const fuzzsupport = @import("fuzzsupport.zig");
 
 const plugin_id = "snapd";
 const query_cmd = "snap list --all";
-const snap_home_cmd = "ls -1 /home/user/snap";
+// `-b`, so a snap directory whose name holds a newline stays one line instead
+// of listing as two, both of which `parseListing` would join onto the root.
+const snap_home_cmd = "ls -1b /home/user/snap";
 const snap_home_root = "/home/user/snap";
 
 pub const DisabledRev = struct {
@@ -281,8 +284,9 @@ fn query_impl(present: i32) i32 {
     if (keep) |keep_list| {
         if (nls >= 0) {
             var store_dropped: usize = 0;
+            const snap_home_len = pstore.unescapeLsB(snap_home_exec_buf[0..@intCast(nls)]);
             n_orphans = listing.parseListing(
-                snap_home_exec_buf[0..@intCast(nls)],
+                snap_home_exec_buf[0..snap_home_len],
                 keep_list,
                 snap_home_root,
                 &orphans,

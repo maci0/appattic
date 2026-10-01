@@ -81,11 +81,13 @@ static int config_injection_token(const char *t) {
            eq(t, "--sysroot") || strncmp(t, "--sysroot", 8) == 0;
 }
 
-/* ls: listing flags only (-1/-a/-A, glued). One optional path. No -R/-l/--*. */
+/* ls: listing flags only (-1/-a/-A-b, glued). One optional path. No -R/-l/--*.
+   -b escapes a name that holds a newline, so the listing keeps one name per
+   line and the guests that split it on newline do not read one entry as two. */
 static int ls_listing_flag(const char *t) {
     if (!t || t[0] != '-' || t[1] == '\0' || t[1] == '-') return 0;
     for (const char *p = t + 1; *p; p++) {
-        if (*p != '1' && *p != 'a' && *p != 'A') return 0;
+        if (*p != '1' && *p != 'a' && *p != 'A' && *p != 'b') return 0;
     }
     return 1;
 }
@@ -903,7 +905,13 @@ static int fixture_for(const char *cmdline, char *scratch, size_t scratchn, cons
             }
             if (strstr(t, "/usr/bin") != NULL) { *out = FIXTURE_LS_USR_BIN; return 1; }
             if (strstr(t, "sources.list.d") != NULL) { *out = FIXTURE_APT_SOURCES; return 1; }
-            if (eq(t, "-A") || eq(t, "-a") || eq(t, "-1A") || eq(t, "-A1")) { *out = FIXTURE_LS_DOT; return 1; }
+            /* The dot listing needs an all-entries flag, and -b is allowed among them,
+               so `ls -1Ab /home/user` still lands on it. */
+            if (eq(t, "-A") || eq(t, "-a") || eq(t, "-1A") || eq(t, "-A1") ||
+                eq(t, "-1Ab") || eq(t, "-A1b") || eq(t, "-Ab")) {
+                *out = FIXTURE_LS_DOT;
+                return 1;
+            }
         }
         *out = FIXTURE_LS; return 1;
     }

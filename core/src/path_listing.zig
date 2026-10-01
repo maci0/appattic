@@ -18,8 +18,15 @@ pub const Spec = struct {
     keep: []const u8,
     missing_note: []const u8,
     dialog_title: []const u8,
-    /// `ls -1A` for home-dot leftovers (`.mozilla`, `.wine`). Others: `ls -1`.
-    query_cmd: []const u8 = "ls -1",
+    /// `ls -1Ab` for home-dot leftovers (`.mozilla`, `.wine`). Others: `ls -1b`.
+    ///
+    /// `-b` is what keeps a name that holds a newline on one line: `ls -1`
+    /// prints such an entry as two lines, and both halves pass
+    /// `jsonbuf.isSafeIdent` and are joined onto the root, so one leftover
+    /// became two `rm -rf` rows for paths that do not exist. The listing is
+    /// unescaped by `pstore.unescapeLsB` before anything reads a name out of
+    /// it.
+    query_cmd: []const u8 = "ls -1b",
     /// If non-empty, only these names (newline list) are leftovers. Home-dot
     /// is a whitelist; other path plugins stay denylist-only.
     allow: []const u8 = "",
@@ -45,7 +52,7 @@ pub const spec_table = [_]Spec{
         .keep = "dconf\n",
         .missing_note = "$HOME is missing. Plugin inactive.",
         .dialog_title = "Remove leftover home dirs?",
-        .query_cmd = "ls -1A",
+        .query_cmd = "ls -1Ab",
         .allow = ".mozilla\n.thunderbird\n.steam\n.wine\n.java\n.gradle\n.android\n.m2\n",
     },
     .{
@@ -283,7 +290,7 @@ pub fn isSystemLeftoverName(name: []const u8) bool {
     return false;
 }
 
-/// Parse `ls -1` / `ls -1A` of a leftover root. Skip `.` and `..`,
+/// Parse `ls -1b` / `ls -1Ab` of a leftover root. Skip `.` and `..`,
 /// Linux/snap system names, and names in `keep` (newline list).
 ///
 /// `dropped` counts the rows the path store could not hold. A name that is a
@@ -431,7 +438,11 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     var hits: [256]Orphan = undefined;
     var paths: [32768]u8 = undefined;
     var store_dropped: usize = 0;
-    var n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths, spec.allow, &store_dropped);
+    // `ls -b` escaping comes off before any name is read out of the listing:
+    // the escaping is what holds a name carrying a newline on one line, and
+    // every reader below splits on newline, so the two go together.
+    const exec_len = pstore.unescapeLsB(exec_buf[0..@intCast(nexec)]);
+    var n = parseListing(exec_buf[0..exec_len], spec.keep, spec.root, &hits, &paths, spec.allow, &store_dropped);
     note.addTruncatedRows(n, hits.len);
     note.addDroppedRows(store_dropped);
     return note.renderShrinking(WithSpec{ .spec = spec }, &hits, &n);
@@ -462,7 +473,7 @@ test "a note lands inside the result object" {
         .dialog_title = "Remove leftover config?",
     };
     note = .{};
-    note.add("ls -1 /home/user/.config", host_exec.fail);
+    note.add("ls -1b /home/user/.config", host_exec.fail);
     try std.testing.expect(renderRows(spec, &.{}));
     note = .{};
     try std.testing.expect(jsonbuf.isValidJson(resultSlice()));
@@ -571,6 +582,47 @@ test "parseListing keeps utf8 leftover names" {
     try std.testing.expectEqualStrings("gone-app", hits[1].name);
 }
 
+test "a name holding a newline is one row, not two" {
+    // What `ls -1b` prints for a directory whose one entry is called
+    // `we<LF>ird`: the escaping keeps it on one line, so the reader below sees
+    // one name. With plain `ls -1` the same directory listed as the two lines
+    // `we` and `ird`, both passed `isSafeIdent`, and both were joined onto the
+    // root, so one leftover became two `rm -rf` rows naming paths that are not
+    // there. The unescaped name holds a newline, so `isSafeIdent` refuses it
+    // and the row is dropped instead.
+    var buf: [64]u8 = undefined;
+    @memcpy(buf[0..9], "we\\nird\n");
+    const listing = buf[0..pstore.unescapeLsB(buf[0..9])];
+    try std.testing.expectEqualStrings("we\nird\n", listing);
+
+    var hits: [4]Orphan = undefined;
+    var paths: [512]u8 = undefined;
+    var dropped: usize = 0;
+    const n = parseListing(listing, "", "/home/user/.config", &hits, &paths, "", &dropped);
+    try std.testing.expectEqual(@as(usize, 0), n);
+
+    // A name whose only escape is a backslash is a real entry too, and
+    // `isSafeIdent` refuses the backslash, so it is dropped rather than
+    // turned into a path that names something else.
+    var buf2: [32]u8 = undefined;
+    @memcpy(buf2[0..6], "a\\\\b\n");
+    const listing2 = buf2[0..pstore.unescapeLsB(buf2[0..6])];
+    try std.testing.expectEqualStrings("a\\b\n", listing2);
+    const n2 = parseListing(listing2, "", "/home/user/.config", &hits, &paths, "", &dropped);
+    try std.testing.expectEqual(@as(usize, 0), n2);
+
+    // The names around it are untouched: escaping only ever shrinks, so a
+    // listing with nothing to unescape is the text `ls -1` printed.
+    var buf3: [64]u8 = undefined;
+    @memcpy(buf3[0..20], "gone-app\nplain-name\n\n");
+    try std.testing.expectEqual(@as(usize, 20), pstore.unescapeLsB(buf3[0..20]));
+    const n3 = parseListing(buf3[0..20], "", "/home/user/.config", &hits, &paths, "", &dropped);
+    try std.testing.expectEqual(@as(usize, 2), n3);
+    try std.testing.expectEqualStrings("gone-app", hits[0].name);
+    try std.testing.expectEqualStrings("/home/user/.config/gone-app", hits[0].path);
+    try std.testing.expectEqualStrings("plain-name", hits[1].name);
+}
+
 test "queryCommand always names the root" {
     const linux = Spec{
         .id = "path-xdg-config",
@@ -580,7 +632,7 @@ test "queryCommand always names the root" {
         .missing_note = "",
         .dialog_title = "",
     };
-    try std.testing.expectEqualStrings("ls -1 /home/user/.config", queryCommand(linux));
+    try std.testing.expectEqualStrings("ls -1b /home/user/.config", queryCommand(linux));
     const home_dot = Spec{
         .id = "path-home-dot",
         .root_label = "home",
@@ -588,9 +640,9 @@ test "queryCommand always names the root" {
         .keep = "",
         .missing_note = "",
         .dialog_title = "",
-        .query_cmd = "ls -1A",
+        .query_cmd = "ls -1Ab",
     };
-    try std.testing.expectEqualStrings("ls -1A /home/user", queryCommand(home_dot));
+    try std.testing.expectEqualStrings("ls -1Ab /home/user", queryCommand(home_dot));
     // A root the host cannot take is named and refused, not dropped: dropping
     // it made `ls` list the process working directory, and those names were
     // then joined onto a root the run never listed.
@@ -602,7 +654,7 @@ test "queryCommand always names the root" {
         .missing_note = "",
         .dialog_title = "",
     };
-    try std.testing.expectEqualStrings("ls -1 /home/user/Application Support", queryCommand(spaced));
+    try std.testing.expectEqualStrings("ls -1b /home/user/Application Support", queryCommand(spaced));
     try std.testing.expect(!rootIsWellFormed(spaced.root));
 }
 
@@ -698,7 +750,7 @@ pub fn expectSpecBinds(comptime spec: Spec) !void {
     const json = resultSlice();
     try std.testing.expect(std.mem.indexOf(u8, json, spec.id) != null);
     try std.testing.expect(std.mem.indexOf(u8, json, spec.root) != null);
-    // The fixture feeds `ls -1` or `ls -1A` per spec; both list leftovers.
+    // The fixture feeds `ls -1b` or `ls -1Ab` per spec; both list leftovers.
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") == null);
     // `keep` names are not leftovers for any of these roots.
     try std.testing.expect(std.mem.indexOf(u8, json, "dconf") == null);

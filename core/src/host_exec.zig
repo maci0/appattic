@@ -388,7 +388,10 @@ fn fixtureFor(cmd: []const u8) ?[]const u8 {
     if (std.mem.startsWith(u8, cmd, "test ")) {
         return if (testFixtureOk(cmd)) "" else null;
     }
+    // The dot listing needs an all-entries flag, and `-b` is allowed among them,
+    // so `ls -1Ab /home/user` still routes here rather than to the plain one.
     if (std.mem.eql(u8, cmd, "ls -1A") or std.mem.startsWith(u8, cmd, "ls -1A ") or
+        std.mem.eql(u8, cmd, "ls -1Ab") or std.mem.startsWith(u8, cmd, "ls -1Ab ") or
         std.mem.startsWith(u8, cmd, "ls -A")) return ls_dot_fixture;
     if (std.mem.startsWith(u8, cmd, "ls")) return ls_fixture;
     return null;
