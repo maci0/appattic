@@ -143,7 +143,16 @@ void enrichLeftoverSizes(
     void *user = nullptr
 );
 bool leftoverNameMatchesDesktop(const QString &name, const QSet<QString> &stems);
-void markOwnedPathLeftovers(QVector<Finding> &findings);
+/// The installed `.desktop` stems, read from the application directories once.
+/// It is a fact about the machine, not about any one plugin, so a scan reads
+/// it once and threads the set through every `markOwnedPathLeftovers` call
+/// rather than re-walking six directories per plugin blob. Empty means no
+/// installed desktop files, which makes every leftover unmatched.
+QSet<QString> installedDesktopStems();
+/// Mark leftovers whose name matches an installed desktop stem as `keep`.
+/// `stems` is the scan-scoped set from `installedDesktopStems`; a caller that
+/// reuses the set across a whole scan does one filesystem read for it.
+void markOwnedPathLeftovers(QVector<Finding> &findings, const QSet<QString> &stems);
 bool isPackage(const Finding &f);
 bool matchPage(const Finding &f, Page page);
 int countPageRows(const QVector<Finding> &findings, Page page);

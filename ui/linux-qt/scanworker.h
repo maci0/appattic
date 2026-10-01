@@ -37,6 +37,11 @@ public slots:
            the rows after it against two different days, and the same scan
            replayed an hour later stores a different idle count. */
         m_scanNow = QDateTime::currentDateTime();
+        /* The installed `.desktop` stems are a fact about the machine, not
+           about any one plugin, so they are read once here and reused by every
+           plugin's ingest. Reading them per blob re-walked six application
+           directories once per plugin. */
+        m_desktopStems = installedDesktopStems();
         /* Clear first so every exit path below leaves the process-global cancel
            clear. */
         clearCoreWasmCancel();
@@ -95,7 +100,7 @@ private:
             if (isCancelled()) return;
         }
         m_partial += batch;
-        if (anyLeftover) markOwnedPathLeftovers(m_partial);
+        if (anyLeftover) markOwnedPathLeftovers(m_partial, m_desktopStems);
         groupLinuxLeftovers(m_partial);
         emit partial(m_partial);
     }
@@ -121,6 +126,10 @@ private:
     /// stop. Same shape as DiskScanWorker::m_token.
     QAtomicInteger<int> m_token{0};
     QDateTime m_scanNow;
+    /// The installed desktop stems, read once per scan on the scan thread. Only
+    /// `run` (the scan thread) and the `ingestBlob` calls it makes during that
+    /// same synchronous `runCoreWasm` touch it, so no lock is needed.
+    QSet<QString> m_desktopStems;
     QVector<Finding> m_partial;
 };
 

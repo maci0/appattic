@@ -773,6 +773,72 @@ static int verifyHelpers() {
         std::fprintf(stderr, "leftoverNameMatchesDesktop: installed desktop stem matching\n");
         return 1;
     }
+    // markOwnedPathLeftovers must mark from the injected stem set, not from a
+    // fresh read of the machine's application directories: a scan reads the set
+    // once and threads it through, so a caller's set is the only input. An
+    // empty set matches nothing, and a set the caller supplies marks its row.
+    {
+        QVector<Finding> rows;
+        Finding matched;
+        matched.plugin = QStringLiteral("path-xdg-config");
+        matched.kind = QStringLiteral("orphan-dir");
+        matched.name = QStringLiteral("firefox");
+        matched.path = QStringLiteral("/home/alice/.config/firefox");
+        matched.status = QStringLiteral("orphaned");
+        rows << matched;
+        Finding unmatched = matched;
+        unmatched.name = QStringLiteral("gone-app");
+        unmatched.path = QStringLiteral("/home/alice/.config/gone-app");
+        rows << unmatched;
+
+        // Empty set: nothing is marked, so a machine whose stems failed to read
+        // leaves every row as the scan reported it.
+        QVector<Finding> emptyRows = rows;
+        markOwnedPathLeftovers(emptyRows, QSet<QString>());
+        for (const Finding &f : emptyRows) {
+            if (f.status != QLatin1String("orphaned")) {
+                std::fprintf(stderr, "markOwnedPathLeftovers: empty stem set must mark nothing\n");
+                return 1;
+            }
+        }
+
+        // Supplied set: only the matching row becomes "keep", the other stays.
+        QVector<Finding> markedRows = rows;
+        markOwnedPathLeftovers(markedRows, desks);
+        if (markedRows.at(0).status != QLatin1String("keep")) {
+            std::fprintf(stderr, "markOwnedPathLeftovers: matching row must become keep\n");
+            return 1;
+        }
+        if (markedRows.at(1).status != QLatin1String("orphaned")) {
+            std::fprintf(stderr, "markOwnedPathLeftovers: non-matching row must stay orphaned\n");
+            return 1;
+        }
+
+        // Same two rows in the opposite order, so the non-matching row is not
+        // always the one the loop reaches second. This is the failure the
+        // check exists for: a row the set does not name must keep the status
+        // the scan gave it, whichever position it sits in.
+        QVector<Finding> reversed;
+        reversed << rows.at(1) << rows.at(0);
+        markOwnedPathLeftovers(reversed, desks);
+        if (reversed.at(0).status != QLatin1String("orphaned")) {
+            std::fprintf(stderr, "markOwnedPathLeftovers: leading non-matching row changed\n");
+            return 1;
+        }
+        if (reversed.at(1).status != QLatin1String("keep")) {
+            std::fprintf(stderr, "markOwnedPathLeftovers: trailing matching row not marked\n");
+            return 1;
+        }
+
+        // A row that is already "keep" is left alone.
+        QVector<Finding> alreadyKeep = rows;
+        alreadyKeep[0].status = QStringLiteral("keep");
+        markOwnedPathLeftovers(alreadyKeep, desks);
+        if (alreadyKeep.at(0).status != QLatin1String("keep")) {
+            std::fprintf(stderr, "markOwnedPathLeftovers: an existing keep must not change\n");
+            return 1;
+        }
+    }
     if (matchPage(leftover, Page::DiskUsage) || !matchPage(leftover, Page::Leftovers)) {
         std::fprintf(stderr, "disk: leftover must not appear on Disk Usage\n");
         return 1;

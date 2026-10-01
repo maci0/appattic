@@ -18,6 +18,7 @@
 #include <QTimeZone>
 #include <QtGui/QTextDocument>
 
+#include <algorithm>
 #include <atomic>
 #include <initializer_list>
 #include <thread>
@@ -1143,7 +1144,7 @@ bool leftoverNameMatchesDesktop(const QString &name, const QSet<QString> &stems)
     return false;
 }
 
-static QSet<QString> installedDesktopStems() {
+QSet<QString> installedDesktopStems() {
     QSet<QString> stems;
     const QStringList dirs = {
         QStringLiteral("/usr/share/applications"),
@@ -1169,9 +1170,20 @@ static QSet<QString> installedDesktopStems() {
     return stems;
 }
 
-void markOwnedPathLeftovers(QVector<Finding> &findings) {
-    const QSet<QString> stems = installedDesktopStems();
+void markOwnedPathLeftovers(QVector<Finding> &findings, const QSet<QString> &stems) {
     if (stems.isEmpty()) return;
+    // Each installed stem is tokenized once here instead of once per leftover
+    // name per stem. addLeftoverAliasTokens walks a fixed table of aliases and
+    // allocates a QSet for each call, so tokenizing every stem for every
+    // leftover made the match O(rows x stems) heap allocations on a machine
+    // with a few hundred installed desktop files.
+    QSet<QString> stemTokens;
+    for (const QString &stem : stems) {
+        QSet<QString> one;
+        addLeftoverAliasTokens(&one, stem);
+        for (const QString &t : one) stemTokens.insert(t);
+    }
+    if (stemTokens.isEmpty()) return;
     for (Finding &f : findings) {
         if (!isLeftover(f) || isShadowFinding(f)) continue;
         // Only "keep" is *written* here, so that is the only status worth
@@ -1181,7 +1193,14 @@ void markOwnedPathLeftovers(QVector<Finding> &findings) {
         // plugin blob, so skipping them would leave a row that a desktop file
         // does match still marked orphaned.
         if (f.status == QLatin1String("keep")) continue;
-        if (leftoverNameMatchesDesktop(f.name, stems)) f.status = QStringLiteral("keep");
+        QSet<QString> leftoverTok;
+        addLeftoverAliasTokens(&leftoverTok, f.name);
+        if (leftoverTok.isEmpty()) continue;
+        if (!std::any_of(leftoverTok.cbegin(), leftoverTok.cend(),
+                         [&stemTokens](const QString &t) { return stemTokens.contains(t); })) {
+            continue;
+        }
+        f.status = QStringLiteral("keep");
     }
 }
 
