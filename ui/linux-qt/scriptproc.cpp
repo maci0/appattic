@@ -129,6 +129,21 @@ void ScriptProcess::appendOutput(const QByteArray &chunk) {
     m_output.remove(0, start);
 }
 
+// Only forget the path once it is gone: a survivor stays in `m_path` so the
+// destructor makes another attempt, and `scriptLeftBehind` tells the window
+// there is an executable it should name. A path that is not the current run's
+// is only deleted, never kept.
+void ScriptProcess::removeRunScript(const QString &path) {
+    if (m_path != path) {
+        QString ignored;
+        removeScriptFile(path, ignored);
+        return;
+    }
+    QString left;
+    if (removeScriptFile(path, left)) m_path.clear();
+    else m_path = left;
+}
+
 bool ScriptProcess::prepare(const QString &script, QString *errorText) {
     if (m_proc) return false;
     QTemporaryFile tmp(QDir::temp().filePath(QStringLiteral("appattic-XXXXXX.sh")));
@@ -163,17 +178,7 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
         appendOutput(proc->readAll());
         if (m_reported) return;
         m_reported = true;
-        // Only forget the path once it is gone: a survivor stays in `m_path`
-        // so the destructor makes another attempt, and `scriptLeftBehind`
-        // tells the window there is an executable it should name.
-        if (m_path == path) {
-            QString left;
-            if (!removeScriptFile(path, left)) m_path = left;
-            else m_path.clear();
-        } else {
-            QString ignored;
-            removeScriptFile(path, ignored);
-        }
+        removeRunScript(path);
         m_timer->stop();
         const bool stopped = m_stopped;
         m_stopped = false;
@@ -189,14 +194,7 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
         m_reported = true;
         m_timer->stop();
         m_stopped = false;
-        if (m_path == path) {
-            QString left;
-            if (!removeScriptFile(path, left)) m_path = left;
-            else m_path.clear();
-        } else {
-            QString ignored;
-            removeScriptFile(path, ignored);
-        }
+        removeRunScript(path);
         m_proc = nullptr;
         proc->deleteLater();
         emit failed();

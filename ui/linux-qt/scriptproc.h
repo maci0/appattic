@@ -75,6 +75,11 @@ signals:
     void failed();
 
 private:
+    /// Delete `path` and keep the result on `m_path` when it is the current
+    /// run's script and the removal did not land, so the destructor makes
+    /// another attempt. Forgets the path once the file is gone.
+    void removeRunScript(const QString &path);
+
     void appendOutput(const QByteArray &chunk);
 
     QProcess *m_proc = nullptr;
