@@ -1659,6 +1659,14 @@ private:
         vis(m_rescanAct, m_rescan, !settings && !disk);
         vis(m_countAct, m_count, list || overview || scanLive);
         vis(m_scanBarAct, m_scanBar, scanLive);
+        /* The search box and the Kind box belong to the page that is on screen.
+           Both were left holding their value when the window left the list, so
+           a term typed on Leftovers was still filtering Outdated on the way
+           back in, with no box on screen to say so: the page read "No outdated
+           packages match this search" and the sidebar badge read a count the
+           list did not have. A filter that outlives the control that set it
+           has no path off, so both go with the page. */
+        if (!list) clearListFilters();
         if (overview) fillOverview();
         else if (list) fillTable(page);
         else if (settings) refreshIgnoredList();
@@ -1680,6 +1688,20 @@ private:
             it->setData(Qt::UserRole, counts[i]);
         }
         m_sidebar->viewport()->update();
+    }
+
+    /// The list-page toolbar filters, reset together. Both are cleared under a
+    /// signal blocker: their own connections refill the page, and this runs
+    /// inside that refill.
+    void clearListFilters() {
+        if (m_filter && m_filter->currentIndex() != 0) {
+            const QSignalBlocker block(m_filter);
+            m_filter->setCurrentIndex(0);
+        }
+        if (m_search && !m_search->text().isEmpty()) {
+            const QSignalBlocker block(m_search);
+            m_search->clear();
+        }
     }
 
     void fillOverview() {
@@ -2359,13 +2381,16 @@ public:
                 return 1;
             }
         }
+        const bool resumed = m_diskPage->checkRescanResumes();
         std::fprintf(
             stdout,
-            "disk-stream: ok (rows=%d segments=%d chart-keyboard=ok)\n",
+            "disk-stream: %s (rows=%d segments=%d chart-keyboard=ok resume=%s)\n",
+            resumed ? "ok" : "FAILED",
             m_diskPage->streamedRows(),
-            m_diskPage->streamedSegments()
+            m_diskPage->streamedSegments(),
+            resumed ? "ok" : "failed"
         );
-        return 0;
+        return resumed ? 0 : 1;
     }
 
     /// Streaming gate: a fixture scan must publish rows more than once, and
@@ -2528,6 +2553,18 @@ public:
         m_search->clear();
         fillCurrent();
         if (m_model->rowCount() != 200) return fail("rows after clearing search");
+        /* A term typed on a list page must not still be filtering it when the
+           window comes back from a page with no search box to clear it. */
+        m_search->setText(QStringLiteral("table-app-1"));
+        fillCurrent();
+        selectPage(Page::DiskUsage);
+        if (!m_search->text().isEmpty()) return fail("search survived leaving the list");
+        if (m_filter->currentIndex() != 0) return fail("kind filter survived leaving the list");
+        m_search->setText(QStringLiteral("table-app-1"));
+        fillCurrent();
+        if (m_model->rowCount() != 111) return fail("search rows after re-applying");
+        m_search->clear();
+        selectPage(Page::Leftovers);
         m_table->setCurrentIndex(m_model->index(3, 0));
         const QString selected = m_selectedUid;
         if (selected.isEmpty()) return fail("no selection");

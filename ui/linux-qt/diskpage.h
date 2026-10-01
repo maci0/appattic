@@ -27,6 +27,10 @@ public:
     int streamedSegments() const;
     bool streamedBeforeFinish() const;
     bool isScanning() const { return m_scanning; }
+    /// The gate in main.cpp: scan, stand in a subfolder, rescan, and report
+    /// whether the view came back to it. Runs the walk twice over a small
+    /// fixture, which is what the other disk checks already cost.
+    bool checkRescanResumes();
 
 signals:
     void statusMessage(const QString &text);

@@ -10,8 +10,10 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -66,6 +68,18 @@ static QTreeWidgetItem *makeValueItem(
     bool mountPoint
 );
 static void appendChildren(QTreeWidgetItem *parent, DiskNode *node, int depth);
+
+/// The node a rebuilt tree holds at `path`, or nullptr when the path is gone.
+/// A rescan after a trashed folder puts the user back in the folder they were
+/// in, instead of at the root of a walk they did not ask to redo.
+static DiskNode *findNodeByPath(DiskNode *node, const QString &path) {
+    if (!node) return nullptr;
+    if (node->path == path) return node;
+    for (DiskNode *ch : node->children) {
+        if (DiskNode *hit = findNodeByPath(ch, path)) return hit;
+    }
+    return nullptr;
+}
 
 /// How long the destructor waits for the scan thread before detaching it. The
 /// walk tests the cancel flag between directories, so a normal stop returns at
@@ -185,6 +199,10 @@ public:
     DiskNode *root = nullptr;
     DiskNode *selected = nullptr;
     QString scanPath;
+    /// Where the rebuilt tree should put the user back to. Set only by a
+    /// rescan the user did not ask for, so a plain Rescan still opens at the
+    /// root the way it always has.
+    QString resumePath;
     QString filter;
     bool allocated = true;
     int scanToken = 0;
@@ -636,6 +654,17 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         d->progress->hide();
         d->progressLabel->hide();
         d->chart->setRoot(d->root);
+        /* A rescan follows a trashed folder, and it used to hand the user the
+           root of a walk they had already done, with the folder they were
+           standing in nowhere on screen. `setRoot` above repoints the view at
+           the root, so the resume has to come after it or it is undone. A
+           plain Rescan leaves `resumePath` empty and opens at the root as it
+           always has. */
+        if (DiskNode *stay = findNodeByPath(tree, d->resumePath)) {
+            d->chart->setView(stay);
+            d->selected = stay;
+        }
+        d->resumePath.clear();
         fillTree();
         updateChrome();
         emit statusMessage(QStringLiteral("Disk scan finished"));
@@ -952,7 +981,22 @@ void DiskPage::openSelected() {
     if (!n) return;
     QString path = n->path;
     if (!n->isDir) path = QFileInfo(path).absolutePath();
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
+        // "Copy path" and "Move to Trash" both say what they did, and this
+        // button was the one that could do nothing at all: with no handler
+        // for the scheme the click left the window exactly as it was.
+        QMessageBox box(
+            QMessageBox::Warning,
+            QStringLiteral("Open"),
+            QStringLiteral("Could not open %1.").arg(redactHomePaths(path))
+        );
+        box.setTextFormat(Qt::PlainText);
+        box.exec();
+        return;
+    }
+    emit statusMessage(
+        QStringLiteral("Opened %1.").arg(redactHomePaths(path))
+    );
 }
 
 void DiskPage::copyPath() {
@@ -968,7 +1012,14 @@ void DiskPage::copyPath() {
 void DiskPage::trashSelected() {
     if (!d->selected || d->selected == d->root) return;
     const QString path = d->selected->path;
-    const QString msg = QStringLiteral("Move “%1” to Trash?").arg(d->selected->name);
+    /* The rescan below re-walks the whole scan root, so on a home folder that
+       is minutes of "Scanning…" the user agreed to without knowing, and the
+       place they were standing in the tree is where they come back to. Say
+       both, in the alert that gates it, rather than only in the status bar
+       once the walk has already started. */
+    const QString msg = QStringLiteral("Move “%1” and everything in it to Trash?\n\n"
+                                       "AppAttic will scan the disk again afterwards.")
+                        .arg(d->selected->name);
     if (askPlain(this, QStringLiteral("Move to Trash"), msg) != QMessageBox::Yes) {
         return;
     }
@@ -986,6 +1037,11 @@ void DiskPage::trashSelected() {
     // answered the alert has no confirmation the folder was trashed. It goes
     // out after the rescan, whose own "Scanning" message would replace it.
     const QString trashed = d->selected->name;
+    /* The chart holds where the user was standing, and the trashed row is
+       gone from the new tree, so the view root is the one folder that is both
+       still there and where they were. */
+    DiskNode *view = d->chart->viewRoot();
+    d->resumePath = view ? view->path : QString();
     rescan();
     emit statusMessage(QStringLiteral("Moved %1 to Trash. Scanning again…").arg(trashed));
 }
@@ -1049,3 +1105,28 @@ int DiskPage::streamedRows() const { return d->streamedRows; }
 int DiskPage::streamedSegments() const { return d->streamedSegments; }
 
 bool DiskPage::streamedBeforeFinish() const { return d->streamedBeforeFinish; }
+
+bool DiskPage::checkRescanResumes() {
+    if (m_scanning || !d->root) return false;
+    // The first subfolder of the scan root: somewhere the user can stand, and
+    // something a rebuild has to carry the view to.
+    DiskNode *stay = d->root->children.isEmpty() ? nullptr : d->root->children.first();
+    if (!stay) return false;
+    const QString where = stay->path;
+    d->chart->setView(stay);
+    if (d->chart->viewRoot() != stay) return false;
+    // What trashing a folder does: rescan from the same root, and come back
+    // to where the user was standing.
+    d->resumePath = where;
+    rescan();
+    // The walk is threaded and its `finished` arrives on the event loop, so
+    // the check has to keep that loop turning or it reads the view the scan
+    // started from.
+    QElapsedTimer timer;
+    timer.start();
+    while (m_scanning && timer.elapsed() < 60000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    if (m_scanning) return false;
+    return d->chart->viewRoot() && d->chart->viewRoot()->path == where;
+}
