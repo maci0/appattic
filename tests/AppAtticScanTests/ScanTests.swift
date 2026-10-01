@@ -612,6 +612,15 @@ final class ScriptPreviewTests: XCTestCase {
         // An unguarded root command keeps the plain prefix.
         XCTAssertEqual(withRootCmd("apt-mark manual libfoo"), "rootcmd apt-mark manual libfoo")
         XCTAssertTrue(callsRootHelper("rootcmd apt-mark manual libfoo"))
+        // A guarded mark-manual line escalates the action and keeps the guard,
+        // the same way a guarded removal does.
+        let keep = withRootCmd(
+            guardedCommand(present: "dpkg -s libkeep", action: "apt-mark manual libkeep")
+        )
+        XCTAssertEqual(keep, "if dpkg -s libkeep >/dev/null 2>&1; then rootcmd apt-mark manual libkeep; fi")
+        XCTAssertTrue(try shScriptParses(keep), keep)
+        XCTAssertTrue(callsRootHelper(keep), keep)
+        XCTAssertFalse(commandNeedsRoot(keep), keep)
         XCTAssertFalse(callsRootHelper("rm -rf /tmp/x"))
     }
 

@@ -166,19 +166,35 @@ public func packageRemoveCommand(_ entry: PackageEntry) -> String {
     }
 }
 
+/// Mark one package as manually installed, wrapped in the same presence guard
+/// every removal uses.
+///
+/// The rows a mark-manual line names are the `kind == "orphan"` rows, which is
+/// exactly the set `packageRemoveCommand` purges, and the two lists are
+/// generated from one snapshot and saved to one script file. A person who kept
+/// that file and runs it again reaches a mark-manual line for a package an
+/// earlier run purged, and every manager here answers that with a nonzero exit:
+/// `apt-mark manual` cannot locate the package, `dnf mark install` and
+/// `zypper --non-interactive install` have nothing to mark. Under `set -e` that
+/// stops the script at the line, so every package below it loses its mark and
+/// the run ends on a status that reads like a failure rather than a no-op.
+///
+/// The guard asks the manager the same question the removal's guard asks, so a
+/// package that is still there is marked and a package that is gone is skipped
+/// and the script continues.
 public func packageMarkManualCommand(_ entry: PackageEntry) -> String? {
     guard entry.canMarkManual else { return nil }
     guard isSafeCommandArgument(entry.name) else { return nil }
     let q = shellQuote(entry.name)
     switch entry.manager {
     case "apt", "dpkg":
-        return "apt-mark manual \(q)"
+        return guardedCommand(present: "dpkg -s \(q)", action: "apt-mark manual \(q)")
     case "pacman":
-        return "pacman -D --asexplicit \(q)"
+        return guardedCommand(present: "pacman -Qq \(q)", action: "pacman -D --asexplicit \(q)")
     case "dnf":
-        return "dnf mark install \(q)"
+        return guardedCommand(present: "rpm -q \(q)", action: "dnf mark install \(q)")
     case "zypper":
-        return "zypper --non-interactive install \(q)"
+        return guardedCommand(present: "rpm -q \(q)", action: "zypper --non-interactive install \(q)")
     default:
         return nil
     }

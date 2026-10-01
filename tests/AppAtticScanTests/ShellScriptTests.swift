@@ -39,10 +39,15 @@ final class ShellScriptTests: XCTestCase {
         XCTAssertNil(packageMarkManualCommand(hostile))
     }
 
+    /// An ordinary name is kept, inside the presence guard every removal
+    /// carries: a re-run over a package the first run purged has to skip the
+    /// line rather than exit nonzero under `set -e`. `ScriptReRunTests` runs
+    /// the line twice against a stub manager and asserts the second run
+    /// reaches the line below it.
     func testPackageMarkManualKeepsAnOrdinaryName() {
         XCTAssertEqual(
             packageMarkManualCommand(PackageEntry(name: "curl", manager: "apt", kind: "orphan")),
-            "apt-mark manual curl"
+            "if dpkg -s curl >/dev/null 2>&1; then apt-mark manual curl; fi"
         )
     }
 

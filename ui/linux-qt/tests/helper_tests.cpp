@@ -516,8 +516,55 @@ static int verifyHelpers() {
     named.manager = QStringLiteral("apt");
     named.kind = QStringLiteral("orphan");
     named.name = QStringLiteral("libfoo");
-    if (markManualCommand(named) != QStringLiteral("apt-mark manual 'libfoo'")) {
-        std::fprintf(stderr, "markManualCommand: a real name must still be scripted\n");
+    // Guarded like a removal, and for the same reason: a re-run of a kept
+    // script reaches a mark-manual line for a package an earlier run purged,
+    // and `apt-mark` cannot find a package dpkg does not know, so a bare call
+    // exits nonzero and `set -e` strands every line below it.
+    const QString mark = markManualCommand(named);
+    if (mark != QStringLiteral("if dpkg -s 'libfoo' >/dev/null 2>&1; then apt-mark manual 'libfoo'; fi")) {
+        std::fprintf(stderr, "markManualCommand: a real name must be scripted inside the presence guard\n");
+        return 1;
+    }
+    if (!parseGuardedRemove(mark).has_value()) {
+        std::fprintf(stderr, "markManualCommand: the line must read back as a guarded line\n");
+        return 1;
+    }
+    {
+        Finding arch;
+        arch.manager = QStringLiteral("pacman");
+        arch.kind = QStringLiteral("orphan");
+        arch.name = QStringLiteral("libfoo");
+        if (markManualCommand(arch)
+            != QStringLiteral("if pacman -Qq 'libfoo' >/dev/null 2>&1; then pacman -D --asexplicit 'libfoo'; fi")) {
+            std::fprintf(stderr, "markManualCommand: pacman must ask pacman itself whether the package is there\n");
+            return 1;
+        }
+        Finding rpm;
+        rpm.manager = QStringLiteral("dnf");
+        rpm.kind = QStringLiteral("orphan");
+        rpm.name = QStringLiteral("libfoo");
+        if (markManualCommand(rpm)
+            != QStringLiteral("if rpm -q 'libfoo' >/dev/null 2>&1; then dnf mark install 'libfoo'; fi")) {
+            std::fprintf(stderr, "markManualCommand: dnf must ask rpm whether the package is there\n");
+            return 1;
+        }
+    }
+    // The guard is a read and stays unprivileged; only the action escalates,
+    // the same way a guarded removal does. `rootcmd if q; then a; fi` is a
+    // syntax error that takes the whole script down, so the judgment is made
+    // on the action and the wrapper goes inside the guard.
+    if (!commandNeedsRoot(mark)) {
+        std::fprintf(stderr, "markManualCommand: the action reaches the user through rootcmd\n");
+        return 1;
+    }
+    const QString escalated = withRootCmd(mark);
+    if (escalated != QStringLiteral("if dpkg -s 'libfoo' >/dev/null 2>&1; then rootcmd apt-mark manual 'libfoo'; fi")) {
+        std::fprintf(stderr, "markManualCommand: the action escalates inside the guard, not around it\n");
+        return 1;
+    }
+    // Wrapping again must not escalate twice.
+    if (withRootCmd(escalated) != escalated) {
+        std::fprintf(stderr, "markManualCommand: an escalated line must not escalate twice\n");
         return 1;
     }
     Finding ppa;

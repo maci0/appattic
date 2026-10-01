@@ -110,6 +110,10 @@ struct GuardedRemove {
 
 /// Split a single-line guarded removal. Null for anything else.
 std::optional<GuardedRemove> parseGuardedRemove(const QString &cmd);
+/// Write one: `if <present> >/dev/null 2>&1; then <action>; fi`. The shape
+/// `parseGuardedRemove` and `withRootCmd` read back, so a line built here is
+/// judged as the guarded line it is.
+QString guardedLine(const QString &present, const QString &action);
 bool commandNeedsRoot(const QString &cmd);
 /// A plugin command may only reach a script when every byte is inert to
 /// `/bin/sh`. Anything else is an unquoted name or path.

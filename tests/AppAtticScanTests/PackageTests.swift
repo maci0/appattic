@@ -51,7 +51,7 @@ final class PackageTests: XCTestCase {
         // An rc row is a Debian distro package, so it takes the apt manual
         // marker. Losing this hid the only corrective action on a config remnant.
         XCTAssertTrue(pkgs[0].canMarkManual)
-        XCTAssertEqual(packageMarkManualCommand(pkgs[0]), "apt-mark manual oldpkg")
+        XCTAssertEqual(packageMarkManualCommand(pkgs[0]), "if dpkg -s oldpkg >/dev/null 2>&1; then apt-mark manual oldpkg; fi")
     }
 
     func testParseDnfUnneededNames() {
@@ -287,11 +287,25 @@ final class PackageTests: XCTestCase {
         }
     }
 
+    /// The mark-manual lines are guarded like the removals, each with the
+    /// presence query its own manager answers: a package an earlier run of the
+    /// same script purged is skipped, and `set -e` does not strand the packages
+    /// below it.
     func testMarkManualOnlyForDistroOrphans() {
-        XCTAssertEqual(packageMarkManualCommand(entry("libfoo", "apt", "orphan")), "apt-mark manual libfoo")
-        XCTAssertEqual(packageMarkManualCommand(entry("libfoo", "pacman", "orphan")), "pacman -D --asexplicit libfoo")
-        XCTAssertEqual(packageMarkManualCommand(entry("libfoo", "dnf", "orphan")), "dnf mark install libfoo")
-        XCTAssertEqual(packageMarkManualCommand(entry("libfoo", "zypper", "orphan")), "zypper --non-interactive install libfoo")
+        let cases: [(String, String, String)] = [
+            ("apt", "dpkg -s libfoo", "apt-mark manual libfoo"),
+            ("dpkg", "dpkg -s libfoo", "apt-mark manual libfoo"),
+            ("pacman", "pacman -Qq libfoo", "pacman -D --asexplicit libfoo"),
+            ("dnf", "rpm -q libfoo", "dnf mark install libfoo"),
+            ("zypper", "rpm -q libfoo", "zypper --non-interactive install libfoo"),
+        ]
+        for (manager, present, action) in cases {
+            XCTAssertEqual(
+                packageMarkManualCommand(entry("libfoo", manager, "orphan")),
+                "if \(present) >/dev/null 2>&1; then \(action); fi",
+                manager
+            )
+        }
         XCTAssertNil(packageMarkManualCommand(entry("typescript", "npm", "global")))
         XCTAssertNil(packageMarkManualCommand(entry("libfoo", "apt", "global")))
         XCTAssertTrue(entry("libfoo", "apt", "orphan").canMarkManual)
@@ -310,7 +324,10 @@ final class PackageTests: XCTestCase {
         )
         XCTAssertTrue(script.contains("if pacman -Qq libfoo >/dev/null 2>&1; then rootcmd pacman -Rns libfoo; fi"), script)
         XCTAssertTrue(script.contains("then npm -g uninstall typescript; fi"), script)
-        XCTAssertTrue(script.contains("rootcmd apt-mark manual libkeep"), script)
+        XCTAssertTrue(
+            script.contains("if dpkg -s libkeep >/dev/null 2>&1; then rootcmd apt-mark manual libkeep; fi"),
+            script
+        )
         XCTAssertFalse(script.contains("rootcmd npm"), script)
         XCTAssertFalse(script.contains("upgrade"), script)
         XCTAssertFalse(script.contains("-Syu"), script)

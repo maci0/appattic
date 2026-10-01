@@ -802,6 +802,15 @@ std::optional<GuardedRemove> parseGuardedRemove(const QString &cmd) {
     return GuardedRemove{t.mid(3, then - 3), t.mid(then + 7, fi - then - 7).trimmed()};
 }
 
+/// `if <present> >/dev/null 2>&1; then <action>; fi` from two whole commands.
+/// The spelling `parseGuardedRemove` and `withRootCmd` read back, so a line
+/// written here is the same shape a guarded removal is and is judged as one.
+/// Mirrors Swift `guardedCommand`.
+QString guardedLine(const QString &present, const QString &action) {
+    return QStringLiteral("if ") + present + QStringLiteral(" >/dev/null 2>&1; then ")
+        + action + QStringLiteral("; fi");
+}
+
 bool commandNeedsRoot(const QString &cmd) {
     QString t = cmd.trimmed();
     if (t.startsWith(QLatin1String("rootcmd "))) return false;
@@ -1334,12 +1343,28 @@ QString markManualCommand(const Finding &f) {
     if (name.isEmpty() || name.startsWith(QLatin1Char('-'))) return {};
     const QString q = shellQuote(name);
     const QString m = distroManager(f);
+    // Wrapped in the same presence guard the core's removals carry, and for
+    // the same reason. The rows a mark-manual line names are the `orphan` rows,
+    // which is exactly what a remove line purges, and both lists are generated
+    // from one snapshot into one script. Re-running a kept script reaches a
+    // mark-manual line for a package an earlier run purged, and every manager
+    // here answers that with a nonzero exit: `apt-mark` cannot locate the
+    // package, `dnf mark install` and `zypper --non-interactive install` have
+    // nothing to mark. Under `set -e` that strands every line below it, so a
+    // run that changed nothing ends in a status that reads like a failure.
+    // Mirrors Swift `packageMarkManualCommand`.
     if (m == QLatin1String("apt") || m == QLatin1String("dpkg")) {
-        return QStringLiteral("apt-mark manual ") + q;
+        return guardedLine(QStringLiteral("dpkg -s ") + q, QStringLiteral("apt-mark manual ") + q);
     }
-    if (m == QLatin1String("pacman")) return QStringLiteral("pacman -D --asexplicit ") + q;
-    if (m == QLatin1String("dnf")) return QStringLiteral("dnf mark install ") + q;
-    if (m == QLatin1String("zypper")) return QStringLiteral("zypper --non-interactive install ") + q;
+    if (m == QLatin1String("pacman")) {
+        return guardedLine(QStringLiteral("pacman -Qq ") + q, QStringLiteral("pacman -D --asexplicit ") + q);
+    }
+    if (m == QLatin1String("dnf")) {
+        return guardedLine(QStringLiteral("rpm -q ") + q, QStringLiteral("dnf mark install ") + q);
+    }
+    if (m == QLatin1String("zypper")) {
+        return guardedLine(QStringLiteral("rpm -q ") + q, QStringLiteral("zypper --non-interactive install ") + q);
+    }
     return {};
 }
 

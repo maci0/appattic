@@ -167,8 +167,80 @@ final class ScriptReRunTests: XCTestCase {
         )
     }
 
+    /// The mark-manual line, run twice, over a package the first run's removal
+    /// purged. These rows are the `orphan` rows, which is exactly what a remove
+    /// line purges, and both lists are generated from one snapshot into one
+    /// script file, so a re-run reaches a mark-manual line for a package that
+    /// is gone. Every manager answers that with a nonzero exit, and under
+    /// `set -e` that stops the script before the lines below it, so a run that
+    /// changed nothing ends on a status that reads like a failure.
+    ///
+    /// The stub stands in for the manager: it answers the presence query the
+    /// way `dpkg -s` does, so a line that lost its guard strands the script
+    /// here instead of passing quietly.
+    func testSecondRunOfAMarkManualOverAPurgedPackageIsANoOp() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("appattic-rerun-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let bin = root.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+
+        // A file stands for the package in the database: `dpkg -s` answers 0
+        // while it is there, and the mark is recorded by appending to it. The
+        // first run marks the package; removing that file is what the same
+        // script's remove line would have done.
+        let marked = root.appendingPathComponent("marked")
+        try Data().write(to: marked)
+        let dpkg = bin.appendingPathComponent("dpkg")
+        try "#!/bin/sh\ntest -e \(shellQuote(marked.path))\n".write(to: dpkg, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dpkg.path)
+        // `apt-mark manual` cannot find a package dpkg does not know, so it
+        // fails when the mark file is gone and a bare call strands the script.
+        let aptMark = bin.appendingPathComponent("apt-mark")
+        try """
+        #!/bin/sh
+        test -e \(shellQuote(marked.path)) || exit 1
+        printf 'marked\\n' >> \(shellQuote(marked.path))
+        """.write(to: aptMark, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: aptMark.path)
+
+        let savedPath = ProcessInfo.processInfo.environment["PATH"]
+        addTeardownBlock {
+            if let savedPath { setenv("PATH", savedPath, 1) } else { unsetenv("PATH") }
+        }
+        setenv("PATH", "\(bin.path):\(savedPath ?? "")", 1)
+
+        let cmd = try XCTUnwrap(
+            packageMarkManualCommand(entry("libfoo", "apt", "orphan")),
+            "an apt orphan takes a mark-manual command"
+        )
+        let guard = try XCTUnwrap(parseGuardedRemove(cmd), "untrapped mark: \(cmd)")
+        XCTAssertEqual(guard.present, "dpkg -s libfoo", cmd)
+        XCTAssertEqual(guard.action, "apt-mark manual libfoo", cmd)
+
+        let script = "set -e\n\(cmd)\nprintf done"
+        let first = try run(script)
+        XCTAssertEqual(first.0, 0, first.1)
+        XCTAssertEqual(first.1, "done", first.1)
+        XCTAssertEqual(
+            try String(contentsOf: marked, encoding: .utf8),
+            "marked\n",
+            "a mark that is already set is not a second mark"
+        )
+
+        // The package is gone now, the way a remove line in the same script
+        // would have left it.
+        try FileManager.default.removeItem(at: marked)
+
+        let second = try run(script)
+        XCTAssertEqual(second.0, 0, "the second run aborted on a package the first removed: \(second.1)")
+        XCTAssertEqual(second.1, "done", "set -e stranded the lines below the mark: \(second.1)")
+    }
+
     /// Each line the app can generate parses on its own, so one bad line cannot
-    /// take the rest of a multi-selection script down with it.
+    /// take the rest of a multi-selection script down with it. The mark-manual
+    /// lines are in the same list and carry the same guard the removals do, so
+    /// a line that lost it is caught here rather than by a re-run.
     func testEveryRemovalAndKeepLineParsesAlone() throws {
         var lines: [String] = []
         var markManualLines = 0
@@ -176,6 +248,10 @@ final class ScriptReRunTests: XCTestCase {
             lines.append(packageRemoveCommand(entry("libfoo", manager)))
             if let keep = packageMarkManualCommand(entry("libfoo", manager, "orphan")) {
                 markManualLines += 1
+                XCTAssertNotNil(
+                    parseGuardedRemove(keep),
+                    "a mark for a package an earlier run removed is unguarded: \(keep)"
+                )
                 lines.append(withRootCmd(keep))
             }
         }
