@@ -7,7 +7,6 @@ build-cache
 core/out
 ui/linux-qt/build
 ui/linux-qt/build-release
-.deps
 .zig-cache
 .zig-cache-local
 .scratch
@@ -16,3 +15,11 @@ dist
 __pycache__
 *.pyc
 .DS_Store
+
+# .deps is an unpacked toolchain: linux-deps.sh installs Zig, Wasmtime and
+# Swift under /opt inside the image, but a contributor who ran --install on
+# the host first has the same trees in .deps, and they are gigabytes of a
+# context nothing in either Dockerfile reads. The prune lines in Dockerfile
+# and Dockerfile.arch cover the same ground inside the tree; this is what
+# keeps the copy from ever carrying them.
+.deps

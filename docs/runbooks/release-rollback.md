@@ -73,9 +73,12 @@ version rather than deleting and stopping.
    ```
 
    The tag is the trigger. `linux.yml` and `release.yml` both run on it, and
-   `release.yml` re-runs `scripts/test.sh` itself, because the two workflows
-   build in parallel and `linux.yml` passing does not stop the release on its
-   own.
+   `release.yml` does not depend on `linux.yml`: the two workflows are
+   separate, so a green `linux.yml` alone does not stop the release. Its own
+   `gate` job runs `scripts/check-version.sh --tag` and `scripts/test.sh`, and
+   both release jobs declare `needs: [gate]`, so a red scan suite or a
+   mistagged push stops the release before anything is published, and the
+   suite runs once per tag rather than in every job that wanted it.
 4. Watch the `release` workflow. A failure after `Publish AppImage` is not
    half-published: `fail_on_unmatched_files: true` means the release is only
    written once all four artifacts exist.

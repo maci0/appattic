@@ -119,9 +119,14 @@ modules:
       # instead: Flatpak remotes have no way to fetch a dir source.
       - type: dir
         path: ../..
+        # The same list scripts/linux-flatpak.sh reads and hands to rsync, so
+        # the two cannot drift. .dockerignore is here because it is build
+        # output for this build: it exists for `podman build` against the whole
+        # tree, and nothing in this module reads it.
         skip:
           - .build
           - .deps
+          - .dockerignore
           - .gauntlet
           - .git
           - .scratch

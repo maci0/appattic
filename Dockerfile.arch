@@ -37,6 +37,12 @@ ENV WASMTIME_DIR=/opt/wasmtime-c-api
 
 WORKDIR /src
 COPY . .
+# The same build-output prune the Ubuntu image does, and for the same reason:
+# .dockerignore keeps these out of the build context, and this rm covers a
+# context that arrived some other way. A stale core/out/*.wasm is the file the
+# WASM gate would load instead of the one this build produced.
+RUN rm -rf .build .swiftpm .zig-cache .zig-cache-local core/out dist \
+        ui/linux-qt/build ui/linux-qt/build-release
 # AppAttic Qt 6 link is proven by scripts/linux-qt-link.sh (ldd libQt6Widgets + --smoke).
 RUN pkg-config --exists Qt6Widgets \
     && pkg-config --modversion Qt6Widgets \

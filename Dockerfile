@@ -36,6 +36,20 @@ ENV WASMTIME_DIR=/opt/wasmtime-c-api
 
 WORKDIR /src
 COPY . .
+# The image is a build image, not a runtime one: the last line compiles and
+# runs the test suite and never starts a server, so a USER here would only
+# break `apt`, the `/opt` toolchain installs, and the Qt smoke's own
+# write to $HOME that scripts/linux-qt-link.sh sets up. The runtime posture
+# is the packages, not the account.
+#
+# core/out/*.wasm, ui/linux-qt/build*, .build, dist and the archives under
+# dist/.appimage-tools are build output. .dockerignore keeps them out of the
+# context; this rm is the belt to that braces, because a context built with
+# `docker build` honours .dockerignore and a context tarball piped in does
+# not, and a stale core/out/*.wasm in the tree would be what the WASM gate
+# loaded instead of the one this build produced.
+RUN rm -rf .build .swiftpm .zig-cache .zig-cache-local core/out dist \
+        ui/linux-qt/build ui/linux-qt/build-release
 # AppAttic Qt 6 link is proven by scripts/linux-qt-link.sh (ldd libQt6Widgets + --smoke).
 # The CLI build goes through scripts/swift-build.sh so the checkout path is
 # mapped out of the binary, the same way every other build does it.

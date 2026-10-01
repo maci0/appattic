@@ -16,9 +16,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The check-version and test pair every job in this workflow already runs,
+  # as a job of its own, so the macOS job can `needs:` it. `needs` takes job
+  # ids and not steps, so without this the only way to make a release wait for
+  # its tests is a new job; this is that job, holding the two gates that
+  # already existed and no third.
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Full history, so check-version.sh can see the existing tags: without
+          # them it cannot tell that the declared version is already a published
+          # release, and the immutability check passes on a shallow clone.
+          fetch-depth: 0
+      - name: Check the tag matches the declared version, and is not already released
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash scripts/check-version.sh --tag "$GITHUB_REF_NAME"
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
+        with:
+          swift-version: "5.10.1"
+      - name: Test scan library
+        run: bash scripts/test.sh
+
   linux-appimage:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # The tag check and the scan suite run in the gate job above, so this job
+    # waits for them instead of repeating them: linux.yml runs the same suite
+    # on the same tag push, and before the gate job existed nothing made the
+    # release wait for either, so a failing test still shipped the AppImage
+    # because the two workflows built in parallel. A release now stops here
+    # on a red gate, and the suite runs once per tag instead of twice.
+    needs: [gate]
     # The only job that writes: everything else stays at the workflow's
     # contents: read.
     permissions:
@@ -58,13 +90,6 @@ jobs:
             'Package.resolved', 'Package.swift', '.swift-version',
             '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
             'core/src/**/*.zig', 'core/src/*.txt', 'core/bench/*.zig') }}
-      # The tag check and the release notes need nothing but the checkout
-      # above, so they run before the toolchain and the test suite. A mistagged
-      # push is the common failure and it is caught in seconds instead of
-      # after a full Swift build.
-      - name: Check the tag matches the declared version, and is not already released
-        if: startsWith(github.ref, 'refs/tags/')
-        run: bash scripts/check-version.sh --tag "$GITHUB_REF_NAME"
       # The AppStream <description> is the release note. The GitHub release
       # page is where a user reads before downloading, so it gets the same
       # text rather than the generated commit list action-gh-release builds by
@@ -78,12 +103,6 @@ jobs:
         uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "5.10.1"
-      # linux.yml runs this on the tag push too, but nothing makes the release
-      # wait for it: without a gate here, a failing test still ships the
-      # AppImage, because the two workflows build in parallel. It runs before
-      # the Qt install so a red suite stops the job before it spends the time.
-      - name: Test scan library
-        run: bash scripts/test.sh
       - name: Install Qt 6 and build tools
         run: sudo bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API
@@ -120,11 +139,20 @@ jobs:
   macos-ui:
     # Two switches, both flipped together: `if` re-enables the job, and
     # `continue-on-error` is what decides whether its failure is visible.
-    # Re-enabling with the flag left true turns a red scan suite into a green
-    # release, because the steps below the test gate are the ones that write.
+    # Re-enabling with the flag left true turns a red build into a green
+    # release, because the steps below the gate are the ones that write.
     # Drop continue-on-error when this job comes back rather than leaving a
     # deploy whose failure nobody sees.
+    #
+    # `needs: [gate]` is what makes the test a gate and not a step: the two
+    # checks this job used to repeat are the gate job's, so a red scan suite
+    # stops the release before this job starts, and it cannot publish a macOS
+    # zip the AppImage job would have refused. The suite now runs once per tag
+    # rather than in every job that wanted it.
+    needs: [gate]
     if: false  # optional; re-enable when AppAtticUI CI build is stable
+    # macos-14 is the arm64 image, so the runner is arm64 and every artifact
+    # this job names `-macos-arm64` is the architecture it actually builds.
     runs-on: macos-14
     timeout-minutes: 60
     continue-on-error: true
@@ -142,20 +170,15 @@ jobs:
           # immutability check passes on a shallow clone and a released version
           # can be shipped a second time.
           fetch-depth: 0
-      # The same two gates linux-appimage runs, so re-enabling this job cannot
-      # publish a macOS zip that the AppImage job would have refused: a tag
-      # that does not match the declared version, a version already released,
-      # or a red scan suite. The tag check needs only the checkout; the test
-      # needs the toolchain, so it goes after setup-swift, which is where
-      # linux-appimage puts it too.
-      - name: Check the tag matches the declared version, and is not already released
-        if: startsWith(github.ref, 'refs/tags/')
-        run: bash scripts/check-version.sh --tag "$GITHUB_REF_NAME"
+      # The two gates this job used to run, `check-version.sh --tag` and
+      # `bash scripts/test.sh`, are the gate job's steps, and `needs: [gate]`
+      # above is what waits for them. Re-enabling this job therefore cannot
+      # publish a macOS zip the AppImage job would have refused: a tag that
+      # does not match the declared version, a version already released, or a
+      # red scan suite stops the release at the gate instead of here.
       - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "5.10.1"
-      - name: Test scan library
-        run: bash scripts/test.sh
       - name: Build AppAtticUI
         run: |
           set -euo pipefail

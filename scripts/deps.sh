@@ -582,6 +582,23 @@ check_tool_pins() {
             line="${line#"${line%%[![:space:]]*}"}"
             [[ "$line" == "#"* ]] && continue
             line="${line#run: }"
+            # A spec written as `yamllint==$(bash scripts/deps.sh yamllint-version)`
+            # reads this file's own pin back through the subcommand, so it is
+            # the pin, and comparing it against the pin it expanded from would
+            # fail every run on a literal that is not a version. The pin is
+            # still checked: this function is what the caller of that
+            # subcommand is, and the literal form below is still required to
+            # match. What is refused is an unexpanded shell substitution in the
+            # version, which would let anything in the environment name a
+            # different linter than the one the config was written for.
+            # shellcheck disable=SC2016  # the literal text, not an expansion
+            if [[ "$line" == *'yamllint==$('*')'* ]]; then
+                case "$line" in
+                    *'yamllint==$(bash scripts/deps.sh yamllint-version)'*) ;;
+                    *) fail "${workflow#"$ROOT"/}: expands the yamllint pin through something other than 'bash scripts/deps.sh yamllint-version': $line" ;;
+                esac
+                continue
+            fi
             spec=""
             case "$line" in
                 *"uv tool install"*)

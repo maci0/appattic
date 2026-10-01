@@ -69,10 +69,14 @@ jobs:
       - name: Install yamllint
         # Pinned: an unpinned linter makes a green run mean "whatever
         # yamllint shipped that morning", not "this tree passes". The pin is
-        # repeated in scripts/deps.sh, which fails if the two disagree.
+        # read out of scripts/deps.sh rather than written here a second time,
+        # so the workflow and the pin cannot disagree: deps.sh is the one
+        # place the version is written, and `deps.sh yamllint-version` is the
+        # subcommand that prints it. The pip form is the one that works
+        # unquoted-as-a-word, so the version expands into it as one argument.
         # pipx, not `uv tool install`: the runner image ships pipx and no uv,
         # so the uv spelling is a step that never finds its own tool.
-        run: pipx install "yamllint==1.38.0"
+        run: pipx install "yamllint==$(bash scripts/deps.sh yamllint-version)"
       - name: Install Wasmtime C API
         # embed.c is the WASM loader, and the C gate compiles every source
         # under core/host. Without these headers it is the one file the gate
@@ -119,12 +123,16 @@ jobs:
           # compiled library and the WASM modules, and a key without the data
           # file serves a cache the file has already invalidated. core/bench
           # is the same case for `zig fmt --check` and the benchmark build.
+          # core/host and core/build-flags.sh are the same case for the C host
+          # every WASM pass links: the host is compiled with the flag list
+          # build-flags.sh carries, and neither is in .build or the zig cache,
+          # so an edit to one changes the artifact with a key that did not move.
           key: >-
             ${{ runner.os }}-${{ github.job }}-${{
             hashFiles('Package.resolved', 'Package.swift', '.swift-version',
             '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
             'benchmarks/**/*.swift', 'core/src/**/*.zig', 'core/src/*.txt',
-            'core/bench/*.zig') }}
+            'core/bench/*.zig', 'core/host/**', 'core/build-flags.sh') }}
       - name: Install Qt 6
         run: sudo bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API
@@ -224,12 +232,25 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     container: swift:5.10.1-jammy
+    # `shell: bash` on every step in this job, and the reason is the
+    # container. A step with no `shell:` runs under `sh -e {0}`, and this
+    # job's image has dash at /bin/sh, not bash. The runner hands a
+    # multi-line step to `sh -e <path-to-the-workflow>`, so dash reads the
+    # whole step as one command string: `$GITHUB_ENV` and `$GITHUB_PATH`
+    # are never expanded, `set -euo pipefail` is a `set` of options dash
+    # does not know (pipefail is a bashism) so the step dies before its
+    # first command runs, and `. scripts/swift-build.sh` is a `.` of a
+    # string, not a source. Each of those is a red step that says nothing
+    # about the tree. The archlinux job below carries the same shell, and
+    # so does every multi-line step in the jobs that run on a hosted
+    # runner, where `sh` is bash.
     steps:
       - name: Install git
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates
+        shell: bash
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -255,25 +276,33 @@ jobs:
           # compiled library and the WASM modules, and a key without the data
           # file serves a cache the file has already invalidated. core/bench
           # is the same case for `zig fmt --check` and the benchmark build.
+          # core/host and core/build-flags.sh are the same case for the C host
+          # every WASM pass links: the host is compiled with the flag list
+          # build-flags.sh carries, and neither is in .build or the zig cache,
+          # so an edit to one changes the artifact with a key that did not move.
           key: >-
             ${{ runner.os }}-${{ github.job }}-${{
             hashFiles('Package.resolved', 'Package.swift', '.swift-version',
             '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
             'benchmarks/**/*.swift', 'core/src/**/*.zig', 'core/src/*.txt',
-            'core/bench/*.zig') }}
+            'core/bench/*.zig', 'core/host/**', 'core/build-flags.sh') }}
       - name: Install Qt 6
         run: bash scripts/linux-deps.sh --install
+        shell: bash
       - name: Install Wasmtime C API
         run: |
           bash scripts/linux-deps.sh --install-wasmtime
           echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
+        shell: bash
       - name: Put zig on PATH
         run: |
           echo /opt/zig >> "$GITHUB_PATH"
           echo /usr/local/bin >> "$GITHUB_PATH"
+        shell: bash
       - name: Test scan library
         run: bash scripts/test.sh
         id: swift_test_jammy
+        shell: bash
       - name: Build CLI
         run: |
           set -euo pipefail
@@ -281,6 +310,7 @@ jobs:
           . scripts/swift-build.sh
           appattic_swift_build debug --product appattic
         if: steps.swift_test_jammy.outcome == 'success'
+        shell: bash
       - name: Link Qt UI
         if: success() || failure()
         shell: bash
@@ -300,6 +330,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     container: archlinux:base-devel
+    # shell: bash for the same reason as the jammy job above: this image's
+    # /bin/sh is dash too.
     steps:
       - name: Install git
         # actions/checkout is git, and archlinux:base-devel has no git. Only git
@@ -309,6 +341,7 @@ jobs:
         # not a pacman package either: --install puts the checksummed
         # .zig-version tarball on PATH.
         run: pacman -Syu --noconfirm --needed git ca-certificates
+        shell: bash
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -319,27 +352,34 @@ jobs:
             .zig-cache
             .zig-cache-local
           # The same input set as the Zig half of the test job's key: the
-          # name list is read by core/src at build time and the benchmark is
-          # part of the Zig tree, so neither can be left out of the key.
+          # name list is read by core/src at build time, the benchmark is part
+          # of the Zig tree, and the C host the modules link is compiled from
+          # core/host with the flag list core/build-flags.sh carries. A key
+          # that omits an input is a key that serves the cache that input
+          # already invalidated.
           key: >-
             ${{ runner.os }}-${{ github.job }}-${{
             hashFiles('.zig-version', 'core/src/**/*.zig', 'core/src/*.txt',
-            'core/bench/*.zig') }}
+            'core/bench/*.zig', 'core/host/**', 'core/build-flags.sh') }}
       - name: Install Qt 6 and build tools
         run: bash scripts/linux-deps.sh --install
+        shell: bash
       - name: Install Wasmtime C API
         run: |
           bash scripts/linux-deps.sh --install-wasmtime
           echo "WASMTIME_DIR=/opt/wasmtime-c-api" >> "$GITHUB_ENV"
+        shell: bash
       - name: Put zig on PATH
         run: |
           echo /opt/zig >> "$GITHUB_PATH"
           echo /usr/local/bin >> "$GITHUB_PATH"
+        shell: bash
       - name: Link Qt UI
         run: |
           set -euo pipefail
           bash scripts/linux-qt-link.sh
           bash scripts/verify-qt-link.sh
+        shell: bash
       - name: Upload Qt link proof
         if: success() || failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
