@@ -130,8 +130,7 @@ static int smokeVerifyTables(const SmokeState &st) {
             }
             ++flatpakUnusedAsPackage;
         }
-        if (isLeftover(f) && f.status != QLatin1String("keep")
-            && f.status != QLatin1String("owned") && f.status != QLatin1String("system")
+        if (isLeftover(f) && !leftoverStatusBlocksCleanup(f.status)
             && !matchPage(f, Page::Leftovers)) {
             std::fprintf(stderr, "tables: leftover finding not in Leftovers table\n");
             return 1;

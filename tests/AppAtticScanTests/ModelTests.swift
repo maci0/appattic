@@ -252,6 +252,59 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(scanResult(from: data, now: now).scannedAt, now)
     }
 
+    /// A software row whose `size_measured` / `data_measured` keys are absent
+    /// decodes as unmeasured, not as measured.
+    ///
+    /// Both keys are `Bool?` on the wire and the synthesised encode omits a
+    /// nil, so absent means "this build cannot tell whether it was measured".
+    /// `dataMeasured` is the safety gate `evaluateVerdict` reads: false holds
+    /// the row at REVIEW, true lets it reach REMOVE. Defaulting the unknown to
+    /// true therefore turns a dropped flag into a destructive verdict, so the
+    /// unknown resolves the safe way round.
+    func testScanResultTreatsAnAbsentMeasuredFlagAsUnmeasured() throws {
+        let json = """
+        {"scanned_at":"2026-08-17T12:00:00Z","duration_s":1,"brew_available":false,\
+        "totals":{"apps_installed":0,"orphaned_items":0,"orphaned_bytes":0,\
+        "system_leftover_bytes":0,"reclaimable_bytes":0,"stale_apps":0,"outdated_apps":0},\
+        "leftovers":[],\
+        "software":[{"name":"Sketch","kind":"app","path":"/Applications/Sketch.app",\
+        "source":"applications","size_bytes":2048,"data_bytes":512}]}
+        """
+        let data = try JSONDecoder().decode(ScanData.self, from: Data(json.utf8))
+        XCTAssertNil(data.software[0].size_measured)
+        XCTAssertNil(data.software[0].data_measured)
+        let restored = scanResult(from: data)
+        XCTAssertFalse(restored.software[0].sizeMeasured)
+        XCTAssertFalse(restored.software[0].dataMeasured)
+        // The byte totals still read back: a number this build cannot vouch for
+        // is still a number, and only the verdict gate changes.
+        XCTAssertEqual(restored.software[0].sizeBytes, 2048)
+        XCTAssertEqual(restored.software[0].dataBytes, 512)
+        // And it is still reported as unmeasured on the way out, so an export
+        // does not quietly promote the unknown to a fact.
+        XCTAssertEqual(restored.toScanData().software[0].size_measured, false)
+        XCTAssertEqual(restored.toScanData().software[0].data_measured, false)
+    }
+
+    /// An explicit `true` is the writer saying it did measure, and survives the
+    /// round trip unchanged. Pins the other side of the fix above: the absent
+    /// case is not fixed by making every row unmeasured.
+    func testScanResultKeepsAnExplicitMeasuredFlag() throws {
+        let json = """
+        {"scanned_at":"2026-08-17T12:00:00Z","duration_s":1,"brew_available":false,\
+        "totals":{"apps_installed":0,"orphaned_items":0,"orphaned_bytes":0,\
+        "system_leftover_bytes":0,"reclaimable_bytes":0,"stale_apps":0,"outdated_apps":0},\
+        "leftovers":[],\
+        "software":[{"name":"Sketch","kind":"app","path":"/Applications/Sketch.app",\
+        "source":"applications","size_bytes":2048,"size_measured":true,\
+        "data_bytes":512,"data_measured":true}]}
+        """
+        let data = try JSONDecoder().decode(ScanData.self, from: Data(json.utf8))
+        let restored = scanResult(from: data)
+        XCTAssertTrue(restored.software[0].sizeMeasured)
+        XCTAssertTrue(restored.software[0].dataMeasured)
+    }
+
     func testUninstallCommandUsesPkgIdForSnap() {
         let item = SoftwareItem(
             name: "Code",

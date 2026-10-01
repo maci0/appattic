@@ -831,6 +831,57 @@ static int verifyHelpers() {
         std::fprintf(stderr, "leftovers: keep/owned leftover must not list on Leftovers\n");
         return 1;
     }
+    // Every blocked status, through every gate, not just "keep" through the
+    // one this function happened to exercise. `canMarkCleanup` refused only
+    // "keep", so a leftover carrying "owned" or "system" was held back twice
+    // over: once by the status it did not check, and once by its cleanup
+    // command coming back empty. Ask the predicate directly, and give each row
+    // a path a command would otherwise be built from, so the status is the
+    // only thing that can stop it.
+    for (const char *blocked : {"keep", "owned", "system"}) {
+        Finding row;
+        row.plugin = QStringLiteral("path-xdg-config");
+        row.status = QLatin1String(blocked);
+        row.kind = QStringLiteral("orphan-dir");
+        row.name = QStringLiteral("firefox");
+        row.path = QStringLiteral("/home/alice/.config/gone-app");
+        row.bytes = 1024;
+        if (!leftoverStatusBlocksCleanup(row.status)) {
+            std::fprintf(stderr, "blocked statuses: %s must block cleanup\n", blocked);
+            return 1;
+        }
+        if (matchPage(row, Page::Leftovers)) {
+            std::fprintf(stderr, "blocked statuses: %s must not list on Leftovers\n", blocked);
+            return 1;
+        }
+        if (canMarkCleanup(row, Page::Leftovers)) {
+            std::fprintf(stderr, "blocked statuses: %s must not be tickable\n", blocked);
+            return 1;
+        }
+        if (!leftoverCleanupCommand(row).isEmpty()) {
+            std::fprintf(stderr, "blocked statuses: %s must produce no cleanup command\n", blocked);
+            return 1;
+        }
+    }
+    // The leftover cases above are stopped twice over, once by the status and
+    // once by the empty command, so they cannot tell the two guards apart. A
+    // row that is not a leftover has no `leftoverCleanupCommand` to fall back
+    // on: it reaches the tail of `canMarkCleanup`, which before the fix tested
+    // only "keep" and so accepted any plugin row carrying "owned" or "system"
+    // with a non-empty command. This is the case that actually moved.
+    for (const char *blocked : {"owned", "system"}) {
+        Finding row;
+        row.plugin = QStringLiteral("container-runtime");
+        row.status = QLatin1String(blocked);
+        row.kind = QStringLiteral("dangling-image");
+        row.id = QStringLiteral("sha256:abc");
+        row.name = QStringLiteral("<none>:<none>");
+        row.command = QStringLiteral("docker rmi sha256:abc");
+        if (canMarkCleanup(row, Page::Leftovers)) {
+            std::fprintf(stderr, "blocked statuses: non-leftover %s must not be tickable\n", blocked);
+            return 1;
+        }
+    }
     return 0;
 }
 

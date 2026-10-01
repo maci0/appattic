@@ -117,6 +117,10 @@ bool commandIsShellSafe(const QString &cmd);
 QString withRootCmd(const QString &cmd);
 QString scriptRootHelper();
 void groupLinuxLeftovers(QVector<Finding> &findings);
+/// The statuses that must never be cleaned, ticked, or re-measured. Every
+/// caller asks this rather than spelling the set out, so a status added here
+/// blocks cleanup everywhere at once.
+bool leftoverStatusBlocksCleanup(const QString &status);
 bool isLeftover(const Finding &f);
 bool isOutdated(const Finding &f);
 /// Same manager list as Swift `outdatedIsUpdatable`, plus a kind gate: only a

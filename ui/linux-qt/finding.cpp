@@ -663,7 +663,21 @@ static QString overlayRootLabel(const QString &path) {
     return {};
 }
 
-static bool leftoverStatusBlocksCleanup(const QString &status) {
+/// The statuses that must never be cleaned, ticked, or re-measured.
+///
+/// One predicate for the whole set, because the set was open-coded at every
+/// call site and the sites did not agree: `leftoverCleanupCommand`,
+/// `enrichLeftoverSizes`, `matchPage`, `smokeVerifyTables`, and the helper
+/// tests each named the same three strings, while `canMarkCleanup` named only
+/// "keep". A leftover carrying "owned" or "system" was therefore still stopped
+/// by `leftoverCleanupCommand` returning empty, which made the missing guard
+/// invisible for exactly the rows it was meant to protect; a row that is not a
+/// leftover has no such fallback and fell through on its command alone. The
+/// question is "may this row be cleaned", not "did a command come out".
+///
+/// `markOwnedPathLeftovers` is the one site that does not ask this: it *writes*
+/// "keep" and so has to keep offering every other row to the desktop list.
+bool leftoverStatusBlocksCleanup(const QString &status) {
     return status == QLatin1String("keep")
         || status == QLatin1String("owned")
         || status == QLatin1String("system");
@@ -1007,10 +1021,7 @@ void enrichLeftoverSizes(
     jobs.reserve(size_t(findings.size()));
     for (Finding &f : findings) {
         if (!isLeftover(f)) continue;
-        if (f.status == QLatin1String("keep") || f.status == QLatin1String("owned")
-            || f.status == QLatin1String("system")) {
-            continue;
-        }
+        if (leftoverStatusBlocksCleanup(f.status)) continue;
         jobs.push_back(&f);
     }
     if (jobs.empty()) return;
@@ -1129,6 +1140,12 @@ void markOwnedPathLeftovers(QVector<Finding> &findings) {
     if (stems.isEmpty()) return;
     for (Finding &f : findings) {
         if (!isLeftover(f) || isShadowFinding(f)) continue;
+        // Only "keep" is *written* here, so that is the only status worth
+        // short-circuiting. An already-owned or already-system row must still be
+        // offered to the desktop list: the set of installed desktop stems is
+        // read once and this pass runs over the whole accumulated scan on every
+        // plugin blob, so skipping them would leave a row that a desktop file
+        // does match still marked orphaned.
         if (f.status == QLatin1String("keep")) continue;
         if (leftoverNameMatchesDesktop(f.name, stems)) f.status = QStringLiteral("keep");
     }
@@ -1156,10 +1173,7 @@ bool matchPage(const Finding &f, Page page) {
         return true;
     case Page::Leftovers:
         if (!isLeftover(f)) return false;
-        if (f.status == QLatin1String("keep") || f.status == QLatin1String("owned")
-            || f.status == QLatin1String("system")) {
-            return false;
-        }
+        if (leftoverStatusBlocksCleanup(f.status)) return false;
         return true;
     case Page::Stale:
         return isStale(f);
@@ -1319,7 +1333,12 @@ bool canMarkCleanup(const Finding &f, Page page) {
     if (page == Page::Outdated) {
         return f.updatable;
     }
-    if (f.status == QLatin1String("keep")) return false;
+    // A blocked status answers the question on its own, for a leftover and for
+    // anything else alike. `leftoverCleanupCommand` refuses the same set, so
+    // the leftover branch below already turned an `owned` or `system` row
+    // untickable by accident of its command coming back empty; asking the
+    // status first is what makes that deliberate rather than incidental.
+    if (leftoverStatusBlocksCleanup(f.status)) return false;
     if (isLeftover(f)) return !leftoverCleanupCommand(f).isEmpty();
     return !f.command.isEmpty() || f.status == QLatin1String("orphaned")
         || f.status == QLatin1String("review") || isShadowFinding(f);

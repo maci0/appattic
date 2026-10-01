@@ -743,12 +743,20 @@ public func scanResult(from data: ScanData, ignoringLeftovers: Set<String> = [],
             path: item.path,
             source: item.source,
             sizeBytes: item.size_bytes ?? 0,
-            sizeMeasured: item.size_measured ?? true,
+            // Absent is not measured. Both fields are `Bool?` on the wire and a
+            // synthesised encode omits a nil, so a key that is not there means
+            // this build was handed a row whose measurement state it does not
+            // know. `dataMeasured` is a safety gate, not a display hint: `false`
+            // holds the row at REVIEW ("review before removing") where `true`
+            // lets it reach REMOVE, so defaulting an unknown to `true` turns a
+            // missing flag into a destructive verdict. Unknown measures as
+            // unmeasured.
+            sizeMeasured: item.size_measured ?? false,
             lastUsed: parseISODate(item.last_used),
             usageSource: item.usage_source,
             installedAt: parseISODate(item.installed_at),
             dataBytes: item.data_bytes ?? 0,
-            dataMeasured: item.data_measured ?? true,
+            dataMeasured: item.data_measured ?? false,
             dataPaths: item.data_paths ?? [],
             runningService: item.running_service ?? false,
             version: item.version ?? item.current_version,
