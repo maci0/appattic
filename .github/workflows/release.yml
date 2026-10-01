@@ -47,12 +47,17 @@ jobs:
           # fallback for the same reason: a prefix that ignores the hash also
           # ignores the toolchain and the sources, so it would hand back exactly
           # the cache the key exists to keep out.
+          #
+          # linux-system-names.txt and core/bench are build input here too, the
+          # first as an AppAtticScan resource and as Zig source data, the
+          # second as part of the Zig tree the gate formats. An input the key
+          # omits is an input a restore can serve stale.
           key: >-
             ${{ runner.os }}-appimage-${{
             hashFiles('scripts/dep-checksums.sha256', 'scripts/deps.sh',
             'Package.resolved', 'Package.swift', '.swift-version',
             '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
-            'core/src/**/*.zig') }}
+            'core/src/**/*.zig', 'core/src/*.txt', 'core/bench/*.zig') }}
       # The tag check and the release notes need nothing but the checkout
       # above, so they run before the toolchain and the test suite. A mistagged
       # push is the common failure and it is caught in seconds instead of

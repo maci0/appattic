@@ -107,11 +107,20 @@ jobs:
           # fallback for the same reason: a prefix that ignores the hash also
           # ignores the toolchain, so it would hand back exactly the cache the
           # key exists to keep out.
+          #
+          # linux-system-names.txt is here because it is build input in two
+          # directions: Package.swift copies it as an AppAtticScan resource
+          # (through Sources/AppAtticScan/linux-system-names.txt, a symlink to
+          # it) and the Zig core reads the same bytes. Editing it changes the
+          # compiled library and the WASM modules, and a key without the data
+          # file serves a cache the file has already invalidated. core/bench
+          # is the same case for `zig fmt --check` and the benchmark build.
           key: >-
             ${{ runner.os }}-${{ github.job }}-${{
             hashFiles('Package.resolved', 'Package.swift', '.swift-version',
             '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
-            'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
+            'benchmarks/**/*.swift', 'core/src/**/*.zig', 'core/src/*.txt',
+            'core/bench/*.zig') }}
       - name: Install Qt 6
         run: sudo bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API
@@ -201,11 +210,20 @@ jobs:
           # fallback for the same reason: a prefix that ignores the hash also
           # ignores the toolchain, so it would hand back exactly the cache the
           # key exists to keep out.
+          #
+          # linux-system-names.txt is here because it is build input in two
+          # directions: Package.swift copies it as an AppAtticScan resource
+          # (through Sources/AppAtticScan/linux-system-names.txt, a symlink to
+          # it) and the Zig core reads the same bytes. Editing it changes the
+          # compiled library and the WASM modules, and a key without the data
+          # file serves a cache the file has already invalidated. core/bench
+          # is the same case for `zig fmt --check` and the benchmark build.
           key: >-
             ${{ runner.os }}-${{ github.job }}-${{
             hashFiles('Package.resolved', 'Package.swift', '.swift-version',
             '.zig-version', 'Sources/**/*.swift', 'tests/**/*.swift',
-            'benchmarks/**/*.swift', 'core/src/**/*.zig') }}
+            'benchmarks/**/*.swift', 'core/src/**/*.zig', 'core/src/*.txt',
+            'core/bench/*.zig') }}
       - name: Install Qt 6
         run: bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API
@@ -259,7 +277,13 @@ jobs:
           path: |
             .zig-cache
             .zig-cache-local
-          key: ${{ runner.os }}-${{ github.job }}-${{ hashFiles('.zig-version', 'core/src/**/*.zig') }}
+          # The same input set as the Zig half of the test job's key: the
+          # name list is read by core/src at build time and the benchmark is
+          # part of the Zig tree, so neither can be left out of the key.
+          key: >-
+            ${{ runner.os }}-${{ github.job }}-${{
+            hashFiles('.zig-version', 'core/src/**/*.zig', 'core/src/*.txt',
+            'core/bench/*.zig') }}
       - name: Install Qt 6 and build tools
         run: bash scripts/linux-deps.sh --install
       - name: Install Wasmtime C API

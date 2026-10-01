@@ -91,7 +91,11 @@ modules:
         export APPATTIC_HOST_EXEC_FIXTURE=1
         bash core/build.sh
         cmake -S ui/linux-qt -B _qt -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${FLATPAK_DEST}" -DWASMTIME_ROOT="${FLATPAK_DEST}"
-        cmake --build _qt
+        # --parallel explicitly, the way scripts/linux-qt-link.sh and
+        # scripts/linux-appimage.sh build the same tree: a flatpak-builder
+        # sandbox does not always hand the module the host's core count, and
+        # the UI is nine C++ translation units plus an automoc pass.
+        cmake --build _qt --parallel
         cmake --install _qt
         install -Dm 644 packaging/appattic.svg "${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/org.appattic.AppAttic.svg"
     # Last module built, so the build-only inputs go here rather than in the
