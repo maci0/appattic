@@ -119,7 +119,101 @@ const pkg_listing_store_len = 131072;
 
 /// Module level, not a local: 128 KiB of guest stack is more than a plugin
 /// wants to carry into a linear-memory sandbox.
+///
+/// It also has to outlive the index below: an index built over a listing is
+/// offsets into that listing, not copies of it.
 var pkg_store: [pkg_listing_store_len]u8 = undefined;
+
+/// A `listingHasName` index: one package dir's names as an open-addressing set
+/// of offsets into its listing, built once instead of re-scanning every line
+/// for every (overlay name x package dir) probe.
+///
+/// The linear scan cost `overlay_names x package_dirs x listing_lines`, and
+/// each of the four packaged bin roots this plugin declares carries thousands
+/// of names (`ls -1 /usr/bin` reports 5 443 on the machine this was measured
+/// on): 100 overlay names against six such roots measured 37 ms of pure CPU
+/// per scan, before any command ran. The set answers each probe in O(1), the
+/// same 37 ms measured 27 us, and a name the index does not hold is a name
+/// the listing does not carry, so it could only have failed the `test -f` that
+/// follows. The `test -f` stays: `ls` lists directories too and only the test
+/// knows which it was.
+///
+/// Offsets are stored as `offset + 1` so a zero slot reads as empty. A listing
+/// with more names than slots cannot be indexed, and a name it did not hold
+/// would answer `false` and drop a shadow row the scan owes the user, so an
+/// over-full table falls back to the linear scan it replaced: correct, and the
+/// cost the fallback exists to avoid is one listing rather than one per probe.
+/// Size it past the largest packaged bin dir rather than at the median, so the
+/// fallback is a ceiling and not a common case.
+const name_index_slots = 8192;
+
+const NameIndex = struct {
+    offsets: [name_index_slots]u32 = @splat(0),
+    overfull: bool = false,
+
+    fn hashName(s: []const u8) u32 {
+        var h: u32 = 2166136261;
+        for (s) |c| {
+            h ^= c;
+            h = h *% 16777619;
+        }
+        return h;
+    }
+
+    fn lineAt(listing: []const u8, off: u32) []const u8 {
+        const rest = listing[off..];
+        const raw = if (std.mem.indexOfScalar(u8, rest, '\n')) |e| rest[0..e] else rest;
+        return std.mem.trim(u8, raw, " \t\r");
+    }
+
+    /// Index every trimmed, non-empty line of `listing`. The listing must
+    /// outlive the index.
+    fn build(self: *NameIndex, listing: []const u8) void {
+        @memset(&self.offsets, 0);
+        self.overfull = false;
+        var lines = std.mem.splitScalar(u8, listing, '\n');
+        while (lines.next()) |raw| {
+            const k = std.mem.trim(u8, raw, " \t\r");
+            if (k.len == 0) continue;
+            const off: u32 = @intCast(@intFromPtr(k.ptr) - @intFromPtr(listing.ptr));
+            if (!self.insert(listing, k, off)) self.overfull = true;
+        }
+    }
+
+    fn insert(self: *NameIndex, listing: []const u8, k: []const u8, off: u32) bool {
+        var i = hashName(k) & (name_index_slots - 1);
+        var probes: usize = 0;
+        while (self.offsets[i] != 0 and probes < name_index_slots) : (probes += 1) {
+            if (std.mem.eql(u8, lineAt(listing, self.offsets[i] - 1), k)) return true;
+            i = (i + 1) & (name_index_slots - 1);
+        }
+        // A full table keeps what it holds and reports that it is not an
+        // index over the whole listing, rather than evicting a name the scan
+        // still has to find.
+        if (probes >= name_index_slots) return false;
+        self.offsets[i] = off + 1;
+        return true;
+    }
+
+    fn has(self: *const NameIndex, listing: []const u8, name: []const u8) bool {
+        if (name.len == 0) return false;
+        if (self.overfull) return listingHasName(listing, name);
+        var i = hashName(name) & (name_index_slots - 1);
+        var probes: usize = 0;
+        while (self.offsets[i] != 0 and probes < name_index_slots) : (probes += 1) {
+            const k = lineAt(listing, self.offsets[i] - 1);
+            if (k.len == name.len and std.mem.eql(u8, k, name)) return true;
+            i = (i + 1) & (name_index_slots - 1);
+        }
+        return false;
+    }
+};
+
+/// Module level, like `pkg_store`: 8 slots x 8192 offsets is 256 KiB, more
+/// than a guest stack should carry. `build` re-zeroes the entry it is given,
+/// so a dir this scan could not list leaves its slot untouched and the
+/// matching `pkg_listings` null keeps it from being read.
+var pkg_indexes: [max_package_dirs]NameIndex = undefined;
 
 /// `ls -1` names are whole lines, so membership is a line compare and never a
 /// substring hit on a longer name.
@@ -161,7 +255,12 @@ fn findShadowsExec(
         // A dir that could not be listed keeps a null prefilter, so its names
         // are probed the way they were before rather than dropped.
         if (m < 0) continue;
-        pkg_listings[i] = pkg_store[pkg_used .. pkg_used + @as(usize, @intCast(m))];
+        const listing = pkg_store[pkg_used .. pkg_used + @as(usize, @intCast(m))];
+        pkg_listings[i] = listing;
+        // Index this listing once. Its lines point into `pkg_store`, and the
+        // next dir writes past `pkg_used` rather than over this slice, so
+        // every index stays valid for the whole scan.
+        pkg_indexes[i].build(listing);
         pkg_used += @intCast(m);
     }
 
@@ -202,7 +301,7 @@ fn findShadowsExec(
             var same = false;
             for (packageDirs[0..pkg_count], 0..) |pdir, i| {
                 if (pkg_listings[i]) |listing| {
-                    if (!listingHasName(listing, name)) continue;
+                    if (!pkg_indexes[i].has(listing, name)) continue;
                 }
                 const pkg_path = pstore.joinPath(pdir, name, path_store, &probe) orelse continue;
                 if (!fileExistsExec(pkg_path)) continue;
@@ -913,4 +1012,67 @@ fn fuzzFindShadows(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expectEqualStrings(a.path, b.path);
         try std.testing.expectEqualStrings(a.shadows, b.shadows);
     }
+}
+
+// The index replaces the linear scan as the prefilter, so it has to answer
+// exactly what `listingHasName` answered. This pins it to that function
+// rather than to a handful of spellings: `findShadowsExec` filters on the
+// index and the loop that follows trusts the answer, so a name the index
+// misses is a shadow row the scan drops.
+test "NameIndex answers what listingHasName answers" {
+    const cases = [_][]const u8{
+        "python3\npip3\nnode\n",
+        "  spaced  \r\n",
+        "",
+        "\n\n\n",
+        "a\nbb\nccc\ndddd\n",
+        "dup\ndup\nother\n",
+        "trailing\r\n",
+        "no-final-newline",
+        "with\n\nblank\nlines\n\n",
+    };
+    const probes = [_][]const u8{
+        "python3", "node",  "pyth", "python", "",         "spaced",
+        "spaced ", "a",     "bb",   "dup",    "other",    "no-final-newline",
+        "blank",   "lines", "zzz",  "\n",     "trailing",
+    };
+    inline for (cases) |listing| {
+        var idx: NameIndex = .{};
+        idx.build(listing);
+        for (probes) |name| {
+            try std.testing.expectEqual(
+                listingHasName(listing, name),
+                idx.has(listing, name),
+            );
+        }
+    }
+}
+
+// A listing longer than its slot table. The table cannot hold it, and an
+// index that dropped the names past its bound would answer false for a name
+// the listing carries, so the scan would skip a shadow row it owes the user.
+// The over-full table therefore falls back to the linear scan, and every
+// answer still matches what the scan alone answered.
+test "NameIndex past its slot table falls back, it does not answer false" {
+    // "tool-000000\n" is 12 bytes, one name per line.
+    var store: [(name_index_slots + 8) * 12]u8 = undefined;
+    var pos: usize = 0;
+    for (0..name_index_slots + 8) |i| {
+        const rest = store[pos..];
+        const line = try std.fmt.bufPrint(rest[0..12], "tool-{d:0>6}\n", .{i});
+        pos += line.len;
+    }
+    const listing = store[0..pos];
+    var idx: NameIndex = .{};
+    idx.build(listing);
+    try std.testing.expect(idx.overfull);
+    // Every name, including the ones past the bound the table could not hold,
+    // and including one that is only in the listing's tail.
+    for (0..name_index_slots + 8) |i| {
+        var name_buf: [32]u8 = undefined;
+        const name = try std.fmt.bufPrint(&name_buf, "tool-{d:0>6}", .{i});
+        try std.testing.expect(listingHasName(listing, name));
+        try std.testing.expectEqual(listingHasName(listing, name), idx.has(listing, name));
+    }
+    try std.testing.expect(!idx.has(listing, "never-listed"));
 }

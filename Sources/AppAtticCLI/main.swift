@@ -295,16 +295,23 @@ enum C {
 }
 
 /// The SGR escape the table paints with, matched once per measured cell.
-/// Compiled at file scope because `renderTable` measures every cell twice.
+/// Compiled at file scope because `renderTable` measures every cell.
 let sgrEscape = try! NSRegularExpression(pattern: #"\u{1b}\[[0-9;]*m"#)
 
 func visibleLen(_ s: String) -> Int {
     if !C.enabled { return displayWidth(s) }
+    // `stringByReplacingMatches` allocates the result string whether or not it
+    // matched, and the NSRange it takes converts the whole cell to UTF-16
+    // offsets first. A cell with no ESC in it has no SGR escape to drop, and
+    // most cells have none: an unpainted table paints none at all, and the
+    // painted ones carry them in a handful of columns. The byte test is the
+    // ~10 ns scan `asciiHasByte` documents.
+    guard asciiHasByte(s, 0x1b) else { return displayWidth(s) }
     return displayWidth(sgrEscape.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: ""))
 }
 
-func padCell(_ cell: String, to width: Int) -> String {
-    let pad = max(0, width - visibleLen(cell))
+func padCell(_ cell: String, to width: Int, measured: Int? = nil) -> String {
+    let pad = max(0, width - (measured ?? visibleLen(cell)))
     return pad == 0 ? cell : cell + String(repeating: " ", count: pad)
 }
 
@@ -313,19 +320,37 @@ func renderTable(headers: [String], rows: [[String]]) -> String {
     // byte. Sanitize before measuring, so the column width and the printed
     // cell come from the same text.
     let clean = rows.map { $0.map(sanitizeForTerminal) }
-    var widths = headers.map { visibleLen($0) }
+    // Each cell is measured once here and the measurement is handed to
+    // `padCell`: `visibleLen` is a regex pass plus a `displayWidth` walk over
+    // every scalar, and measuring a cell twice to pad it once is the whole of
+    // what the width pass bought.
+    let headerWidths = headers.map { visibleLen($0) }
+    var widths = headerWidths
+    var cellWidths: [[Int]] = []
+    cellWidths.reserveCapacity(clean.count)
     for row in clean {
-        for (i, cell) in row.enumerated() where i < widths.count {
-            widths[i] = max(widths[i], visibleLen(cell))
+        var rowWidths: [Int] = []
+        rowWidths.reserveCapacity(row.count)
+        for (i, cell) in row.enumerated() {
+            let w = visibleLen(cell)
+            if i < widths.count { widths[i] = max(widths[i], w) }
+            rowWidths.append(w)
         }
+        cellWidths.append(rowWidths)
     }
     var lines: [String] = []
-    lines.append(zip(headers, widths).map { padCell($0.0, to: $0.1) }.joined(separator: "  ").trimmingCharacters(in: .whitespaces))
+    // The header is padded to the finished column width but measured from its
+    // own text, so it carries the pre-max width alongside the post-max one.
+    var headerLine: [String] = []
+    for (i, header) in headers.enumerated() {
+        headerLine.append(padCell(header, to: widths[i], measured: headerWidths[i]))
+    }
+    lines.append(headerLine.joined(separator: "  ").trimmingCharacters(in: .whitespaces))
     lines.append(widths.map { String(repeating: "-", count: $0) }.joined(separator: "  "))
-    for row in clean {
+    for (row, rowWidths) in zip(clean, cellWidths) {
         var cells: [String] = []
         for (i, cell) in row.enumerated() {
-            cells.append(padCell(cell, to: i < widths.count ? widths[i] : 0))
+            cells.append(padCell(cell, to: i < widths.count ? widths[i] : 0, measured: rowWidths[i]))
         }
         lines.append(cells.joined(separator: "  ").trimmingCharacters(in: .whitespaces))
     }
