@@ -107,49 +107,21 @@ final class ScannerViewModel {
             cachedPackages = []
             return
         }
-        let q = posixFolded(searchText)
-        cachedLeftovers = visibleOrphanedLeftovers(data.leftovers, ignoring: ignoredLeftovers).filter { item in
-            if q.isEmpty { return true }
-            return posixFolded(leftoverDisplayName(name: item.name, extraPaths: item.extra_paths ?? [])).contains(q)
-                || posixFolded(item.name).contains(q)
-                || posixFolded(item.path).contains(q)
-                || posixFolded(item.root).contains(q)
-                || posixFolded(item.status).contains(q)
-                || posixFolded(item.owner ?? "").contains(q)
-                || posixFolded(item.reason ?? "").contains(q)
-                || posixFolded(item.summary ?? "").contains(q)
-                || posixFolded(item.shadows ?? "").contains(q)
-                || (item.extra_paths ?? []).contains { posixFolded($0).contains(q) }
+        let q = searchQuery(searchText)
+        cachedLeftovers = visibleOrphanedLeftovers(data.leftovers, ignoring: ignoredLeftovers).filter {
+            leftoverMatchesSearch($0, q)
         }.sorted { a, b in
             let (ls, rs) = (a.size_bytes ?? 0, b.size_bytes ?? 0)
             return ls == rs ? collatedBefore(a.path, b.path, tieBreak: a.path, b.path) : ls > rs
         }
-        cachedStale = visibleStaleSoftware(data.software, includeSystem: includeSystem).filter { item in
-            if q.isEmpty { return true }
-            return posixFolded(item.name).contains(q)
-                || posixFolded(item.path).contains(q)
-                || posixFolded(item.source).contains(q)
-                || posixFolded(item.tier ?? "").contains(q)
-                || posixFolded(item.reason ?? "").contains(q)
-                || posixFolded(item.summary ?? "").contains(q)
-                || (item.outdated == true && "outdated".hasPrefix(q))
+        cachedStale = visibleStaleSoftware(data.software, includeSystem: includeSystem).filter {
+            softwareMatchesSearch($0, q)
         }.sorted { a, b in
             a.totalBytes == b.totalBytes
                 ? collatedBefore(a.path, b.path, tieBreak: a.path, b.path)
                 : a.totalBytes > b.totalBytes
         }
-        let outdated = data.outdated ?? []
-        if q.isEmpty {
-            cachedOutdated = outdated
-        } else {
-            cachedOutdated = outdated.filter {
-                posixFolded($0.name).contains(q)
-                    || posixFolded($0.manager).contains(q)
-                    || posixFolded($0.title ?? "").contains(q)
-                    || posixFolded($0.summary ?? "").contains(q)
-                    || posixFolded($0.reason ?? "").contains(q)
-            }
-        }
+        cachedOutdated = (data.outdated ?? []).filter { outdatedMatchesSearch($0, q) }
         cachedPackages = data.packages ?? []
     }
 
