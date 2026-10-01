@@ -1325,7 +1325,29 @@ int countPageRows(const QVector<Finding> &findings, Page page) {
 void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line,
                             QStringList *notes) {
     const QJsonDocument doc = QJsonDocument::fromJson(line);
-    if (!doc.isObject()) return;
+    if (!doc.isObject()) {
+        /* A blob that is not a JSON object carries no rows, and the one
+           before this returned in silence, so a plugin whose render ran out
+           of room mid-document, or whose host handed over a buffer the
+           reader could not parse, left a page short of the machine reading as
+           clean: zero findings and, worse, no note. The note channel exists
+           for exactly this, and it is the only signal left once the document
+           itself is unreadable. The bytes are named, not quoted: a blob is
+           another program's output and can hold anything, and a package name
+           or a path is what makes the message actionable. */
+        if (notes) {
+            /* The clause that renders this list (`scanNoteClause`) is what
+               puts the words "Scan incomplete" in front, so an entry here
+               carries only the fact: an entry that already named the
+               incompleteness rendered as "Scan incomplete: Scan incomplete:
+               ..." on the status bar. The size is what identifies the blob
+               when the plugin name is unrecoverable, which is exactly this
+               case. */
+            notes->append(QStringLiteral("a plugin result could not be read (%1 bytes)")
+                              .arg(line.size()));
+        }
+        return;
+    }
     const QJsonObject obj = doc.object();
     const QString plugin = obj.value(QStringLiteral("plugin")).toString();
     const QString engine = jsonStr(obj, "engine");
@@ -1347,8 +1369,12 @@ void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line,
         if (notes) {
             /* The raw plugin id, not `pluginScanLabel`: that is the running
                "Scanning leftover caches" the progress bar shows, which reads
-               as an instruction after the scan has already finished. */
-            notes->append(plugin.isEmpty() ? noteBody : plugin + QStringLiteral(": ") + note);
+               as an instruction after the scan has already finished. A blob
+               with no plugin name contributes `note` on its own, never
+               `noteBody`: `scanNoteClause` puts "Scan incomplete" in front of
+               every entry, so handing it a `noteBody` printed the clause
+               twice. */
+            notes->append(plugin.isEmpty() ? note : plugin + QStringLiteral(": ") + note);
         }
         if (!dialogBody.isEmpty()) {
             dialogBody += QLatin1Char('\n');

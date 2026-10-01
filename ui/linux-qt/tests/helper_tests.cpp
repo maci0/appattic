@@ -517,6 +517,64 @@ static int verifyHelpers() {
         return 1;
     }
 
+    /* A blob that is not a JSON object at all is the same fact seen from the
+       other side: the plugin published nothing this reader can hold. It used
+       to return in silence, which is indistinguishable from a plugin that
+       found nothing -- so a render cut off mid-document left the page reading
+       as clean, and nothing could tell the two apart. */
+    notes.clear();
+    rows.clear();
+    appendFindingsFromBlob(rows, QByteArrayLiteral("{\"plugin\":\"brew\",\"findings\":["), &notes);
+    if (!rows.isEmpty() || notes.size() != 1
+        || !notes[0].contains(QLatin1String("could not be read"))) {
+        std::fprintf(stderr, "note: a truncated blob must add a note, not read as a clean plugin\n");
+        return 1;
+    }
+    appendFindingsFromBlob(rows, QByteArrayLiteral("not json at all"), &notes);
+    appendFindingsFromBlob(rows, QByteArrayLiteral("[]"), &notes);
+    if (!rows.isEmpty() || notes.size() != 3) {
+        std::fprintf(stderr, "note: each unreadable blob must add its own note\n");
+        return 1;
+    }
+    /* The clause still reads as a scan that came back short, which is what
+       someone reading the status bar needs to see. */
+    if (!scanNoteClause(notes).contains(QLatin1String("incomplete"))) {
+        std::fprintf(stderr, "note: an unreadable blob must reach the status bar as incomplete\n");
+        return 1;
+    }
+    /* `scanNoteClause` is what puts the words in front, so a note entry that
+       already named the incompleteness printed "Scan incomplete: Scan
+       incomplete: ..." on the status bar. Both spellings are checked: one
+       that names its plugin, and one that cannot, because the second took a
+       different branch and only the first was right. Asserted on the entry
+       rather than on the clause, whose plural form is "N scans incomplete". */
+    for (const QString &entry : notes) {
+        if (entry.startsWith(QLatin1String("Scan incomplete"))) {
+            std::fprintf(stderr, "note: a note entry must not carry the clause's own prefix\n");
+            return 1;
+        }
+    }
+    if (scanNoteClause(QStringList{notes.value(0)}).count(QLatin1String("Scan incomplete")) != 1) {
+        std::fprintf(stderr, "note: an unreadable blob must name the incompleteness once\n");
+        return 1;
+    }
+    QStringList unnamed;
+    appendFindingsFromBlob(rows, QByteArrayLiteral(
+        "{\"note\":\"ls refused: exit 1\",\"findings\":[]}"), &unnamed);
+    if (unnamed.value(0).startsWith(QLatin1String("Scan incomplete"))
+        || scanNoteClause(unnamed).count(QLatin1String("Scan incomplete")) != 1) {
+        std::fprintf(stderr, "note: a note with no plugin name must name the incompleteness once\n");
+        return 1;
+    }
+    /* A caller with no note list -- the smoke harness, which proves the build
+       and renders nothing -- must still not be handed a half-parsed row. */
+    rows.clear();
+    appendFindingsFromBlob(rows, QByteArrayLiteral("{\"plugin\":\"apt\""));
+    if (!rows.isEmpty()) {
+        std::fprintf(stderr, "note: an unreadable blob must not add a row when no note list is given\n");
+        return 1;
+    }
+
     /* The clause the status bar shows: silent when nothing was short, so a
        complete scan says nothing extra, and it says "incomplete" when there
        is something. */

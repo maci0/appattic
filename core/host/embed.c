@@ -640,6 +640,96 @@ static void plugin_id_from_path(const char *path, char *out, size_t cap) {
     out[n] = '\0';
 }
 
+/* Write `s` into `out` as the body of a JSON string: the two characters that
+   may not appear raw between quotes escaped, and every control byte as \u.
+   `cap` includes the NUL, so a `reason` longer than the buffer is cut on a
+   whole character rather than mid-sequence, which the reader would decode as
+   a replacement character inside a name. */
+static size_t json_escape_into(const char *s, char *out, size_t cap) {
+    if (!out || cap == 0) return 0;
+    size_t n = 0;
+    /* A cut escape is worse than a cut reason, so stop while all six bytes of
+       one \uXXXX still fit. */
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        char esc[8];
+        size_t len;
+        if (*p == '"' || *p == '\\') {
+            esc[0] = '\\';
+            esc[1] = (char)*p;
+            len = 2;
+        } else if (*p >= 0x20) {
+            esc[0] = (char)*p;
+            len = 1;
+        } else {
+            snprintf(esc, sizeof esc, "\\u%04x", (unsigned)*p);
+            len = 6;
+        }
+        if (n + len + 1 > cap) break;
+        memcpy(out + n, esc, len);
+        n += len;
+    }
+    out[n] = '\0';
+    return n;
+}
+
+/* Publish a plugin that produced no result as a note-only document.
+
+   A skipped plugin used to reach the caller as a clean run: `run_plugin`
+   returned 0 with an empty `err`, so the exit status said success and the
+   window drew its normal "Scanned N leftovers" summary with this plugin's
+   rows absent. The only sign was one `skip <id> (...)` line on the host's
+   stderr, which a windowed run never shows and a piped run buries.
+
+   The document is the shape a Zig plugin already publishes for a manager it
+   could not run (`{"plugin":...,"engine":null,"findings":[],...}`), so the
+   reader that turns a plugin `note` into "Scan incomplete" handles it with no
+   new vocabulary. `findings` is empty because the plugin has none: what is
+   missing is the reason, and that is what the note says. */
+static void publish_skipped_plugin(
+    appattic_json_fn on_json,
+    const char *id,
+    const char *reason,
+    void *user
+) {
+    if (!on_json || !id || !id[0]) return;
+    /* Bounded like the rest of the host's fixed text: an id is the wasm
+       module's stem and a reason is one of this file's literals, so neither
+       is near the cap. The bound is here so neither can overrun the buffer.
+       The id is escaped too, not just the reason: it is copied off a file
+       name, so a module called `we"ird.wasm` would otherwise put a bare
+       quote into the document and turn this note into the unreadable blob it
+       exists to report. */
+    char id_esc[256];
+    char reason_esc[256];
+    (void)json_escape_into(id, id_esc, sizeof id_esc);
+    (void)json_escape_into(reason ? reason : "it did not run", reason_esc, sizeof reason_esc);
+    char doc[768];
+    const int n = snprintf(
+        doc,
+        sizeof doc,
+        "{\"plugin\":\"%s\",\"engine\":null,\"findings\":[],\"script\":null,"
+        "\"dialog\":null,\"note\":\"plugin did not run: %s\"}",
+        id_esc,
+        reason_esc
+    );
+    if (n < 0 || (size_t)n >= sizeof doc) return;
+    on_json(doc, (size_t)n, user);
+}
+
+/* Report one skipped plugin: on stderr for a terminal run, and as a note in
+   the result stream for every caller. One absent plugin is not a failed scan,
+   so the run's exit status is left alone; it is an incomplete one, and this
+   is what says so. */
+static void skip_plugin_noted(
+    appattic_json_fn on_json,
+    void *user,
+    const char *id,
+    const char *reason
+) {
+    fprintf(stderr, "skip %s (%s)\n", id ? id : "?", reason);
+    publish_skipped_plugin(on_json, id, reason, user);
+}
+
 static int run_plugin(
     wasmtime_context_t *ctx,
     wasmtime_linker_t *linker,
@@ -656,20 +746,34 @@ static int run_plugin(
     const int32_t tag = parse_tag(spec, &path);
     char id[128];
     plugin_id_from_path(path, id, sizeof id);
+    /* Why this plugin is being given up on. Set before every `goto
+       skip_plugin`, and read by that label, so no skip can reach the label
+       without a reason to name: an unnamed skip is exactly the one that
+       leaves the page short of the machine with nothing to say why. */
+    const char *skip_reason = "it did not run";
     if (on_progress) on_progress(id, index, total, user);
-    /* A skipped plugin is not a failure, but the skip must not erase a fault an
-       earlier plugin already published on this accumulator: the two writes do
-       not commute, and the skip used to win, leaving rc=1 with an empty err. */
+    /* A skipped plugin is not a failed run, but it IS an incomplete one: the
+       rows it would have published are absent, and a caller told "success"
+       draws the scan as clean over a page that is short of the machine. The
+       skip is published as a note-only document so it rides the same
+       "Scan incomplete" channel a plugin uses for a command that did not
+       answer, and it must not erase a fault an earlier plugin already put on
+       this accumulator: the two writes do not commute, and the skip used to
+       win, leaving rc=1 with an empty err. */
     const int err_was_failed = e->failed;
     if (access(path, R_OK) != 0) {
-        fprintf(stderr, "skip %s (missing coeffect/file)\n", path);
+        skip_plugin_noted(on_json, user, id, "the plugin file is missing or unreadable");
+        if (!err_was_failed) {
+            e->failed = 0;
+            if (e->buf && e->len) e->buf[0] = '\0';
+        }
         return 0;
     }
 
     wasmtime_module_t *mod = NULL;
     wasmtime_instance_t plug;
     if (instantiate(ctx, linker, engine, path, &mod, &plug, e) != 0) {
-        fprintf(stderr, "skip %s (instantiate failed)\n", path);
+        skip_plugin_noted(on_json, user, id, "it could not be instantiated");
         if (!err_was_failed) {
             e->failed = 0;
             if (e->buf && e->len) e->buf[0] = '\0';
@@ -697,45 +801,56 @@ static int run_plugin(
     size_t mem_len = 0;
     const uint8_t *json = NULL;
     for (i = 0; i < 7; i++) {
-        if (must_export(ctx, &plug, names[i], slots[i], e)) goto skip_plugin;
+        if (must_export(ctx, &plug, names[i], slots[i], e)) {
+            skip_reason = "it does not export what a plugin has to";
+            goto skip_plugin;
+        }
         ngot++;
     }
     if (memory.kind != WASMTIME_EXTERN_MEMORY ||
         plug_abi.kind != WASMTIME_EXTERN_FUNC ||
         query.kind != WASMTIME_EXTERN_FUNC) {
-        fprintf(stderr, "skip %s (bad plugin exports)\n", path);
+        skip_reason = "its exports are not the shape a plugin has to have";
         goto skip_plugin;
     }
-    if (call_i32(ctx, &plug_abi.of.func, &abi, e) != 0) goto skip_plugin;
+    if (call_i32(ctx, &plug_abi.of.func, &abi, e) != 0) {
+        skip_reason = "it faulted answering for its version";
+        goto skip_plugin;
+    }
     if (abi != 1) {
-        fprintf(stderr, "skip %s (plugin abi mismatch)\n", path);
+        skip_reason = "its plugin ABI version does not match this host";
         goto skip_plugin;
     }
 
     if (call_i32(ctx, &id_ptr.of.func, &ip, e) != 0 ||
         call_i32(ctx, &id_len.of.func, &il, e) != 0) {
+        skip_reason = "it faulted answering for its id";
         goto skip_plugin;
     }
     data = wasmtime_memory_data(ctx, &memory.of.memory);
     mem_len = wasmtime_memory_data_size(ctx, &memory.of.memory);
     if (ip < 0 || il < 0 || (size_t)ip + (size_t)il > mem_len) {
-        fprintf(stderr, "skip %s (plugin id out of memory)\n", path);
+        skip_reason = "its id does not point inside its own memory";
         goto skip_plugin;
     }
 
-    if (call_i32_arg(ctx, &query.of.func, tag, &qrc, e) != 0) goto skip_plugin;
+    if (call_i32_arg(ctx, &query.of.func, tag, &qrc, e) != 0) {
+        skip_reason = "it faulted while answering the query";
+        goto skip_plugin;
+    }
     if (qrc != 0) {
-        fprintf(stderr, "skip %s (plugin_query failed)\n", path);
+        skip_reason = "it could not render a result for this machine";
         goto skip_plugin;
     }
     data = wasmtime_memory_data(ctx, &memory.of.memory);
     mem_len = wasmtime_memory_data_size(ctx, &memory.of.memory);
     if (call_i32(ctx, &res_ptr.of.func, &rp, e) != 0 ||
         call_i32(ctx, &res_len.of.func, &rl, e) != 0) {
+        skip_reason = "it faulted answering for its result";
         goto skip_plugin;
     }
     if (rp < 0 || rl < 0 || (size_t)rp + (size_t)rl > mem_len) {
-        fprintf(stderr, "skip %s (result out of memory)\n", path);
+        skip_reason = "its result does not point inside its own memory";
         goto skip_plugin;
     }
     json = data + rp;
@@ -755,6 +870,12 @@ static int run_plugin(
     return 0;
 
 skip_plugin:
+    /* `e` may already carry a fault from inside this plugin, which `e` itself
+       reported into `err`. The note is the operator's signal, and it is
+       published from the same place either way, so it does not matter which
+       fault won the accumulator: the plugin's absence is stated once, and the
+       run's own err keeps the first fault it saw. */
+    skip_plugin_noted(on_json, user, id, skip_reason);
     drop_externs(slots, ngot);
     if (!err_was_failed) {
         e->failed = 0;

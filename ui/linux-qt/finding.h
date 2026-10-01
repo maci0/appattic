@@ -218,12 +218,16 @@ int countPageRows(const QVector<Finding> &findings, Page page);
 /// One plugin's result blob, one line at a time.
 ///
 /// `notes`, when given, is appended to with one entry per blob that carried a
-/// `note`. A note is a fact about the scan, not about any one row, so it is
-/// collected here rather than only read out of a row: a plugin that answers
-/// with an empty `findings` list and a note (`path_listing` when every query
-/// command refused, a render that could not fit a single row) produced no row
-/// to carry it, and the omission was then invisible on a page that read as
-/// clean. Swift makes the same fact scan-level: `ScanData.incomplete`, not a
+/// `note`, and one per blob that could not be read at all. A note is a fact
+/// about the scan, not about any one row, so it is collected here rather than
+/// only read out of a row: a plugin that answers with an empty `findings`
+/// list and a note (`path_listing` when every query command refused, a render
+/// that could not fit a single row, a plugin the host skipped) produced no
+/// row to carry it, and the omission was then invisible on a page that read
+/// as clean. A blob that is not a JSON object cannot be read as anything, so
+/// it is recorded the same way: without it a truncated render and a plugin
+/// that genuinely found nothing are indistinguishable on the page.
+/// Swift makes the same fact scan-level: `ScanData.incomplete`, not a
 /// per-item string. `main.cpp` renders this list in the status bar, which is
 /// where a count a user has to notice is already announced.
 void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line,
