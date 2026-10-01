@@ -483,14 +483,10 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: @escaping Monoton
     // pipe reads on that pool deadlocks (workers wait for readers, readers wait
     // for threads).
     //
-    // A thread that could not be created takes its group entry back. The
-    // entries are only balanced by the readers themselves, so one that never
-    // started parks every `group.wait()` below forever, with this run's four
-    // pipe descriptors still open.
-    let outReaderStarted = startPipeReader(in: group) {
+    startPipeReader(in: group) {
         collected.out = collected.drain(outRead)
     }
-    let errReaderStarted = startPipeReader(in: group) {
+    startPipeReader(in: group) {
         collected.err = collected.drain(errRead)
     }
     // The read ends are this function's, and both readers are joined before
@@ -503,17 +499,6 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: @escaping Monoton
     func closeWriteEnds() {
         try? outPipe.fileHandleForWriting.close()
         try? errPipe.fileHandleForWriting.close()
-    }
-    if !outReaderStarted || !errReaderStarted {
-        // Nothing is going to drain the pipes, so the run cannot start: the
-        // child would block on the first full pipe and every descriptor here
-        // would outlive the call. Report it the way a command that produced no
-        // usable result is reported, and join whichever reader did start.
-        closeWriteEnds()
-        collected.closeDrainWindow()
-        group.wait()
-        closeReadEnds()
-        return (127, "", "could not start a reader for the command's output")
     }
     let exited = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in exited.signal() }
@@ -556,19 +541,12 @@ func runCommand(_ cmd: [String], timeout: TimeInterval, clock: @escaping Monoton
 }
 
 /// Runs one pipe reader on its own thread, joined by `group` on every path.
-/// False when the thread could not be created, with the group entry this call
-/// took already given back, so the caller's wait cannot be left short one
-/// reader.
-private func startPipeReader(in group: DispatchGroup, _ body: @escaping () -> Void) -> Bool {
+private func startPipeReader(in group: DispatchGroup, _ body: @escaping () -> Void) {
     group.enter()
-    if Thread.detachNewThread({
+    Thread.detachNewThread {
         body()
         group.leave()
-    }) != nil {
-        return true
     }
-    group.leave()
-    return false
 }
 
 /// The status a stopped script reports, 124 being the shell's own "timed out".

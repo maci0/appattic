@@ -762,7 +762,10 @@ final class CacheTests: XCTestCase {
     /// used to rebuild the list the default `which` walks, so a tool directory
     /// installed in between was invisible to the stamp that decided whether the
     /// snapshot was still current.
-    func testScanFingerprintRebuildsTheSearchListEveryTime() {
+    func testScanFingerprintRebuildsTheSearchListEveryTime() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
         resetWhichSearchDirectories()
         // Warm the list the way a launch does, then stamp again. With the
         // fingerprint rebuilding the list, both stamps are made against the
@@ -776,7 +779,8 @@ final class CacheTests: XCTestCase {
                     lookups += 1
                     return nil
                 },
-                run: { _, _ in (1, "", "") }
+                run: { _, _ in (1, "", "") },
+                fileStamps: { [rootInventoryStamp("fixture", root.path)] }
             )
         }
         let first = stamp()
@@ -784,5 +788,7 @@ final class CacheTests: XCTestCase {
         let second = stamp()
         XCTAssertEqual(first, second, "a stamp must not depend on a list an earlier one cached")
         XCTAssertGreaterThan(afterFirst, 0, "the injected which must actually have been called")
+        try Data("changed".utf8).write(to: root.appendingPathComponent("app"))
+        XCTAssertNotEqual(first, stamp(), "a change in the injected inventory must change the stamp")
     }
 }

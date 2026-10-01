@@ -283,10 +283,29 @@ public func commitScanCache(
 /// the only way two stamps of the same machine can be compared.
 public func scanFingerprint(
     which: WhichFn = whichCommand,
-    run: CommandRun = runCommand
+    run: CommandRun = runCommand,
+    fileStamps: (() -> [String])? = nil
 ) -> String {
     resetWhichSearchDirectories()
     var lines: [String] = ["ver:\(appAtticVersion)", "eval:20", "packages:1"]
+    lines.append(contentsOf: fileStamps?() ?? fingerprintFileStamps(which: which))
+    if let brew = which("brew") {
+        let (_, formulas, _) = run([brew, "list", "--formula", "--versions"], 30)
+        let (_, casks, _) = run([brew, "list", "--cask", "--versions"], 30)
+        lines.append("brew-f:\(stampEscape(formulas.trimmingCharacters(in: .whitespacesAndNewlines)))")
+        lines.append("brew-c:\(stampEscape(casks.trimmingCharacters(in: .whitespacesAndNewlines)))")
+    }
+    if which("wine") != nil { lines.append("path:wine") }
+    if which("docker") != nil { lines.append("path:docker") }
+    if let mas = which("mas") {
+        let (_, out, _) = run([mas, "list"], 30)
+        lines.append("mas:\(stampEscape(out.trimmingCharacters(in: .whitespacesAndNewlines)))")
+    }
+    return lines.joined(separator: "\n")
+}
+
+private func fingerprintFileStamps(which: WhichFn) -> [String] {
+    var lines: [String] = []
     if PlatformOverride.isLinux {
         for dir in linuxDesktopDirs() {
             guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
@@ -308,12 +327,6 @@ public func scanFingerprint(
             lines.append("apps:\(stampEscape(root)):\(stampJoin(names))")
         }
     }
-    if let brew = which("brew") {
-        let (_, formulas, _) = run([brew, "list", "--formula", "--versions"], 30)
-        let (_, casks, _) = run([brew, "list", "--cask", "--versions"], 30)
-        lines.append("brew-f:\(stampEscape(formulas.trimmingCharacters(in: .whitespacesAndNewlines)))")
-        lines.append("brew-c:\(stampEscape(casks.trimmingCharacters(in: .whitespacesAndNewlines)))")
-    }
     let steam = steamManifestStamp()
     if !steam.isEmpty {
         lines.append(steam)
@@ -322,8 +335,6 @@ public func scanFingerprint(
     if !cx.isEmpty {
         lines.append(cx)
     }
-    if which("wine") != nil { lines.append("path:wine") }
-    if which("docker") != nil { lines.append("path:docker") }
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     var toolDirs: [(String, String)] = [
         ("localbin", (home as NSString).appendingPathComponent(".local/bin")),
@@ -359,11 +370,7 @@ public func scanFingerprint(
         let line = pathMtimeStamp(label, path)
         if !line.isEmpty { lines.append(line) }
     }
-    if let mas = which("mas") {
-        let (_, out, _) = run([mas, "list"], 30)
-        lines.append("mas:\(stampEscape(out.trimmingCharacters(in: .whitespacesAndNewlines)))")
-    }
-    return lines.joined(separator: "\n")
+    return lines
 }
 
 public func linuxPkgStampPaths(
