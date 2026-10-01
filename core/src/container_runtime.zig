@@ -272,8 +272,7 @@ const WithEngine = struct {
 fn query_impl(present: i32) i32 {
     note = .{};
     if (present != EngineDocker and present != EnginePodman) {
-        @memcpy(result_buf[0..none_json.len], none_json);
-        result_nbytes = @intCast(none_json.len);
+        plugin_abi.publishMissing(result_buf[0..], &result_nbytes, none_json);
         return 0;
     }
     const engine: []const u8 = if (present == EnginePodman) "podman" else "docker";

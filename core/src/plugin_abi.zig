@@ -1,5 +1,21 @@
 const abi = @import("abi.zig");
 
+/// Publish `json` as the whole plugin result: the whole of `buf`, and its
+/// length in `n`.
+///
+/// Every plugin answers a manager it could not run by writing its own
+/// "inactive" document here and returning 0, and every one of them spelled the
+/// pair out the same way. `buf` and `n` are the buffer and the length the
+/// plugin declares and hands to `bind`, so the caller cannot publish into a
+/// buffer the ABI does not read back.
+///
+/// @intCast traps when the document is longer than what `n` can hold, which is
+/// the point: the document is a compile-time constant and the buffer is not.
+pub fn publishMissing(buf: []u8, n: *u32, json: []const u8) void {
+    @memcpy(buf[0..json.len], json);
+    n.* = @intCast(json.len);
+}
+
 /// WASM ABI for one query plugin. Each plugin is a separate compilation;
 /// `comptime { plugin_abi.bind(id, queryImpl, &result_buf, &result_nbytes); }`
 /// exports the guest symbols the host looks up, taking the result buffer and

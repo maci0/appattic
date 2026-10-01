@@ -138,8 +138,7 @@ const missing_json =
 
 fn query_impl(present: i32) i32 {
     if (present == 0) {
-        @memcpy(result_buf[0..missing_json.len], missing_json);
-        result_nbytes = @intCast(missing_json.len);
+        plugin_abi.publishMissing(result_buf[0..], &result_nbytes, missing_json);
         return 0;
     }
     var found: [128]BrokenLink = undefined;

@@ -419,8 +419,7 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     note = .{};
     if (present == 0) {
         const none = missingJson(spec);
-        @memcpy(result_buf[0..none.len], none);
-        result_nbytes = @intCast(none.len);
+        plugin_abi.publishMissing(result_buf[0..], &result_nbytes, none);
         return 0;
     }
     const nexec = host_exec.run(queryCommand(spec), &exec_buf);
