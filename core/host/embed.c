@@ -571,9 +571,18 @@ static wasm_trap_t *host_exec_cb(
     const int32_t out_cap = args[3].of.i32;
     if (cmd_ptr < 0 || cmd_len < 0 || out_ptr < 0 || out_cap < 0) return NULL;
 
+    /* `wasmtime_caller_export_get` hands back an owned reference in `item` and
+       only writes it when the export exists, so the two failures are not one
+       branch: a missing export leaves nothing to free, while an export of the
+       wrong kind is a live handle this host now holds. Deleting only the second
+       is what keeps a plugin that exports a non-memory `memory` from leaking one
+       reference per query, for the lifetime of the process. */
     wasmtime_extern_t item;
-    if (!wasmtime_caller_export_get(caller, "memory", strlen("memory"), &item) ||
-        item.kind != WASMTIME_EXTERN_MEMORY) {
+    if (!wasmtime_caller_export_get(caller, "memory", strlen("memory"), &item)) {
+        return NULL;
+    }
+    if (item.kind != WASMTIME_EXTERN_MEMORY) {
+        wasmtime_extern_delete(&item);
         return NULL;
     }
     wasmtime_context_t *ctx = wasmtime_caller_context(caller);
