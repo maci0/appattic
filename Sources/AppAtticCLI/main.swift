@@ -125,9 +125,11 @@ enum AppAtticCLI {
             fputs("Updating \(localeCount(n)) package(s)…\n", stderr)
             let run = runShellScript(script)
             // The update changed package state, so the snapshot no longer
-            // describes the machine. `clearScanCache` reports whether the
-            // removal landed; a snapshot that survived is a stale one the next
-            // run would serve rows from, so it is named rather than dropped.
+            // describes the machine. `clearScanCache` reports whether anything
+            // is left at that path; a snapshot that survived is a stale one the
+            // next run would serve rows from, so it is named rather than
+            // dropped. A machine with no snapshot at all left nothing, so the
+            // warning is not printed for it either.
             let cacheCleared = clearScanCache()
             let cacheNote = cacheCleared
                 ? ""

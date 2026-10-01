@@ -682,11 +682,43 @@ final class CacheTests: XCTestCase {
         let data = sampleScanData()
         try writeScanCache(ScanCacheFile(fingerprint: "fp", includeSystem: false, data: data), to: url)
         XCTAssertNotNil(loadScanCache(from: url))
-        // True only while a file is there to take, so a caller that promises the
-        // snapshot is gone cannot say it over a removal that failed.
+        // True while nothing is left at the path, which covers a file taken and
+        // a file that was never there: a caller that purges the snapshot must
+        // not warn that a stale inventory might survive on a machine that has
+        // none. A removal that did not land is still false, so the two cases a
+        // caller acts on are still told apart.
         XCTAssertTrue(clearScanCache(at: url))
         XCTAssertNil(loadScanCache(from: url))
-        XCTAssertFalse(clearScanCache(at: url))
+        XCTAssertTrue(clearScanCache(at: url), "nothing was there to keep")
+        XCTAssertFalse(try eraseScanCache(at: url), "nothing was there to erase")
+    }
+
+    /// The purge reports on what is left at the path, so a removal that cannot
+    /// land is false: the snapshot is a full inventory of the account's paths,
+    /// and a file that survived a purge has to be named rather than read as a
+    /// clean one. `fileExists` stats the path, so it answers true here and the
+    /// call under test really does reach `removeItem` rather than returning on
+    /// the absent-file guard.
+    ///
+    /// The parent directory is read-and-execute only, so the unlink is refused
+    /// with `EACCES`, which no uid can bypass: root's `CAP_DAC_OVERRIDE` drops
+    /// to a directory's own execute bit here, and the suite has to hold under
+    /// a root run. Restored in teardown, before the directory is taken, so a
+    /// failed assertion cannot strand the next test's tmp.
+    func testClearScanCacheIsFalseWhenARemovalDoesNotLand() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("appattic-clear-\(UUID().uuidString)")
+        let url = dir.appendingPathComponent("last-scan.json")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data().write(to: url)
+        let fm = FileManager.default
+        try fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
+        addTeardownBlock {
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+            try? fm.removeItem(at: dir)
+        }
+        XCTAssertFalse(clearScanCache(at: url), "the snapshot survived the purge")
+        XCTAssertTrue(fm.fileExists(atPath: url.path), "the snapshot is still on disk")
     }
 
     /// The cache is a full inventory of the account's paths, so a snapshot past
@@ -710,6 +742,23 @@ final class CacheTests: XCTestCase {
         let later = parseISODate("2026-08-20T12:30:00Z")!
         XCTAssertTrue(deleteExpiredScanCache(cache, now: later, maxAge: 3600, at: url))
         XCTAssertNil(loadScanCache(from: url))
+    }
+
+    /// An expired snapshot is purged on launch, and the purge is checked there:
+    /// the snapshot is the account's whole path inventory, so a removal that
+    /// did not land has to be reportable rather than a discarded return value.
+    func testExpiredSnapshotPurgeIsTrueWhenNothingIsLeft() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-launch-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let now = parseISODate("2026-08-20T12:30:00Z")!
+        let cache = ScanCacheFile(fingerprint: "a", includeSystem: false, data: sampleScanData())
+
+        try writeScanCache(cache, to: url)
+        XCTAssertTrue(isScanCacheExpired(cache, now: now))
+        XCTAssertTrue(deleteExpiredScanCache(cache, now: now, maxAge: 3600, at: url))
+        // A launch that found the file already gone is not a purge that failed,
+        // so the second purge says so instead of producing a spurious warning.
+        XCTAssertTrue(clearScanCache(at: url))
     }
 
     /// An erase is the user asking for the account's own paths to leave the

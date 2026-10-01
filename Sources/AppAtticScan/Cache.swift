@@ -180,15 +180,32 @@ public func isScanCacheStale(
     return isScanCacheExpired(cache, now: now, maxAge: maxAge)
 }
 
-/// Remove the stored snapshot. True when a file was there and is now gone.
+/// Remove the stored snapshot, and say whether there is nothing left at `url`.
 ///
-/// A removal that failed is false, not a silent success: the snapshot is a full
-/// inventory of the account's paths, and a caller that tells the user it is off
-/// the disk while it is still there is worse than one that says the removal did
-/// not land. Nothing was there to delete, so that is false too, never a failure.
+/// "Nothing is there" is the state every caller of a purge acts on, and it
+/// covers both cases that matter: a file that was taken, and a file that was
+/// already absent. It used to answer "a file was there and is now gone", which
+/// put those two on opposite sides of one `Bool`: a caller holding `false` on
+/// a machine with no snapshot warned that a stale inventory might survive when
+/// there was never one, and the launch purge read that `false` as "the snapshot
+/// is still on disk" over a removal that never had a file to take.
+///
+/// The failure that does have to be visible is still visible: a removal that
+/// did not land leaves the snapshot holding the account's own paths, so this
+/// returns false for it, and a caller reporting from this value names a
+/// removal that failed rather than a snapshot that was never there.
 @discardableResult
 public func clearScanCache(at url: URL = defaultScanCacheURL()) -> Bool {
-    (try? eraseScanCache(at: url)) ?? false
+    // Both of `eraseScanCache`'s returns mean the wanted state, and only the
+    // one it throws for does not: it returns true for a file it took and false
+    // for a file that was not there, so the value is dropped and the absence
+    // of a throw is the answer.
+    do {
+        _ = try eraseScanCache(at: url)
+        return true
+    } catch {
+        return false
+    }
 }
 
 /// Delete the stored snapshot on request, whatever its age, and report whether
@@ -201,6 +218,11 @@ public func clearScanCache(at url: URL = defaultScanCacheURL()) -> Bool {
 /// paths back in memory to decide whether they may go) and it treats absent as
 /// the wanted state. A removal that fails throws, because a snapshot that
 /// survived the erase is not an erased snapshot.
+///
+/// False covers "there was none" and "the removal did not land", which are
+/// different states a caller has to tell apart. `clearScanCache` is the
+/// "nothing is left" view of the same removal; this stays the "was there" one
+/// for the callers that print `removed` against `no scan snapshot at`.
 @discardableResult
 public func eraseScanCache(at url: URL = defaultScanCacheURL()) throws -> Bool {
     guard FileManager.default.fileExists(atPath: url.path) else { return false }
@@ -225,7 +247,8 @@ public struct EraseResult: Codable, Sendable {
     }
 }
 
-/// Delete a snapshot past the retention bound, and report whether it did.
+/// Delete a snapshot past the retention bound, and report whether nothing is
+/// left at `url`.
 ///
 /// The file is a full inventory of the account: every app path, every leftover
 /// path under the home directory. Past `maxAge` no run serves it, so leaving it
@@ -235,7 +258,9 @@ public struct EraseResult: Codable, Sendable {
 /// races an install and `commitScanCache` refuses to write over it.
 ///
 /// False covers both "not expired" and "the removal did not land"; either way
-/// the snapshot is still on disk, which is what a caller has to know.
+/// the snapshot is still on disk, which is what a caller has to know. Past the
+/// bound the answer is this one's: a file taken or a file that was never there
+/// both leave nothing at `url`, and only a removal that did not land is false.
 @discardableResult
 public func deleteExpiredScanCache(
     _ cache: ScanCacheFile,

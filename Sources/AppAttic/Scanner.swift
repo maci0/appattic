@@ -157,8 +157,13 @@ final class ScannerViewModel {
             // gate a launch on; the fingerprint check still runs behind it.
             // Past the retention bound the snapshot is deleted rather than
             // left holding the account's paths for a rescan that overwrites it.
+            // A deletion that did not land leaves exactly that file behind, so
+            // it is named on the scan that replaces it rather than dropped on
+            // the floor with the return value.
             let expired = isScanCacheExpired(cache)
-            if expired { clearScanCache() }
+            if expired, !clearScanCache() {
+                pendingNote = "the expired scan snapshot could not be removed"
+            }
             if cache.includeSystem != includeSystem
                 || cache.data.incomplete == true
                 || expired {
