@@ -16,6 +16,48 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# --help has to answer before the binary lookup below, or asking how to run
+# this prints "no built appattic CLI found" instead: the question is about the
+# script, and answering it needs nothing built. Same spelling every other
+# script here takes.
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help)
+            cat <<'EOF'
+Usage: bash scripts/cli-contract.sh [appattic-binary]
+
+  (no binary)     check .build/debug/appattic, else .build/release/appattic
+  <binary>        check that one instead
+
+Asserts the built CLI's exit codes and which stream each result lands on.
+Hermetic: it runs against a temporary HOME and XDG_* tree, never runs
+`update`, and never runs a command that walks the filesystem.
+scripts/check.sh builds the CLI and runs this.
+EOF
+            exit 0
+            ;;
+        -*)
+            echo "error: unknown argument: $arg" >&2
+            echo "Usage: $0 [appattic-binary]" >&2
+            echo "       $0 --help" >&2
+            exit 2
+            ;;
+        # A bare path names the binary.
+        *) ;;
+    esac
+done
+
+# Only the first argument names the binary, and the loop above scans the rest
+# for -h. A second path would be dropped, so a mistyped pair checks the binary
+# the first path named instead of failing.
+if [[ $# -gt 1 ]]; then
+    echo "error: unexpected argument: $2" >&2
+    echo "Usage: $0 [appattic-binary]" >&2
+    echo "       $0 --help" >&2
+    exit 2
+fi
+
 BIN="${1:-$ROOT/.build/debug/appattic}"
 if [[ ! -x "$BIN" ]]; then
     BIN="$ROOT/.build/release/appattic"

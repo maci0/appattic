@@ -66,6 +66,54 @@ shellcheck -x -P SCRIPTDIR \
     --enable=add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,useless-use-of-cat \
     "${shell_files[@]}"
 
+# Every runnable script answers --help. A contributor who cannot list a
+# script's arguments has to read it, and a script that reaches its dependency
+# check before its argument parsing answers --help with the missing dependency
+# instead: `scripts/cli-contract.sh` printed "no built appattic CLI found" for
+# `bash scripts/cli-contract.sh --help`, on a host that had simply never built
+# one. Read by running rather than by grepping: the pre-fix script mentioned
+# `--help` only inside its own test cases, so a text match said nothing about
+# whether the flag was handled. Discovered rather than listed, like the list
+# the checker walks above, so a new script joins the gate without being added
+# here. A sourced library is not an entry point and has no arguments to list;
+# the header comment naming its callers is the marker, and it is what makes a
+# library readable as one.
+#
+# timeout caps the damage if a script ignores the flag and starts its real
+# work: the check then fails on the timeout rather than hanging the gate on a
+# build. CI and a developer machine agree on the bound because it is here.
+mapfile -t entry_scripts < <(
+    printf '%s\n' "${shell_files[@]}" | while read -r f; do
+        head -6 "$f" | grep -qi 'sourced by' || printf '%s\n' "$f"
+    done
+)
+entry_help_fail=0
+for f in "${entry_scripts[@]}"; do
+    name="$(basename "$f")"
+    # `set -e` suspends inside the condition, so a script that exits non-zero
+    # for --help lands in the else rather than killing the gate before it can
+    # report which script did it.
+    if out="$(timeout 30 bash "$f" --help 2>&1)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    if [[ "$rc" -eq 124 ]]; then
+        echo "error: $name --help timed out, so it does not answer before it works" >&2
+        entry_help_fail=1
+    elif [[ "$rc" -ne 0 ]]; then
+        echo "error: $name --help exits $rc, so a contributor asking how to run it gets a failure" >&2
+        printf '       %s\n' "${out%%$'\n'*}" >&2
+        entry_help_fail=1
+    fi
+done
+if [[ "$entry_help_fail" -ne 0 ]]; then
+    echo "       fix: handle -h|--help in the argument parsing, before any dependency" >&2
+    echo "             or missing-binary check, print the usage, and exit 0" >&2
+    exit 1
+fi
+echo "entry-point help: ok (${#entry_scripts[@]} scripts)"
+
 # One declared version, three copies to keep in step (AppStream release,
 # Info.plist, the qt man page), plus a CFBundleVersion that is a rising build
 # number. Mismatch means an artifact reports one number while the packaging
