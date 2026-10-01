@@ -222,6 +222,85 @@ else
     echo "note: shellcheck not found, the AppRun body was not checked for bashisms" >&2
 fi
 
+# Both images build with `linux-deps.sh`, which sources its helpers at startup,
+# and the find-*.sh pair resolves the toolchain pins from $ROOT while it is
+# being sourced. A COPY that carries linux-deps.sh without the rest aborts the
+# RUN below it on the build host, not in CI: neither Dockerfile is built by any
+# workflow, so the failure reaches a contributor running `podman build` from the
+# README and nowhere else. The list is derived from the scripts rather than
+# restated, so adding a `source=` line to linux-deps.sh makes this check demand
+# the new file instead of passing against a list that no longer matches it.
+deps_script="scripts/linux-deps.sh"
+deps_source_lines() {
+    # `$_script_dir` here is the literal text linux-deps.sh writes, not an
+    # expansion of this script's own variables.
+    # shellcheck disable=SC2016
+    sed -n 's|^\. "$_script_dir/\([a-z0-9-]*\.sh\)"$|\1|p' "$deps_script" \
+        | LC_ALL=C sort -u
+}
+deps_sourced=()
+while IFS= read -r _dep; do
+    [[ -n "$_dep" ]] && deps_sourced+=("$_dep")
+done < <(deps_source_lines)
+((${#deps_sourced[@]} > 0)) \
+    || fail "$deps_script has no '. \"\$_script_dir/...\"' source lines to read the image COPY against"
+
+# The version files are read by the sourced helpers, not by linux-deps.sh: the
+# find-*.sh pair resolves the pin at source time, before --help and before
+# --install, so the image has to carry the version files alongside the scripts.
+deps_root_files=()
+for _helper in "${deps_sourced[@]}"; do
+    while IFS= read -r _pin; do
+        [[ -n "$_pin" ]] && deps_root_files+=("$_pin")
+    done < <(sed -n 's|.*ROOT/\(\.[a-z-]*-version\).*|\1|p' "$ROOT/scripts/$_helper" 2>/dev/null \
+        | LC_ALL=C sort -u || true)
+done
+mapfile -t deps_root_files < <(printf '%s\n' "${deps_root_files[@]}" | LC_ALL=C sort -u)
+((${#deps_root_files[@]} > 0)) \
+    || fail "$deps_script sources no helper that reads a version file through \$ROOT; the image COPY check cannot know what to require"
+
+for image in Dockerfile Dockerfile.arch; do
+    [[ -f "$image" ]] || continue
+    # Every source named by a COPY/ADD, including the backslash-continued
+    # lines. These COPYs span several lines, and a source named on a
+    # continuation line is as much part of the copy set as the one the
+    # instruction sits on, so reading only the instruction line would report a
+    # file the build actually copies as absent. A line that neither continues
+    # a COPY nor opens one is skipped rather than globbed, so an unrelated
+    # indented RUN argument cannot stand in for a source.
+    copy_srcs=()
+    continuing=0
+    while IFS= read -r _line || [[ -n "$_line" ]]; do
+        if ((continuing)); then
+            if [[ "$_line" == *\\* ]]; then
+                copy_srcs+=("$_line")
+                continue
+            fi
+            copy_srcs+=("$_line")
+            continuing=0
+            continue
+        fi
+        [[ "$_line" =~ ^[[:space:]]*(COPY|ADD)[[:space:]]+(.*)$ ]] || continue
+        _body="${BASH_REMATCH[2]}"
+        if [[ "$_body" == *\\* ]]; then
+            copy_srcs+=("$_body")
+            continuing=1
+        else
+            copy_srcs+=("$_body")
+        fi
+    done < "$image"
+    copy_blob="$(printf '%s\n' "${copy_srcs[@]}")"
+    for needed in "${deps_sourced[@]}"; do
+        printf '%s\n' "$copy_blob" | grep -qF -- "$needed" \
+            || fail "$image does not copy scripts/$needed, which $deps_script sources at startup; the image build fails on 'No such file or directory'"
+    done
+    for needed in "${deps_root_files[@]}"; do
+        printf '%s\n' "$copy_blob" | grep -qF -- "$needed" \
+            || fail "$image does not copy $needed, which the helpers $deps_script sources read through \$ROOT before parsing its arguments; the image build fails on 'missing'"
+    done
+done
+echo "docker COPY sets: ok (linux-deps.sh sources ${#deps_sourced[@]} script(s), both images carry them)"
+
 if command -v desktop-file-validate >/dev/null 2>&1; then
     if ! validate_out="$(desktop-file-validate "$DESKTOP" 2>&1)"; then
         printf '%s\n' "$validate_out" | sed 's/^/error: /' >&2

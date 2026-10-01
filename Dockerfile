@@ -11,10 +11,22 @@ LABEL org.opencontainers.image.title="AppAttic" \
       org.opencontainers.image.url="https://github.com/maci0/appattic" \
       org.opencontainers.image.licenses="LicenseRef-proprietary"
 
+# linux-deps.sh sources verify-sha256.sh, find-zig.sh, find-wasmtime.sh,
+# find-swift.sh and find-qt6.sh at startup, and find-zig.sh / find-swift.sh
+# resolve the toolchain pin from .zig-version / .swift-version through $ROOT
+# while they are being sourced, before argument parsing. A COPY carrying only
+# linux-deps.sh and verify-sha256.sh aborts the build at that source with
+# "find-zig.sh: No such file or directory" (or ".zig-version missing") before a
+# single package is installed.
 COPY scripts/linux-deps.sh \
      scripts/verify-sha256.sh \
+     scripts/find-zig.sh \
+     scripts/find-wasmtime.sh \
+     scripts/find-swift.sh \
+     scripts/find-qt6.sh \
      scripts/dep-checksums.sha256 \
      /tmp/appattic/scripts/
+COPY .zig-version .swift-version /tmp/appattic/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && bash /tmp/appattic/scripts/linux-deps.sh --install \

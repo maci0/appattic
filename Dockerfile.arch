@@ -17,10 +17,19 @@ RUN pacman -Syu --noconfirm --needed \
         git gcc binutils libxml2 ncurses python \
     && pacman -Scc --noconfirm
 
+# Same set Dockerfile copies, and for the same reason: linux-deps.sh sources
+# every find-*.sh helper at startup and the find-*.sh pair reads the two
+# version files through $ROOT while being sourced, so an incomplete COPY fails
+# the RUN below before it installs anything.
 COPY scripts/linux-deps.sh \
      scripts/verify-sha256.sh \
+     scripts/find-zig.sh \
+     scripts/find-wasmtime.sh \
+     scripts/find-swift.sh \
+     scripts/find-qt6.sh \
      scripts/dep-checksums.sha256 \
      /tmp/appattic/scripts/
+COPY .zig-version .swift-version /tmp/appattic/
 RUN bash /tmp/appattic/scripts/linux-deps.sh --install \
     && bash /tmp/appattic/scripts/linux-deps.sh --install-wasmtime \
     && rm -rf /tmp/appattic
