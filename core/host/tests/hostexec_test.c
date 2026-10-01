@@ -354,7 +354,10 @@ int main(void) {
     rc |= expect_allow("/usr/bin/paru -Qua");
     rc |= expect_allow("dpkg -l");
     rc |= expect_allow("/usr/bin/dpkg -l");
-    rc |= expect_allow("ls -1 /etc/apt/sources.list.d");
+    /* The two listings the readers split on newline now ask for the escaping,
+       so `-b` has to stay admitted for these exact commands. */
+    rc |= expect_allow("ls -1b /etc/apt/sources.list.d");
+    rc |= expect_allow("ls -1b /home/user/.deno/bin");
     rc |= expect_allow("snap list --all");
     rc |= expect_allow("ls -1");
     rc |= expect_allow("ls -1A");

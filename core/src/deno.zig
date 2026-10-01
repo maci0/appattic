@@ -11,7 +11,10 @@ const sliceInside = fuzzsupport.sliceInside;
 const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "deno";
-const query_cmd = "ls -1 " ++ path_store.home_sentinel ++ "/.deno/bin";
+// `-b`, like every other directory listing this core reads: `ls` escapes the
+// bytes that would otherwise break the listing's one-entry-per-line shape, and
+// `parseDenoGlobalList` takes the escaping back off per line after the split.
+const query_cmd = "ls -1b " ++ path_store.home_sentinel ++ "/.deno/bin";
 
 var result_buf: [8192]u8 = undefined;
 var note: querynote.Log = .{};
@@ -30,14 +33,23 @@ fn skipName(name: []const u8) bool {
     return name.len == 0 or name[0] == '.' or std.mem.eql(u8, name, "deno") or std.mem.eql(u8, name, "deno.exe");
 }
 
-/// Parse `ls -1 ~/.deno/bin`. Dot names and the `deno` / `deno.exe` runtime are
+/// Parse `ls -1b ~/.deno/bin`. Dot names and the `deno` / `deno.exe` runtime are
 /// skipped; everything else that passes `jsonbuf.isSafeCmdIdent` is reported.
-pub fn parseDenoGlobalList(text: []const u8, out: []DenoGlobal) usize {
+///
+/// Each line is unescaped in place *after* the split, which is the order every
+/// other listing reader here uses and the only one that keeps one entry one
+/// row. `ls -1` prints a binary named `we\nird` as the two lines `we` and
+/// `ird`, both of which pass `isSafeCmdIdent`, so one entry became two
+/// `deno uninstall --global` rows for names that were never on disk. With `-b`
+/// the entry stays one line, the decode puts the real newline back inside the
+/// name, and `isSafeCmdIdent` drops it there.
+pub fn parseDenoGlobalList(text: []u8, out: []DenoGlobal) usize {
     var n: usize = 0;
     var lines = std.mem.splitScalar(u8, text, '\n');
-    while (lines.next()) |raw| {
+    while (lines.next()) |const_line| {
         if (n == out.len) break;
-        const line = std.mem.trim(u8, raw, " \t\r");
+        const raw: []u8 = @constCast(const_line);
+        const line = std.mem.trim(u8, raw[0..path_store.unescapeLsB(raw)], " \t\r");
         if (line.len == 0) continue;
         const name = path_store.basenameOf(line);
         if (skipName(name)) continue;
@@ -63,6 +75,14 @@ pub fn parseDenoGlobalList(text: []const u8, out: []DenoGlobal) usize {
 /// and the Qt ingest rewrites it in `command` and `update_command`, so a guard
 /// that carries it reaches the script as the account's real home.
 const presence_check = "test -e " ++ path_store.home_sentinel ++ "/.deno/bin/";
+
+// The `-b` in the query is the control for the newline case, so it is pinned
+// rather than assumed: without it `ls` prints the entry holding a newline as
+// two lines and `parseDenoGlobalList` accepts both halves as two removals.
+test "the deno listing asks ls to escape the names" {
+    try std.testing.expect(std.mem.indexOf(u8, query_cmd, "ls -1b ") != null);
+    try std.testing.expect(std.mem.endsWith(u8, query_cmd, "/.deno/bin"));
+}
 
 fn renderDeno(hits: []const DenoGlobal) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
@@ -118,13 +138,10 @@ comptime {
 
 test "parseDenoGlobalList skips runtime" {
     var buf: [8]DenoGlobal = undefined;
-    const text =
-        \\deno
-        \\file_server
-        \\deployctl
-        \\
-    ;
-    const n = parseDenoGlobalList(text, &buf);
+    const text = "deno\n" ++ "file_server\n" ++ "deployctl\n" ++ "\n";
+    var listing: [text.len]u8 = undefined;
+    @memcpy(&listing, text);
+    const n = parseDenoGlobalList(&listing, &buf);
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqualStrings("file_server", buf[0].name);
     try std.testing.expectEqualStrings("deployctl", buf[1].name);
@@ -132,9 +149,47 @@ test "parseDenoGlobalList skips runtime" {
 
 test "parseDenoGlobalList empty and unsafe" {
     var buf: [4]DenoGlobal = undefined;
-    try std.testing.expectEqual(@as(usize, 0), parseDenoGlobalList("", &buf));
-    try std.testing.expectEqual(@as(usize, 0), parseDenoGlobalList("deno\n", &buf));
-    try std.testing.expectEqual(@as(usize, 0), parseDenoGlobalList("foo;rm\n", &buf));
+    var empty: [1]u8 = undefined;
+    empty[0] = '\n';
+    try std.testing.expectEqual(@as(usize, 0), parseDenoGlobalList(empty[0..0], &buf));
+    var runtime = [_]u8{ 'd', 'e', 'n', 'o', '\n' };
+    try std.testing.expectEqual(@as(usize, 0), parseDenoGlobalList(&runtime, &buf));
+    var injected = [_]u8{ 'f', 'o', 'o', ';', 'r', 'm', '\n' };
+    try std.testing.expectEqual(@as(usize, 0), parseDenoGlobalList(&injected, &buf));
+}
+
+// With `-b` in the query, an entry whose name holds a byte `ls` must escape
+// arrives as one line carrying a backslash, and `isSafeCmdIdent` refuses it:
+// a backslash is not an ident byte. One entry in, no row out, rather than the
+// two rows the unescaped `ls -1` listing turned that one entry into. The
+// plain entry beside it is the control, so this also pins that a name `ls`
+// prints verbatim still becomes a removal.
+test "parseDenoGlobalList drops an escaped name and keeps a plain one" {
+    var buf: [8]DenoGlobal = undefined;
+    // What `ls -1b` prints: the escaped entry on one line, then a plain one.
+    var listing = [_]u8{
+        'w', 'e',  '\\', 'n', 'i', 'r', 'd', '\n',
+        'd', 'e',  'p',  'l', 'o', 'y', 'c', 't',
+        'l', '\n',
+    };
+    const n = parseDenoGlobalList(&listing, &buf);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqualStrings("deployctl", buf[0].name);
+}
+
+// Every escape `ls -b` writes is refused, so no entry whose name holds a byte
+// needing one can reach a removal command as a row for the escaped spelling.
+// The plain entry is the control: `ls` prints it verbatim, so it must survive.
+test "parseDenoGlobalList drops every escape ls -b writes" {
+    var buf: [8]DenoGlobal = undefined;
+    var listing = [_]u8{
+        't', 'a',  'b', '\\', 't',  'h',  'e', 'r',  'e', '\n',
+        'b', 'a',  'c', 'k',  '\\', '\\', 's', 'l',  'a', 'n',
+        'd', '\n', 'p', 'l',  'a',  'i',  'n', '\n',
+    };
+    const n = parseDenoGlobalList(&listing, &buf);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqualStrings("plain", buf[0].name);
 }
 
 test "plugin_query present JSON comes from deno bin listing fixture" {
@@ -166,7 +221,7 @@ test "plugin_query missing is empty findings" {
     try std.testing.expect(std.mem.indexOf(u8, json, "deno missing") != null);
 }
 
-// `ls -1 ~/.deno/bin` prints one entry per line, each a full path whose last
+// `ls -1b ~/.deno/bin` prints one entry per line, each a full path whose last
 // component becomes the name of a `deno uninstall --global <name>` command.
 // The seeds cover the runtime entry that must be skipped, a path with no
 // directory, trailing slashes and `..`, names the command guard rejects, and
@@ -189,6 +244,16 @@ const fuzz_deno_unsafe = packFuzzSlice(
     \\/home/user/.deno/bin/with space
 );
 const fuzz_deno_junk = packFuzzSlice("/home/user/.deno/bin/a\x00b\n\t\r\n/home/user/.deno/bin/\xff");
+// What `ls -b` writes for the names the unescaped seeds imply: the escaped
+// form of a newline, a tab, a backslash and a carriage return, so the corpus
+// exercises the decode the reader now runs and not only the shape it replaced.
+const fuzz_deno_escaped = packFuzzSlice(
+    \\/home/user/.deno/bin/we\nird
+    \\/home/user/.deno/bin/tab\there
+    \\/home/user/.deno/bin/back\\slash
+    \\/home/user/.deno/bin/car\rriage
+    \\/home/user/.deno/bin/plain
+);
 const fuzz_deno_empty = packFuzzSlice("");
 
 test "fuzz parseDenoGlobalList" {
@@ -197,6 +262,7 @@ test "fuzz parseDenoGlobalList" {
         &fuzz_deno_paths,
         &fuzz_deno_unsafe,
         &fuzz_deno_junk,
+        &fuzz_deno_escaped,
         &fuzz_deno_empty,
     } });
 }

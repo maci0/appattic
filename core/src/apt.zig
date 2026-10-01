@@ -4,6 +4,7 @@ const jsonbuf = @import("jsonbuf.zig");
 const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const path_store = @import("path_store.zig");
 const fuzzsupport = @import("fuzzsupport.zig");
 
 const sliceInside = fuzzsupport.sliceInside;
@@ -13,7 +14,18 @@ const plugin_id = "apt";
 const query_cmd = "apt-get -s autoremove";
 const outdated_cmd = "apt list --upgradable";
 const dpkg_cmd = "dpkg -l";
-const ppa_cmd = "ls -1 /etc/apt/sources.list.d";
+// `-b`, like every other directory listing this core reads: `ls` escapes the
+// bytes that would otherwise break the listing's one-entry-per-line shape, and
+// `parsePpaSources` takes the escaping back off per line after the split.
+const ppa_cmd = "ls -1b /etc/apt/sources.list.d";
+
+// The `-b` in the query is the control for the newline case, so it is pinned
+// rather than assumed: without it `ls` prints a source file holding a newline
+// as two lines, each of which can satisfy `isPpaFile` on its own.
+test "the ppa listing asks ls to escape the names" {
+    try std.testing.expect(std.mem.startsWith(u8, ppa_cmd, "ls -1b "));
+    try std.testing.expect(std.mem.endsWith(u8, ppa_cmd, "/etc/apt/sources.list.d"));
+}
 
 var result_buf: [65536]u8 = undefined;
 var note: querynote.Log = .{};
@@ -74,13 +86,22 @@ pub fn parseDpkgRc(text: []const u8, out: []DpkgRc) usize {
     return n;
 }
 
-/// Parse `ls -1 /etc/apt/sources.list.d`. Keep PPA-looking names.
-pub fn parsePpaSources(text: []const u8, out: []PpaSource) usize {
+/// Parse `ls -1b /etc/apt/sources.list.d`. Keep PPA-looking names.
+///
+/// Each line is unescaped in place *after* the split, which is the order every
+/// other listing reader here uses and the only one that keeps one entry one
+/// row. `ls -1` prints a file named `x.ppa\ny.launchpad.list` as two lines, and
+/// both halves satisfy `isPpaFile` and `isSafeCmdIdent`, so the unescaped
+/// listing became two `ppa` rows, each `path` naming one line joined onto the
+/// sources directory. With `-b` the entry stays one line, the decode puts the
+/// real newline back inside the name, and `isSafeCmdIdent` drops it there.
+pub fn parsePpaSources(text: []u8, out: []PpaSource) usize {
     var n: usize = 0;
     var lines = std.mem.splitScalar(u8, text, '\n');
-    while (lines.next()) |raw| {
+    while (lines.next()) |const_line| {
         if (n == out.len) break;
-        const line = std.mem.trim(u8, raw, " \t\r");
+        const raw: []u8 = @constCast(const_line);
+        const line = std.mem.trim(u8, raw[0..path_store.unescapeLsB(raw)], " \t\r");
         if (line.len == 0) continue;
         const name = blk: {
             if (std.mem.lastIndexOfScalar(u8, line, '/')) |i| break :blk line[i + 1 ..];
@@ -374,15 +395,39 @@ test "parseDpkgRc keeps rc skips ii" {
 
 test "parsePpaSources keeps ppa files" {
     var buf: [8]PpaSource = undefined;
-    const text =
-        \\google-chrome.list
-        \\deadsnakes-ubuntu-ppa-noble.list
-        \\ubuntu.sources
-        \\
-    ;
-    const n = parsePpaSources(text, &buf);
+    const text = "google-chrome.list\n" ++
+        "deadsnakes-ubuntu-ppa-noble.list\n" ++
+        "ubuntu.sources\n" ++
+        "\n";
+    var listing: [text.len]u8 = undefined;
+    @memcpy(&listing, text);
+    const n = parsePpaSources(&listing, &buf);
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("deadsnakes-ubuntu-ppa-noble.list", buf[0].name);
+}
+
+// An entry whose name holds a byte `ls` must escape arrives with `-b` as one
+// line carrying a backslash, and the ident gate refuses it: one entry, no
+// row. Plain `ls -1` split it into the two lines around the newline, and
+// because each half could satisfy `isPpaFile` on its own, one entry became
+// two `ppa` rows whose paths were one line each joined onto the sources
+// directory.
+test "parsePpaSources keeps an escaped newline name to one row" {
+    var buf: [8]PpaSource = undefined;
+    var text = [_]u8{ 'x', '.', 'p', 'p', 'a', '\\', 'n', 'y', '.', 'l', 'a', 'u', 'n', 'c', 'h', 'p', 'a', 'd', '.', 'l', 'i', 's', 't', '\n' };
+    try std.testing.expectEqual(@as(usize, 0), parsePpaSources(&text, &buf));
+}
+
+// A plain PPA name carries no escape and has to survive the decode unchanged,
+// with its full path still recorded: this is the row the operator acts on.
+test "parsePpaSources keeps a plain name and its path" {
+    var buf: [8]PpaSource = undefined;
+    const text = "/etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-noble.list\n";
+    var listing: [text.len]u8 = undefined;
+    @memcpy(&listing, text);
+    try std.testing.expectEqual(@as(usize, 1), parsePpaSources(&listing, &buf));
+    try std.testing.expectEqualStrings("deadsnakes-ubuntu-ppa-noble.list", buf[0].name);
+    try std.testing.expectEqualStrings("/etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-noble.list", buf[0].path);
 }
 
 test "plugin_query present JSON includes dpkg rc and ppa source" {
@@ -397,7 +442,7 @@ test "plugin_query present JSON includes dpkg rc and ppa source" {
 }
 
 // Seeds are real `apt` output: `dpkg -l` rc rows, an autoremove dry run, an
-// `apt list --upgradable` table, and an `ls -1` of a sources.list.d. The
+// `apt list --upgradable` table, and an `ls -1b` of a sources.list.d. The
 // mutations that matter to a hand-rolled line parser are the ones below:
 // truncated rows, a missing `[...]`, a bare `/` with no version after it, and
 // a row that starts with the `rc` marker but carries no name.
@@ -493,13 +538,22 @@ fn fuzzAptListings(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(o.current[o.current.len - 1] != ']');
     }
 
+    // Its own copy: `parsePpaSources` decodes `ls -b` escaping in place, so it
+    // is the one reader of this input that does not leave it as the fuzzer
+    // wrote it. Sharing the buffer would let its decode change what the
+    // assertions below compare against.
+    var ppa_raw: [4096]u8 = undefined;
+    const ppa_text_len = @min(text.len, ppa_raw.len);
+    @memcpy(ppa_raw[0..ppa_text_len], text[0..ppa_text_len]);
+    const ppa_text = ppa_raw[0..ppa_text_len];
+
     var ppas: [32]PpaSource = undefined;
-    const nppa = parsePpaSources(text, &ppas);
+    const nppa = parsePpaSources(ppa_text, &ppas);
     try std.testing.expect(nppa <= ppas.len);
     for (ppas[0..nppa]) |p| {
         try std.testing.expect(jsonbuf.isSafeCmdIdent(p.name));
-        try std.testing.expect(sliceInside(text, p.name));
-        try std.testing.expect(sliceInside(text, p.path));
+        try std.testing.expect(sliceInside(ppa_text, p.name));
+        try std.testing.expect(sliceInside(ppa_text, p.path));
         // The name is the last path component, so it is a suffix of the line.
         try std.testing.expect(p.path.len >= p.name.len);
         try std.testing.expect(std.mem.endsWith(u8, p.path, p.name));

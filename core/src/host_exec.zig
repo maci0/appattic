@@ -470,7 +470,7 @@ test "native fixture routes apt pacman snap ls dnf zypper flatpak npm pnpm bun p
     try std.testing.expect(dpkg > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(dpkg)], "rc  oldpkg") != null);
 
-    const ppa = run("ls -1 /etc/apt/sources.list.d", &buf);
+    const ppa = run("ls -1b /etc/apt/sources.list.d", &buf);
     try std.testing.expect(ppa > 0);
     try std.testing.expect(std.mem.indexOf(u8, buf[0..@intCast(ppa)], "deadsnakes-ubuntu-ppa-noble.list") != null);
 
