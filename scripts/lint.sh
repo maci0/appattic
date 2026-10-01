@@ -401,6 +401,15 @@ echo "host plugin argv: ok"
 # whatever moved onto that line. The symbol is what a reader greps for, and it
 # does not go stale. The spec cited twelve of these and six had already drifted
 # by the time this check landed.
+#
+# docs/THREAT_MODEL.md is on the list and carried 218 of them, all of the form
+# the check below would have refused: two hundred-odd citations across every
+# boundary and every mitigation, none of which failed anything when the code
+# moved underneath them. They are symbols now.
+#
+# The second pattern is the same rot in a shorter form. `:412` on its own, with
+# the file named once earlier in the sentence, is a line citation that the first
+# pattern cannot see, and it is the one that survives being partially rewritten.
 doc_cite_files=(
     "$ROOT/README.md"
     "$ROOT/DESIGN.md"
@@ -409,6 +418,7 @@ doc_cite_files=(
     "$ROOT/docs/specs/README.md"
     "$ROOT/docs/specs/2026-08-26-zig-wasm-core-design.md"
     "$ROOT/docs/privacy.md"
+    "$ROOT/docs/THREAT_MODEL.md"
     "$ROOT/docs/tmog-design-language.md"
     "$ROOT/docs/runbooks/state-recovery.md"
 )
@@ -418,6 +428,13 @@ for _cite_src in "${doc_cite_files[@]}"; do
         echo "error: ${_cite_src#"$ROOT"/} cites a line number: $_cite" >&2
         cite_bad=1
     done < <(rg -N -o '`[A-Za-z0-9_./-]+\.(zig|swift|cpp|h|c|sh|sh):[0-9]+`' "$_cite_src" 2>/dev/null \
+        | sort -u || true)
+    # A `, `:NNN`` left after the file was named once: same rot, invisible to
+    # the pattern above.
+    while IFS= read -r _cite; do
+        echo "error: ${_cite_src#"$ROOT"/} cites a bare line number: $_cite" >&2
+        cite_bad=1
+    done < <(rg -N -o '`, `:[0-9]+`"' "$_cite_src" 2>/dev/null \
         | sort -u || true)
 done
 if [[ "$cite_bad" -ne 0 ]]; then
