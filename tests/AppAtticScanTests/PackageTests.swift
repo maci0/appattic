@@ -246,8 +246,17 @@ final class PackageTests: XCTestCase {
             "if pip show httpie >/dev/null 2>&1; then pip uninstall -y --user httpie; fi"
         )
         XCTAssertEqual(
-            packageRemoveCommand(entry("file_server", "deno", "global")),
-            "if test -e ~/.deno/bin/file_server >/dev/null 2>&1; then deno uninstall --global file_server; fi"
+            packageRemoveCommand(entry("file_server", "deno", "global"), home: "/home/user"),
+            "if test -e /home/user/.deno/bin/file_server >/dev/null 2>&1; then deno uninstall --global file_server; fi"
+        )
+        // The guard runs in a generated `/bin/sh` script, and POSIX `sh`
+        // performs no tilde expansion, so `test -e ~/.deno/bin/name` tests a
+        // directory named `~` under the working directory and skips the removal
+        // on every run. The home goes through `shellQuote` so a home with a
+        // space in it still reaches the shell as one word.
+        XCTAssertEqual(
+            packageRemoveCommand(entry("file_server", "deno", "global"), home: "/home/a user"),
+            "if test -e '/home/a user'/.deno/bin/file_server >/dev/null 2>&1; then deno uninstall --global file_server; fi"
         )
         XCTAssertEqual(
             packageRemoveCommand(entry("foo; rm /usr/bin/snap", "npm", "global")),

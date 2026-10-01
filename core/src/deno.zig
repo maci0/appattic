@@ -48,6 +48,22 @@ pub fn parseDenoGlobalList(text: []const u8, out: []DenoGlobal) usize {
     return n;
 }
 
+/// The presence check every guarded removal opens with, and the half the
+/// guard wrapper appends the quoted name to. `test -e <prefix><name>` has to
+/// name a path `/bin/sh` resolves, because the guard runs in the generated
+/// script and not through `host.exec`. `~` is not one: tilde expansion is an
+/// interactive-shell extension that POSIX `sh` does not perform, so a script
+/// carrying `test -e ~/.deno/bin/name` tests a directory named `~` under the
+/// working directory, finds nothing, and skips the removal on every run. It
+/// also fails the embedder's byte gate for a scripted command, which refuses
+/// `~` outright.
+///
+/// The sentinel is what the query above already uses, and it is what the
+/// embedder expands: `core/host/hostexec.c` rewrites it in `host.exec` argv,
+/// and the Qt ingest rewrites it in `command` and `update_command`, so a guard
+/// that carries it reaches the script as the account's real home.
+const presence_check = "test -e " ++ path_store.home_sentinel ++ "/.deno/bin/";
+
 fn renderDeno(hits: []const DenoGlobal) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
     var q_buf: [1024]u8 = undefined;
@@ -56,7 +72,7 @@ fn renderDeno(hits: []const DenoGlobal) bool {
     for (hits, 0..) |h, i| {
         if (i != 0) w.raw(",");
         var cmd_w = jsonbuf.W{ .buf = &cmd_buf };
-        guard.writeNameGuard(&cmd_w, &q_buf, "test -e ~/.deno/bin/", "deno uninstall --global ", h.name);
+        guard.writeNameGuard(&cmd_w, &q_buf, presence_check, "deno uninstall --global ", h.name);
         jsonbuf.writeGlobal(&w, h.name, "", cmd_w.slice(), "deno");
     }
     w.raw("],\"script\":");
@@ -65,7 +81,7 @@ fn renderDeno(hits: []const DenoGlobal) bool {
     } else {
         w.raw("\"#!/bin/sh\\nset -e\\n# AppAttic deno. Review before running.\\n");
         for (hits) |h| {
-            guard.writeNameGuard(&w, &q_buf, "test -e ~/.deno/bin/", "deno uninstall --global ", h.name);
+            guard.writeNameGuard(&w, &q_buf, presence_check, "deno uninstall --global ", h.name);
             w.raw("\\n");
         }
         w.raw("\"");
@@ -130,7 +146,15 @@ test "plugin_query present JSON comes from deno bin listing fixture" {
     try std.testing.expect(std.mem.indexOf(u8, json, "file_server") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deployctl") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deno uninstall --global file_server") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "if test -e ~/.deno/bin/file_server; then deno uninstall --global file_server; fi") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "if test -e " ++ path_store.home_sentinel ++ "/.deno/bin/file_server; then deno uninstall --global file_server; fi") != null);
+    // The guard runs in a generated `/bin/sh` script, which performs no tilde
+    // expansion: `test -e ~/.deno/bin/name` tests a directory named `~` under
+    // the working directory, never finds it, and skips the removal on every
+    // run. Only the sentinel, which the embedder expands to the account's real
+    // home, survives that. The dialog body still spells the directory the way a
+    // person reads it; this is about the shell line.
+    try std.testing.expect(std.mem.indexOf(u8, json, "test -e ~") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "; then deno uninstall --global ~") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"deno\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, json, "deno install") == null);
 }

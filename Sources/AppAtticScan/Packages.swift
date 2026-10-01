@@ -106,7 +106,14 @@ public func filterPackages(
 /// manager what it still lists, which is deliberately broader than the
 /// collector's query: the collector wants the strict "nobody needs this"
 /// answer, while the guard only has to be sure the package is still installed.
-public func packageRemoveCommand(_ entry: PackageEntry) -> String {
+///
+/// `home` is the account's home directory, for the one guard that names a path
+/// rather than asking a manager. It is quoted like any other value, so a home
+/// with a space in it still reaches `/bin/sh` as one word.
+public func packageRemoveCommand(
+    _ entry: PackageEntry,
+    home: String = FileManager.default.homeDirectoryForCurrentUser.path
+) -> String {
     guard isSafeCommandArgument(entry.name) else {
         return "# skipped \(shellComment(entry.name)): name reads as a command option"
     }
@@ -155,8 +162,16 @@ public func packageRemoveCommand(_ entry: PackageEntry) -> String {
     case "pip":
         return guardedRemoveCommand(present: "pip show \(q)", remove: "pip uninstall -y --user \(q)")
     case "deno":
+        // The one guard with no manager to ask: it tests the file the removal
+        // takes away. That path has to be one `/bin/sh` resolves, and `~` is
+        // not: tilde expansion is an interactive-shell extension that POSIX `sh`
+        // does not perform, so `test -e ~/.deno/bin/name` tests a directory
+        // named `~` under the working directory, finds nothing, and skips the
+        // removal on every run. The resolved home is absolute and expands
+        // nowhere, so the guard fires while the file is still there and skips
+        // the line once it is gone.
         return guardedRemoveCommand(
-            present: "test -e ~/.deno/bin/\(q)",
+            present: "test -e \(shellQuote(home))/.deno/bin/\(q)",
             remove: "deno uninstall --global \(q)"
         )
     default:

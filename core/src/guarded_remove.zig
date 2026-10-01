@@ -132,9 +132,9 @@ test "name guard quotes an injected name in both halves" {
     var buf: [512]u8 = undefined;
     var q_buf: [128]u8 = undefined;
     var w = jsonbuf.W{ .buf = &buf };
-    writeNameGuard(&w, &q_buf, "test -e ~/.deno/bin/", "deno uninstall --global ", "x'; reboot; '");
+    writeNameGuard(&w, &q_buf, "test -e /home/user/.deno/bin/", "deno uninstall --global ", "x'; reboot; '");
     const got = w.slice() orelse return error.Overflow;
-    try std.testing.expect(std.mem.indexOf(u8, got, "if test -e ~/.deno/bin/'x'\\''; reboot; '\\'''; then ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "if test -e /home/user/.deno/bin/'x'\\''; reboot; '\\'''; then ") != null);
     try std.testing.expect(std.mem.indexOf(u8, got, "deno uninstall --global 'x'\\''; reboot; '\\'''; fi") != null);
 }
 
