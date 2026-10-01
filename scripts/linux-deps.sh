@@ -30,6 +30,7 @@ usage() {
     cat <<'EOF'
 Usage: scripts/linux-deps.sh [--install] [--install-swift] [--install-wasmtime] [--install-zig]
                               [--install-shellcheck] [--install-desktop-file-utils]
+                              [--install-ripgrep]
 
   (no flags)           Preflight: report every dependency as present or missing,
                        against the versions .zig-version and .swift-version pin.
@@ -41,6 +42,8 @@ Usage: scripts/linux-deps.sh [--install] [--install-swift] [--install-wasmtime] 
   --install-shellcheck  Install shellcheck (scripts/lint.sh needs it).
   --install-desktop-file-utils  Install desktop-file-validate, which
                        scripts/check-packaging.sh runs on the desktop entry.
+  --install-ripgrep     Install ripgrep (scripts/lint.sh needs it for the
+                       doc-citation and stray-`swift build` scans).
 
 Then run: bash scripts/linux-qt-link.sh
 
@@ -76,6 +79,7 @@ INSTALL_WASMTIME=0
 INSTALL_ZIG=0
 INSTALL_SHELLCHECK=0
 INSTALL_DESKTOP_FILE_UTILS=0
+INSTALL_RIPGREP=0
 for arg in "$@"; do
     case "$arg" in
         --install) INSTALL_PKGS=1 ;;
@@ -84,6 +88,7 @@ for arg in "$@"; do
         --install-zig) INSTALL_ZIG=1 ;;
         --install-shellcheck) INSTALL_SHELLCHECK=1 ;;
         --install-desktop-file-utils) INSTALL_DESKTOP_FILE_UTILS=1 ;;
+        --install-ripgrep) INSTALL_RIPGREP=1 ;;
         -h|--help) usage; exit 0 ;;
         *)
             echo "error: unknown argument: $arg" >&2
@@ -106,7 +111,8 @@ if [[ "$host_os" == Darwin ]]; then
         "$INSTALL_ZIG|--install-zig|brew install zig  (core/build.sh wants exactly $(cat "$ROOT/.zig-version"))" \
         "$INSTALL_SWIFT|--install-swift|xcode-select --install  then check 'swift --version' against .swift-version" \
         "$INSTALL_SHELLCHECK|--install-shellcheck|brew install shellcheck" \
-        "$INSTALL_DESKTOP_FILE_UTILS|--install-desktop-file-utils|scripts/check-packaging.sh notes the skip when it is absent"
+        "$INSTALL_DESKTOP_FILE_UTILS|--install-desktop-file-utils|scripts/check-packaging.sh notes the skip when it is absent" \
+        "$INSTALL_RIPGREP|--install-ripgrep|brew install ripgrep"
     do
         if [[ "${pair%%|*}" == 1 ]]; then
             rest="${pair#*|}"
@@ -301,12 +307,14 @@ if [[ "$host_os" == Darwin ]]; then
     zig_install="brew install zig   (core/build.sh wants exactly ${ZIG_VER}; brew ships its own)"
     wasmtime_install="brew install wasmtime   (export WASMTIME_DIR=\$(brew --prefix wasmtime))"
     shellcheck_install="brew install shellcheck"
+    ripgrep_install="brew install ripgrep"
     swift_install="xcode-select --install   then check 'swift --version' against .swift-version (or: https://www.swift.org/install/)"
     desktop_validate_install="scripts/check-packaging.sh notes the skip when it is absent; macOS has no distro package"
 else
     zig_install="bash $0 --install-zig (checksummed tarball, never a distro package)"
     wasmtime_install="bash $0 --install-wasmtime"
     shellcheck_install="bash $0 --install-shellcheck"
+    ripgrep_install="bash $0 --install-ripgrep"
     swift_install="bash $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
     desktop_validate_install="bash $0 --install-desktop-file-utils"
 fi
@@ -352,6 +360,13 @@ if command -v shellcheck >/dev/null 2>&1; then
     present "shellcheck" "$(command -v shellcheck)"
 else
     missing "shellcheck (scripts/lint.sh needs it)" "$shellcheck_install"
+fi
+
+if command -v rg >/dev/null 2>&1; then
+    present "ripgrep" "$(command -v rg)"
+else
+    missing "ripgrep (scripts/lint.sh needs it for the doc-citation and stray-swift-build scans)" \
+        "${ripgrep_install}"
 fi
 
 if command -v yamllint >/dev/null 2>&1; then
@@ -734,4 +749,34 @@ install_desktop_file_utils() {
 if [[ "$INSTALL_DESKTOP_FILE_UTILS" -eq 1 ]]; then
     install_desktop_file_utils
     echo "Then: bash scripts/check-packaging.sh"
+fi
+
+install_ripgrep() {
+    if command -v rg >/dev/null 2>&1; then
+        echo "ripgrep already on PATH: $(command -v rg)"
+        return 0
+    fi
+    case "${family}" in
+        arch) run_as_root pacman -S --needed --noconfirm ripgrep ;;
+        fedora) run_as_root dnf install -y ripgrep ;;
+        suse) run_as_root zypper --non-interactive install ripgrep ;;
+        debian)
+            run_as_root apt-get update
+            run_as_root apt-get install -y --no-install-recommends ripgrep
+            ;;
+        *)
+            echo "error: cannot install ripgrep on unrecognized distro" >&2
+            echo "Debian/Ubuntu: apt install ripgrep" >&2
+            echo "Fedora:        dnf install ripgrep" >&2
+            echo "Arch:          pacman -S ripgrep" >&2
+            echo "openSUSE:      zypper install ripgrep" >&2
+            return 1
+            ;;
+    esac
+    echo "rg: $(command -v rg || printf 'not on PATH')"
+}
+
+if [[ "${INSTALL_RIPGREP}" -eq 1 ]]; then
+    install_ripgrep
+    echo "Then: bash scripts/lint.sh"
 fi

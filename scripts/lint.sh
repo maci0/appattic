@@ -60,8 +60,13 @@ fi
 # them: shellcheck lists each by name, and the group keyword is not a list of
 # them. So the ones the tree passes are named one by one below. The rest stay
 # off because the tree does not pass them: masked return (SC2312) and
-# suppressed set -e (SC2310) want 150 and 87 rewrites, and ${var} braces
-# (SC2250) is the one style rewrite left, at 1891. The other style rewrite,
+# suppressed set -e (SC2310) want roughly 150 and 90 rewrites, and ${var} braces
+# (SC2250) is the one style rewrite left, at about 1900. The standing figure is
+# not written here: it drifts silently, and it did — the prose held 150 and 87
+# for a tree that had moved to 151 and 92 while every rule it justified stayed
+# off. The gate re-counts all three on every run and prints each under the
+# rule-name line below, so the current number is read there.
+# The other style rewrite,
 # [[ ]] over [ ] (SC2292), used to be the second off-name at 36; the tree has
 # been converted to [[ ]] everywhere the shebang is bash, so it is enabled here
 # and 36 reads clean.
@@ -110,6 +115,24 @@ if [[ "$bogus" -ne 0 ]]; then
     exit 1
 fi
 echo "shellcheck rule names: ok (${#enabled_checks[@]} of ${#known_checks[@]} optional rules)"
+
+# The rules left off are left off because the tree does not pass them, and the
+# comment above names the standing count for each. A number written in prose is
+# evidence nobody regenerates: it went stale here while every rule it justified
+# stayed off, so the gate re-derives each count on every run and prints it.
+# That does not fail on a drift — the rule stays off either way — but this line
+# is where a reader looks to learn whether a rule is closer to passing than the
+# comment claims, and an out-of-date count in a comment is worse than none.
+# An off rule prints one gcc-format line per finding, so the count is the line
+# count.
+for _off in check-extra-masked-returns check-set-e-suppressed require-variable-braces; do
+    if printf '%s\n' "${enabled_checks[@]}" | grep -qx "${_off}"; then
+        continue
+    fi
+    _off_n="$(shellcheck -x -P SCRIPTDIR --enable="${_off}" -f gcc \
+        "${shell_files[@]}" 2>/dev/null | grep -c 'SC' || true)"
+    printf '  off, %4d findings: %s\n' "${_off_n}" "${_off}"
+done
 
 # Every runnable script answers --help. A contributor who cannot list a
 # script's arguments has to read it, and a script that reaches its dependency
@@ -398,6 +421,25 @@ for _doc in "${plugin_argv_docs[@]}"; do
 done
 echo "host plugin argv: ok"
 
+# ripgrep is a dependency of this gate like shellcheck and yamllint, and it was
+# the only one of the three with no check for it. Two checks below call `rg` —
+# the doc-citation scan and the stray `swift build` scan — and both pipe it
+# through `|| true` so that "no match" is not a failure. A missing ripgrep
+# exits the same way "no match" does, so without this guard both checks read an
+# empty result set, report `ok`, and the gate goes green having scanned nothing:
+# a stale `path:line` citation and a bare `swift build` would both have shipped
+# clean. Reading it as a shell builtin rather than a program is what hid it.
+# The fix is the one every other tool in this script gets, and CI installs the
+# toolchain before it runs this script, so a CI pass can never come from the
+# skip.
+if ! command -v rg >/dev/null 2>&1; then
+    echo "error: ripgrep (rg) missing" >&2
+    echo "       two checks below run it; without it they would report a pass" >&2
+    echo "       having scanned nothing. Linux: sudo apt-get install ripgrep" >&2
+    echo "       macOS: brew install ripgrep" >&2
+    exit 1
+fi
+
 # No `path:line` citation in a markdown doc. A line number in prose rots
 # silently: nothing fails when an edit shifts one, and the doc still reads as
 # though it had been checked, so a reader following a stale citation lands on
@@ -426,7 +468,7 @@ done
 if [[ "$cite_bad" -ne 0 ]]; then
     echo "       fix: name the symbol and the file, without the line:" >&2
     # The backticks are the form being asked for, not a command.
-    # shellcheck disable=SC2016
+    # shellcheck disable=SC2016  # the single-quoted string holds literal backticks
     echo '             (`groupLinuxLeftovers`, `ui/linux-qt/finding.cpp`)' >&2
     exit 1
 fi

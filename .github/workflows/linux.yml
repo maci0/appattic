@@ -66,6 +66,15 @@ jobs:
         # entry and names the skip when the tool is absent. Installing it here
         # is what keeps that check blocking in CI rather than a note.
         run: sudo bash scripts/linux-deps.sh --install-desktop-file-utils
+      - name: Install ripgrep
+        # scripts/lint.sh scans the markdown for stale `path:line` citations
+        # and for a bare `swift build` that skips the prefix mapping, and both
+        # run `rg` through `|| true` so that "no match" is not a failure. A
+        # runner without ripgrep therefore reported both checks `ok` having
+        # scanned nothing. The lint script now refuses to run without it;
+        # installing it here is what keeps the check real rather than a guard
+        # failure, and it stops the gate depending on the runner image.
+        run: sudo bash scripts/linux-deps.sh --install-ripgrep
       - name: Install yamllint
         # Pinned: an unpinned linter makes a green run mean "whatever
         # yamllint shipped that morning", not "this tree passes". The pin is
