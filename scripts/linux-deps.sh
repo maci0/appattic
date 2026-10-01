@@ -47,8 +47,21 @@ Then run: bash scripts/linux-qt-link.sh
 Arch Swift is not in extra. AUR package is swift-bin, or use --install-swift / swiftly.
 The Ubuntu 22.04 Swift tarball needs that ABI (libpython3.10, older ICU). Prefer
 Dockerfile (swift:5.10.1-jammy) or AUR swift-bin on Arch. Homebrew Qt on macOS is not Linux.
+
+Every --install-* flag installs a Linux artifact: a distro package, or a
+tarball whose pinned checksum in dep-checksums.sha256 is a linux triple. On
+macOS each one stops with the Homebrew or Xcode command instead, and the
+report marks the Qt 6 window as a Linux target rather than a missing tool.
 EOF
 }
+
+# macOS is a supported host (build.sh has a Darwin branch, .swift-version is
+# pinned for it, linux.yml runs a macos job), and it has no /etc/os-release.
+# The host is read before anything is reported, so the preflight says what the
+# machine is rather than what this script hoped for: without it a Mac was
+# answered with "distro: unknown family: unknown" plus apt/dnf/pacman install
+# lines, and every --install-* flag went on to fetch a Linux tarball.
+host_os="$(uname -s)"
 
 INSTALL_PKGS=0
 INSTALL_SWIFT=0
@@ -75,6 +88,30 @@ for arg in "$@"; do
     esac
 done
 
+# One guard for every flag, before any of them can reach a package manager or
+# a download URL. macOS is a supported host (build.sh, .swift-version, the
+# macos job in linux.yml), so the honest answer there is a named refusal plus
+# the command that does work, not a Linux tarball fetched into /opt.
+if [[ "$host_os" == Darwin ]]; then
+    for pair in \
+        "$INSTALL_PKGS|--install|brew install qt cmake ninja pkg-config zig wasmtime clang-format" \
+        "$INSTALL_WASMTIME|--install-wasmtime|brew install wasmtime  (then: export WASMTIME_DIR=\$(brew --prefix wasmtime))" \
+        "$INSTALL_ZIG|--install-zig|brew install zig  (core/build.sh wants exactly $(cat "$ROOT/.zig-version"))" \
+        "$INSTALL_SWIFT|--install-swift|xcode-select --install  then check 'swift --version' against .swift-version" \
+        "$INSTALL_SHELLCHECK|--install-shellcheck|brew install shellcheck" \
+        "$INSTALL_DESKTOP_FILE_UTILS|--install-desktop-file-utils|scripts/check-packaging.sh notes the skip when it is absent"
+    do
+        if [[ "${pair%%|*}" == 1 ]]; then
+            rest="${pair#*|}"
+            flag="${rest%%|*}"
+            echo "error: $flag is a Linux-only installer; this host is macOS ($host_os $(uname -m))" >&2
+            echo "macOS: ${pair##*|}" >&2
+            echo "note: the Linux UI is built on a Linux host; scripts/linux-qt-link.sh exits 3 on macOS" >&2
+            exit 2
+        fi
+    done
+fi
+
 ID=""
 ID_LIKE=""
 if [[ -r /etc/os-release ]]; then
@@ -88,18 +125,20 @@ like_lc="$(printf '%s' "${ID_LIKE:-}" | tr '[:upper:]' '[:lower:]')"
 tokens=" $id_lc $like_lc "
 
 family="unknown"
-if [[ "$tokens" == *" arch "* || "$tokens" == *" archlinux "* || "$tokens" == *" manjaro "* \
-    || "$tokens" == *" endeavouros "* || "$tokens" == *" garuda "* || "$tokens" == *" cachyos "* \
-    || "$tokens" == *" artix "* ]]; then
-    family="arch"
-elif [[ "$tokens" == *" fedora "* || "$tokens" == *" rhel "* || "$tokens" == *" centos "* \
-    || "$tokens" == *" rocky "* || "$tokens" == *" almalinux "* || "$tokens" == *" nobara "* ]]; then
-    family="fedora"
-elif [[ "$tokens" == *" suse "* || "$tokens" == *" sles "* || "$id_lc" == opensuse* ]]; then
-    family="suse"
-elif [[ "$tokens" == *" debian "* || "$tokens" == *" ubuntu "* || "$tokens" == *" linuxmint "* \
-    || "$tokens" == *" pop "* ]]; then
-    family="debian"
+if [[ "$host_os" != Darwin ]]; then
+    if [[ "$tokens" == *" arch "* || "$tokens" == *" archlinux "* || "$tokens" == *" manjaro "* \
+        || "$tokens" == *" endeavouros "* || "$tokens" == *" garuda "* || "$tokens" == *" cachyos "* \
+        || "$tokens" == *" artix "* ]]; then
+        family="arch"
+    elif [[ "$tokens" == *" fedora "* || "$tokens" == *" rhel "* || "$tokens" == *" centos "* \
+        || "$tokens" == *" rocky "* || "$tokens" == *" almalinux "* || "$tokens" == *" nobara "* ]]; then
+        family="fedora"
+    elif [[ "$tokens" == *" suse "* || "$tokens" == *" sles "* || "$id_lc" == opensuse* ]]; then
+        family="suse"
+    elif [[ "$tokens" == *" debian "* || "$tokens" == *" ubuntu "* || "$tokens" == *" linuxmint "* \
+        || "$tokens" == *" pop "* ]]; then
+        family="debian"
+    fi
 fi
 
 # Dev headers + tools for cmake link; runtime QPA/OpenGL/xcb for headless --smoke (no Gtk).
@@ -221,7 +260,12 @@ install_family_pkgs() {
     esac
 }
 
-echo "distro: ${ID:-unknown}  family: $family"
+if [[ "$host_os" == Darwin ]]; then
+    echo "host: macOS $(uname -m)"
+    echo "note: the Qt 6 window is a Linux target; the CLI and scan library build here."
+else
+    echo "distro: ${ID:-unknown}  family: $family"
+fi
 
 # Every dependency is reported as found or missing, so this doubles as the
 # preflight a contributor runs first: before, it printed the same install
@@ -235,6 +279,24 @@ missing() {
     printf '    %s\n' "$@"
 }
 
+# The install line a missing tool names has to be the one that works on this
+# host: the flag when it is Linux, the Homebrew or Xcode command when it is
+# not. Every hint below reads these two, so a Mac is never told to apt-get a
+# package Homebrew carries under a different name.
+if [[ "$host_os" == Darwin ]]; then
+    zig_install="brew install zig   (core/build.sh wants exactly ${ZIG_VER}; brew ships its own)"
+    wasmtime_install="brew install wasmtime   (export WASMTIME_DIR=\$(brew --prefix wasmtime))"
+    shellcheck_install="brew install shellcheck"
+    swift_install="xcode-select --install   then check 'swift --version' against .swift-version (or: https://www.swift.org/install/)"
+    desktop_validate_install="scripts/check-packaging.sh notes the skip when it is absent; macOS has no distro package"
+else
+    zig_install="bash $0 --install-zig (checksummed tarball, never a distro package)"
+    wasmtime_install="bash $0 --install-wasmtime"
+    shellcheck_install="bash $0 --install-shellcheck"
+    swift_install="bash $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
+    desktop_validate_install="bash $0 --install-desktop-file-utils"
+fi
+
 # zig_ok reads .zig-version, so a zig of another version counts as missing
 # rather than as a tool that is there and wrong.
 if command -v zig >/dev/null 2>&1; then
@@ -242,17 +304,20 @@ if command -v zig >/dev/null 2>&1; then
     if [[ "$have" == "$ZIG_VER" ]]; then
         present "zig ${ZIG_VER}" "$have"
     else
-        missing "zig (need ${ZIG_VER}, found ${have:-unknown})" "bash $0 --install-zig"
+        missing "zig (need ${ZIG_VER}, found ${have:-unknown})" "$zig_install"
     fi
 else
-    missing "zig ${ZIG_VER}" \
-        "bash $0 --install-zig" \
-        "checksummed tarball on every distro, never a distro package"
+    missing "zig ${ZIG_VER}" "$zig_install"
 fi
 
 if qt6_dev_ok; then
     ver="$(pkg-config --modversion Qt6Widgets 2>/dev/null || printf 'cmake config only')"
     present "Qt 6" "$ver"
+elif [[ "$host_os" == Darwin ]]; then
+    # Not a defect on macOS: the Qt window is a Linux target (linux-qt-link.sh
+    # exits 3 on Darwin), and core/build.sh + the Qt link need its headers on
+    # the Linux host that runs them. Saying so beats four lines of apt/dnf.
+    echo "  n/a     Qt 6 (Linux target: build the window on a Linux host)"
 else
     missing "Qt 6 Widgets development files" \
         "cmake, ninja, pkg-config and clang come with it" \
@@ -266,13 +331,13 @@ if appattic_find_wasmtime; then
     present "Wasmtime C API ${WASMTIME_VER}" "${WASMTIME_DIR:-pkg-config}"
 else
     missing "Wasmtime C API ${WASMTIME_VER} (embed.c and the Qt link need it)" \
-        "bash $0 --install-wasmtime"
+        "$wasmtime_install"
 fi
 
 if command -v shellcheck >/dev/null 2>&1; then
     present "shellcheck" "$(command -v shellcheck)"
 else
-    missing "shellcheck (scripts/lint.sh needs it)" "bash $0 --install-shellcheck"
+    missing "shellcheck (scripts/lint.sh needs it)" "$shellcheck_install"
 fi
 
 if command -v yamllint >/dev/null 2>&1; then
@@ -294,6 +359,10 @@ fi
 # without clang a local gate is weaker than the CI gate it stands in for.
 if command -v clang >/dev/null 2>&1; then
     present "clang" "$(command -v clang)"
+elif [[ "$host_os" == Darwin ]]; then
+    # Xcode ships it; the prompt above a clean macOS clone never did.
+    missing "clang (scripts/lint.sh compiles with cc and clang; without it the local run is weaker than CI)" \
+        "xcode-select --install"
 else
     missing "clang (scripts/lint.sh compiles with cc and clang; without it the local run is weaker than CI)" \
         "bash $0 --install"
@@ -307,7 +376,7 @@ if command -v desktop-file-validate >/dev/null 2>&1; then
     present "desktop-file-validate" "$(command -v desktop-file-validate)"
 else
     missing "desktop-file-validate (scripts/check-packaging.sh runs it on the desktop entry; without it the check only notes the skip)" \
-        "bash $0 --install-desktop-file-utils"
+        "$desktop_validate_install"
 fi
 
 # Swift is the one tool with no single install command: the distro packages
@@ -321,22 +390,22 @@ if appattic_find_swift; then
             present "swift ${SWIFT_VER}" "$have"
             ;;
         *)
-            missing "swift ${SWIFT_VER} (found: ${have:-unknown})" \
-                "swiftly: https://www.swift.org/install/linux/" \
-                "or: bash $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
+            missing "swift ${SWIFT_VER} (found: ${have:-unknown})" "$swift_install"
             ;;
     esac
 else
-    missing "swift ${SWIFT_VER} (needed to compile the CLI and tests)" \
-        "swiftly: https://www.swift.org/install/linux/" \
-        "or: bash $0 --install-swift   (Ubuntu 22.04 toolchain into /opt/swift or .deps/swift)"
+    missing "swift ${SWIFT_VER} (needed to compile the CLI and tests)" "$swift_install"
     if [[ "$family" == arch ]]; then
         echo "    Arch extra has no Swift compiler. AUR: swift-bin (or swiftly-bin)."
     fi
 fi
 
-echo "Build on the machine you run. Do not copy an Ubuntu build onto Arch and expect it to start."
-echo "With Qt 6, Wasmtime and zig present: bash scripts/linux-qt-link.sh"
+if [[ "$host_os" == Darwin ]]; then
+    echo "Then: ./build.sh debug   (CLI + AppAttic.app)   bash scripts/check.sh"
+else
+    echo "Build on the machine you run. Do not copy an Ubuntu build onto Arch and expect it to start."
+    echo "With Qt 6, Wasmtime and zig present: bash scripts/linux-qt-link.sh"
+fi
 if [[ "$family" == debian ]]; then
     ver="${VERSION_ID:-}"
     if [[ "$ver" == 24.04 ]]; then

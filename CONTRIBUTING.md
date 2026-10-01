@@ -25,6 +25,8 @@ imports: an unqualified name would run the imported tree's tests and read green
 while the module you edited went untested. A test that lives in another module
 is run from that module.
 
+A filter that matches no test fails rather than reporting a pass. `swift test` exits 0 having run zero tests, so a renamed or misspelled class name reads green; `scripts/test.sh` refuses that condition, the same way `core/build.sh` does for a `zig test` filter that matches nothing.
+
 `scripts/check.sh --core` runs the lint gate, the Zig core suite and the
 reproducible-artifact check without a Swift toolchain, for work in `core/src/`,
 `core/host/` or `packaging/`. It is not the CI gate: `AppAtticScanTests` and the
@@ -35,6 +37,8 @@ pass unnoticed.
 PRs run `.github/workflows/linux.yml` (lint, Ubuntu tests, jammy, archlinux Qt link). The Ubuntu, jammy and macOS jobs call `bash scripts/test.sh` themselves, so use that script rather than `swift test`: it passes `--disable-automatic-resolution`, sets `APPATTIC_NO_MAC_UI=1` on macOS, and checks the toolchain against `.swift-version`. `swift test` builds every target in the package and `AppAtticUI` needs a Swift 6 compiler, which `.swift-version` (5.10.1) does not provide, so a bare `swift test` does not build on the pinned toolchain. `scripts/check.sh` runs the same script. The lint job checks out full history so `scripts/lint.sh` can reject AI tool credits in commit messages; a shallow clone sees fewer commits and says how many.
 
 Missing tools: `bash scripts/linux-deps.sh` with no flags is the preflight. It reports each dependency as `present` or `missing`, against the versions `.zig-version` and `.swift-version` pin, and an install hint follows only a `missing` line. Run it first on a clean clone: a tool it reports as present will not be the reason a gate fails, and the ones it names are the whole remaining setup. Each `--install-*` flag installs the tool its `missing` line names.
+
+Every `--install-*` flag is Linux-only: each installs a distro package or a tarball whose pinned checksum in `scripts/dep-checksums.sha256` is a `linux` triple. On macOS the script still runs the preflight and reports the same `present` / `missing` lines, with Homebrew and Xcode commands as the hints; Qt 6 reads `n/a (Linux target)`, because the Qt window is a Linux build (`scripts/linux-qt-link.sh` exits 3 on Darwin) and the CLI and scan library are what build on a Mac. An `--install-*` flag on macOS stops with exit 2 and the command that works there, rather than fetching a Linux binary.
 
 Every workflow pins its actions to a commit SHA with a `# vX.Y.Z` comment; Dependabot (`.github/dependabot.yml`) reads both, so a pin bump arrives as a pull request instead of rotting until the action fails.
 

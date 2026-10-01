@@ -203,6 +203,8 @@ bash scripts/test.sh DiskSizeTests/testParseDuKBRequiresLeadingInteger   # one t
 bash scripts/lint.sh
 ```
 
+A filter that matches no test fails rather than reporting a pass: `swift test` exits 0 having run zero tests, so a renamed class name reads as a green run. `scripts/test.sh` refuses that condition, as `core/build.sh` does for a `zig test` filter that matches nothing.
+
 `scripts/test.sh` is the `swift test` to use: it carries `--disable-automatic-resolution`, the toolchain check against `.swift-version`, and, on macOS, `APPATTIC_NO_MAC_UI=1`. The CI jobs call it, so a local run and a workflow run are the same run. `swift test` builds every target in the package, and `AppAtticUI` needs a Swift 6 compiler while `.swift-version` pins 5.10.1, so a bare `swift test` fails to build on the pinned toolchain.
 
 `swift test` and `swift build` need unrestricted permissions in sandboxed environments.
@@ -227,6 +229,8 @@ Linux: UI is Qt 6 Widgets. Install headers with `./scripts/linux-deps.sh` (optio
 You cannot cross-compile the Qt UI from macOS and call that a Linux link. Build on the Linux machine you will run, matching that distro. An Ubuntu-built binary is not assumed to start on Arch (glibc differs). Homebrew Qt on macOS is not Linux.
 
 Qt discovery looks in the Debian multiarch directory, `/usr/lib`, and `/usr/lib64`, so the same commands work on Fedora and openSUSE, where Qt 6 installs under `lib64`. The Qt window needs glibc 2.28 or newer because Qt 6 does; the window itself uses `statx` (`ui/linux-qt/diskusage.cpp`) only where the libc has the wrapper, and falls back to `fstatat` on an older glibc. The CLI and `AppAtticScan` are pure Swift and link no C host, so they carry only the floor Swift itself has. musl is not a target: the AppImage, the Flatpak (`org.kde.Platform`), and `core/host` all build against glibc.
+
+On macOS run the same preflight (`bash scripts/linux-deps.sh`): it reports the CLI's toolchain against `.swift-version` and names the Homebrew or Xcode command for anything missing. Every `--install-*` flag below is Linux-only and refuses to run on a Mac, because each installs a Linux distro package or a Linux tarball from the pinned checksum table.
 
 ```bash
 ./scripts/linux-deps.sh              # preflight: what is present, what is missing

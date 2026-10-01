@@ -709,6 +709,61 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(matchOut.contains("isSafeIdent"), matchOut)
         XCTAssertFalse(matchOut.contains("All 0 tests passed"), matchOut)
 
+        // The same condition on the Swift side. `swift test --filter` runs zero
+        // tests for a name that matches none and still exits 0, so a renamed
+        // class read green until scripts/test.sh refused it. Exercised through
+        // a stub `swift` ahead of the real one on PATH rather than through the
+        // real toolchain: the point is the script's own zero-match check, and a
+        // run of the real suite would only re-test swift itself. The stub
+        // answers `--version` with the pin so find-swift.sh's check passes,
+        // then reports the XCTest summary line the check reads.
+        func stubSwiftRun(_ executed: Int, exitCode: Int32) throws -> (Int32, String, String) {
+            let fm = FileManager.default
+            let stub = fm.temporaryDirectory.appendingPathComponent("appattic-stubbin-\(UUID().uuidString)")
+            try fm.createDirectory(at: stub, withIntermediateDirectories: true)
+            defer { try? fm.removeItem(at: stub) }
+            let pin = try String(
+                contentsOf: root.appendingPathComponent(".swift-version"), encoding: .utf8
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let sh = stub.appendingPathComponent("swift")
+            let plural = executed == 1 ? "" : "s"
+            try """
+            #!/bin/sh
+            case "$1" in
+              --version) echo "Swift version \(pin) (swift-\(pin) RELEASE)"; exit 0 ;;
+            esac
+            echo "Test Suite 'Selected tests' finished"
+            echo "	 Executed \(executed) test\(plural), with 0 failures (0 unexpected) in 0.001 seconds"
+            exit \(exitCode)
+            """.write(to: sh, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sh.path)
+            // PATH is prepended, not replaced, so bash, uname and the rest of
+            // the script's world still resolve. A wrapper sets it for the one
+            // child rather than calling setenv, which would be global state a
+            // later test in this same process would inherit.
+            let wrapper = stub.appendingPathComponent("run-with-stub")
+            try """
+            #!/bin/sh
+            PATH='\(stub.path)':"$PATH"
+            export PATH
+            exec bash "$@"
+            """.write(to: wrapper, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+            return runCommand(
+                [wrapper.path, root.appendingPathComponent("scripts/test.sh").path, "StubbedClass"],
+                timeout: 60
+            )
+        }
+        let (stubZeroRc, _, stubZeroErr) = try stubSwiftRun(0, exitCode: 0)
+        XCTAssertEqual(stubZeroRc, 1, stubZeroErr)
+        XCTAssertTrue(stubZeroErr.contains("no test matched 'StubbedClass'"), stubZeroErr)
+        // A filter that matched, and a real failure, both keep the status swift
+        // gave them: the guard adds a check, it does not swallow one.
+        let (stubSomeRc, _, stubSomeErr) = try stubSwiftRun(2, exitCode: 0)
+        XCTAssertEqual(stubSomeRc, 0, stubSomeErr)
+        let (stubFailRc, _, stubFailErr) = try stubSwiftRun(1, exitCode: 1)
+        XCTAssertEqual(stubFailRc, 1, stubFailErr)
+
         let (lintRc, _, lintErr) = try run("scripts/lint.sh", ["nope"])
         XCTAssertEqual(lintRc, 2, lintErr)
 
@@ -737,19 +792,47 @@ final class PackagingTests: XCTestCase {
             timeout: 60
         )
         XCTAssertEqual(rc, 0, "rc=\(rc) stderr=\(stderr)")
-        XCTAssertTrue(stdout.contains("family:"), stdout)
+        // The header names the host it actually read. Linux reports the distro
+        // and its family; macOS has no os-release, so it reports the platform
+        // instead of "distro: unknown family: unknown", which is what a Mac
+        // used to be told. Either shape is a pass, but one of the two must
+        // appear: a header that names neither leaves the reader guessing what
+        // the report is about.
+        let header = try XCTUnwrap(
+            stdout.split(separator: "\n").first { $0.contains(": ") },
+            "linux-deps.sh printed no header line: \(stdout)"
+        )
+        if ProcessInfo.processInfo.operatingSystemVersion.isMacOSX
+            || header.contains("host: macOS")
+        {
+            XCTAssertTrue(
+                header.contains("host: macOS") || header.contains("family:"),
+                "a Darwin host header has to say host: macOS: \(header)"
+            )
+        } else {
+            XCTAssertTrue(header.contains("family:"), "a Linux header has to say family:: \(header)")
+        }
 
         for tool in ["zig", "Qt 6", "Wasmtime C API", "shellcheck", "swift"] {
             let state = try XCTUnwrap(
                 stdout.split(separator: "\n").first {
-                    ($0.contains("present ") || $0.contains("missing ")) && $0.contains(tool)
+                    ($0.contains("present ") || $0.contains("missing ") || $0.contains("n/a ")) && $0.contains(tool)
                 },
-                "linux-deps.sh reports no present/missing line for \(tool): \(stdout)"
+                "linux-deps.sh reports no present/missing/n/a line for \(tool): \(stdout)"
             )
+            // `n/a` counts as an answer, for a tool that is not this platform's
+            // to begin with: the Qt 6 window is a Linux build, so a Mac has
+            // nothing to install there.
             XCTAssertTrue(
-                state.contains("present ") || state.contains("missing "),
-                "\(tool) line is neither present nor missing: \(state)"
+                state.contains("present ") || state.contains("missing ") || state.contains("n/a "),
+                "\(tool) line is neither present, missing nor n/a: \(state)"
             )
+            if !ProcessInfo.processInfo.operatingSystemVersion.isMacOSX && tool == "Qt 6" {
+                XCTAssertFalse(
+                    state.contains("n/a "),
+                    "Qt 6 is a real dependency on Linux, so it reports present or missing, not n/a: \(state)"
+                )
+            }
         }
         // An install hint belongs to a missing tool only: a line that reads
         // "present" followed by a command to run is the old output.
