@@ -1049,6 +1049,91 @@ static int verifyHelpers() {
             return 1;
         }
     }
+    // The closed set, one row per status, through both questions: may this row
+    // be listed, may it be cleaned. The literals were open-coded at each site
+    // and the sites disagreed — the Swift scan writes "active" and this shell
+    // had no predicate for it, so a cached or exported row carrying it was
+    // listed and offered to a generated `rm` as an ordinary orphan. "review"
+    // is apt's PPA status and container_runtime's stopped-container status, and
+    // it is *not* blocked, which is the case a strict reading of "blocked =
+    // anything not orphaned" gets wrong.
+    {
+        struct StatusCase {
+            const char *status;
+            bool blocks;
+            bool listed;
+        };
+        const StatusCase statuses[] = {
+            {"orphaned", false, true},
+            {"shadow", false, true},
+            {"review", false, true},
+            {"keep", true, false},
+            {"owned", true, false},
+            {"system", true, false},
+            {"active", true, false},
+            // A status from a newer core. Not knowing it is not permission:
+            // Swift's `isListedLeftoverStatus` already answers this way for the
+            // listing half, and the cleanup half follows it.
+            {"kept-by-newer-core", true, false},
+        };
+        for (const StatusCase &c : statuses) {
+            if (leftoverStatusBlocksCleanup(QLatin1String(c.status)) != c.blocks) {
+                std::fprintf(stderr, "status set: %s blocks=%d\n", c.status, c.blocks);
+                return 1;
+            }
+            if (isListedLeftoverStatus(leftoverStatusFromWire(QLatin1String(c.status)))
+                != c.listed) {
+                std::fprintf(stderr, "status set: %s listed=%d\n", c.status, c.listed);
+                return 1;
+            }
+            Finding row;
+            row.plugin = QStringLiteral("path-xdg-config");
+            row.kind = QStringLiteral("orphan-dir");
+            row.status = QLatin1String(c.status);
+            row.name = QStringLiteral("firefox");
+            row.path = QStringLiteral("/home/alice/.config/gone-app");
+            if (leftoverCleanupCommand(row).isEmpty() != c.blocks) {
+                std::fprintf(stderr, "status set: %s command must follow blocks=%d\n",
+                             c.status, c.blocks);
+                return 1;
+            }
+            if (matchPage(row, Page::Leftovers) != c.listed) {
+                std::fprintf(stderr, "status set: %s listing must follow listed=%d\n",
+                             c.status, c.listed);
+                return 1;
+            }
+            if (canMarkCleanup(row, Page::Leftovers) == c.blocks) {
+                std::fprintf(stderr, "status set: %s tickable must follow blocks=%d\n",
+                             c.status, c.blocks);
+                return 1;
+            }
+        }
+    }
+    // No status at all is not an unread status. A leftover is identified by its
+    // kind and plugin, and a producer that says nothing about status has not
+    // withdrawn the row, so it is still an orphan and still offered.
+    if (leftoverStatusFromWire(QString()) != LeftoverStatus::Empty
+        || leftoverStatusBlocksCleanup(QString())
+        || !isListedLeftoverStatus(LeftoverStatus::Empty)) {
+        std::fprintf(stderr, "status set: an absent status is an orphan, not an unknown one\n");
+        return 1;
+    }
+    // An unread status fails closed for a leftover and only for a leftover. The
+    // field is shared with package rows, whose "global"/"installed"/
+    // "outdated" are equally outside this enum and equally ordinary; their
+    // command still decides, or they could never be ticked at all.
+    {
+        Finding pkg;
+        pkg.plugin = QStringLiteral("container-runtime");
+        pkg.kind = QStringLiteral("image");
+        pkg.name = QStringLiteral("nginx:latest");
+        pkg.status = QStringLiteral("global");
+        pkg.command = QStringLiteral("docker rmi nginx:latest");
+        if (!canMarkCleanup(pkg, Page::Leftovers)) {
+            std::fprintf(stderr, "status set: a package row is decided by its command\n");
+            return 1;
+        }
+    }
     return 0;
 }
 

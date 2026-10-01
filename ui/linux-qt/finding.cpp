@@ -660,7 +660,7 @@ bool commandIsShellSafe(const QString &cmd) {
 }
 
 bool isShadowFinding(const Finding &f) {
-    return f.status == QLatin1String("shadow")
+    return leftoverStatusFromWire(f.status) == LeftoverStatus::Shadow
         || f.kind == QLatin1String("shadow")
         || !f.packagedPath.isEmpty();
 }
@@ -692,10 +692,75 @@ static QString overlayRootLabel(const QString &path) {
 ///
 /// `markOwnedPathLeftovers` is the one site that does not ask this: it *writes*
 /// "keep" and so has to keep offering every other row to the desktop list.
+///
+/// `Unknown` blocks, and only because the row asking is a leftover row: a
+/// status this build cannot parse is one a newer core or a newer Swift half can
+/// send, and "this build does not know" is not a licence to delete a path.
+/// The non-leftover callers pass a `status` from the same shared field, where
+/// `"global"`, `"outdated"`, `"stale"`, `"installed"`, and a package row's
+/// manager-specific values are all outside this enum and all rows whose own
+/// kind and command decide the answer, so `canMarkCleanup` asks the leftover
+/// predicate only once it has established the row is a leftover.
+bool leftoverStatusBlocksCleanup(LeftoverStatus status) {
+    switch (status) {
+    case LeftoverStatus::Empty:
+    case LeftoverStatus::Orphaned:
+    case LeftoverStatus::Shadow:
+    case LeftoverStatus::Review:
+        return false;
+    case LeftoverStatus::Keep:
+    case LeftoverStatus::Owned:
+    case LeftoverStatus::System:
+    // "active" is the Swift scan's verdict on a name whose tree moved inside
+    // `activeDays`: still being written to, so a real leftover that must not
+    // be deleted. The Swift half reads it the same way, by not listing it, and
+    // `isListedLeftoverStatus` below answers identically. Nothing in this
+    // shell writes "active" today, so the rule was missing rather than wrong:
+    // the row arrived from a cached or exported scan and reached a generated
+    // `rm` as an ordinary orphan.
+    case LeftoverStatus::Active:
+    case LeftoverStatus::Unknown:
+        return true;
+    }
+    return true;
+}
+
 bool leftoverStatusBlocksCleanup(const QString &status) {
-    return status == QLatin1String("keep")
-        || status == QLatin1String("owned")
-        || status == QLatin1String("system");
+    return leftoverStatusBlocksCleanup(leftoverStatusFromWire(status));
+}
+
+LeftoverStatus leftoverStatusFromWire(const QString &status) {
+    if (status.isEmpty()) return LeftoverStatus::Empty;
+    if (status == QLatin1String("orphaned")) return LeftoverStatus::Orphaned;
+    if (status == QLatin1String("shadow")) return LeftoverStatus::Shadow;
+    if (status == QLatin1String("review")) return LeftoverStatus::Review;
+    if (status == QLatin1String("keep")) return LeftoverStatus::Keep;
+    if (status == QLatin1String("owned")) return LeftoverStatus::Owned;
+    if (status == QLatin1String("system")) return LeftoverStatus::System;
+    if (status == QLatin1String("active")) return LeftoverStatus::Active;
+    return LeftoverStatus::Unknown;
+}
+
+QString leftoverStatusToWire(LeftoverStatus status) {
+    switch (status) {
+    case LeftoverStatus::Orphaned: return QStringLiteral("orphaned");
+    case LeftoverStatus::Shadow: return QStringLiteral("shadow");
+    case LeftoverStatus::Review: return QStringLiteral("review");
+    case LeftoverStatus::Keep: return QStringLiteral("keep");
+    case LeftoverStatus::Owned: return QStringLiteral("owned");
+    case LeftoverStatus::System: return QStringLiteral("system");
+    case LeftoverStatus::Active: return QStringLiteral("active");
+    case LeftoverStatus::Empty: break;
+    case LeftoverStatus::Unknown: break;
+    }
+    // Nothing writes `Empty` or `Unknown`: a row keeps the spelling it arrived
+    // with rather than being relabelled as an orphan.
+    return QStringLiteral("orphaned");
+}
+
+bool isListedLeftoverStatus(LeftoverStatus status) {
+    return status == LeftoverStatus::Empty || status == LeftoverStatus::Orphaned
+        || status == LeftoverStatus::Shadow || status == LeftoverStatus::Review;
 }
 
 /// A path a generated `rm` may name. Every leftover root the core walks is
@@ -1196,7 +1261,7 @@ void markOwnedPathLeftovers(QVector<Finding> &findings, const QSet<QString> &ste
         // read once and this pass runs over the whole accumulated scan on every
         // plugin blob, so skipping them would leave a row that a desktop file
         // does match still marked orphaned.
-        if (f.status == QLatin1String("keep")) continue;
+        if (leftoverStatusFromWire(f.status) == LeftoverStatus::Keep) continue;
         QSet<QString> leftoverTok;
         addLeftoverAliasTokens(&leftoverTok, f.name);
         if (leftoverTok.isEmpty()) continue;
@@ -1204,7 +1269,7 @@ void markOwnedPathLeftovers(QVector<Finding> &findings, const QSet<QString> &ste
                          [&stemTokens](const QString &t) { return stemTokens.contains(t); })) {
             continue;
         }
-        f.status = QStringLiteral("keep");
+        f.status = leftoverStatusToWire(LeftoverStatus::Keep);
     }
 }
 
@@ -1230,8 +1295,11 @@ bool matchPage(const Finding &f, Page page) {
         return true;
     case Page::Leftovers:
         if (!isLeftover(f)) return false;
-        if (leftoverStatusBlocksCleanup(f.status)) return false;
-        return true;
+        // The listing rule and the cleanup rule are two questions, and both
+        // are now named: a shadow overlay is listed *and* cleanable, so
+        // "listed" is not "leftoverStatusBlocksCleanup says no". Routing this
+        // through the listing predicate states which one answers.
+        return isListedLeftoverStatus(leftoverStatusFromWire(f.status));
     case Page::Stale:
         return isStale(f);
     case Page::Outdated:
@@ -1406,15 +1474,28 @@ bool canMarkCleanup(const Finding &f, Page page) {
     if (page == Page::Outdated) {
         return f.updatable;
     }
-    // A blocked status answers the question on its own, for a leftover and for
-    // anything else alike. `leftoverCleanupCommand` refuses the same set, so
-    // the leftover branch below already turned an `owned` or `system` row
-    // untickable by accident of its command coming back empty; asking the
-    // status first is what makes that deliberate rather than incidental.
-    if (leftoverStatusBlocksCleanup(f.status)) return false;
-    if (isLeftover(f)) return !leftoverCleanupCommand(f).isEmpty();
-    return !f.command.isEmpty() || f.status == QLatin1String("orphaned")
-        || f.status == QLatin1String("review") || isShadowFinding(f);
+    const LeftoverStatus status = leftoverStatusFromWire(f.status);
+    // A modelled blocked status ("keep", "owned", "system", "active") answers
+    // the question on its own, for a leftover and for anything else alike:
+    // `leftoverCleanupCommand` refuses the same set, so a leftover's command
+    // came back empty anyway, and a non-leftover row carrying one has no such
+    // fallback and fell through on its command alone. Asking the status first
+    // is what makes that deliberate rather than incidental, and it is why the
+    // check stays above the leftover branch.
+    if (status != LeftoverStatus::Unknown && leftoverStatusBlocksCleanup(status)) {
+        return false;
+    }
+    if (isLeftover(f)) {
+        // `leftoverCleanupCommand` already refused an `Unknown` leftover, so a
+        // status this build cannot read fails closed here without a second
+        // rule: the path is never deleted because its status is unreadable.
+        return !leftoverCleanupCommand(f).isEmpty();
+    }
+    // Not a leftover. A package row's `"global"`, `"installed"`, or
+    // `"outdated"` is equally outside this enum and equally ordinary; its
+    // command and kind decide, which is where they always did.
+    return !f.command.isEmpty() || status == LeftoverStatus::Orphaned
+        || status == LeftoverStatus::Review || isShadowFinding(f);
 }
 
 QStringList leftoverIgnoreKeys(const Finding &f) {
