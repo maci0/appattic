@@ -29,6 +29,14 @@ finish-args:
   # /bin/sh scripts that do remove host files run under flatpak-spawn --host,
   # outside the sandbox, so narrowing this grant does not stop a cleanup the
   # user confirmed.
+  #
+  # That is `ScriptProcess::start` (ui/linux-qt/scriptproc.cpp `scriptCommand`):
+  # the run is `flatpak-spawn --host -- /bin/sh` with the script on stdin, since
+  # the sandbox temp path above is not a path the host can open. It is the same
+  # crossing core/host/hostexec.c makes for its allowlisted queries. If a run
+  # ever went back to `sh <path>` inside the sandbox, every confirmed removal
+  # would fail against a read-only host grant and this manifest's claim would
+  # be false; `checkScriptLeavesTheSandbox` in ui/linux-qt/tests pins the shape.
   - --filesystem=host:ro
   - --talk-name=org.freedesktop.Flatpak
   # QFile::moveToTrash goes through the file manager portal.

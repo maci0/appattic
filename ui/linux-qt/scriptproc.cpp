@@ -77,6 +77,44 @@ bool removeScriptFile(const QString &path, QString &keepPath) {
     return false;
 }
 
+/// Whether a run crosses the Flatpak sandbox boundary. `FLATPAK_ID` is what
+/// Flatpak sets, and what `core/host/hostexec.c` and `ui/linux-qt/corehost.cpp`
+/// already read, so all three agree on one signal rather than three spellings
+/// of "sandboxed". Taken as a parameter so the helper tests can drive both
+/// sides without a Flatpak; `start` passes the environment's own value.
+///
+/// Trimmed before it is read, because the rest of the tree treats a blank
+/// `FLATPAK_ID` as unset: `core/host/hostexec.c` has an `env_set` helper for
+/// exactly that, and `corehost.cpp` uses `qEnvironmentVariableIsEmpty`. A
+/// whitespace-only value is a variable somebody exported by accident, and
+/// reading it as sandboxed would send a host run through a `flatpak-spawn` that
+/// is not installed.
+bool scriptRunsOnHost(const QString &flatpakId) {
+    return !flatpakId.trimmed().isEmpty();
+}
+
+/// The program and arguments one run spawns, and whether the script is handed
+/// over on stdin instead of by path. Under a Flatpak the run is
+/// `flatpak-spawn --host -- /bin/sh` with the script on stdin, because the
+/// manifest grants `--filesystem=host:ro` and no host write, and because the
+/// script is in the sandbox temp directory the host cannot see: passing the
+/// path would have the host shell report "No such file or directory" for a
+/// cleanup the user confirmed, which is the silent failure this shape exists
+/// to prevent. On a host it is `sh <path>`, unchanged.
+void scriptCommand(const QString &path, const QString &flatpakId, QString *program,
+                   QStringList *args, bool *scriptOnStdin) {
+    if (scriptRunsOnHost(flatpakId)) {
+        *program = QStringLiteral("flatpak-spawn");
+        *args = {QStringLiteral("--host"), QStringLiteral("--"),
+                 QStringLiteral("/bin/sh")};
+        if (scriptOnStdin) *scriptOnStdin = true;
+        return;
+    }
+    *program = QStringLiteral("/bin/sh");
+    *args = {path};
+    if (scriptOnStdin) *scriptOnStdin = false;
+}
+
 ScriptProcess::ScriptProcess(QObject *parent) : ScriptProcess(kScriptTimeoutMs, parent) {}
 
 ScriptProcess::ScriptProcess(int timeoutMs, QObject *parent) : QObject(parent), m_timeoutMs(timeoutMs) {
@@ -173,7 +211,9 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
     m_proc = proc;
     isolateScriptProcessGroup(proc);
     proc->setProcessChannelMode(QProcess::MergedChannels);
-    proc->setStandardInputFile(QProcess::nullDevice());
+    /* stdin is set in `start`, where the program is known: a host run has no
+       input, and a sandboxed run hands the script itself over the same pipe
+       (see `start`). Setting it here would make that write go to /dev/null. */
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert(QStringLiteral("DEBIAN_FRONTEND"), QStringLiteral("noninteractive"));
     env.insert(QStringLiteral("APT_LISTCHANGES_FRONTEND"), QStringLiteral("none"));
@@ -219,7 +259,48 @@ void ScriptProcess::start() {
        also stops a prepared script that is never started from being torn down
        by a deadline that fired against no process. */
     m_timer->start(m_timeoutMs);
-    m_proc->start(QStringLiteral("/bin/sh"), {m_path});
+    /* Sandboxed, the script runs on the host. Two things force it out of the
+       sandbox rather than running `/bin/sh` here: the Flatpak grants
+       `--filesystem=host:ro` and no host write, so `rm`, `apt-get purge` and
+       `flatpak uninstall` from inside would fail on every packaged path they
+       were confirmed to touch; and the script is written to the sandbox temp
+       directory, which the host cannot see, so its path is not a usable
+       argument. The manifest's grant is honest only because of this:
+       `core/host/hostexec.c` leaves the sandbox the same way for its
+       allowlisted queries. `scriptCommand` is where that shape is spelled, and
+       the helper tests pin both sides of it. */
+    QString program;
+    QStringList args;
+    bool scriptOnStdin = false;
+    scriptCommand(m_path, qEnvironmentVariable("FLATPAK_ID"), &program, &args,
+                  &scriptOnStdin);
+    QByteArray hostScript;
+    if (scriptOnStdin) {
+        QFile script(m_path);
+        /* Read the script before the child exists. A host shell handed nothing
+           on stdin exits 0 having done nothing, which reads to the window as a
+           clean cleanup that removed nothing, so a script that cannot be read
+           is refused here rather than started. */
+        if (!script.open(QIODevice::ReadOnly)) {
+            m_timer->stop();
+            emit failed();
+            return;
+        }
+        hostScript = script.readAll();
+        /* QProcess buffers what is written before the child exists and flushes
+           it at start, so the whole script goes in one write, and the channel
+           is closed in `started`, where the child is known to be reading. */
+        connect(m_proc, &QProcess::started, this, [this]() {
+            m_proc->closeWriteChannel();
+        });
+    } else {
+        /* No stdin for a host run: the script must not wait on a terminal, and
+           nothing it runs reads input. Set here rather than in `prepare`, where
+           it would have made the sandboxed `write` a write to /dev/null. */
+        m_proc->setStandardInputFile(QProcess::nullDevice());
+    }
+    m_proc->start(program, args);
+    if (scriptOnStdin) m_proc->write(hostScript);
 }
 
 void ScriptProcess::stop() {

@@ -45,6 +45,7 @@ MANPAGE="packaging/appattic-qt.1"
 MANIFEST="packaging/flatpak/${APP_ID}.yml"
 CMAKE="ui/linux-qt/CMakeLists.txt"
 MAIN="ui/linux-qt/main.cpp"
+SCRIPTPROC="ui/linux-qt/scriptproc.cpp"
 
 fail() {
     echo "error: $1" >&2
@@ -69,7 +70,8 @@ metainfo_has() {
 
 # Every file the shipped metadata refers to has to exist before any of it can
 # be compared, so a missing one is named instead of read as an empty value.
-for required in "$DESKTOP" "$METAINFO" "$MANPAGE" "$MANIFEST" "$CMAKE" "$MAIN"; do
+for required in "$DESKTOP" "$METAINFO" "$MANPAGE" "$MANIFEST" "$CMAKE" "$MAIN" \
+                "$SCRIPTPROC"; do
     [[ -f "$required" ]] || fail "missing $required"
 done
 
@@ -130,6 +132,27 @@ manifest_rename_icon="$(sed -n 's/^rename-icon:[[:space:]]*//p' "$MANIFEST" | he
 if [[ "$icon_name" != "$APP_ID" ]]; then
     [[ "$manifest_rename_icon" == "$APP_ID" ]] \
         || fail "$MANIFEST has no rename-icon: $APP_ID, which the desktop entry's Icon=$icon_name needs"
+fi
+
+# `--filesystem=host:ro` with no host write is only honest if every path that
+# removes a host file leaves the sandbox. The generated cleanup, update and
+# mark-manual scripts are one such path, and the manifest says so in prose; if
+# the runner went back to `sh <path>` inside the sandbox, every confirmed
+# removal would fail against the read-only grant while the manifest kept
+# claiming it ran on the host. Read the spawn out of the runner and compare, so
+# the prose cannot outlive the code it describes. The assignment is matched
+# rather than the word: the name also appears in the comments above it, so a
+# grep for it would keep passing after the spawn had been taken out.
+if grep -q -- '--filesystem=host:ro' "$MANIFEST"; then
+    # Strip comments first, so prose cannot satisfy the code check.
+    sandboxed_spawn="$(
+        sed -n 's|^[[:space:]]*\*\{0,2\}program[[:space:]]*=[[:space:]]*QStringLiteral(\("[^"]*"\)).*|\1|p' \
+            "$SCRIPTPROC" | tr -d '"'
+    )"
+    grep -qx 'flatpak-spawn' <<<"$sandboxed_spawn" \
+        || fail "$MANIFEST grants only --filesystem=host:ro, but the sandboxed run in $SCRIPTPROC is not flatpak-spawn (found: ${sandboxed_spawn:-nothing})"
+    grep -q 'QStringLiteral("--host")' "$SCRIPTPROC" \
+        || fail "$MANIFEST grants only --filesystem=host:ro, but $SCRIPTPROC does not spawn with --host"
 fi
 
 # Qt publishes this as GTK_APPLICATION_ID and KDE_NET_WM_DESKTOP_FILE, and a

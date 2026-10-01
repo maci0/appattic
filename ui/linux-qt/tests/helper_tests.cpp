@@ -2336,6 +2336,77 @@ static int checkScriptDeadlineStartsAtSpawn() {
     return 0;
 }
 
+/// A sandboxed run has to leave the Flatpak. The manifest grants
+/// `--filesystem=host:ro` and no host write, and the script is written to the
+/// sandbox temp directory, which the host cannot see, so a run that stayed
+/// inside the sandbox both could not remove a packaged path and had a path the
+/// host shell cannot open. This is a pure check of the command shape rather
+/// than a real Flatpak, which CI has no reason to have: the boundary is the
+/// contract, not the spawn. Both halves are pinned, because they are the same
+/// defect seen from either side.
+static int checkScriptLeavesTheSandbox() {
+    const QString path = QStringLiteral("/tmp/appattic-abc123.sh");
+    QString program;
+    QStringList args;
+    bool onStdin = false;
+
+    scriptCommand(path, QStringLiteral("org.appattic.AppAttic"), &program, &args,
+                  &onStdin);
+    if (program != QLatin1String("flatpak-spawn")) {
+        std::fprintf(stderr, "sandbox: run program is %s, want flatpak-spawn\n",
+                     qPrintable(program));
+        return 1;
+    }
+    if (args != (QStringList{QStringLiteral("--host"), QStringLiteral("--"),
+                             QStringLiteral("/bin/sh")})) {
+        std::fprintf(stderr, "sandbox: run args are [%s], want --host -- /bin/sh\n",
+                     qPrintable(args.join(QLatin1Char(' '))));
+        return 1;
+    }
+    if (!onStdin) {
+        std::fprintf(stderr,
+                     "sandbox: the script is passed by path, and the host cannot\n"
+                     "         see a path in the sandbox temp directory\n");
+        return 1;
+    }
+    // The sandboxed temp path must not appear in the host's argv at all: one
+    // left in is the "No such file or directory" run.
+    if (args.contains(path)) {
+        std::fprintf(stderr, "sandbox: the host argv names the sandbox temp file %s\n",
+                     qPrintable(path));
+        return 1;
+    }
+
+    // A host run is unchanged: no flatpak-spawn, the path is the argument, and
+    // stdin is not the script. Unset and blank FLATPAK_ID both mean a normal
+    // host run, which is what `core/host/hostexec.c`'s `env_set` and
+    // `corehost.cpp`'s `qEnvironmentVariableIsEmpty` already say. A blank one
+    // read as sandboxed would send a host run through a `flatpak-spawn` that is
+    // not installed, so it is pinned here rather than left to a trim that only
+    // one of the three readers does.
+    for (const QString &unset : {QString(), QStringLiteral(" "), QStringLiteral("\t")}) {
+        scriptCommand(path, unset, &program, &args, &onStdin);
+        if (program != QLatin1String("/bin/sh") || args != (QStringList{path}) || onStdin) {
+            std::fprintf(stderr,
+                         "sandbox: FLATPAK_ID=%s runs [%s] with args [%s], want "
+                         "/bin/sh [%s] with the script by path\n",
+                         qPrintable(unset), qPrintable(program),
+                         qPrintable(args.join(QLatin1Char(' '))), qPrintable(path));
+            return 1;
+        }
+    }
+    if (!scriptRunsOnHost(QStringLiteral("org.appattic.AppAttic"))
+        || scriptRunsOnHost(QString())
+        || scriptRunsOnHost(QStringLiteral(" "))
+        || scriptRunsOnHost(QStringLiteral("\t"))) {
+        std::fprintf(stderr,
+                     "sandbox: scriptRunsOnHost does not read a non-blank FLATPAK_ID\n");
+        return 1;
+    }
+    std::fprintf(stdout, "sandbox: ok\n");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     /* QProcess and QTimer need a running event dispatcher, and
        checkScriptRunCleansUpItsFile() drives a real one. Constructed before
@@ -2351,6 +2422,7 @@ int main(int argc, char **argv) {
         checkLocaleGrouping(), checkSizeLocaleDigits(),
         checkLegacySettingsMigration(), checkScriptFileRemoval(),
         checkScriptRunCleansUpItsFile(), checkScriptDeadlineStartsAtSpawn(),
+        checkScriptLeavesTheSandbox(),
     };
     for (const int rc : checks) {
         if (rc != 0) return rc;
