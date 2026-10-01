@@ -48,14 +48,14 @@ pub fn findBrokenLinks(out: []BrokenLink, paths: []u8, dropped: *usize) usize {
 
     for (roots) |root| {
         var cmd_buf: [512]u8 = undefined;
-        // `-b`, so a name holding a newline stays on one line instead of splitting
-        // into two names that are both joined onto the root.
+        // `-b`, so a name holding a newline is printed escaped on one line. It
+        // still has to be split before it is unescaped, which is the order
+        // `listingNames` decodes in.
         const ls_cmd = std.fmt.bufPrint(&cmd_buf, "ls -1b {s}", .{root.path}) catch continue;
         const ls_n = host_exec.run(ls_cmd, &ls_buf);
         note.add(ls_cmd, ls_n);
         if (ls_n < 0) continue;
-        const ls_len = pstore.unescapeLsB(ls_buf[0..@intCast(ls_n)]);
-        const name_n = pstore.listingNames(ls_buf[0..ls_len], &names, keep);
+        const name_n = pstore.listingNames(ls_buf[0..@intCast(ls_n)], &names, keep);
 
         for (names[0..name_n]) |name| {
             if (n >= out.len) return n;

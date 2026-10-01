@@ -258,6 +258,14 @@ fn findShadowsExec(
         // A dir that could not be listed keeps a null prefilter, so its names
         // are probed the way they were before rather than dropped.
         if (m < 0) continue;
+        // The packaged side is only a prefilter: `NameIndex` answers "is this
+        // name in the listing", and a name the listing holds only because a
+        // decoded newline split it in two is probed against `test -f` next,
+        // where the file is not there and the row is dropped. The overlay side
+        // goes through `listingNames`, which splits before it unescapes so the
+        // two halves never become two names in the first place. Decoding this
+        // listing per line would only make the prefilter exact; it changes no
+        // row.
         const listed = pstore.unescapeLsB(pkg_store[pkg_used .. pkg_used + @as(usize, @intCast(m))]);
         const listing = pkg_store[pkg_used .. pkg_used + listed];
         pkg_listings[i] = listing;
@@ -274,8 +282,7 @@ fn findShadowsExec(
         const ls_n = host_exec.run(ls_cmd, &ls_buf);
         note.add(ls_cmd, ls_n);
         if (ls_n < 0) continue;
-        const ls_len = pstore.unescapeLsB(ls_buf[0..@intCast(ls_n)]);
-        const raw_n = pstore.listingNames(ls_buf[0..ls_len], &names, "");
+        const raw_n = pstore.listingNames(ls_buf[0..@intCast(ls_n)], &names, "");
         // `name_store` is reset per root, not per scan: `listingNames` hands
         // back names pointing into `ls_buf`, which the next root's `run`
         // overwrites, so each root needs its own stable copy. Carrying the

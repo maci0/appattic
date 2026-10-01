@@ -1,5 +1,9 @@
 const std = @import("std");
 const jsonbuf = @import("jsonbuf.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
+const sliceInside = fuzzsupport.sliceInside;
 
 /// Path helpers shared by the path plugins. Findings keep their names and
 /// paths in one caller-owned byte store instead of allocating per root.
@@ -86,23 +90,24 @@ fn lsBEscapeByte(b: u8) ?u8 {
     };
 }
 
-/// Undo `ls -b`'s escaping across a whole listing, in place, and return the
-/// length the text now occupies.
+/// Undo `ls -b`'s escaping across one line, in place, and return the length
+/// the text now occupies.
 ///
 /// Every escape `ls -b` writes is at least two bytes and stands for exactly
 /// one, so the text only ever shrinks and unescaping into the same buffer
-/// cannot overwrite a byte it has yet to read. The result is the listing
-/// `ls -1` would have printed for names holding no such byte, and a name
-/// holding one is back on a single line, which is what every reader here
-/// assumes.
+/// cannot overwrite a byte it has yet to read. A line that decoded clean comes
+/// back as the line `ls -1` would have printed for a name holding no such byte.
 ///
-/// The alternative was splitting `ls -1` output on `\n` and treating each
-/// line as a name, and a directory holding one entry called `we<LF>ird` then
-/// listed as the two names `we` and `ird`: both pass `jsonbuf.isSafeIdent`,
-/// both are joined onto the root, and both become `rm -rf` rows naming paths
-/// that do not exist. The Swift tree reads directories with `readdir` and
-/// never sees this; it is the `ls` the guest plugins run that turns one name
-/// into two.
+/// **Call this on a line, after splitting the listing, never on a whole
+/// listing.** A directory holding one entry called `we<LF>ird` lists as the
+/// single line `we\nird`, so decoding the whole listing first writes a real LF
+/// into the middle of it, and the reader that splits next sees the two names
+/// `we` and `ird`: both pass `jsonbuf.isSafeIdent`, both are joined onto the
+/// root, and both become `rm` rows naming paths that do not exist. The Swift
+/// tree reads directories with `readdir` and never sees this; it is the `ls`
+/// the guest plugins run that turns one name into two. `listingNames` splits
+/// first and decodes each line, and `parseListing` in `path_listing.zig`
+/// inlines the same pass.
 ///
 /// A backslash that begins no escape `ls` writes is kept as a backslash and
 /// the byte after it is kept too, so an unrecognised pair stays text rather
@@ -146,19 +151,40 @@ pub fn unescapeLsB(buf: []u8) usize {
     return r;
 }
 
-/// Names an `ls -1b` listing carries, after `unescapeLsB`: one basename per
-/// line. Dot names, empty names, and names outside `jsonbuf.isSafeIdent` are
-/// dropped. A leading `-` is kept: these names are always joined onto a
+/// Names an `ls -1b` listing carries: one basename per line, unescaped and
+/// trimmed. Dot names, empty names, and names outside `jsonbuf.isSafeIdent`
+/// are dropped. A leading `-` is kept: these names are always joined onto a
 /// constant root before they reach a command, so a dash there is inert. A name
 /// a package manager reads as its own argument needs `jsonbuf.isSafeCmdIdent`
 /// instead.
 /// `keep` is a newline name list to skip as well; pass "" for none.
-pub fn listingNames(listing: []const u8, names: [][]const u8, keep: []const u8) usize {
+///
+/// `listing` is the `ls -1b` text and is taken as mutable because each line is
+/// unescaped in place, after the split, and every name this returns is a slice
+/// of it. The order is the whole point: `ls -b` prints a file named `we<LF>ird`
+/// as the single line `we\nird`, so unescaping the whole listing first and
+/// splitting afterwards puts a decoded LF back across a line boundary and the
+/// one entry becomes the two names `we` and `ird` — both plain ident bytes,
+/// both joined onto the root, both `rm` rows naming paths that are not there.
+/// Splitting first and unescaping the name leaves the decoded LF inside the
+/// name, where `isSafeIdent` refuses it, so the row is dropped instead of
+/// doubled.
+///
+/// The in-place pass is safe for the same reason the whole-listing one was:
+/// unescaping only shrinks, so every byte written for a line lands before the
+/// `\n` that `splitScalar` has already stopped at, and the scan for the next
+/// delimiter never reads a byte this pass moved. The caller hands the buffer
+/// over; nothing reads it again afterwards, which is what lets every name here
+/// be a slice of it rather than a copy.
+/// `parseListing` in `path_listing.zig` inlines the same pass for the same
+/// reason.
+pub fn listingNames(listing: []u8, names: [][]const u8, keep: []const u8) usize {
     var n: usize = 0;
     var lines = std.mem.splitScalar(u8, listing, '\n');
-    while (lines.next()) |raw| {
+    while (lines.next()) |const_line| {
         if (n == names.len) break;
-        const line = std.mem.trim(u8, raw, " \t\r");
+        const raw: []u8 = @constCast(const_line);
+        const line = std.mem.trim(u8, raw[0..unescapeLsB(raw)], " \t\r");
         if (line.len == 0) continue;
         const name = basenameOf(line);
         if (name.len == 0 or name[0] == '.') continue;
@@ -168,6 +194,80 @@ pub fn listingNames(listing: []const u8, names: [][]const u8, keep: []const u8) 
         n += 1;
     }
     return n;
+}
+
+const fuzz_listing_names = packFuzzSlice("gone-app\nhtop\ndconf\n.cache-secret\n");
+const fuzz_listing_escaped = packFuzzSlice("we\\nird\na\\\\b\nc\\td\n\\102x\nwe\\0102\n");
+const fuzz_listing_utf8 = packFuzzSlice("café\nnaïve\n😀\n\xc3\n\xff\xfe\n");
+const fuzz_listing_control = packFuzzSlice("a\tb\na\rb\na\x00b\na\x1bb\na\x7fb\n");
+const fuzz_listing_dots = packFuzzSlice(".\n..\n./\n.hidden\n..hidden\n");
+const fuzz_listing_crlf = packFuzzSlice("  gone-app \r\n\tgone\t \r\n\r\n");
+const fuzz_listing_empty = packFuzzSlice("");
+const fuzz_listing_blank = packFuzzSlice(" \t \n\n\r\n");
+const fuzz_listing_trunc = packFuzzSlice("\\102\\1");
+const fuzz_listing_slashes = packFuzzSlice("/\n//\na/\n/a\n./x\n");
+
+test "fuzz an ls -b listing yields one row per entry, cut from the listing" {
+    try std.testing.fuzz({}, fuzzListingNames, .{ .corpus = &.{
+        &fuzz_listing_names,
+        &fuzz_listing_escaped,
+        &fuzz_listing_utf8,
+        &fuzz_listing_control,
+        &fuzz_listing_dots,
+        &fuzz_listing_crlf,
+        &fuzz_listing_empty,
+        &fuzz_listing_blank,
+        &fuzz_listing_trunc,
+        &fuzz_listing_slashes,
+    } });
+}
+
+/// Every name this listing reader hands to a removal command is a slice of the
+/// listing, and one `ls -1b` entry is one name. A fuzzer on the parser alone
+/// cannot say either: the property that broke was the *order* of two passes, so
+/// the harness states it. It holds when the entry is one line, when it decodes
+/// to a name with no line break in it, and when reading the same listing twice
+/// gives the same names.
+fn fuzzListingNames(_: void, smith: *std.testing.Smith) !void {
+    var seed: [4096]u8 = undefined;
+    const escaped = seed[0..smith.slice(&seed)];
+    var raw: [4096]u8 = undefined;
+    @memcpy(raw[0..escaped.len], escaped);
+
+    var names: [64][]const u8 = undefined;
+    const kept = listingNames(raw[0..escaped.len], &names, "");
+    try std.testing.expect(kept <= names.len);
+
+    // One entry is one name: no name may carry a line break, and every one is
+    // cut from the listing the caller still owns. A reader that unescaped the
+    // whole listing before splitting put the decoded LF back across the
+    // boundary, so the one entry `we\nird` came back as the two safe names
+    // `we` and `ird`, and both became rows.
+    for (names[0..kept]) |name| {
+        try std.testing.expect(std.mem.indexOfScalar(u8, name, '\n') == null);
+        try std.testing.expect(sliceInside(&raw, name));
+        // The reader is the only gate between a name and a command, so it
+        // keeps the identifier the rest of the core gates on.
+        try std.testing.expect(jsonbuf.isSafeIdent(name));
+        try std.testing.expect(name[0] != '.');
+    }
+
+    // The same escaped text read twice gives the same names. The pass decodes
+    // in place, so the second read runs against a fresh copy of the seed
+    // rather than the buffer the first read already rewrote.
+    var again: [64][]const u8 = undefined;
+    var second: [4096]u8 = undefined;
+    @memcpy(second[0..escaped.len], escaped);
+    const kept2 = listingNames(second[0..escaped.len], &again, "");
+    try std.testing.expectEqual(kept, kept2);
+    for (names[0..kept], again[0..kept2]) |a, b| {
+        try std.testing.expectEqualStrings(a, b);
+    }
+
+    // The rows are bounded by the array, not by the listing: a listing with
+    // more entries than the array holds stops at the bound.
+    var one: [1][]const u8 = undefined;
+    try std.testing.expect(listingNames(raw[0..escaped.len], &one, "") <= 1);
 }
 
 /// Membership in a newline-separated name list. `list` is a keep list, an
@@ -209,12 +309,65 @@ test "nameInList matches whole lines only" {
 
 test "listingNames skips dot names and unsafe names" {
     var names: [8][]const u8 = undefined;
-    const n = listingNames("\n  .mozilla  \ngone-app\nfoo;rm\n", &names, "");
+    var buf: [32]u8 = undefined;
+    const listing = "\n  .mozilla  \ngone-app\nfoo;rm\n";
+    @memcpy(buf[0..listing.len], listing);
+    const n = listingNames(buf[0..listing.len], &names, "");
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("gone-app", names[0]);
+    var kept: [8]u8 = undefined;
+    @memcpy(kept[0.."dconf\n".len], "dconf\n");
     try std.testing.expectEqual(
         @as(usize, 0),
-        listingNames("dconf\n", &names, "dconf\n"),
+        listingNames(kept[0.."dconf\n".len], &names, "dconf\n"),
+    );
+}
+
+test "a name holding a newline is one entry and no row, not two rows" {
+    // What `ls -1b` prints for a single file named `we<LF>ird`, and what
+    // happens when a file called `we` or `ird` sits beside it in the same
+    // directory. Unescaping the listing before splitting it made the entry
+    // come back as those two names, both plain ident bytes, and each one was
+    // joined onto the root as its own `rm` row for a path that is not there.
+    var names: [8][]const u8 = undefined;
+    var buf: [64]u8 = undefined;
+    const listing = "we\\nird\n";
+    @memcpy(buf[0..listing.len], listing);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        listingNames(buf[0..listing.len], &names, ""),
+    );
+
+    // The same reading with a real file beside it: the neighbours are still
+    // reported, so the dropped entry is dropped and not the whole listing.
+    var with_neighbours: [64]u8 = undefined;
+    const mixed = "gone-app\nwe\\nird\nhtop\n";
+    @memcpy(with_neighbours[0..mixed.len], mixed);
+    const n = listingNames(with_neighbours[0..mixed.len], &names, "");
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqualStrings("gone-app", names[0]);
+    try std.testing.expectEqualStrings("htop", names[1]);
+
+    // An escape that decodes to a byte `isSafeIdent` accepts is still one row
+    // carrying the decoded byte, so the reader is not simply refusing anything
+    // `ls -b` escaped: `\102` is `B`.
+    var octal: [64]u8 = undefined;
+    const spelled = "go\\102ne-app\n";
+    @memcpy(octal[0..spelled.len], spelled);
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        listingNames(octal[0..spelled.len], &names, ""),
+    );
+    try std.testing.expectEqualStrings("goBne-app", names[0]);
+
+    // A name that decodes to a byte outside the ident class is still refused,
+    // so the newline fix did not become a licence to pass anything through.
+    var backslash: [64]u8 = undefined;
+    const spelled_back = "a\\\\b\n";
+    @memcpy(backslash[0..spelled_back.len], spelled_back);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        listingNames(backslash[0..spelled_back.len], &names, ""),
     );
 }
 
