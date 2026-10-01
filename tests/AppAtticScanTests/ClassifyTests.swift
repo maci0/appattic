@@ -7,6 +7,33 @@ private func ident(_ apps: [AppRecord] = [], formulas: [Formula] = [], casks: [C
 }
 
 final class ClassifyTests: XCTestCase {
+    /// The expansion behind the alias table. `Identity.addName` feeds every
+    /// token it returns into the name and stem indexes, so the shape of the
+    /// set decides who owns a leftover directory: a missing alias hides a
+    /// real leftover the app is still using, and an alias invented here would
+    /// let one app's name own another's data.
+    func testExpandNameAliasesAlwaysCarriesTheNameItWasGiven() {
+        // Every alias resolves back to a name of the same app, so the table is
+        // walked from the alias side too: `firefoxwebbrowser` alone must reach
+        // `firefox`, and it does through the table's own entry.
+        XCTAssertEqual(expandNameAliases("firefoxwebbrowser"), ["firefoxwebbrowser", "mozilla", "firefox"])
+        XCTAssertEqual(expandNameAliases("Firefox"), ["firefox", "mozilla"])
+        // A name with no entry is its own only token, and the caller indexes
+        // exactly this.
+        XCTAssertEqual(expandNameAliases("SomeOtherApp"), ["someotherapp"])
+        // The fold, not the spelling: a display name reaches this function
+        // with its spaces and capitals, and the table is keyed by the folded
+        // token, so the name a plist carries still reaches its aliases.
+        XCTAssertEqual(expandNameAliases("Visual Studio Code"), ["visualstudiocode", "code", "vscode"])
+        XCTAssertEqual(expandNameAliases("vscode"), ["vscode", "code", "visualstudiocode"])
+        // Nothing to index. A name that folds away entirely contributes no
+        // token, and an empty token in the name table would answer for every
+        // later name.
+        XCTAssertTrue(expandNameAliases("").isEmpty)
+        XCTAssertTrue(expandNameAliases("---").isEmpty)
+        XCTAssertTrue(expandNameAliases("微信").isEmpty, "a name in another script folds to nothing and indexes no token")
+    }
+
     func testStemMatchingIgnoresDecompositionForm() {
         // macOS reports the app directory in NFD ("e" + U+0301), Linux in NFC.
         // `stems` and `ownedByStem` compared raw code units, so a stem table

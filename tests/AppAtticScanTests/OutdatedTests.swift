@@ -979,6 +979,44 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(failures[0].hasPrefix("no response"), failures[0])
     }
 
+    /// The stub carries its answer in the session it is installed in, not in
+    /// process-wide state. A shared answer made a request's outcome depend on
+    /// which test had run before it: a transport failure asked for here left
+    /// the stub failing, and the success and non-JSON requests below inherited
+    /// that failure, so `testItunesRequestKeepsQuietOnSuccess` only passed
+    /// because XCTest reached the tests in a fixed order. Each session now
+    /// answers with its own status, body, and error.
+    func testStubSessionsDoNotShareTheirAnswers() {
+        // The failing session is built first, so a shared answer would be the
+        // one the two sessions after it are checked against.
+        let failing = stubURLSession(status: 0, error: URLError(.notConnectedToInternet))
+        let good = stubURLSession(
+            status: 200,
+            body: Data(#"{"results":[{"bundleId":"com.example.app","trackName":"Example"}]}"#.utf8)
+        )
+        let notJSON = stubURLSession(status: 200, body: Data("<html>rate limited</html>".utf8))
+
+        var goodFailures: [String] = []
+        let goodRows = itunesRequest(
+            ["bundleId": "com.example.app", "country": "us"], session: good
+        ) { goodFailures.append($0) }
+        XCTAssertTrue(goodFailures.isEmpty, "a session after a failing one must still serve its own body")
+        XCTAssertEqual(goodRows["com.example.app"]?["trackName"] as? String, "Example")
+
+        var jsonFailures: [String] = []
+        XCTAssertTrue(
+            itunesRequest(["bundleId": "com.example.app", "country": "us"], session: notJSON) { jsonFailures.append($0) }.isEmpty
+        )
+        XCTAssertEqual(jsonFailures, ["the response was not JSON"])
+
+        var failedFailures: [String] = []
+        XCTAssertTrue(
+            itunesRequest(["bundleId": "com.example.app", "country": "us"], session: failing) { failedFailures.append($0) }.isEmpty
+        )
+        XCTAssertEqual(failedFailures.count, 1)
+        XCTAssertTrue(failedFailures[0].hasPrefix("no response"), failedFailures[0])
+    }
+
     func testItunesRequestKeepsQuietOnSuccess() {
         var failures: [String] = []
         let body = Data(#"{"results":[{"bundleId":"com.example.app","trackName":"Example","version":"2.0"}]}"#.utf8)
@@ -1040,13 +1078,65 @@ final class OutdatedTests: XCTestCase {
         )
         XCTAssertTrue(asked.isEmpty, "no ids means no storefront lookup and no request")
     }
+
+    /// `shortDesc` is the one function every summary a reader sees goes
+    /// through: the iTunes and Homebrew description columns, and the leftover
+    /// blurb `Recommend` and `LeftoverText` build from them. It is fed text
+    /// this app does not write, so the three things it decides are the first
+    /// paragraph only, the whitespace collapse, and the cut at the limit.
+    func testShortDescKeepsTheFirstParagraphAndCollapsesWhitespace() throws {
+        XCTAssertNil(shortDesc(nil))
+        XCTAssertNil(shortDesc(""), "an empty description is no description")
+        XCTAssertNil(shortDesc("   \n\t "), "a blank description is no description")
+        XCTAssertEqual(shortDesc("  A fast browser.  "), "A fast browser.")
+        // A registry description is paragraphs; only the first one is a
+        // summary, and the paragraph break is a blank line, not every newline.
+        XCTAssertEqual(
+            shortDesc("A fast browser.\nRuns on macOS.\n\nLonger prose about support."),
+            "A fast browser. Runs on macOS."
+        )
+        XCTAssertEqual(shortDesc("Line one\nLine two"), "Line one Line two")
+    }
+
+    /// The cut is what keeps a summary to one line, and the boundary is where
+    /// it goes wrong: a description that fits is returned whole, one that does
+    /// not is cut, and the cut lands on a word rather than mid-word so the row
+    /// does not end in half a name.
+    func testShortDescTruncatesOnAWordBoundaryAtTheLimit() throws {
+        // Fits exactly: nothing to cut, so it comes back whole rather than
+        // being trimmed to a word boundary for no reason.
+        XCTAssertEqual(shortDesc("1234567890", limit: 10), "1234567890")
+        // 19 characters against a limit of 15, so the cut is `The quick bro`
+        // and the word straddling the limit is dropped whole, leaving `The
+        // quick` rather than a summary ending in `bro`.
+        XCTAssertEqual(shortDesc("The quick brown fox", limit: 15), "The quick")
+        // A description whose first word alone overruns the limit has no word
+        // boundary inside the cut, so the hard prefix is what the reader gets
+        // instead of an empty summary.
+        XCTAssertEqual(shortDesc("Supercalifragilistic suffix", limit: 4), "Supe")
+        // The default is the bound every caller gets, so the summary a reader
+        // sees never exceeds it and one under it is not cut.
+        XCTAssertEqual(shortDesc(String(repeating: "b", count: 221)), String(repeating: "b", count: 220))
+        XCTAssertEqual(shortDesc(String(repeating: "b", count: 220)), String(repeating: "b", count: 220))
+    }
 }
 
 /// Answers every request with one canned status, body, or error.
-private final class StubURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var status = 200
-    nonisolated(unsafe) static var body = Data()
-    nonisolated(unsafe) static var error: Error?
+///
+/// One subclass per stub answer, built by `stubProtocolClass`. The three
+/// answers used to be statics on a single shared class, which made the stub's
+/// answer depend on which test had run last: a test that set `error` left it
+/// set for every later one, so the stub kept failing requests the next test
+/// had asked it to serve, and the run passed only because XCTest happened to
+/// reach the tests in a fixed order. Two tests running at once raced on the
+/// same three variables. A class per answer carries its own copy, so each
+/// session answers with what its own test asked for and no two can race.
+private class StubURLProtocol: URLProtocol {
+    /// The answer this subclass carries. Overridden by `stubProtocolClass` on
+    /// the class it returns, which is the one a session installs.
+    class var status: Int { 200 }
+    class var body: Data { Data() }
+    class var error: Error? { nil }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -1070,11 +1160,21 @@ private final class StubURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+/// A `URLProtocol` subclass holding one answer, so a session's stub is its own
+/// immutable state rather than a slot every test in the process writes to.
+private func stubProtocolClass(answerStatus: Int, answerBody: Data, answerError: Error?) -> AnyClass {
+    final class OneShot: StubURLProtocol {
+        // The parameters are the names on purpose, so each override reads the
+        // captured value rather than resolving to the property it overrides.
+        override class var status: Int { answerStatus }
+        override class var body: Data { answerBody }
+        override class var error: Error? { answerError }
+    }
+    return OneShot
+}
+
 private func stubURLSession(status: Int, body: Data = Data(), error: Error? = nil) -> URLSession {
-    StubURLProtocol.status = status
-    StubURLProtocol.body = body
-    StubURLProtocol.error = error
     let config = URLSessionConfiguration.ephemeral
-    config.protocolClasses = [StubURLProtocol.self]
+    config.protocolClasses = [stubProtocolClass(answerStatus: status, answerBody: body, answerError: error)]
     return URLSession(configuration: config)
 }
