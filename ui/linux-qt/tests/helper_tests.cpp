@@ -2277,6 +2277,91 @@ static int checkScriptRunCleansUpItsFile() {
     return 0;
 }
 
+/// A run that reports `failed` is over, and the object says so. `start`'s
+/// refusal of a sandboxed script it could not read reported it without saying
+/// so: it stopped the deadline and emitted `failed`, and left `m_proc` set.
+/// `running()` then answered true for a process that never started, `prepare`
+/// refused every later run on that handle, and the run was never marked
+/// reported, so a `finished` that did eventually arrive would have reported
+/// the same run twice. The `FailedToStart` handler in `prepare` already did
+/// all four steps; this pins that `start` does the same.
+///
+/// Driven by removing the prepared script, which is the same `QFile::open`
+/// refusal a temp-directory cleaner produces, and needs no Flatpak: only the
+/// script's own open is under test, not the `flatpak-spawn` above it.
+static int checkScriptFailedRunIsOver() {
+    /* Scoped, and restored before the one exit below: `start` only reads the
+       script itself when FLATPAK_ID is set, and the checks around this one run
+       real scripts through the host path, which a left-behind value would
+       break. One exit rather than a guard per failure, so the restore cannot
+       be the thing that is forgotten. */
+    const QByteArray savedAppId = qgetenv("FLATPAK_ID");
+    const bool hadAppId = qEnvironmentVariableIsSet("FLATPAK_ID");
+    qputenv("FLATPAK_ID", "org.appattic.AppAttic");
+
+    int rc = 0;
+    do {
+        ScriptProcess proc;
+        QString err;
+        if (!proc.prepare(QStringLiteral("#!/bin/sh\nexit 0\n"), &err)) {
+            std::fprintf(stderr, "failed run: prepare failed (%s)\n", qPrintable(err));
+            rc = 1;
+            break;
+        }
+        if (!QFile::remove(proc.scriptLeftBehind())) {
+            std::fprintf(stderr, "failed run: could not remove the prepared script\n");
+            rc = 1;
+            break;
+        }
+
+        bool failed = false;
+        QObject::connect(&proc, &ScriptProcess::failed, [&failed] { failed = true; });
+        proc.start();
+
+        if (!failed) {
+            std::fprintf(stderr,
+                         "failed run: a script that cannot be read did not report failed\n");
+            rc = 1;
+            break;
+        }
+        if (proc.running()) {
+            std::fprintf(stderr,
+                         "failed run: running() is true after failed, and the next\n"
+                         "           prepare is refused on a process that never started\n");
+            rc = 1;
+            break;
+        }
+        /* The refused run left nothing behind, and nothing blocks the next
+           one: the object is reusable, which is what the window relies on when
+           the user tries the same cleanup again. */
+        QString err2;
+        if (!proc.prepare(QStringLiteral("#!/bin/sh\nexit 0\n"), &err2)) {
+            std::fprintf(stderr, "failed run: prepare after failed returned false (%s)\n",
+                         qPrintable(err2));
+            rc = 1;
+            break;
+        }
+        const QString second = proc.scriptLeftBehind();
+        if (second.isEmpty() || !QFile::exists(second)) {
+            std::fprintf(stderr, "failed run: the next run has no script on disk\n");
+            rc = 1;
+            break;
+        }
+        /* Not started, so there is no run to stop and nothing would report it:
+           the runner's destructor is what deletes a script that was prepared
+           and never spawned, which is exactly the case this exercises. */
+        QFile::remove(second);
+    } while (false);
+
+    if (hadAppId) {
+        qputenv("FLATPAK_ID", savedAppId);
+    } else {
+        qunsetenv("FLATPAK_ID");
+    }
+    if (rc == 0) std::fprintf(stdout, "failed run: ok\n");
+    return rc;
+}
+
 /// The run deadline counts the run, not the gap between preparing it and
 /// starting it. `prepare` and `start` are separate so a caller can connect to
 /// `finished` and `failed` before the process exists, and the production bound
@@ -2438,6 +2523,7 @@ int main(int argc, char **argv) {
         checkLocaleGrouping(), checkSizeLocaleDigits(),
         checkLegacySettingsMigration(), checkScriptFileRemoval(),
         checkScriptRunCleansUpItsFile(), checkScriptDeadlineStartsAtSpawn(),
+        checkScriptFailedRunIsOver(),
         checkScriptLeavesTheSandbox(),
     };
     for (const int rc : checks) {

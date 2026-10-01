@@ -282,7 +282,20 @@ void ScriptProcess::start() {
            clean cleanup that removed nothing, so a script that cannot be read
            is refused here rather than started. */
         if (!script.open(QIODevice::ReadOnly)) {
+            /* The same four steps the `FailedToStart` handler in `prepare`
+               takes: `failed` means the run is over, so the deadline is
+               disarmed, the run is marked reported so a later `finished`
+               cannot report it twice, the script goes while this object still
+               knows its path, and the `QProcess` is let go. Only the timer and
+               the signal were here, so `m_proc` survived a `failed` and
+               `running()` answered true for a process that never started
+               while every later `prepare` refused on the same handle. */
             m_timer->stop();
+            m_reported = true;
+            removeRunScript(m_path);
+            QProcess *proc = m_proc;
+            m_proc = nullptr;
+            proc->deleteLater();
             emit failed();
             return;
         }
