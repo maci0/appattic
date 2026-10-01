@@ -5,6 +5,7 @@ const jsonbuf = @import("jsonbuf.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
 const pstore = @import("path_store.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
 
 const Io = std.Io;
 const Dir = Io.Dir;
@@ -450,4 +451,294 @@ test "a note from one run does not reach the next" {
     const json = result_buf[0..result_nbytes];
     try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "did not answer") == null);
+}
+
+// ---------------------------------------------------------------------------
+// Fuzz target.
+//
+// `findShadows` reads directory entries in `~/.local/bin` and `~/bin` that any
+// unprivileged process can create, and turns one into an `rm -f <path>` line
+// the UI runs under `pkexec`. So the harness holds every row to the property
+// that keeps the removal safe, rather than checking only that nothing crashed:
+//
+//   - the name is a basename, never a path, never empty, never a dot name, and
+//     survives `isSafeIdent`, the predicate that gates every entry before it
+//     can reach a command;
+//   - `name`, `path` and `shadows` are copies inside the caller's path store,
+//     never pointers into a directory-reader buffer the next read invalidates;
+//   - `path` sits under an overlay root and `shadows` under a package root, so
+//     a row can never name a removal outside the roots that were asked about;
+//   - `path` names a file and never the root itself;
+//   - reading the same names twice gives the same rows, or a scan replayed
+//     from a recorded listing disagrees with the one the user confirmed;
+//   - `shQuote` can spell the path, which is what the script writer needs.
+//
+// The seeds are the shapes an overlay root actually holds: ordinary binaries,
+// scoped and path-like names, shell metacharacter soup, non-ASCII and truncated
+// UTF-8, control bytes, names of only dots and slashes, a name long enough to
+// fill a small path store, and the empty and whitespace-only listings.
+// ---------------------------------------------------------------------------
+
+// The filesystem per-component limit, the ceiling on what a directory
+// entry in an overlay root can be. A name longer than this never becomes
+// a row, so the harness stops trying to create one rather than reading
+// `NameTooLong` from the tree instead of a row from the parser.
+const fuzz_name_max = 255;
+
+const fuzz_overlay_names = fuzzsupport.packFuzzSlice("python3\npip3\nnode\n.cache-secret\n");
+const fuzz_overlay_scoped = fuzzsupport.packFuzzSlice("@scope/tool\n./python3\n../bin/node\nnode_modules\n");
+const fuzz_overlay_shell = fuzzsupport.packFuzzSlice("x'; reboot; '\nrm -rf /\n$(id)\n`id`\na b\na|b\n~/x\n--flag\n-e\n");
+const fuzz_overlay_utf8 = fuzzsupport.packFuzzSlice("caf\u{e9}\nna\u{ef}ve\n\u{1F600}\n\xc3\n\xff\xfe\n");
+const fuzz_overlay_control = fuzzsupport.packFuzzSlice("a\tb\na\nb\nplain\n\x1b[2J\n");
+const fuzz_overlay_dots = fuzzsupport.packFuzzSlice(".\n..\n./\n/\n//\na/\n.hidden\n..hidden\n");
+const fuzz_overlay_empty = fuzzsupport.packFuzzSlice("");
+const fuzz_overlay_blank = fuzzsupport.packFuzzSlice(" \t \n\n\r\n");
+const fuzz_overlay_long = fuzzsupport.packFuzzSlice("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+
+test "fuzz findShadows" {
+    try std.testing.fuzz({}, fuzzFindShadows, .{ .corpus = &.{
+        &fuzz_overlay_names,
+        &fuzz_overlay_scoped,
+        &fuzz_overlay_shell,
+        &fuzz_overlay_utf8,
+        &fuzz_overlay_control,
+        &fuzz_overlay_dots,
+        &fuzz_overlay_empty,
+        &fuzz_overlay_blank,
+        &fuzz_overlay_long,
+    } });
+}
+
+// The exec reader answers "is this name in the `ls -1` output" by comparing
+// whole trimmed lines, and it compares a line the parser has already accepted
+// against a listing it has not. That is the one place in this module where a
+// hostile line can arrive without the filesystem having to hold it, so the
+// harness drives it directly: a name must match only on a whole line, and never
+// on a prefix, a suffix, a substring of a longer name, or an empty line.
+test "fuzz listingHasName" {
+    try std.testing.fuzz({}, fuzzListingHasName, .{ .corpus = &.{
+        &fuzz_overlay_names,
+        &fuzz_overlay_shell,
+        &fuzz_overlay_utf8,
+        &fuzz_overlay_control,
+        &fuzz_overlay_dots,
+        &fuzz_overlay_blank,
+    } });
+}
+
+fn fuzzListingHasName(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const listing = raw[0..smith.slice(&raw)];
+
+    // A hit must be a whole line: reading the same listing the same way twice
+    // cannot change the answer, and trimming is applied before the compare, so
+    // the line that hit is a line a re-read hits too.
+    if (listingHasName(listing, "python3")) {
+        try std.testing.expect(listingHasName(listing, "python3"));
+        try std.testing.expectEqual(true, listingHasName(listing, "python3"));
+    }
+
+    // A name holding a newline can never be one line of a listing, so it can
+    // never match: a hit would mean the compare spans lines and a crafted name
+    // could match a listing line it does not name.
+    const nl_name = "ab\ncd";
+    try std.testing.expect(!listingHasName(listing, nl_name));
+    try std.testing.expect(!listingHasName(listing, "a\nb\n"));
+
+    // Every line of a listing is found. This is the direction that has
+    // consequences: the caller uses this to skip a package directory that does
+    // not hold the file, and a false negative there means a shadow is never
+    // reported at all, so a removal the user confirmed quietly leaves the
+    // shadowing file in place. An off-by-one in the trim, a dropped line, or a
+    // scan that stops early all show up here.
+    var iter = std.mem.splitScalar(u8, listing, '\n');
+    while (iter.next()) |candidate| {
+        const line = std.mem.trim(u8, candidate, " \t\r");
+        if (line.len == 0) continue;
+        try std.testing.expect(listingHasName(listing, line));
+        // Re-asking cannot change the answer, so a hit is stable across reads.
+        try std.testing.expectEqual(true, listingHasName(listing, line));
+    }
+
+    // The compare is on whole lines, not on substrings. For every line of the
+    // listing, ask about each of its proper prefixes: a prefix matches if and
+    // only if the listing holds that prefix as a line of its own. A compare
+    // that accepted substrings would match every prefix, which is how a listing
+    // holding "python3" comes to answer yes for "py" and a package directory
+    // is wrongly believed to hold a file it does not.
+    var lines_a = std.mem.splitScalar(u8, listing, '\n');
+    while (lines_a.next()) |raw_a| {
+        const line_a = std.mem.trim(u8, raw_a, " \t\r");
+        var cut: usize = 1;
+        while (cut < line_a.len) : (cut += 1) {
+            const prefix = line_a[0..cut];
+            const is_a_line = block: {
+                var it = std.mem.splitScalar(u8, listing, '\n');
+                var hit = false;
+                while (it.next()) |w| {
+                    if (std.mem.eql(u8, std.mem.trim(u8, w, " \t\r"), prefix)) hit = true;
+                }
+                break :block hit;
+            };
+            try std.testing.expectEqual(is_a_line, listingHasName(listing, prefix));
+        }
+    }
+
+    // An empty listing matches nothing, including the empty name.
+    try std.testing.expect(!listingHasName("", ""));
+    try std.testing.expect(!listingHasName("", "x"));
+
+    // A name the parser would have rejected as unsafe never reaches this
+    // compare from the overlay reader, so a listing may hold one without the
+    // reader ever matching it. The two answers have to stay independent: an
+    // unsafe line in a listing is text, not a name.
+    if (listingHasName(listing, "rm -rf /")) {
+        try std.testing.expect(!jsonbuf.isSafeIdent("rm -rf /"));
+    }
+}
+
+fn fuzzFindShadows(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const listing = raw[0..smith.slice(&raw)];
+
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // The names `listingNames` keeps, copied into one store so they outlive the
+    // listing buffer and can be handed to `joinPath` as stable slices. A name
+    // longer than the store stops the round instead of overrunning it.
+    var names: [32][]const u8 = undefined;
+    var name_store: [4096]u8 = undefined;
+    var name_used: usize = 0;
+    var n_names = pstore.listingNames(listing, &names, "");
+    var kept: usize = 0;
+    while (kept < n_names) : (kept += 1) {
+        names[kept] = pstore.copyInto(names[kept], &name_store, &name_used) orelse break;
+    }
+    n_names = kept;
+
+    // Materialise the listing as a real overlay root and a real package root.
+    // Only the names the tree can actually hold become rows, so the round is
+    // about the parsers rather than about which `openat` failed. `NAME_MAX` is
+    // the filesystem's own limit: a name past it never reaches a parser, and
+    // asking the tree to hold one reports `NameTooLong` instead of the reading
+    // under test.
+    try tmp.dir.createDirPath(io, "overlay");
+    try tmp.dir.createDirPath(io, "usr/bin");
+    for (names[0..n_names]) |name| {
+        if (name.len == 0 or name.len > fuzz_name_max) continue;
+        // The same name under both roots with different contents, so it is a
+        // shadow rather than a symlink to the packaged file.
+        const overlay_sub = try std.fs.path.join(std.testing.allocator, &.{ "overlay", name });
+        defer std.testing.allocator.free(overlay_sub);
+        const pkg_sub = try std.fs.path.join(std.testing.allocator, &.{ "usr/bin", name });
+        defer std.testing.allocator.free(pkg_sub);
+        tmp.dir.writeFile(io, .{ .sub_path = overlay_sub, .data = "overlay" }) catch continue;
+        tmp.dir.writeFile(io, .{ .sub_path = pkg_sub, .data = "packaged" }) catch continue;
+    }
+
+    // A second overlay entry that symlinks to the packaged file. It shadows
+    // nothing: both paths resolve to the same file, so reporting it would ask
+    // the user to remove a file whose packaged copy is the very same inode. The
+    // module decides that by comparing resolved paths, and this is the only
+    // shape in the tree that exercises that comparison. The link target is
+    // absolute, because a relative one would resolve against the link's own
+    // directory and dangle instead of naming the packaged file.
+    {
+        const link_sub = try std.fs.path.join(std.testing.allocator, &.{ "overlay", "linked-shadow" });
+        defer std.testing.allocator.free(link_sub);
+        const target_sub = try std.fs.path.join(std.testing.allocator, &.{ "usr/bin", "linked-shadow" });
+        defer std.testing.allocator.free(target_sub);
+        tmp.dir.writeFile(io, .{ .sub_path = target_sub, .data = "packaged" }) catch {};
+        var tp: [512]u8 = undefined;
+        const tn = try tmp.dir.realPathFile(io, target_sub, &tp);
+        tmp.dir.symLink(io, tp[0..tn], link_sub, .{}) catch {};
+    }
+
+    var overlay_rp: [512]u8 = undefined;
+    var package_rp: [512]u8 = undefined;
+    const overlay_n = try tmp.dir.realPathFile(io, "overlay", &overlay_rp);
+    const package_n = try tmp.dir.realPathFile(io, "usr/bin", &package_rp);
+    const overlay_dir = overlay_rp[0..overlay_n];
+    const package_dir = package_rp[0..package_n];
+    const overlays = [_][]const u8{overlay_dir};
+    const packages = [_][]const u8{package_dir};
+
+    var hits: [16]ShadowFinding = undefined;
+    var paths: [2048]u8 = undefined;
+    const n = findShadows(&overlays, &packages, &hits, &paths);
+    // `out` is fixed, so a listing with more rows than it holds stops at the
+    // bound rather than writing past it.
+    try std.testing.expect(n <= hits.len);
+
+    for (hits[0..n]) |hit| {
+        // A name that reaches a removal command is the identifier the rest of
+        // the core gates on: no shell metacharacter, no path, no dot name.
+        try std.testing.expect(jsonbuf.isSafeIdent(hit.name));
+        try std.testing.expect(hit.name.len != 0);
+        try std.testing.expect(hit.name[0] != '.');
+        try std.testing.expect(std.mem.indexOfScalar(u8, hit.name, '/') == null);
+        // Copies in the caller's store, so no pointer into a directory reader
+        // or into a buffer this round reuses.
+        try std.testing.expect(fuzzsupport.sliceInside(&paths, hit.name));
+        try std.testing.expect(fuzzsupport.sliceInside(&paths, hit.path));
+        try std.testing.expect(fuzzsupport.sliceInside(&paths, hit.shadows));
+        // The roots the caller passed bound both ends of the row.
+        try std.testing.expect(std.mem.startsWith(u8, hit.path, overlay_dir));
+        try std.testing.expect(std.mem.startsWith(u8, hit.shadows, package_dir));
+        try std.testing.expectEqualStrings(hit.name, pstore.basenameOf(hit.path));
+        try std.testing.expectEqualStrings(hit.name, pstore.basenameOf(hit.shadows));
+        // A removal may name a file, never the root it was found under.
+        try std.testing.expect(hit.path.len > overlay_dir.len + 1);
+        try std.testing.expect(hit.shadows.len > package_dir.len + 1);
+        // The writer turns the path into the `command` field and the script
+        // line; a path `shQuote` refuses is a removal it cannot spell.
+        var q: [1024]u8 = undefined;
+        const quoted = jsonbuf.shQuote(&q, hit.path) orelse return error.Overflow;
+        try std.testing.expect(
+            fuzzsupport.isQuotedValue(quoted) or std.mem.eql(u8, quoted, hit.path),
+        );
+    }
+
+    // The rows have to survive the writer that turns them into what the UI
+    // runs. This is the binding step: `renderShadows` is where a row becomes an
+    // `rm -f` line, so a writer that lost the quote or dropped a path shows up
+    // here as a script that does not name the file it was built from.
+    if (n > 0) {
+        try std.testing.expect(renderShadows(hits[0..n]));
+        const json = result_buf[0..result_nbytes];
+        try std.testing.expect(jsonbuf.isValidJson(json));
+        for (hits[0..n]) |hit| {
+            // Every row reaches both the reported command and the script, so a
+            // row the writer dropped is a file the user confirmed and no
+            // command names.
+            try std.testing.expect(std.mem.indexOf(u8, json, "\"shadows\":\"") != null);
+            // The path appears in the script, shell-quoted, and nowhere raw:
+            // a raw path in a row carrying a space would split the `rm`.
+            var qs: [1024]u8 = undefined;
+            const sq = jsonbuf.shQuote(&qs, hit.path) orelse return error.Overflow;
+            if (!std.mem.eql(u8, sq, hit.path)) {
+                try std.testing.expect(std.mem.indexOf(u8, json, sq) != null);
+            }
+        }
+    }
+
+    // The symlinked entry is not a shadow, so no row names it. A row that did
+    // would put `rm -f` on a path whose packaged copy is the same inode.
+    for (hits[0..n]) |hit| {
+        try std.testing.expect(!std.mem.eql(u8, pstore.basenameOf(hit.path), "linked-shadow"));
+    }
+
+    // The same directory read twice gives the same rows, or a scan replayed
+    // from a recorded listing disagrees with the one the user confirmed.
+    var hits2: [16]ShadowFinding = undefined;
+    var paths2: [2048]u8 = undefined;
+    const n2 = findShadows(&overlays, &packages, &hits2, &paths2);
+    try std.testing.expectEqual(n, n2);
+    for (hits[0..n], hits2[0..n2]) |a, b| {
+        try std.testing.expectEqualStrings(a.name, b.name);
+        try std.testing.expectEqualStrings(a.path, b.path);
+        try std.testing.expectEqualStrings(a.shadows, b.shadows);
+    }
 }
