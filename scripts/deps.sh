@@ -381,6 +381,62 @@ flatpak_platform_rows() {
     done < <(flatpak_manifests)
 }
 
+# The default a fetcher installs with, read out of the assignment it reads the
+# environment or a version file for: `WASMTIME_VER="${WASMTIME_C_API_VERSION:-28.0.0}"`
+# resolves to the text between `:-` and `}`, which is the version a run with an
+# empty WASMTIME_C_API_VERSION gets. A second spelling of the same pin that
+# lives only in a script is a version nothing else in this tree can see, so a
+# bump that reaches the manifest and the table can leave the script installing
+# and prefetching a different one with nothing failing.
+#
+# Only `check` reads this. linux-flatpak.sh and linux-deps.sh compare the same
+# values against the manifest during a build, but neither script runs in CI, so
+# those comparisons never gate a change that lands here.
+fetcher_default() {
+    local file="$1" assignment="$2"
+    [[ -f "$file" ]] || return 1
+    sed -n -E "s/^${assignment}=\"?\\\$\{[A-Za-z_][A-Za-z_0-9]*:-([^\}]*)\}.*/\1/p" "$file" | head -n 1 | grep -E '.' || return 1
+}
+
+# The Wasmtime version the fetchers default to has to be the one the artifact
+# table pins. The table is the inventory a consumer reads, so a fetcher left on
+# another release fetches bytes that inventory never describes.
+check_wasmtime_default() {
+    local script default pinned
+    pinned="$(table_version_for 'wasmtime-*')" || {
+        fail "the table pins no Wasmtime version to compare the fetchers against"
+        return
+    }
+    for script in linux-deps.sh linux-flatpak.sh; do
+        if ! default="$(fetcher_default "$ROOT/scripts/$script" WASMTIME_VER)"; then
+            fail "scripts/$script declares no WASMTIME_VER default; the version the fetcher installs with has to be readable here"
+            continue
+        fi
+        if [[ "$default" != "$pinned" ]]; then
+            fail "scripts/$script installs Wasmtime ${default} by default, the table pins ${pinned}"
+        fi
+    done
+}
+
+# The KDE branch linux-flatpak.sh installs the SDK from and requires the manifest
+# to pin has to be the branch the manifests name, for the same reason: a script
+# on another branch resolves a runtime the bundle was never built against.
+check_flatpak_runtime_default() {
+    local default manifest declared
+    if ! default="$(fetcher_default "$ROOT/scripts/linux-flatpak.sh" KDE_RUNTIME)"; then
+        fail "scripts/linux-flatpak.sh declares no KDE_RUNTIME default; the branch it installs the SDK from has to be readable here"
+        return
+    fi
+    while IFS= read -r manifest; do
+        [[ -n "$manifest" ]] || continue
+        declared="$(flatpak_manifest_value "$manifest" runtime-version)"
+        [[ -n "$declared" ]] || continue
+        if [[ "$declared" != "$default" ]]; then
+            fail "${manifest#"$ROOT"/}: pins runtime-version ${declared}, scripts/linux-flatpak.sh installs ${default} by default"
+        fi
+    done < <(flatpak_manifests)
+}
+
 # The Flatpak manifest carries its own sha256 field, which flatpak-builder
 # checks. Two copies of a hash drift, so both must be in dep-checksums.sha256.
 check_flatpak_hashes() {
@@ -873,6 +929,8 @@ run_check() {
     check_vendored
     check_flatpak_hashes
     check_flatpak_platform
+    check_wasmtime_default
+    check_flatpak_runtime_default
     check_urls
     check_version_anchors
     check_artifact_versions_in_tree
