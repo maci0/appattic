@@ -484,4 +484,15 @@ final class DiscoverTests: XCTestCase {
         XCTAssertEqual(lprojCandidates(lang: "pt_BR.UTF-8"), ["pt_BR", "pt"] + base)
         XCTAssertEqual(lprojCandidates(lang: "pt-BR"), ["pt_BR", "pt"] + base)
     }
+
+    /// A locale with nothing before its `_` has no language to fall back to.
+    /// The fallback indexed the first part of the split, which is empty for
+    /// `LANG=_` or `LANG=-`, and trapped the whole scan; for `_BR` it fell
+    /// back to the region as if it were a language.
+    func testLprojCandidatesSurviveALocaleWithNoLanguagePart() {
+        let base = ["en", "English", "Base"]
+        XCTAssertEqual(lprojCandidates(lang: "_"), ["_"] + base)
+        XCTAssertEqual(lprojCandidates(lang: "-.UTF-8"), ["_"] + base)
+        XCTAssertEqual(lprojCandidates(lang: "_BR"), ["_BR"] + base)
+    }
 }

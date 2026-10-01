@@ -224,7 +224,12 @@ func lprojCandidates(lang raw: String) -> [String] {
     let lang = lprojLocale(lang: raw)
     if !lang.isEmpty {
         out.append(lang)
-        if lang.contains("_") { out.append(String(lang.split(separator: "_")[0])) }
+        // The language before the region, when there is one: `_BR` names none.
+        if lang.contains("_"),
+           let language = lang.split(separator: "_", omittingEmptySubsequences: false).first,
+           !language.isEmpty {
+            out.append(String(language))
+        }
     }
     for extra in ["en", "English", "Base"] where !out.contains(extra) {
         out.append(extra)
