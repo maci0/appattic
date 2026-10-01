@@ -5,7 +5,7 @@
 > This file is kept for history; do not extend it.
 
 Date: 2026-08-17
-Updated: 2026-09-05
+Updated: 2026-09-27
 Status: Implemented, superseded by [`2026-08-26-zig-wasm-core-design.md`](../2026-08-26-zig-wasm-core-design.md)
 
 Port the Python scanner into Swift so the Mac UI and Linux CLI/UI run with no Python. Product behavior stays the same: leftovers, stale software, outdated version signal. Nothing auto-deletes. Outdated is report-only except Homebrew formulas/casks and Flatpak, which apply only through the explicit `update` command or UI confirm. Distro managers, Snap, and the App Store stay report-only.

@@ -1,7 +1,7 @@
 # AppAttic Zig WASM core
 
 Date: 2026-08-26
-Updated: 2026-09-27
+Updated: 2026-10-01
 Status: Accepted
 
 ## Context
@@ -75,7 +75,7 @@ The `note` is a fact about the whole plugin result, not about one row. It travel
 
 `script` is null when nothing named. Host intercept rejects a plugin result whose JSON contains any of these substrings: `system prune`, `rmi -f`, `volume prune`, `snap remove --purge`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`, `rm /usr/bin/flatpak` (`core/host/embed.c`).
 
-Every named removal a script runs is wrapped in `if <present>; then <remove>; fi` (`core/src/guarded_remove.zig`). The script runs under `set -e`, and a manager exits nonzero when asked to remove something it already removed, so an unguarded line would stop a rerun at the first target the first run took and strand every line below it. The presence check is a read and never escalates: a package query (`dpkg -s`, `rpm -q`, `pacman -Qq`, `flatpak info`, `pip show`), a row of a listing the global tool already prints, grepped with `-qF` (`npm ls -g --depth=0`, `pnpm ls -g --depth=0`, `bun pm ls -g`, `uv tool list`, `pipx list`), a file the removal takes away (`test -e /var/lib/snapd/snaps/<name>_<rev>.snap`, `test -e ~/.deno/bin/`), or an engine query (`docker image inspect`, `docker volume inspect`, `docker container inspect`).
+Every named removal a script runs survives a rerun. A manager line is wrapped in `if <present>; then <remove>; fi` (`core/src/guarded_remove.zig`); a file line carries a flag that is a no-op on an absent target (`rm -rf`, `rm -f`, `path_listing.zig`, `path_shadow.zig`, `path_user_bin.zig`, and the snapd orphan dirs). The script runs under `set -e`, and a manager exits nonzero when asked to remove something it already removed, so an unguarded manager line would stop a rerun at the first target the first run took and strand every line below it. The presence check is a read and never escalates: a package query (`dpkg -s`, `rpm -q`, `pacman -Qq`, `flatpak info`, `pip show`), a row of a listing the global tool already prints, grepped with `-qF` (`npm ls -g --depth=0`, `pnpm ls -g --depth=0`, `bun pm ls -g`, `uv tool list`, `pipx list`), a file the removal takes away (`test -e /var/lib/snapd/snaps/<name>_<rev>.snap`, `test -e ~/.deno/bin/`), or an engine query (`docker image inspect`, `docker volume inspect`, `docker container inspect`).
 
 The pacman-family upgrade carries the same guard, for a different reason: `pacman -S <name>` on a package already at the repo's version is a reinstall, not a no-op, so a rerun would download the package again, run its install scripts again, and rewrite its database entry. The check is the manager's own update query (`pacman -Qu <name>`, `paru -Qu <name>`), which exits 0 only while the package is still behind. Every other manager answers "nothing to do" on a package that is already current (`brew upgrade`, `flatpak update`, `apt-get --only-upgrade`, `dnf upgrade`), so those lines are left unguarded.
 
@@ -102,8 +102,8 @@ Plugin membership lives in one place: the `wasm_sources` list in `core/build.sh`
 | `deno` | `host.exec` `ls` of `~/.deno/bin` | User-global Deno installs. Not every project. | Named `deno uninstall --global`. |
 | `pipx` | `host.exec` `pipx` | Unused pipx tools. | `pipx uninstall` named. |
 | `uv` | `host.exec` `uv` | `uv tool` leftovers. | `uv tool uninstall` named. |
-| `gem` | `host.exec` `gem` | User-install outdated (`gem outdated`). Report-only. | `gem uninstall` named. |
-| `composer` | `host.exec` `composer` | Global outdated (`composer global outdated`). Report-only. Not every project `vendor/`. | `composer global remove` named. |
+| `gem` | `host.exec` `gem` | User-install outdated (`gem outdated`). Report-only. No removal path at all: `gem.zig` emits `"script":null`, so no `gem uninstall` line exists. | Named `gem update` on the row after confirm, `updatable: false` keeps it out of the update script. |
+| `composer` | `host.exec` `composer` | Global outdated (`composer global outdated`). Report-only. Not every project `vendor/`. No removal path at all: `composer.zig` emits `"script":null`, so no `composer global remove` line exists. | Named `composer global update` on the row after confirm, `updatable: false` keeps it out of the update script. |
 | `container-runtime` | `host.exec` `docker` and/or `podman` | Dangling images, dangling volumes, exited containers. Idle-days skipped. Abandoned compose/pods and unnamed build cache not queried this turn. | Named `rmi` / `volume rm` / `rm`. Never `system prune -af`. Never delete the engine binary. |
 
 `~/snap` orphan dirs belong to `snapd`, not a second path plugin.
