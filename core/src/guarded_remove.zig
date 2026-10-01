@@ -116,7 +116,7 @@ pub fn writeRowGuard(
     // The 64 above is slack for the two `Row` halves, so a longer half is a
     // caller that outgrew the buffer rather than a name too long to compose.
     // Asserted here, where the buffer is, instead of left as a comment.
-    std.debug.assert(row.before.len + row.after.len <= 0);
+    std.debug.assert(row.before.len + row.after.len <= 64);
     std.debug.assert(name.len <= jsonbuf.max_pkg_name_len);
     const composed = composeRow(&row_buf, row, name) orelse {
         w.failed = true;

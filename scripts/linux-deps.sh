@@ -63,6 +63,13 @@ EOF
 # lines, and every --install-* flag went on to fetch a Linux tarball.
 host_os="$(uname -s)"
 
+# One scratch root for the whole run, removed on every exit. Armed before
+# anything can fail: the installer unpacks a pinned toolchain into it, and a
+# `set -e` exit or the layout check's hand-written `exit 1` would otherwise
+# leave a few hundred MB behind in /tmp, once per attempt.
+DEPS_TMP="$(mktemp -d)"
+trap 'rm -rf "$DEPS_TMP"' EXIT
+
 INSTALL_PKGS=0
 INSTALL_SWIFT=0
 INSTALL_WASMTIME=0
@@ -219,8 +226,15 @@ install_release_tarball() {
         exit 1
     }
     echo "$message"
-    local tmp
-    tmp="$(mktemp -d)"
+    # The run's one scratch root, made under the name the EXIT trap watches.
+    # Every tarball this script installs is unpacked under it, and the trap
+    # takes the whole root on every exit: `set -e` carries the script out on a
+    # failed fetch, checksum or unpack, and the layout check below exits by
+    # hand. Without it each of those leaves an unpacked toolchain (or a
+    # partial download of a few hundred MB) in /tmp for the next run to
+    # accumulate against, which is what a retried install loop does.
+    local tmp="$DEPS_TMP"
+    mkdir -p "$tmp"
     curl_fetch "$url" "$tmp/$archive"
     verify_sha256 "$tmp/$archive" "$expected"
     tar "$tarflag" -C "$tmp" -f "$tmp/$archive"
