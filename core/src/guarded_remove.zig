@@ -94,6 +94,13 @@ pub fn writeUpgradeGuard(
 
 /// `if <list> | grep -qF -- '<row>'; then <remove> <name>; fi`. For the
 /// managers that have no per-package query and answer only with a listing.
+///
+/// `name` must already have passed `jsonbuf.isSafePkgName`: `row_buf` below is
+/// sized `max_pkg_name_len + 64` for the longest name that check accepts plus
+/// the widest `Row` half, and a longer name would fail the compose with
+/// `w.failed` set, which reads as "the buffer filled up" rather than as "this
+/// caller skipped the name check". Every caller (npm, pnpm, bun, uv, pipx)
+/// validates before it gets here.
 pub fn writeRowGuard(
     w: *jsonbuf.W,
     q_buf: []u8,
@@ -106,6 +113,11 @@ pub fn writeRowGuard(
     w.raw(list);
     w.raw(" | grep -qF -- ");
     var row_buf: [jsonbuf.max_pkg_name_len + 64]u8 = undefined;
+    // The 64 above is slack for the two `Row` halves, so a longer half is a
+    // caller that outgrew the buffer rather than a name too long to compose.
+    // Asserted here, where the buffer is, instead of left as a comment.
+    std.debug.assert(row.before.len + row.after.len <= 0);
+    std.debug.assert(name.len <= jsonbuf.max_pkg_name_len);
     const composed = composeRow(&row_buf, row, name) orelse {
         w.failed = true;
         return;

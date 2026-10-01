@@ -172,6 +172,13 @@ fn findShadowsExec(
         note.add(ls_cmd, ls_n);
         if (ls_n < 0) continue;
         const raw_n = pstore.listingNames(ls_buf[0..@intCast(ls_n)], &names, "");
+        // `name_store` is reset per root, not per scan: `listingNames` hands
+        // back names pointing into `ls_buf`, which the next root's `run`
+        // overwrites, so each root needs its own stable copy. Carrying the
+        // cursor across roots spent the 8 KiB on the first root's names and
+        // left every later root with a list cut short at whatever the bound
+        // was left at, so a shadow in a later root went unreported.
+        name_used = 0;
         var copied: usize = 0;
         while (copied < raw_n) : (copied += 1) {
             const src = names[copied];
@@ -411,6 +418,32 @@ test "findShadows reaches a later root after a long run of non-shadowing files" 
     try std.testing.expectEqualStrings("python3", hits[0].name);
     try std.testing.expect(std.mem.endsWith(u8, hits[0].path, "/overlay-b/python3"));
     try std.testing.expect(std.mem.endsWith(u8, hits[0].shadows, "/usr/bin/python3"));
+}
+
+test "findShadowsExec reads every root, not only the first few" {
+    // `findShadowsExec` copies each root's `ls` names into a scratch store so
+    // the names outlive the buffer `ls` filled, and that copy has to be reset
+    // per root. Carrying one cursor across the whole scan spends the store on
+    // the first roots and silently truncates every later root's candidate
+    // list, so a shadow in a late root is never reported. The fixture root
+    // lists five names, so 300 roots need far more than the 8 KiB store and
+    // only the per-root reset lets the last of them reach `python3`.
+    const root_repeats = 300;
+    const packages = [_][]const u8{package_fixture};
+    var hits: [root_repeats]ShadowFinding = undefined;
+    // Every finding keeps its overlay path in `path_store` for the whole scan,
+    // so this store is sized for all of them: 300 paths of about 60 bytes.
+    var paths: [root_repeats * 64]u8 = undefined;
+
+    var overlays: [root_repeats][]const u8 = undefined;
+    for (&overlays) |*o| o.* = overlay_fixture;
+
+    const n = findShadowsExec(&overlays, &packages, &hits, &paths);
+    try std.testing.expectEqual(@as(usize, root_repeats), n);
+    for (hits) |h| {
+        try std.testing.expectEqualStrings("python3", h.name);
+        try std.testing.expect(std.mem.endsWith(u8, h.shadows, "/usr/bin/python3"));
+    }
 }
 
 test "plugin_query present JSON includes shadow finding" {

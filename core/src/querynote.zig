@@ -93,11 +93,16 @@ pub const Log = struct {
         list: anytype,
         n: *usize,
     ) i32 {
-        const n_parsed = n.*;
+        // The same `noted` latch `renderShrinkingPair` uses, so one row lost to
+        // the render reads the same way whichever shrinker reported it.
+        var noted = false;
         while (true) {
             if (render(list[0..n.*])) return 0;
             if (n.* == 0) return 1;
-            if (n.* == n_parsed) self.addDroppedRows(1);
+            if (!noted) {
+                self.addDroppedRows(1);
+                noted = true;
+            }
             n.* -= 1;
         }
     }
