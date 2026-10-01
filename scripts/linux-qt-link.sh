@@ -322,6 +322,7 @@ run_smoke() {
     fi
     if try_smoke offscreen; then
         run_ui_check table '^tables-ui: ok \(rows=[1-9][0-9]* cols=[0-9]+ children=[0-9]+\)$'
+        run_ui_check overview '^overview-ui: ok \(rows=[1-9][0-9]* enter=ok\)$'
         run_ui_check stream '^stream: ok \(updates=[1-9][0-9]* rows=[1-9][0-9]*'
         run_ui_check disk '^disk-stream: ok \(rows=[1-9][0-9]* segments=[1-9][0-9]* chart-keyboard=ok\)$'
         run_ui_check shot '^shot: ok \(pages=[1-9][0-9]* ' "$BUILD_DIR/shots"

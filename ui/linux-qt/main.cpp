@@ -1131,6 +1131,13 @@ private:
         edit->setFont(aaMonoFont());
         edit->setReadOnly(true);
         edit->setPlainText(script);
+        // The script is the whole substance of this dialog, and a bare
+        // QPlainTextEdit reads as an unnamed "text edit" to a screen reader.
+        // Name it for what it holds, and say it is the thing to review.
+        edit->setAccessibleName(QStringLiteral("Script to review"));
+        edit->setAccessibleDescription(
+            QStringLiteral("The commands that will run, one per line. This is the text to review before running.")
+        );
         auto *box = new QDialogButtonBox;
         auto *copy = box->addButton(QStringLiteral("Copy"), QDialogButtonBox::ActionRole);
         connect(copy, &QPushButton::clicked, this, [script, copy] {
@@ -1138,6 +1145,10 @@ private:
                 cb->setText(script);
                 copy->setText(QStringLiteral("Copied"));
                 copy->setEnabled(false);
+                // The button relabels itself and disables for a moment, and a
+                // screen reader reads the label on focus rather than watching
+                // it change, so the result of the copy is announced instead.
+                aaAnnounce(copy, QStringLiteral("Script copied to the clipboard."));
                 QTimer::singleShot(1500, copy, [copy] {
                     copy->setText(QStringLiteral("Copy"));
                     copy->setEnabled(true);
@@ -1303,17 +1314,35 @@ private:
         cols->setStretchFactor(2, 1);
         cols->setSizes({380, 380, 380});
         v->addWidget(cols, 1);
-        connect(m_ovLeftovers, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int) {
+        /* Every row here opens the page it came from, from a pointer and from
+           the keyboard. `itemClicked` alone left a keyboard or screen-reader
+           user with no way in: the tree takes focus, the arrows move the
+           current row, and Enter did nothing, while the hint under the column
+           title and the table's accessible description both promise Enter
+           works. `itemActivated` is the keyboard half (Enter, and Return on the
+           platforms that send it instead), so it is wired beside the click. */
+        auto openOverviewRow = [this](QTreeWidgetItem *it, Page page) {
+            if (!it) return;
             m_selectedUid = it->data(0, Qt::UserRole).toString();
-            selectPage(Page::Leftovers);
+            selectPage(page);
+        };
+        connect(m_ovLeftovers, &QTreeWidget::itemClicked, this, [openOverviewRow](QTreeWidgetItem *it, int) {
+            openOverviewRow(it, Page::Leftovers);
         });
-        connect(m_ovStale, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int) {
-            m_selectedUid = it->data(0, Qt::UserRole).toString();
-            selectPage(Page::Stale);
+        connect(m_ovLeftovers, &QTreeWidget::itemActivated, this, [openOverviewRow](QTreeWidgetItem *it, int) {
+            openOverviewRow(it, Page::Leftovers);
         });
-        connect(m_ovOutdated, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *it, int) {
-            m_selectedUid = it->data(0, Qt::UserRole).toString();
-            selectPage(Page::Outdated);
+        connect(m_ovStale, &QTreeWidget::itemClicked, this, [openOverviewRow](QTreeWidgetItem *it, int) {
+            openOverviewRow(it, Page::Stale);
+        });
+        connect(m_ovStale, &QTreeWidget::itemActivated, this, [openOverviewRow](QTreeWidgetItem *it, int) {
+            openOverviewRow(it, Page::Stale);
+        });
+        connect(m_ovOutdated, &QTreeWidget::itemClicked, this, [openOverviewRow](QTreeWidgetItem *it, int) {
+            openOverviewRow(it, Page::Outdated);
+        });
+        connect(m_ovOutdated, &QTreeWidget::itemActivated, this, [openOverviewRow](QTreeWidgetItem *it, int) {
+            openOverviewRow(it, Page::Outdated);
         });
         return w;
     }
@@ -1510,9 +1539,12 @@ private:
             m_ignored.clear();
             persistSettings();
             fillCurrent();
-            statusBar()->showMessage(
-                QStringLiteral("Shown in the list again: %1.").arg(localeCount(n))
-            );
+            const QString shown =
+                QStringLiteral("Shown in the list again: %1.").arg(localeCount(n));
+            statusBar()->showMessage(shown);
+            // The list emptied under the button; the count that reports it
+            // lives in the status bar, which is silent to a screen reader.
+            aaAnnounce(m_ignoredList, shown);
         });
         connect(m_ignoredList, &QListWidget::currentItemChanged, this,
                 [this](QListWidgetItem *it, QListWidgetItem *) {
@@ -2372,6 +2404,60 @@ public:
         return 0;
     }
 
+    /// Keyboard gate for the overview panels. Every row there opens the page it
+    /// came from, and both the hint under the column title and the table's
+    /// accessible description tell the reader to press Enter. This drives the
+    /// tree the way a keyboard user does: move the current row, send Return,
+    /// and check the window left the overview for that item's page with the
+    /// item selected. Without the `itemActivated` wiring the key did nothing
+    /// and the overview was a pointer-only page.
+    int smokeOverviewChecks() {
+        const auto fail = [](const char *what) {
+            std::fprintf(stderr, "overview-ui: %s\n", what);
+            return 1;
+        };
+        m_findings.clear();
+        for (int i = 0; i < 3; ++i) {
+            Finding f;
+            f.plugin = QStringLiteral("path-xdg-config");
+            f.kind = QStringLiteral("orphan-dir");
+            f.id = QStringLiteral("overview-%1").arg(i);
+            f.status = QStringLiteral("orphaned");
+            f.name = QStringLiteral("overview-app-%1").arg(i);
+            f.path = QStringLiteral("/home/user/.config/overview-app-%1").arg(i);
+            f.bytes = 1024 * (3 - i);
+            f.mtime = QStringLiteral("2026-01-01T00:00:00Z");
+            m_findings.push_back(f);
+        }
+        m_hasScanned = true;
+        m_scanning = false;
+        m_scanOk = true;
+        selectPage(Page::Overview);
+        if (m_ovLeftovers->topLevelItemCount() != 3) return fail("overview rows");
+
+        // The biggest leftover sorts first, so the row the cursor lands on
+        // after Down is the second one.
+        m_ovLeftovers->setCurrentItem(m_ovLeftovers->topLevelItem(0));
+        QKeyEvent down(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+        QApplication::sendEvent(m_ovLeftovers, &down);
+        QTreeWidgetItem *cursor = m_ovLeftovers->currentItem();
+        if (!cursor || cursor != m_ovLeftovers->topLevelItem(1)) {
+            return fail("Down did not move the overview cursor");
+        }
+        const QString uid = cursor->data(0, Qt::UserRole).toString();
+        if (uid.isEmpty()) return fail("overview row carries no uid");
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QApplication::sendEvent(m_ovLeftovers, &enter);
+        if (currentPage() != Page::Leftovers) return fail("Enter did not open the leftovers page");
+        if (m_selectedUid != uid) return fail("Enter did not carry the row's selection over");
+        std::fprintf(
+            stdout,
+            "overview-ui: ok (rows=%d enter=ok)\n",
+            m_ovLeftovers->topLevelItemCount()
+        );
+        return 0;
+    }
+
     /// Widget-level check of the model-backed table. main.cpp owns the window,
     /// so this lives here instead of smoke.cpp: page switch, search, the mark
     /// toggle, selection restore and dependency rows all run through the model.
@@ -2864,10 +2950,14 @@ private:
                 // only way back is the Settings page, and nothing on the list
                 // page says the item was hidden rather than deleted.
                 if (m_error->text().isEmpty()) {
-                    statusBar()->showMessage(
+                    const QString hidden =
                         QStringLiteral("Hidden %1 from the list. Restore it in Settings.")
-                            .arg(displayName(copy))
-                    );
+                            .arg(displayName(copy));
+                    statusBar()->showMessage(hidden);
+                    // The row is gone and the status bar is not a live region,
+                    // so a screen-reader user otherwise hears nothing at all
+                    // after pressing the one button that removes a row.
+                    aaAnnounce(m_stack, hidden);
                 }
             });
             m_inspectorLay->addWidget(ign);
@@ -3359,10 +3449,12 @@ private:
         refreshIgnoredList();
         fillCurrent();
         refreshRestoreButton();
-        statusBar()->showMessage(
-            QStringLiteral("Settings restored from the backup. The file it replaced is "
-                           "settings.json.bad if you need it.")
+        const QString restored = QStringLiteral(
+            "Settings restored from the backup. The file it replaced is "
+            "settings.json.bad if you need it."
         );
+        statusBar()->showMessage(restored);
+        aaAnnounce(m_stack, restored);
     }
 
     /// The button is disabled rather than failing on click when there is
@@ -3426,7 +3518,11 @@ private:
         if (key.isEmpty() || !m_ignored.remove(key)) return;
         persistSettings();
         fillCurrent();
-        statusBar()->showMessage(QStringLiteral("Shown in the list again: %1.").arg(label));
+        const QString shown = QStringLiteral("Shown in the list again: %1.").arg(label);
+        statusBar()->showMessage(shown);
+        // The list the path left is on another page, so the status bar is the
+        // only place the result is written, and it is not announced on its own.
+        aaAnnounce(m_ignoredList, shown);
     }
 
     void refreshIgnoredList() {
@@ -3766,9 +3862,10 @@ int main(int argc, char **argv) {
            build's rejection of the flag itself, rather than the app opening and
            then complaining. */
         if (std::strcmp(which, "table") != 0 && std::strcmp(which, "stream") != 0
-            && std::strcmp(which, "disk") != 0 && std::strcmp(which, "shot") != 0) {
+            && std::strcmp(which, "disk") != 0 && std::strcmp(which, "shot") != 0
+            && std::strcmp(which, "overview") != 0) {
             std::fprintf(stderr, "error: unknown check: %s\n", which);
-            std::fprintf(stderr, "usage: --dev-check <table|stream|disk|shot> [dir]\n");
+            std::fprintf(stderr, "usage: --dev-check <table|stream|disk|overview|shot> [dir]\n");
             std::fprintf(stderr, "Try 'appattic-qt --help' for more information.\n");
             return 2;
         }
@@ -3785,6 +3882,7 @@ int main(int argc, char **argv) {
         w.show();
         const QLatin1String name(which);
         if (name == QLatin1String("table")) return w.smokeTableChecks();
+        if (name == QLatin1String("overview")) return w.smokeOverviewChecks();
         if (name == QLatin1String("stream")) return w.smokeStreamChecks();
         if (name == QLatin1String("disk")) return w.smokeDiskStreamChecks();
         if (name == QLatin1String("shot")) {
