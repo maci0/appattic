@@ -23,9 +23,9 @@ pub const Spec = struct {
     /// `-b` is what keeps a name that holds a newline on one line: `ls -1`
     /// prints such an entry as two lines, and both halves pass
     /// `jsonbuf.isSafeIdent` and are joined onto the root, so one leftover
-    /// became two `rm -rf` rows for paths that do not exist. The listing is
-    /// unescaped by `pstore.unescapeLsB` before anything reads a name out of
-    /// it.
+    /// became two `rm -rf` rows for paths that do not exist. The escaping is
+    /// left on through the split and `parseListing` unescapes each name as it
+    /// reads it, so `isSafeIdent` sees the real bytes and drops such a row.
     query_cmd: []const u8 = "ls -1b",
     /// If non-empty, only these names (newline list) are leftovers. Home-dot
     /// is a whitelist; other path plugins stay denylist-only.
@@ -315,9 +315,28 @@ pub fn parseListing(
         if (n == out.len) break;
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0) continue;
-        const name = pstore.basenameOf(line);
-        if (name.len == 0) continue;
-        if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
+        // The row is still `ls -b` text here. Unescaping it before the split
+        // put a name carrying a newline back across a line boundary, so one
+        // leftover became two rows joined onto the root, and both halves are
+        // plain ident bytes. Splitting first and unescaping the name here is
+        // what keeps the row count the way `ls -1b` printed it.
+        const escaped_name = pstore.basenameOf(line);
+        if (escaped_name.len == 0) continue;
+        if (std.mem.eql(u8, escaped_name, ".") or std.mem.eql(u8, escaped_name, "..")) continue;
+        // Room for the unescaped name, which is never longer than the escaped
+        // one: every `ls -b` escape is at least two bytes and stands for one.
+        if (used + escaped_name.len > path_store.len) {
+            dropped.* += 1;
+            continue;
+        }
+        const name_start = used;
+        @memcpy(path_store[used..][0..escaped_name.len], escaped_name);
+        used += escaped_name.len;
+        const name_len = pstore.unescapeLsB(path_store[name_start..used]);
+        const name = path_store[name_start..][0..name_len];
+        // `isSafeIdent` now sees the real bytes, so a name holding a newline,
+        // a backslash, or any other escaped byte is dropped here rather than
+        // becoming an `rm -rf` row for a path that does not exist.
         if (!jsonbuf.isSafeIdent(name)) continue;
         if (isSystemLeftoverName(name)) continue;
         if (pstore.nameInList(name, keep)) continue;
@@ -438,11 +457,11 @@ pub fn query(comptime spec: Spec, present: i32) i32 {
     var hits: [256]Orphan = undefined;
     var paths: [32768]u8 = undefined;
     var store_dropped: usize = 0;
-    // `ls -b` escaping comes off before any name is read out of the listing:
-    // the escaping is what holds a name carrying a newline on one line, and
-    // every reader below splits on newline, so the two go together.
-    const exec_len = pstore.unescapeLsB(exec_buf[0..@intCast(nexec)]);
-    var n = parseListing(exec_buf[0..exec_len], spec.keep, spec.root, &hits, &paths, spec.allow, &store_dropped);
+    // The listing is handed to parseListing with `ls -b` escaping still on it.
+    // Unescaping it here instead would put a name holding a newline back across
+    // a line boundary before the split, which is the bug parseListing now
+    // handles: it splits first and unescapes each name as it reads it.
+    var n = parseListing(exec_buf[0..@intCast(nexec)], spec.keep, spec.root, &hits, &paths, spec.allow, &store_dropped);
     note.addTruncatedRows(n, hits.len);
     note.addDroppedRows(store_dropped);
     return note.renderShrinking(WithSpec{ .spec = spec }, &hits, &n);
@@ -583,17 +602,12 @@ test "parseListing keeps utf8 leftover names" {
 }
 
 test "a name holding a newline is one row, not two" {
-    // What `ls -1b` prints for a directory whose one entry is called
-    // `we<LF>ird`: the escaping keeps it on one line, so the reader below sees
-    // one name. With plain `ls -1` the same directory listed as the two lines
-    // `we` and `ird`, both passed `isSafeIdent`, and both were joined onto the
-    // root, so one leftover became two `rm -rf` rows naming paths that are not
-    // there. The unescaped name holds a newline, so `isSafeIdent` refuses it
-    // and the row is dropped instead.
-    var buf: [64]u8 = undefined;
-    @memcpy(buf[0..9], "we\\nird\n");
-    const listing = buf[0..pstore.unescapeLsB(buf[0..9])];
-    try std.testing.expectEqualStrings("we\nird\n", listing);
+    // `we` and `ird`, both passed `isSafeIdent` and were joined onto the root,
+    // so one leftover became two `rm -rf` rows naming paths that do not exist.
+    // The listing is handed over still escaped, exactly as the reader does:
+    // the row is one line, and unescaping the name inside it is what exposes
+    // the newline to `isSafeIdent`, which drops the row.
+    const listing = "we\\nird\n";
 
     var hits: [4]Orphan = undefined;
     var paths: [512]u8 = undefined;
@@ -601,22 +615,29 @@ test "a name holding a newline is one row, not two" {
     const n = parseListing(listing, "", "/home/user/.config", &hits, &paths, "", &dropped);
     try std.testing.expectEqual(@as(usize, 0), n);
 
+    // The escaped form is what the name unescapes to, kept honest here rather
+    // than only through `parseListing`: `\n` is the two bytes `ls -b` writes
+    // for one LF, and a listing carrying the real LF is two rows again.
+    var buf: [64]u8 = undefined;
+    @memcpy(buf[0..8], "we\\nird\n");
+    try std.testing.expectEqualStrings("we\nird\n", buf[0..pstore.unescapeLsB(buf[0..8])]);
+
     // A name whose only escape is a backslash is a real entry too, and
     // `isSafeIdent` refuses the backslash, so it is dropped rather than
     // turned into a path that names something else.
-    var buf2: [32]u8 = undefined;
-    @memcpy(buf2[0..6], "a\\\\b\n");
-    const listing2 = buf2[0..pstore.unescapeLsB(buf2[0..6])];
-    try std.testing.expectEqualStrings("a\\b\n", listing2);
-    const n2 = parseListing(listing2, "", "/home/user/.config", &hits, &paths, "", &dropped);
+    const n2 = parseListing("a\\\\b\n", "", "/home/user/.config", &hits, &paths, "", &dropped);
     try std.testing.expectEqual(@as(usize, 0), n2);
+
+    var buf2: [32]u8 = undefined;
+    @memcpy(buf2[0..5], "a\\\\b\n");
+    try std.testing.expectEqualStrings("a\\b\n", buf2[0..pstore.unescapeLsB(buf2[0..5])]);
 
     // The names around it are untouched: escaping only ever shrinks, so a
     // listing with nothing to unescape is the text `ls -1` printed.
     var buf3: [64]u8 = undefined;
-    @memcpy(buf3[0..20], "gone-app\nplain-name\n\n");
-    try std.testing.expectEqual(@as(usize, 20), pstore.unescapeLsB(buf3[0..20]));
-    const n3 = parseListing(buf3[0..20], "", "/home/user/.config", &hits, &paths, "", &dropped);
+    @memcpy(buf3[0..21], "gone-app\nplain-name\n\n");
+    try std.testing.expectEqual(@as(usize, 21), pstore.unescapeLsB(buf3[0..21]));
+    const n3 = parseListing(buf3[0..21], "", "/home/user/.config", &hits, &paths, "", &dropped);
     try std.testing.expectEqual(@as(usize, 2), n3);
     try std.testing.expectEqualStrings("gone-app", hits[0].name);
     try std.testing.expectEqualStrings("/home/user/.config/gone-app", hits[0].path);
@@ -820,10 +841,18 @@ fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
         const n = parseListing(text, spec.keep, spec.root, &hits, &paths, spec.allow, &dropped);
         try std.testing.expect(n <= hits.len);
         for (hits[0..n]) |hit| {
-            // The name is a slice of the listing, never a copy the parser built.
-            try std.testing.expect(sliceInside(text, hit.name));
+            // The name is a copy in the store, unescaped from the row it was
+            // read out of. It is not a slice of the listing: an `ls -b` name
+            // holding an escape has to be decoded before anything can judge
+            // it, and the decoded bytes do not exist in the listing text.
+            // The store is what both the name and the joined path live in, so
+            // that is the buffer each is checked against.
+            try std.testing.expect(sliceInside(&paths, hit.name));
             // A leftover that reaches the script must survive shell quoting
             // unchanged, so nothing the parser kept can carry a metacharacter.
+            // This is the assertion that catches an escape left undecoded: the
+            // backslash of `\n` is not an ident byte, so a name the parser
+            // failed to unescape is refused here.
             try std.testing.expect(jsonbuf.isSafeIdent(hit.name));
             try std.testing.expect(!isSystemLeftoverName(hit.name));
             try std.testing.expect(!pstore.nameInList(hit.name, spec.keep));

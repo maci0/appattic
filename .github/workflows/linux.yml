@@ -169,6 +169,17 @@ jobs:
           . scripts/swift-build.sh
           appattic_swift_build debug --product appattic
         if: steps.swift_test.outcome == 'success'
+      - name: CLI contract
+        # The binary this job already built, checked for exit codes and which
+        # stream each result lands on. It ran only in scripts/check.sh, so a
+        # stream mix-up or a wrong exit code shipped green here and failed
+        # downstream for whoever scripted against the CLI; the AppImage release
+        # gates on scripts/test.sh alone, so nothing else in CI caught it
+        # either. The script is hermetic (temporary HOME and XDG_* tree) and
+        # runs no command that walks the filesystem, so it is safe next to the
+        # rest of this job.
+        if: steps.swift_test.outcome == 'success'
+        run: bash scripts/cli-contract.sh
       - name: Reproducible artifacts
         # The claim the AppImage release ships on: the same source built twice
         # from differently named directories, under a different timezone and

@@ -2,7 +2,7 @@
 # Build a portable AppImage for the Qt 6 Linux UI (appattic-qt).
 # Bundles Qt via linuxdeploy-plugin-qt, libwasmtime.so (usr/lib, $ORIGIN/../lib), and core/out WASM.
 # Usage: bash scripts/linux-appimage.sh
-#   ARCH=aarch64 bash scripts/linux-appimage.sh   # override host arch for tool names
+#   ARCH=x86_64 bash scripts/linux-appimage.sh   # must name the host arch; see --help
 # Requires Linux, Qt 6 dev, zig, wasmtime (scripts/linux-deps.sh). Exit 3 on Darwin.
 set -euo pipefail
 
@@ -19,8 +19,11 @@ for arg in "$@"; do
             cat <<'EOF'
 Usage: bash scripts/linux-appimage.sh
 
-  ARCH=aarch64 bash scripts/linux-appimage.sh   # override host arch for tool names
   Requires Linux, Qt 6, zig, wasmtime (scripts/linux-deps.sh). Exit 3 on Darwin.
+
+  ARCH must name this host's arch. It selects the linuxdeploy/appimagetool
+  downloads, and there is no cross-compile here: the AppImage payload is the
+  host build. An ARCH that disagrees with uname -m is an error.
 EOF
             exit 0
             ;;
@@ -73,7 +76,20 @@ case "$APPIMAGE_ARCH" in
         ;;
 esac
 if [[ "$APPIMAGE_ARCH" != "$HOST_ARCH" ]]; then
-    echo "note: ARCH=$APPIMAGE_ARCH overrides host $HOST_ARCH for tool downloads only"
+    # ARCH never cross-compiles: it only names which linuxdeploy/appimagetool
+    # builds to download, and the payload is always this host's own
+    # `cmake --build`. Overriding it to another arch therefore downloads tools
+    # this machine cannot execute (an exec format error part-way through the
+    # bundle), and on a host that can run them it labels a host-arch AppImage
+    # with the other arch's name in dist/ and in the embedded update URL. Both
+    # are worse than stopping, so an override that does not name this host is
+    # an error: build on the arch you ship, or run the job on a runner of that
+    # arch.
+    echo "error: ARCH=$APPIMAGE_ARCH does not match host arch $HOST_ARCH" >&2
+    echo "       ARCH names the linuxdeploy/appimagetool downloads, not a" >&2
+    echo "       cross-compile target: the payload is the host build." >&2
+    echo "       Build on the arch you ship, or move the job to a runner of that arch." >&2
+    exit 2
 fi
 
 DIST="$ROOT/dist"
