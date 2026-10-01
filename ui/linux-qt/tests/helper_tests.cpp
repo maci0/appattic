@@ -838,6 +838,43 @@ static int verifyHelpers() {
             std::fprintf(stderr, "markOwnedPathLeftovers: an existing keep must not change\n");
             return 1;
         }
+
+        // A shadow overlay is a leftover whose name an installed stem can
+        // match, so the isShadowFinding guard is the only thing keeping it out
+        // of this pass. Marking it "keep" is not cosmetic: "keep" is in
+        // leftoverStatusBlocksCleanup and "shadow" is not, so a marked overlay
+        // stops being removable and the user loses the one cleanup the row
+        // exists for (remove the overlay, keep the packaged copy). The same
+        // holds for a row carrying a packagedPath, the other spelling
+        // isShadowFinding answers to.
+        QVector<Finding> shadowRows = rows;
+        shadowRows[0].kind = QStringLiteral("shadow");
+        shadowRows[0].status = QStringLiteral("shadow");
+        shadowRows[0].packagedPath = QStringLiteral("/usr/bin/firefox");
+        markOwnedPathLeftovers(shadowRows, desks);
+        if (shadowRows.at(0).status != QLatin1String("shadow")) {
+            std::fprintf(stderr,
+                "markOwnedPathLeftovers: a shadow overlay must keep its status, got %s\n",
+                qPrintable(shadowRows.at(0).status));
+            return 1;
+        }
+        if (leftoverStatusBlocksCleanup(shadowRows.at(0).status)) {
+            std::fprintf(stderr,
+                "markOwnedPathLeftovers: the overlay row is no longer removable\n");
+            return 1;
+        }
+        // A shadow row and a plain row of the same shape together, so the guard
+        // above is about the shadow row's own kind and not about this leftover
+        // name or about position in the vector.
+        QVector<Finding> shadowAndPlain = rows;
+        shadowAndPlain[0].kind = QStringLiteral("shadow");
+        shadowAndPlain[0].status = QStringLiteral("shadow");
+        markOwnedPathLeftovers(shadowAndPlain, desks);
+        if (shadowAndPlain.at(0).status != QLatin1String("shadow")
+            || shadowAndPlain.at(1).status != QLatin1String("orphaned")) {
+            std::fprintf(stderr, "markOwnedPathLeftovers: the shadow guard skipped the wrong row\n");
+            return 1;
+        }
     }
     if (matchPage(leftover, Page::DiskUsage) || !matchPage(leftover, Page::Leftovers)) {
         std::fprintf(stderr, "disk: leftover must not appear on Disk Usage\n");
