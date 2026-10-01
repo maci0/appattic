@@ -392,6 +392,27 @@ if [[ ! -f "$UPDATE_ZSYNC" ]]; then
     exit 1
 fi
 
+# What CMake compiled the shipped binary with, read out of the cache the
+# configure above wrote. CMAKE_CXX_COMPILER is the one the shipped binary is
+# linked from: appattic-qt is CXX, and the C core objects are compiled by the C
+# compiler the same cache names, so both are recorded. An entry the cache does
+# not carry says so: a buildinfo line that guessed a compiler is worse than one
+# that admits it does not know, because the whole file exists so a rebuild can
+# be attempted from it.
+cmake_toolchain_field() {
+    local field="$1" value=""
+    if [[ -r "$BUILD_DIR/CMakeCache.txt" ]]; then
+        value="$(sed -n "s/^${field}:[^=]*=//p" "$BUILD_DIR/CMakeCache.txt" | head -n 1)"
+    fi
+    if [[ -n "$value" && -x "$value" ]]; then
+        "$value" --version 2>/dev/null | head -n 1
+    else
+        printf 'unknown (%s not in CMakeCache.txt)\n' "$field"
+    fi
+}
+cmake_toolchain_cc() { cmake_toolchain_field CMAKE_C_COMPILER; }
+cmake_toolchain_cxx() { cmake_toolchain_field CMAKE_CXX_COMPILER; }
+
 {
     echo "format: appattic-buildinfo/1"
     echo "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
@@ -400,6 +421,16 @@ fi
     echo "zig: $(zig version)"
     echo "cmake: $(cmake --version | head -n 1)"
     echo "cc: $("${CC:-cc}" --version | head -n 1)"
+    # The compiler lines below are the ones CMake actually compiled the shipped
+    # binary with, read out of the cache it wrote above. The "cc:" line is the
+    # cc on PATH, which CMake uses only when nothing selects another one: with
+    # CC or CXX set in the environment, or clang as the first compiler on
+    # PATH, CMake can build with a different compiler than this manifest names,
+    # and a buildinfo that records the wrong compiler cannot be used to rebuild
+    # the artifact. An unreadable entry says so rather than printing the name
+    # of a tool that was never run.
+    echo "cmake-cc: $(cmake_toolchain_cc)"
+    echo "cmake-cxx: $(cmake_toolchain_cxx)"
     echo "qt: $($QMAKE -query QT_VERSION 2>/dev/null || printf unknown)"
 } >"${OUT}.buildinfo"
 
