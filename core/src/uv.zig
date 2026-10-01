@@ -4,6 +4,10 @@ const jsonbuf = @import("jsonbuf.zig");
 const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "uv";
 const query_cmd = "uv tool list";
@@ -140,4 +144,76 @@ test "plugin_query missing is empty findings" {
     try std.testing.expect(jsonbuf.isValidJson(json));
     try std.testing.expect(std.mem.indexOf(u8, json, "\"findings\":[]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "uv missing") != null);
+}
+
+// Seeds are what `uv tool list` prints: the tool rows with their leading `-`
+// entry lines, blank lines and trailing whitespace, a bare runtime name, then
+// the ways this listing arrives broken: a name with no version, a version that
+// is just `v`, extra tokens, names the command guard has to reject, and the
+// bytes a directory entry on disk can carry (NUL, C0, a BOM, invalid UTF-8).
+const fuzz_uv_rows = packFuzzSlice(
+    \\ruff v0.6.8
+    \\- ruff
+    \\httpie v3.2.2
+    \\- http
+    \\
+);
+const fuzz_uv_no_version = packFuzzSlice("ruff\nruffv\n\n   \nv\nv\nx v0\n");
+const fuzz_uv_edges = packFuzzSlice(
+    \\ruff v0.6.8 extra tokens
+    \\  httpie   v3.2.2
+    \\deno v1.0
+    \\@scope/tool v1.2.3
+    \\@scope v1.0
+);
+const fuzz_uv_unsafe = packFuzzSlice(
+    \\ruff;rm -rf / v1.0
+    \\../../etc v1.0
+    \\-x v1.0
+    \\$(id) v1.0
+);
+const fuzz_uv_junk = packFuzzSlice("\x00\xff\r\n \t\nv\rv\n \xef\xbb\xbfrust v1");
+const fuzz_uv_empty = packFuzzSlice("");
+
+test "fuzz parseUvToolList" {
+    try std.testing.fuzz({}, fuzzUvToolList, .{ .corpus = &.{
+        &fuzz_uv_rows,
+        &fuzz_uv_no_version,
+        &fuzz_uv_edges,
+        &fuzz_uv_unsafe,
+        &fuzz_uv_junk,
+        &fuzz_uv_empty,
+    } });
+}
+
+/// The name of a reported row is spliced into a `uv tool uninstall <name>`
+/// line, so it has to pass the package-name rule and to be a slice of this
+/// input rather than a dead buffer. The version is the second token with one
+/// leading `v` removed, so it is a slice of the input too, and a token shorter
+/// than `v0` is not a version at all, so no reported row carries an empty one.
+/// Rows are read one line at a time, so reading the same text twice has to give
+/// the same rows.
+fn fuzzUvToolList(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var buf: [32]UvTool = undefined;
+    const n = parseUvToolList(text, &buf);
+    try std.testing.expect(n <= buf.len);
+    for (buf[0..n]) |tool| {
+        try std.testing.expect(jsonbuf.isSafePkgName(tool.name));
+        try std.testing.expect(sliceInside(text, tool.name));
+        try std.testing.expect(sliceInside(text, tool.version));
+        // A reported row always has a version: the parser skips a second token
+        // shorter than `v0`.
+        try std.testing.expect(tool.version.len > 0);
+    }
+
+    var again: [32]UvTool = undefined;
+    const n2 = parseUvToolList(text, &again);
+    try std.testing.expectEqual(n, n2);
+    for (buf[0..n], again[0..n2]) |a, b| {
+        try std.testing.expect(std.mem.eql(u8, a.name, b.name));
+        try std.testing.expect(std.mem.eql(u8, a.version, b.version));
+    }
 }

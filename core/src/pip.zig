@@ -5,6 +5,10 @@ const guard = @import("guarded_remove.zig");
 const querynote = @import("querynote.zig");
 const jsonscan = @import("jsonscan.zig");
 const host_exec = @import("host_exec.zig");
+const fuzzsupport = @import("fuzzsupport.zig");
+
+const sliceInside = fuzzsupport.sliceInside;
+const packFuzzSlice = fuzzsupport.packFuzzSlice;
 
 const plugin_id = "pip";
 const list_cmds = [_][]const u8{
@@ -274,4 +278,86 @@ test "parsePipOutdatedJSON does not carry a field across elements" {
     try std.testing.expectEqualStrings("b", buf[1].name);
     try std.testing.expectEqualStrings("", buf[1].current);
     try std.testing.expectEqualStrings("3.0", buf[1].latest);
+}
+
+// Seeds are what `pip list --user --outdated --format=json` prints: a compact
+// row set, the pretty-printed form pip falls back to when the listing is long,
+// an element that leaves a field out (the shape that proved the per-element
+// reset), and one carrying a `latest_filetype` the parser skips. The rest are
+// the ways this manifest arrives broken: cut mid-string, an element that is not
+// an object, a document that is not an array, escapes, and names the command
+// guard has to reject.
+const fuzz_pip_rows = packFuzzSlice(
+    \\[{"name":"requests","version":"2.28.1","latest_version":"2.32.3","latest_filetype":"wheel"},{"name":"urllib3","version":"1.26.18","latest_version":"2.2.2"}]
+);
+const fuzz_pip_pretty = packFuzzSlice(
+    \\[
+    \\  {"name": "backports.zoneinfo", "version": "0.2.1", "latest_version": "0.2.2"},
+    \\  {"name": "zope.interface", "version": "5.0", "latest_version": "6.0", "latest_filetype": "sdist"}
+    \\]
+);
+const fuzz_pip_missing_field = packFuzzSlice(
+    \\[{"name":"a","version":"1.0","latest_version":"2.0"},{"name":"b","latest_version":"3.0"},{"name":"c","version":"4.0"}]
+);
+const fuzz_pip_truncated = packFuzzSlice(
+    \\[{"name":"requests","version":"2.28.1","latest_version":"2.32
+);
+const fuzz_pip_unsafe = packFuzzSlice(
+    \\[{"name":"requests;rm -rf /","version":"1","latest_version":"2"},{"name":"../../etc/passwd","version":"1"},{"name":"-x","version":"1"}]
+);
+const fuzz_pip_shapes = packFuzzSlice(
+    \\{"name":"not-an-array"}
+    \\[]
+    \\[1,2,3]
+    \\[null,"str",[{"name":"nested"}],{"name":123}]
+);
+const fuzz_pip_escapes = packFuzzSlice("[{\"name\":\"a\\\"b\",\"version\":\"1\\n2\"}]");
+const fuzz_pip_junk = packFuzzSlice("not json [ { \x00\xff\r\n \t ]");
+const fuzz_pip_empty = packFuzzSlice("");
+
+test "fuzz parsePipOutdatedJSON" {
+    try std.testing.fuzz({}, fuzzPipOutdatedJson, .{ .corpus = &.{
+        &fuzz_pip_rows,
+        &fuzz_pip_pretty,
+        &fuzz_pip_missing_field,
+        &fuzz_pip_truncated,
+        &fuzz_pip_unsafe,
+        &fuzz_pip_shapes,
+        &fuzz_pip_escapes,
+        &fuzz_pip_junk,
+        &fuzz_pip_empty,
+    } });
+}
+
+/// Every field of a reported row reaches the result JSON, and the name also
+/// reaches a `pip uninstall -y --user <name>` line, so a row has to carry a
+/// name the command ident guard accepts, and every field has to be a slice of
+/// this input rather than a rebuilt or a dead buffer. Elements are read one at
+/// a time, so a value nested inside one must not be read as the next element's
+/// field: reading the same text twice has to give the same rows.
+fn fuzzPipOutdatedJson(_: void, smith: *std.testing.Smith) !void {
+    var raw: [4096]u8 = undefined;
+    const text = raw[0..smith.slice(&raw)];
+
+    var buf: [32]PipOutdated = undefined;
+    const n = parsePipOutdatedJSON(text, &buf);
+    try std.testing.expect(n <= buf.len);
+    for (buf[0..n]) |row| {
+        try std.testing.expect(jsonbuf.isSafeCmdIdent(row.name));
+        try std.testing.expect(sliceInside(text, row.name));
+        try std.testing.expect(sliceInside(text, row.current));
+        try std.testing.expect(sliceInside(text, row.latest));
+        // A field is a whole string token, so none keeps the quoting around it.
+        try std.testing.expect(std.mem.indexOfScalar(u8, row.name, '"') == null);
+        try std.testing.expect(std.mem.indexOfScalar(u8, row.name, '\\') == null);
+    }
+
+    var again: [32]PipOutdated = undefined;
+    const n2 = parsePipOutdatedJSON(text, &again);
+    try std.testing.expectEqual(n, n2);
+    for (buf[0..n], again[0..n2]) |a, b| {
+        try std.testing.expect(std.mem.eql(u8, a.name, b.name));
+        try std.testing.expect(std.mem.eql(u8, a.current, b.current));
+        try std.testing.expect(std.mem.eql(u8, a.latest, b.latest));
+    }
 }
