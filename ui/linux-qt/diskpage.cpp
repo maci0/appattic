@@ -18,6 +18,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
+#include <QHash>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -216,11 +217,21 @@ public:
     /// finished. Freed with `delete`, which takes the children.
     DiskNode *streamRoot = nullptr;
     int streamedSegments = 0;
+    /// Running totals of what has streamed in, so a `dirDone` event adds its
+    /// own folder instead of re-reading every row already there. Reset with the
+    /// rest of the streaming state in `startScan`.
+    StreamTotals streamTotals;
+    /// The streamed folder each finished path already has a node for, so a
+    /// second `dirDone` for the same folder updates it rather than scanning the
+    /// whole segment list for a matching path. The key is the path as the walk
+    /// spells it, the same string the linear search compared.
+    QHash<QString, DiskNode *> streamNodes;
 
     /// Frees the placeholder tree; the segment count stays for the gate.
     void dropStreamRoot() {
         delete streamRoot;
         streamRoot = nullptr;
+        streamNodes.clear();
     }
 
     DiskNode *nodeFromItem(QTreeWidgetItem *it) const {
@@ -590,14 +601,12 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 }
                 top->insertChild(at, item);
                 d->streamedRows += 1;
-                qint64 sumApparent = 0;
-                qint64 sumAllocated = 0;
-                qint64 sumItems = 0;
-                for (int i = 0; i < top->childCount(); ++i) {
-                    sumApparent = addSatBytes(sumApparent, top->child(i)->data(1, Qt::UserRole).toLongLong());
-                    sumAllocated = addSatBytes(sumAllocated, top->child(i)->data(2, Qt::UserRole).toLongLong());
-                    sumItems = addSatBytes(sumItems, top->child(i)->data(3, Qt::UserRole).toLongLong());
-                }
+                // The totals are running, not recomputed: every row this
+                // stream has shown is counted once, when it arrived.
+                d->streamTotals.add(apparent, allocated, items);
+                const qint64 sumApparent = d->streamTotals.apparent;
+                const qint64 sumAllocated = d->streamTotals.allocated;
+                const qint64 sumItems = d->streamTotals.items;
                 // Placeholder root row: the totals of what has arrived so far.
                 // `diskContentsLabel` counts the node itself, and the walk
                 // counts the scan root as one entry, so the streamed total
@@ -615,18 +624,13 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                     d->streamRoot->path = d->scanPath;
                     d->streamRoot->isDir = true;
                 }
-                DiskNode *kid = nullptr;
-                for (DiskNode *existing : d->streamRoot->children) {
-                    if (existing->path == path) {
-                        kid = existing;
-                        break;
-                    }
-                }
+                DiskNode *kid = d->streamNodes.value(path, nullptr);
                 if (!kid) {
                     kid = new DiskNode;
                     kid->path = path;
                     kid->isDir = true;
                     d->streamRoot->children.append(kid);
+                    d->streamNodes.insert(path, kid);
                 }
                 kid->name = name;
                 kid->apparent = apparent;
@@ -803,6 +807,7 @@ void DiskPage::startScan(const QString &path) {
     d->streamedRows = 0;
     d->streamedSegments = 0;
     d->streamedBeforeFinish = false;
+    d->streamTotals = StreamTotals();
     d->dropStreamRoot();
     showScan();
     d->progress->show();

@@ -1669,6 +1669,110 @@ static int checkRootDirDoneTotals() {
     return 0;
 }
 
+/// The disk page draws each top-level folder as the walk finishes it and totals
+/// what has arrived on the placeholder root row. Those totals used to be
+/// re-read off the rows already drawn, which is the same arithmetic this
+/// accumulation does and is what the row is supposed to show, so both are run
+/// over the same folders here and have to agree at every step: after each add,
+/// and at the end.
+static int checkStreamTotals() {
+    // Real walk numbers, so a rounding or unit slip in the walk would show up
+    // here rather than hiding behind round fixtures.
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "stream totals: temp dir failed\n");
+        return 1;
+    }
+    const int dirCount = 24;
+    for (int i = 0; i < dirCount; ++i) {
+        const QString sub = QStringLiteral("%1/d%2").arg(tmp.path()).arg(i);
+        if (!QDir().mkpath(sub)) {
+            std::fprintf(stderr, "stream totals: mkpath %d failed\n", i);
+            return 1;
+        }
+        if (writeFile(sub + QStringLiteral("/f.bin"), QByteArray(1000 * (i + 1), 'x'))) {
+            std::fprintf(stderr, "stream totals: write %d failed\n", i);
+            return 1;
+        }
+    }
+    DiskNode *tree = scanDiskTree(QDir::cleanPath(tmp.path()), DiskScanOptions());
+    if (!tree || tree->unreadable) {
+        std::fprintf(stderr, "stream totals: scan produced no tree\n");
+        delete tree;
+        return 1;
+    }
+
+    // The folders the stream would report, in the order the walk reports them,
+    // each with the totals it hands the page.
+    struct Row { qint64 apparent; qint64 allocated; qint64 items; };
+    QVector<Row> rows;
+    for (int i = 0; i < tree->children.size(); ++i) {
+        const DiskNode *kid = tree->children[i];
+        rows.append(Row{kid->apparent, kid->allocated, kid->items});
+    }
+    if (rows.isEmpty()) {
+        std::fprintf(stderr, "stream totals: walk reported no top-level folders\n");
+        delete tree;
+        return 1;
+    }
+
+    StreamTotals running;
+    qint64 wantApparent = 0;
+    qint64 wantAllocated = 0;
+    qint64 wantItems = 0;
+    for (int i = 0; i < rows.size(); ++i) {
+        running.add(rows[i].apparent, rows[i].allocated, rows[i].items);
+        // What re-reading every row drawn so far would have produced.
+        wantApparent = addSatBytes(wantApparent, rows[i].apparent);
+        wantAllocated = addSatBytes(wantAllocated, rows[i].allocated);
+        wantItems = addSatBytes(wantItems, rows[i].items);
+        if (running.apparent != wantApparent
+            || running.allocated != wantAllocated
+            || running.items != wantItems) {
+            std::fprintf(stderr,
+                "stream totals: after %d folders got (%lld,%lld,%lld), the rows total (%lld,%lld,%lld)\n",
+                i + 1,
+                static_cast<long long>(running.apparent), static_cast<long long>(running.allocated),
+                static_cast<long long>(running.items),
+                static_cast<long long>(wantApparent), static_cast<long long>(wantAllocated),
+                static_cast<long long>(wantItems));
+            delete tree;
+            return 1;
+        }
+    }
+    // And the whole stream against an independent total over every folder,
+    // which is what re-reading all the drawn rows would have produced. Not
+    // against the root node: its `apparent` carries the scan root's own inode
+    // size, and the placeholder row sums the folders under it, so the two
+    // differ by exactly that and the row has always shown the folders.
+    StreamTotals want;
+    for (int i = 0; i < rows.size(); ++i) want.add(rows[i].apparent, rows[i].allocated, rows[i].items);
+    if (running.apparent != want.apparent || running.allocated != want.allocated
+        || running.items != want.items) {
+        std::fprintf(stderr, "stream totals: streamed (%lld,%lld,%lld), the folders total (%lld,%lld,%lld)\n",
+            static_cast<long long>(running.apparent), static_cast<long long>(running.allocated),
+            static_cast<long long>(running.items),
+            static_cast<long long>(want.apparent), static_cast<long long>(want.allocated),
+            static_cast<long long>(want.items));
+        delete tree;
+        return 1;
+    }
+    // Every folder has to have reached the total, or a row dropped out of the
+    // stream and the placeholder row would sit under the truth with no other
+    // sign of it.
+    qint64 folderItems = 0;
+    for (int i = 0; i < rows.size(); ++i) folderItems = addSatBytes(folderItems, rows[i].items);
+    if (running.items != folderItems || dirCount > rows.size()) {
+        std::fprintf(stderr, "stream totals: %d folders streamed for %d walked\n",
+            int(rows.size()), dirCount);
+        delete tree;
+        return 1;
+    }
+    delete tree;
+    std::fprintf(stdout, "stream totals: ok (%d folders)\n", int(rows.size()));
+    return 0;
+}
+
 /// A wide tree must not sit on one descriptor per directory it defers: the
 /// deferred fds are all live until the worker phase starts, so an uncapped
 /// deferral holds hundreds at once on a home folder and runs into the process
@@ -2890,7 +2994,7 @@ int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     const int checks[] = {
         verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
-        checkRootDirDoneTotals(),
+        checkRootDirDoneTotals(), checkStreamTotals(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
         checkSettingsBackup(), checkSettingsBackupRepeatedSave(), checkDurableWrite(),
         checkDurableWriteNonASCIIPath(),

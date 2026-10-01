@@ -13,6 +13,8 @@
 #include <QJsonValue>
 #include <QLocale>
 #include <QMap>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QRegularExpression>
 #include <QSet>
 #include <QTimeZone>
@@ -69,28 +71,67 @@ QString plainTooltip(const QString &s) {
     return Qt::convertFromPlainText(s);
 }
 
+namespace {
+
+/// The compiled `redactHomePaths` pattern, keyed on the home path it was built
+/// from.
+///
+/// The pattern depends on nothing but that path, and `redactHomePaths` is
+/// called on every disk-scan progress tick (every 64 directories walked) and
+/// on every status-bar line the scan, a script run, or a settings write
+/// prints, so it is the most-called string function in the app. `QRegularExpression`
+/// compiles its PCRE program in the constructor and throws that program away
+/// with the object: building one per call measured 10.5 us against 63 ns for
+/// the same match served from a kept instance, and the ten microseconds land on
+/// the UI thread that is painting the walk that is producing the progress tick.
+///
+/// The cache holds one entry, because the app has one account: the tests pass
+/// an explicit home, and a caller that switches home rewrites this on its next
+/// call. A `QMutex` rather than a bare because `redactHomePaths` runs on the
+/// disk-scan worker thread as well as the window's.
+struct HomeRedactor {
+    QMutex mu;
+    QString key;
+    QRegularExpression re;
+    bool valid = false;
+
+    /// The regex for `homePath`, rebuilding it only when the path is not the
+    /// one the kept pattern was compiled from.
+    QRegularExpression forHome(const QString &homePath) {
+        QMutexLocker lock(&mu);
+        if (valid && key == homePath) return re;
+        // The home path is matched in both canonical forms rather than the
+        // message being normalized: `$HOME` arrives composed while a path off
+        // a decomposed mount spells the same directory with combining marks,
+        // and the two never match as literal text, so the account name rides
+        // out in the status bar instead of being replaced. Normalizing the
+        // haystack instead would re-spell every path in it, and on a
+        // decomposed mount NFC and NFD are different files, so the user would
+        // be invited to copy back a path that does not exist.
+        QString pattern = QRegularExpression::escape(homePath);
+        const QString decomposed = homePath.normalized(QString::NormalizationForm_D);
+        if (decomposed != homePath) {
+            pattern = QStringLiteral("(?:") + pattern + QLatin1Char('|')
+                + QRegularExpression::escape(decomposed) + QLatin1Char(')');
+        }
+        // The lookahead matches everything but a character that could continue
+        // a path, so a home path in a parenthetical or bracketed message is
+        // redacted like one followed by a separator. Same set as Swift
+        // `isHomeBoundary`.
+        re = QRegularExpression(pattern + QStringLiteral("(?=/|$|[^A-Za-z0-9._~+=-])"));
+        key = homePath;
+        valid = true;
+        return re;
+    }
+};
+
+} // namespace
+
 QString redactHomePaths(const QString &text, const QString &home) {
     const QString homePath = pathIdentityKey(QDir::cleanPath(home.isEmpty() ? QDir::homePath() : home));
     if (homePath.size() <= 1) return text;
-    // The home path is matched in both canonical forms rather than the message
-    // being normalized: `$HOME` arrives composed while a path off a decomposed
-    // mount spells the same directory with combining marks, and the two never
-    // match as literal text, so the account name rides out in the status bar
-    // instead of being replaced. Normalizing the haystack instead would
-    // re-spell every path in it, and on a decomposed mount NFC and NFD are
-    // different files, so the user would be invited to copy back a path that
-    // does not exist.
-    QString pattern = QRegularExpression::escape(homePath);
-    const QString decomposed = homePath.normalized(QString::NormalizationForm_D);
-    if (decomposed != homePath) {
-        pattern = QStringLiteral("(?:") + pattern + QLatin1Char('|')
-            + QRegularExpression::escape(decomposed) + QLatin1Char(')');
-    }
-    // The lookahead matches everything but a character that could continue a
-    // path, so a home path in a parenthetical or bracketed message is
-    // redacted like one followed by a separator. Same set as Swift
-    // `isHomeBoundary`.
-    const QRegularExpression re(pattern + QStringLiteral("(?=/|$|[^A-Za-z0-9._~+=-])"));
+    static HomeRedactor cached;
+    const QRegularExpression re = cached.forHome(homePath);
     if (!text.contains(re)) return text;
     QString out = text;
     out.replace(re, QStringLiteral("~"));

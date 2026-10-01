@@ -1592,7 +1592,15 @@ private:
         return l;
     }
 
-    QVector<Finding> visibleRows(Page page) const {
+    /// The rows of `page` the list shows, in the order it shows them. Every
+    /// predicate `visibleRows` applies is here, so a caller that needs the same
+    /// set can ask for it without re-deriving them.
+    ///
+    /// `sorted` is off for callers that only count or test membership in the
+    /// set: sorting copies a `Finding` per comparison and collates names, which
+    /// buys an order those callers throw away. The sort is the expensive half
+    /// of this function, and it used to run on every checkbox toggle.
+    QVector<Finding> filteredRows(Page page, bool sorted) const {
         QVector<Finding> rows;
         const QString q = searchFold(m_search->text().trimmed());
         const QString filt = m_filter->currentData().toString();
@@ -1607,6 +1615,7 @@ private:
             if (needQ && !searchHaystack(f).contains(q)) continue;
             rows.push_back(f);
         }
+        if (!sorted) return rows;
         // Largest first, then a total order. Size alone is not one: every
         // 4 KB directory and every unmeasured row carries the same bytes and
         // `std::sort` is not stable, so the same scan filled the table in a
@@ -1632,6 +1641,10 @@ private:
             return a.uid() < b.uid();
         });
         return rows;
+    }
+
+    QVector<Finding> visibleRows(Page page) const {
+        return filteredRows(page, true);
     }
 
     int countPage(Page page) const {
@@ -2628,8 +2641,15 @@ private:
 
     void refreshMarkChrome() {
         if (m_selectAll) {
+            // The select-all label is a question about mark state over the page's
+            // rows, not about their order, so it reads the unsorted filter
+            // rather than `visibleRows`. Every checkbox toggle reaches here, and
+            // `visibleRows` copies and collator-sorts every finding on the page
+            // to answer a question the sort cannot change. The row set is the
+            // one `visibleRows` builds, same predicates and same search.
+            const QVector<Finding> rows = filteredRows(currentPage(), false);
             m_selectAll->setText(
-                allMarked(currentPage(), visibleRows(currentPage()))
+                allMarked(currentPage(), rows)
                     ? QStringLiteral("Deselect All")
                     : QStringLiteral("Select All")
             );
@@ -2852,7 +2872,11 @@ private:
         if (!f || !matchPage(*f, page)) {
             QString title = QStringLiteral("Select an item");
             QString body = QStringLiteral("What it is, why it was flagged, plus path and size.");
-            if (visibleRows(page).isEmpty()) {
+            // Unselected, so the question is only whether the page has any
+            // rows at all. The unsorted filter answers it: sorting every
+            // finding on the page to look at an empty/size result throws the
+            // order away, and this runs on every selection change.
+            if (filteredRows(page, false).isEmpty()) {
                 title = emptyTitle(page);
                 body = emptyDetail(page);
             } else if (page == Page::Leftovers) {

@@ -73,6 +73,31 @@ struct DiskScanOptions {
 /// skipped, and a negative running total restarts at zero when a measured
 /// addend arrives. That is how a size is spelled before it is known.
 qint64 addSatBytes(qint64 a, qint64 b);
+
+/// The running totals a disk scan's streaming rows add each finished folder to
+/// as it arrives.
+///
+/// The rows are drawn as the walk finishes each top-level folder, and the
+/// placeholder root row shows what has streamed in so far. Re-reading every row
+/// already on screen to total them is quadratic in the number of folders
+/// directly under the scan root, on the thread painting the scan; a whole-disk
+/// scan of `/` has hundreds of them. Accumulating as rows arrive is the same
+/// arithmetic done once per row.
+///
+/// `items` counts the folder's own entries the walk reported; the row label
+/// adds the scan root itself, which is what `diskContentsLabel(items + 1, true)`
+/// takes, and this total is the one that plus-one is applied to.
+struct StreamTotals {
+    qint64 apparent = 0;
+    qint64 allocated = 0;
+    qint64 items = 0;
+    void add(qint64 a, qint64 alloc, qint64 n) {
+        apparent = addSatBytes(apparent, a);
+        allocated = addSatBytes(allocated, alloc);
+        items = addSatBytes(items, n);
+    }
+};
+
 DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts);
 /// Allocated bytes for a file or directory tree. -1 when the path cannot be
 /// stat'ed; a tree whose entries cannot be opened still reports the totals the
