@@ -386,7 +386,11 @@ QString locationLabel(const Finding &f) {
 }
 
 /// Instant from RFC 3339 / ISO-8601. Zone-less values are UTC, matching parseISODate.
-/// Date-only `yyyy-MM-dd` is that calendar day in local time (not UTC midnight).
+/// Date-only `yyyy-MM-dd` is that calendar day at UTC midnight, matching
+/// parseISODate too: a bare date names an instant, not a wall-clock day, and
+/// UTC midnight is unambiguous where local midnight is not (nonexistent on a
+/// spring-forward, doubled on a fall-back). Both windows read the same scan
+/// JSON, so a stored bare date has to land on the same instant in each.
 QDateTime parseIsoInstant(const QString &value) {
     QString s = value.trimmed();
     if (s.isEmpty()) return {};
@@ -394,7 +398,7 @@ QDateTime parseIsoInstant(const QString &value) {
 
     if (s.size() == 10 && s[4] == QLatin1Char('-') && s[7] == QLatin1Char('-')) {
         const QDate d = QDate::fromString(s, Qt::ISODate);
-        if (d.isValid()) return d.startOfDay();
+        if (d.isValid()) return QDateTime(d, QTime(0, 0), QTimeZone::utc());
     }
 
     const int tIndex = s.indexOf(QLatin1Char('T'));

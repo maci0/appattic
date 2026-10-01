@@ -71,6 +71,44 @@ final class DatesTests: XCTestCase {
         XCTAssertEqual(naive.timeIntervalSince1970, z.timeIntervalSince1970, accuracy: 0.5)
     }
 
+    /// A date-only value carries a calendar day and no time of day. It parses
+    /// as that day at UTC midnight, like every other zone-less value here, so
+    /// the parser stays zone-deterministic and this parser and the Qt twin
+    /// (`parseIsoInstant`, which requires a bare date to parse) agree on which
+    /// rows carry a date at all. A date-only `mtime` that drops to nil here
+    /// leaves the row undated in the CLI and the window while the Qt window
+    /// still prints it, so the two read one scan differently.
+    func testParseISODateDateOnlyIsUTCMidnight() throws {
+        let midnight = try XCTUnwrap(parseISODate("2026-04-01"))
+        let explicit = try XCTUnwrap(parseISODate("2026-04-01T00:00:00Z"))
+        XCTAssertEqual(midnight.timeIntervalSince1970, explicit.timeIntervalSince1970, accuracy: 0.5)
+
+        // The day it names is the day it lands on in UTC: not the previous day
+        // a zone behind UTC would give, and not the next day a zone ahead would.
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        XCTAssertEqual(cal.component(.year, from: midnight), 2026)
+        XCTAssertEqual(cal.component(.month, from: midnight), 4)
+        XCTAssertEqual(cal.component(.day, from: midnight), 1)
+        XCTAssertEqual(cal.component(.hour, from: midnight), 0)
+
+        // A leap day is a real date and still parses.
+        XCTAssertEqual(
+            try XCTUnwrap(parseISODate("2024-02-29")).timeIntervalSince1970,
+            1_709_164_800,
+            accuracy: 0.5
+        )
+        // A full timestamp is not re-read as the date-only form that now also
+        // sits in the fallback list, so the two never disagree on an instant.
+        XCTAssertEqual(
+            try XCTUnwrap(parseISODate("2026-04-01T15:00:00")).timeIntervalSince1970,
+            1_775_055_600,
+            accuracy: 0.5
+        )
+        XCTAssertNil(parseISODate("2026-04"))
+        XCTAssertNil(parseISODate("2026-04-01T"))
+    }
+
     func testParseISODateOffsetIsInstantNotWallClock() throws {
         let paris = try XCTUnwrap(parseISODate("2026-08-17T14:30:00+02:00"))
         let z = try XCTUnwrap(parseISODate("2026-08-17T12:30:00Z"))

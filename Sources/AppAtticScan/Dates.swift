@@ -40,6 +40,13 @@ private let isoFallbackFormats = [
     "yyyy-MM-dd HH:mm:ss Z",
     "yyyy-MM-dd'T'HH:mm:ss",
     "yyyy-MM-dd'T'HH:mm:ss.SSS",
+    // Date-only, for a value that carries a calendar day and no time of day.
+    // The same value is accepted by the Qt twin's `parseIsoInstant`, so a
+    // stored or reported `mtime` / `last_used` that is a bare date dates the
+    // row in both windows instead of only in one. UTC, like every other
+    // zone-less value here, which keeps this parser zone-deterministic: the
+    // day is the day the writer named, not a day shifted by the reader's zone.
+    "yyyy-MM-dd",
 ]
 
 /// One formatter per format, built once. `dateFormat` is never mutated after this,

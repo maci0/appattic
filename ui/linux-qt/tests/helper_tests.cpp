@@ -930,6 +930,16 @@ static int checkTiming() {
         std::fprintf(stderr, "timing: date-only mtime must parse\n");
         return 1;
     }
+    // The bare date is UTC midnight, the same instant parseISODate gives it, so
+    // both windows put one stored value on the same day whatever zone each runs
+    // in. Local midnight here would shift the row a day for every zone that is
+    // not UTC.
+    const QDateTime dateOnlyInstant = parseIsoInstant(QStringLiteral("2026-08-17"));
+    const QDateTime explicitMidnight = parseIsoInstant(QStringLiteral("2026-08-17T00:00:00Z"));
+    if (!dateOnlyInstant.isValid() || dateOnlyInstant.toUTC() != explicitMidnight.toUTC()) {
+        std::fprintf(stderr, "timing: date-only mtime must be UTC midnight\n");
+        return 1;
+    }
 
     std::fprintf(stdout, "timing: ok\n");
     return 0;
