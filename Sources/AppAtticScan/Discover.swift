@@ -639,12 +639,13 @@ private func finishAppDiscovery(
 
 public func findApps(
     progress: (String) -> Void = { _ in },
+    run: CommandRun = runCommand,
     clock: MonotonicFn = monotonicSeconds
 ) -> [AppRecord] {
     if PlatformOverride.isLinux {
         return findLinuxApps(progress: progress, clock: clock)
     }
-    return findMacApps(progress: progress, clock: clock)
+    return findMacApps(progress: progress, run: run, clock: clock)
 }
 
 func findLinuxApps(
@@ -682,8 +683,13 @@ func findLinuxApps(
 
 private let mdfindMax = 400
 
-func findViaMdfind(existing: Set<String>) -> [String] {
-    let (rc, out, _) = runCommand(["mdfind", "kMDItemFSName == '*.app'"], timeout: 30)
+/// `run` is the same `CommandRun` seam every other collector in a scan takes,
+/// so a replay answers `mdfind` from a recorded fixture instead of from the
+/// live Spotlight index: the index is the one macOS app list that is neither
+/// derivable from the filesystem a scan walks nor stable between runs, and a
+/// caller holding a substituted `run` still got a real subprocess here.
+func findViaMdfind(existing: Set<String>, run: CommandRun = runCommand) -> [String] {
+    let (rc, out, _) = run(["mdfind", "kMDItemFSName == '*.app'"], 30)
     guard rc == 0 else { return [] }
     var found: [String] = []
     for line in out.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -698,7 +704,11 @@ func findViaMdfind(existing: Set<String>) -> [String] {
     return found
 }
 
-func findMacApps(progress: (String) -> Void, clock: MonotonicFn = monotonicSeconds) -> [AppRecord] {
+func findMacApps(
+    progress: (String) -> Void,
+    run: CommandRun = runCommand,
+    clock: MonotonicFn = monotonicSeconds
+) -> [AppRecord] {
     progress("  · discovering installed apps…")
     var paths: [String] = []
     var seen = Set<String>()
@@ -711,7 +721,7 @@ func findMacApps(progress: (String) -> Void, clock: MonotonicFn = monotonicSecon
             if seen.insert(real).inserted { paths.append(real) }
         }
     }
-    for p in findViaMdfind(existing: seen) {
+    for p in findViaMdfind(existing: seen, run: run) {
         if seen.insert(p).inserted { paths.append(p) }
     }
     var apps = pmap(paths, workers: 16) { makeApp(from: $0) }.compactMap { $0 }

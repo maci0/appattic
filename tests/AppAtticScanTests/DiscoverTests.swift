@@ -495,4 +495,43 @@ final class DiscoverTests: XCTestCase {
         XCTAssertEqual(lprojCandidates(lang: "-.UTF-8"), ["_"] + base)
         XCTAssertEqual(lprojCandidates(lang: "_BR"), ["_BR"] + base)
     }
+
+    /// The Spotlight index is the one macOS app list that is neither derivable
+    /// from the filesystem the rest of the discovery walks nor stable between
+    /// runs, so it is the part a replay has to answer from a record rather
+    /// than from the host. `mdfind` reached the real subprocess directly, so a
+    /// scan run with a substituted `run` still answered from whatever the
+    /// machine's index held, and the same seed produced a different app list
+    /// on a differently indexed box. These pin that the injected runner is
+    /// what answers, in both directions.
+    func testFindViaMdfindAnswersFromTheInjectedRunner() {
+        let fixture = "/Applications/FromFixture.app"
+        let found = findViaMdfind(existing: [], run: { cmd, _ in
+            XCTAssertEqual(cmd, ["mdfind", "kMDItemFSName == '*.app'"])
+            return (0, "\(fixture)\n", "")
+        })
+        XCTAssertEqual(
+            found,
+            [URL(fileURLWithPath: fixture).resolvingSymlinksInPath().path],
+            "the runner's output decides the list, symlinks resolved the way discovery resolves them"
+        )
+    }
+
+    func testFindViaMdfindReportsNothingWhenTheInjectedRunnerFails() {
+        // rc != 0 is the runner saying "no index", not the host's: a replay
+        // that recorded a failed query must not silently pick up the live
+        // index on the next run.
+        let run: CommandRun = { _, _ in (127, "", "not found: mdfind") }
+        XCTAssertTrue(findViaMdfind(existing: [], run: run).isEmpty)
+    }
+
+    func testFindViaMdfindSkipsPathsAlreadyInTheScan() {
+        let fixture = "/Applications/FromFixture.app"
+        let real = URL(fileURLWithPath: fixture).resolvingSymlinksInPath().path
+        let run: CommandRun = { _, _ in (0, "\(fixture)\n", "") }
+        XCTAssertTrue(
+            findViaMdfind(existing: [real], run: run).isEmpty,
+            "a path the directory walk already reported is not reported twice"
+        )
+    }
 }

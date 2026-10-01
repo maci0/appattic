@@ -993,6 +993,53 @@ final class OutdatedTests: XCTestCase {
         XCTAssertTrue(rows.isEmpty)
         XCTAssertEqual(failures, ["the response was not JSON"])
     }
+
+    // The storefront decides which country's prices and releases the App Store
+    // answers with, so it is part of a scan's result rather than a display
+    // preference. It is read from `defaults` and `LANG`: both are per-host
+    // answers, and neither is reachable through a replay's substituted `run`
+    // unless the caller supplies both. These pin that the seam is really the
+    // one that answers, so a host whose `AppleLocale` disagrees with the
+    // replayed run cannot change what the replay reports.
+    func testStoreCountriesReadsDefaultsThroughTheInjectedRunner() {
+        var asked: [[String]] = []
+        let run: CommandRun = { cmd, _ in
+            asked.append(cmd)
+            return (0, "en_GB\n", "")
+        }
+        XCTAssertEqual(storeCountries(nil, run: run), ["gb", "us"])
+        XCTAssertEqual(asked, [["defaults", "read", "-g", "AppleLocale"]])
+    }
+
+    func testStoreCountriesFallsBackToTheSuppliedEnvironment() {
+        // `defaults` answered nothing usable: the answer then has to come from
+        // the injected environment, not from whatever `LANG` the host running
+        // the test happens to have.
+        let failing: CommandRun = { _, _ in (1, "", "") }
+        XCTAssertEqual(
+            storeCountries(nil, run: failing, env: ["LANG": "de_DE.UTF-8"]),
+            ["de", "us"]
+        )
+        XCTAssertEqual(
+            storeCountries(nil, run: failing, env: [:]),
+            ["us"],
+            "no locale anywhere still answers us rather than reading the host"
+        )
+    }
+
+    func testItunesLookupBatchTakesItsStorefrontFromTheInjectedRunner() {
+        var asked: [[String]] = []
+        let run: CommandRun = { cmd, _ in
+            asked.append(cmd)
+            return (0, "ja_JP.UTF-8", "")
+        }
+        // An empty id list returns before any storefront is resolved, so the
+        // runner is never asked: nothing reaches the host either way.
+        XCTAssertTrue(
+            itunesLookupBatch([], session: stubURLSession(status: 200), run: run).isEmpty
+        )
+        XCTAssertTrue(asked.isEmpty, "no ids means no storefront lookup and no request")
+    }
 }
 
 /// Answers every request with one canned status, body, or error.

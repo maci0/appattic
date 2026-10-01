@@ -251,7 +251,7 @@ public func performScan(
     resetWhichSearchDirectories()
 
     progress("Scanning installed applications…")
-    var found = apps ?? findApps(progress: progress, clock: clock)
+    var found = apps ?? findApps(progress: progress, run: run, clock: clock)
     let leftoverApps = found
     if !includeSystem {
         found = found.filter { !$0.isSystem }

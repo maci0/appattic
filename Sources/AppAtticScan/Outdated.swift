@@ -769,14 +769,24 @@ public func parseMasOutdated(_ text: String) -> [OutdatedPkg] {
     }
 }
 
-public func storeCountries(_ localeText: String? = nil) -> [String] {
+/// `run` and `env` are the two edges this reads: the App Store's storefront
+/// comes from `defaults`/`LANG`, which are per-host answers, so a replayed or
+/// simulated scan passes both rather than picking up whatever machine it runs
+/// on. The storefront decides which country's prices and releases an App Store
+/// row comes back with, so leaving it to the process changed the scan's
+/// result, not just its cosmetics.
+public func storeCountries(
+    _ localeText: String? = nil,
+    run: CommandRun = runCommand,
+    env: [String: String] = ProcessInfo.processInfo.environment
+) -> [String] {
     var text = localeText
     if text == nil {
-        let (rc, out, _) = runCommand(["defaults", "read", "-g", "AppleLocale"], timeout: 5)
+        let (rc, out, _) = run(["defaults", "read", "-g", "AppleLocale"], 5)
         if rc == 0, !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             text = out.trimmingCharacters(in: .whitespacesAndNewlines)
         } else {
-            text = ProcessInfo.processInfo.environment["LANG"] ?? ""
+            text = env["LANG"] ?? ""
         }
     }
     var countries: [String] = []
@@ -1020,10 +1030,11 @@ public func itunesLookup(
     _ bundleId: String,
     session: URLSession = .shared,
     onFailure: ((String) -> Void)? = nil,
-    countries: [String]? = nil
+    countries: [String]? = nil,
+    run: CommandRun = runCommand
 ) -> [String: Any]? {
     if bundleId.isEmpty { return nil }
-    for country in countries ?? storeCountries() {
+    for country in countries ?? storeCountries(nil, run: run) {
         let idx = itunesRequest(
             ["bundleId": bundleId, "country": country],
             session: session,
@@ -1038,12 +1049,13 @@ public func itunesLookupBatch(
     _ adamIds: [String],
     session: URLSession = .shared,
     onFailure: ((String) -> Void)? = nil,
-    countries: [String]? = nil
+    countries: [String]? = nil,
+    run: CommandRun = runCommand
 ) -> [String: [String: Any]] {
     let ids = adamIds.filter { !$0.isEmpty }
     if ids.isEmpty { return [:] }
     var out: [String: [String: Any]] = [:]
-    for country in countries ?? storeCountries() {
+    for country in countries ?? storeCountries(nil, run: run) {
         let missing = ids.filter { out[$0] == nil }
         if missing.isEmpty { break }
         var i = 0
@@ -1071,7 +1083,8 @@ public func collectAppstore(
     _ apps: [AppRecord],
     progress: ((String) -> Void)? = nil,
     lookup: ((String) -> [String: Any]?)? = nil,
-    catalog: [String: [String: Any]]? = nil
+    catalog: [String: [String: Any]]? = nil,
+    run: CommandRun = runCommand
 ) -> [OutdatedPkg] {
     let masApps = apps.filter { app in
         app.bundleId != nil && (app.extra["mas_receipt"] == "1" || app.extra["mas_receipt"] == "true")
@@ -1092,7 +1105,7 @@ public func collectAppstore(
             // empty list it leaves behind is what the scan records, so it is
             // recorded as a failed check and the scan stays out of the cache.
             noteScanCheckFailed("app-store")
-        })
+        }, run: run)
     }
     let resolved = cat ?? [:]
     var out: [OutdatedPkg] = []
@@ -1110,7 +1123,8 @@ public func collectAppstore(
 func masCatalog(
     _ apps: [AppRecord],
     session: URLSession = .shared,
-    onFailure: ((String) -> Void)? = nil
+    onFailure: ((String) -> Void)? = nil,
+    run: CommandRun = runCommand
 ) -> [String: [String: Any]] {
     var ids: [String] = []
     var mutated = apps
@@ -1120,7 +1134,7 @@ func masCatalog(
     // first request went out. `pmap` keeps the results in input order, so
     // `ids` is the same list the serial loop built.
     let missing = mutated.indices.filter { mutated[$0].extra["mas_adam_id"] == nil }
-    let found = pmap(missing.map { mutated[$0].path }, workers: 8) { masSpotlightMeta($0) }
+    let found = pmap(missing.map { mutated[$0].path }, workers: 8) { masSpotlightMeta($0, run: run) }
     let resolvedFromSpotlight = Dictionary(uniqueKeysWithValues: zip(missing, found))
     for i in mutated.indices {
         var extra = mutated[i].extra
@@ -1135,7 +1149,7 @@ func masCatalog(
     }
     // Resolved once: `storeCountries` shells out to `defaults`, and the
     // per-app fallback below calls it again for every app the batch missed.
-    let countries = storeCountries()
+    let countries = storeCountries(nil, run: run)
     var catalog = itunesLookupBatch(ids, session: session, onFailure: onFailure, countries: countries)
     for app in mutated {
         let extra = app.extra
@@ -1157,14 +1171,15 @@ func masCatalog(
 public func attachItunesMeta(
     _ pkgs: [OutdatedPkg],
     catalog: [String: [String: Any]]? = nil,
-    onFailure: ((String) -> Void)? = nil
+    onFailure: ((String) -> Void)? = nil,
+    run: CommandRun = runCommand
 ) {
     // A track id is ASCII digits. `isNumber` alone also accepts e.g. U+0669,
     // so a non-ASCII-digit name would be looked up and have its `name`
     // overwritten with a bundleId.
     let isTrackID: (String) -> Bool = { $0.allSatisfy { $0.isNumber && $0.isASCII } }
     let ids = pkgs.filter { $0.manager == "app-store" && isTrackID($0.name) }.map(\.name)
-    let cat = catalog ?? itunesLookupBatch(ids, onFailure: onFailure)
+    let cat = catalog ?? itunesLookupBatch(ids, onFailure: onFailure, run: run)
     for p in pkgs where p.manager == "app-store" {
         guard let row = cat[p.name] else { continue }
         if let bid = row["bundleId"] as? String, isTrackID(p.name) {
@@ -1209,10 +1224,10 @@ public func queryAppstore(
 ) -> [OutdatedPkg] {
     if PlatformOverride.isLinux { return [] }
     if let pkgs = queryMas(progress: progress, which: which, run: run) {
-        attachItunesMeta(pkgs) { progress?("  · App Store lookup failed (\($0)): details may be missing") }
+        attachItunesMeta(pkgs, onFailure: { progress?("  · App Store lookup failed (\($0)): details may be missing") }, run: run)
         return pkgs
     }
-    return collectAppstore(apps, progress: progress)
+    return collectAppstore(apps, progress: progress, run: run)
 }
 
 private func flatpakColumns(path: String, kind: String, withMeta: Bool) -> [String] {
