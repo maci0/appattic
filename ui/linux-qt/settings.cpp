@@ -262,6 +262,63 @@ bool keepSettingsBackup(const QString &settingsPath) {
     return true;
 }
 
+QString settingsRejectedPath(const QString &settingsPath) {
+    return settingsPath + QStringLiteral(".bad");
+}
+
+bool restoreSettingsBackup(const QString &settingsPath, QString *err) {
+    if (settingsPath.isEmpty()) {
+        if (err) *err = QStringLiteral("no settings file to restore");
+        return false;
+    }
+    const QString backup = settingsBackupPath(settingsPath);
+    if (!QFile::exists(backup)) {
+        if (err) *err = QStringLiteral("there is no settings backup at %1 to restore").arg(backup);
+        return false;
+    }
+    QFile in(backup);
+    if (!in.open(QIODevice::ReadOnly)) {
+        if (err) *err = QStringLiteral("could not read the settings backup at %1").arg(backup);
+        return false;
+    }
+    const QByteArray raw = in.readAll();
+    in.close();
+    /* The parse is the check, and it is the window's own loader: a backup that
+       reads here is a backup the window will read, so the restore cannot be
+       the step that leaves the settings unreadable. The copy has no such step,
+       which is why a copy is not what this does. */
+    AppSettings restored;
+    QString parseErr;
+    if (!parseSettingsJson(raw, &restored, &parseErr)) {
+        if (err) *err = QStringLiteral("the settings backup at %1 is not usable (%2); nothing was changed")
+                            .arg(backup, parseErr);
+        return false;
+    }
+    const QByteArray encoded = encodeSettingsJson(restored);
+    /* Keep the state this restore replaces before it replaces it. Absent is
+       not a failure: then the wanted state is a fresh settings.json. A restore
+       that would write back the same bytes keeps nothing, or the file a
+       restore already kept is lost to a copy of the file that is already
+       there. */
+    QFile current(settingsPath);
+    if (current.open(QIODevice::ReadOnly)) {
+        const QByteArray before = current.readAll();
+        current.close();
+        if (!before.isEmpty() && before != encoded) {
+            if (!writeDurableFile(before, settingsRejectedPath(settingsPath))) {
+                if (err) *err = QStringLiteral("could not keep the settings file being replaced; nothing was changed");
+                return false;
+            }
+            restrictPrivateDataFile(settingsRejectedPath(settingsPath));
+        }
+    }
+    if (!writeDurableFile(encoded, settingsPath)) {
+        if (err) *err = QStringLiteral("could not write settings to %1").arg(settingsPath);
+        return false;
+    }
+    return true;
+}
+
 QByteArray encodeSettingsJson(const AppSettings &s) {
     QJsonObject o;
     o.insert(QStringLiteral("confirmDelete"), s.confirmDelete);

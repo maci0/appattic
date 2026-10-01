@@ -230,15 +230,23 @@ static QString scanSummaryMessage(int leftovers, int stale, int outdated, int pa
 /* The settings path is under the account home, so the account name is in it.
    Redact before it reaches the error bar, where it is copied into bug
    reports and screenshots. `~/...` still names the file to fix. */
+/* The ignore list is the user's own paths and no scan rebuilds it, so the
+   settings.json.bak beside this file is the only other copy and the recovery
+   path a user needs named here, not left in a runbook they have not opened.
+   The restore checks that the backup loads before it puts it back and keeps
+   what was there as settings.json.bad; docs/runbooks/state-recovery.md has the
+   manual sequence. */
 static QString settingsUnreadableMessage(const QString &path) {
     return redactHomePaths(QStringLiteral(
-        "Could not read settings at %1. AppAttic will not overwrite that file until you save settings."
+        "Could not read settings at %1. AppAttic will not overwrite that file until you save "
+        "settings. The backup %1.bak holds the settings from before the last change."
     ).arg(path));
 }
 
 static QString settingsInvalidMessage(const QString &path, const QString &err) {
     return redactHomePaths(QStringLiteral(
-        "Settings at %1 are not valid (%2). AppAttic will not overwrite that file until you save settings."
+        "Settings at %1 are not valid (%2). AppAttic will not overwrite that file until you save "
+        "settings. The backup %1.bak holds the settings from before the last change."
     ).arg(path, err));
 }
 
@@ -821,6 +829,7 @@ public:
         connect(m_markManualBtn, &QPushButton::clicked, this, &MainWindow::confirmMarkManual);
 
         loadSettings();
+        refreshRestoreButton();
         applySystemAppearance();
         applyInitialPage();
         fillCurrent();
@@ -1468,6 +1477,19 @@ private:
         m_clearIgnored->setToolTip(QStringLiteral("Show every ignored leftover in the list again"));
         ignCol.second->addWidget(ignListHost, 1);
         ignCol.second->addWidget(m_clearIgnored);
+        /* The backup is the only copy of this list once settings.json stops
+           reading, and there is no other way back to it: a settings file that
+           will not parse is one the window refuses to overwrite, so the list
+           cannot be retyped by saving over it. The button is here rather than
+           only in the error bar because that bar is dismissible, and a
+           dismissed bar would leave the list unreachable. Disabled with the
+           reason on the tooltip when there is nothing to put back. */
+        m_restoreSettings = new QPushButton(QStringLiteral("Restore settings from backup"));
+        m_restoreSettings->setToolTip(QStringLiteral(
+            "Put settings.json.bak back in place of the settings file, and keep the file "
+            "being replaced as settings.json.bad"
+        ));
+        ignCol.second->addWidget(m_restoreSettings);
 
         row->addWidget(scanCol.first, 1);
         row->addWidget(delCol.first, 1);
@@ -1504,6 +1526,9 @@ private:
         connect(m_ignoredList, &QListWidget::itemActivated, this, [this](QListWidgetItem *it) {
             if (!it) return;
             restoreIgnoredLeftover(it->data(Qt::UserRole).toString(), it->text());
+        });
+        connect(m_restoreSettings, &QPushButton::clicked, this, [this] {
+            restoreSettingsFromBackup();
         });
         return w;
     }
@@ -3318,6 +3343,42 @@ private:
         applyLoadedSettings(s);
     }
 
+    /// Put the settings backup back and carry on as a normal load. The
+    /// restore checks the backup parses with this window's own loader before
+    /// it writes anything, keeps the file it replaces, and says why it did
+    /// not, so the button cannot be the step that loses the ignore list.
+    void restoreSettingsFromBackup() {
+        const QString path = settingsFilePath();
+        QString err;
+        if (!restoreSettingsBackup(path, &err)) {
+            refreshRestoreButton();
+            showError(redactHomePaths(err));
+            return;
+        }
+        loadSettings();
+        refreshIgnoredList();
+        fillCurrent();
+        refreshRestoreButton();
+        statusBar()->showMessage(
+            QStringLiteral("Settings restored from the backup. The file it replaced is "
+                           "settings.json.bad if you need it.")
+        );
+    }
+
+    /// The button is disabled rather than failing on click when there is
+    /// nothing to restore, because a machine with no backup cannot use it.
+    void refreshRestoreButton() {
+        if (!m_restoreSettings) return;
+        const bool there = QFile::exists(settingsBackupPath(settingsFilePath()));
+        m_restoreSettings->setEnabled(there);
+        m_restoreSettings->setToolTip(
+            there ? QStringLiteral(
+                        "Put settings.json.bak back in place of the settings file, and keep "
+                        "the file being replaced as settings.json.bad")
+                  : QStringLiteral("There is no settings backup to restore.")
+        );
+    }
+
     /// True when the settings reached disk. The migration needs the answer:
     /// it deletes the legacy file only after the copy that replaced it is
     /// written, so a failed write leaves the old file as the only copy of the
@@ -3455,6 +3516,9 @@ private:
     QLabel *m_ignoredEmpty = nullptr;
     QPushButton *m_clearIgnored = nullptr;
     QPushButton *m_showIgnored = nullptr;
+    // Put the settings backup back, for the machine whose settings file does not
+    // read: the list it holds is the user's own paths and nothing rebuilds them.
+    QPushButton *m_restoreSettings = nullptr;
     QLabel *m_statInstalled = nullptr;
     QLabel *m_statLeftovers = nullptr;
     QLabel *m_statLeftoverData = nullptr;
@@ -3609,6 +3673,15 @@ static int smokeUiCopy() {
     if (badMsg.contains(QLatin1String("invalid settings /tmp"))
         || !badMsg.contains(QLatin1String("not valid JSON"))) {
         std::fprintf(stderr, "ui-copy: settings invalid still uses developer phrasing\n");
+        return 1;
+    }
+    /* The ignore list is the user's own paths and no scan rebuilds it, so a
+       settings file that will not read leaves settings.json.bak as the only
+       other copy. Both messages name that path: a user told the file is bad
+       and nothing else is on the machine a runbook they have not opened away. */
+    if (!readMsg.contains(QLatin1String("/tmp/settings.json.bak"))
+        || !badMsg.contains(QLatin1String("/tmp/settings.json.bak"))) {
+        std::fprintf(stderr, "ui-copy: settings error does not name the backup to restore from\n");
         return 1;
     }
     const QString legacyMsg = settingsLegacyMessage(

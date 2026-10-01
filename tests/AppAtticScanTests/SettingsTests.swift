@@ -358,6 +358,132 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(try loadSettings(from: url).ignoredLeftoverPaths, ["/tmp/First"])
     }
 
+    /// `restoreSettingsBackup` is the checked form of that copy. The settings
+    /// file the restore replaces is kept as `settings.json.bad`, so a restore
+    /// that turns out to be the wrong one is not a second loss on a machine
+    /// that already lost the first.
+    func testRestoreKeepsTheFileItReplacedAsSettingsBad() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-restore-\(UUID().uuidString).json")
+        let backup = settingsBackupURL(url)
+        let rejected = settingsRejectedURL(url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.removeItem(at: rejected)
+        }
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/First"]), to: url)
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/Second"]), to: url)
+        // The state the user has to get back to: the bytes the restore is
+        // about to overwrite, held here rather than only in the broken file.
+        let broken = Data("{ \"ignoredLeftoverPaths\": ".utf8)
+        try broken.write(to: url)
+
+        let restored = try restoreSettingsBackup(from: url)
+        XCTAssertEqual(restored.ignoredLeftoverPaths, ["/tmp/First"])
+        XCTAssertEqual(try loadSettings(from: url).ignoredLeftoverPaths, ["/tmp/First"])
+        XCTAssertEqual(try Data(contentsOf: rejected), broken)
+        // The kept file carries the account's own paths, so it is as private as
+        // the file it was copied from.
+        let mode = (try FileManager.default.attributesOfItem(atPath: rejected.path)[.posixPermissions] as! NSNumber).intValue
+        XCTAssertEqual(mode & 0o777, 0o600)
+    }
+
+    /// A backup that no longer loads is not restored over a file that might
+    /// still be readable by hand: the whole point of the check is that the
+    /// restore cannot be the step that leaves the settings unloadable. Nothing
+    /// on disk changes, not the settings file and not the kept copy.
+    func testRestoreRefusesABackupThatDoesNotLoadAndChangesNothing() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-restore-bad-\(UUID().uuidString).json")
+        let backup = settingsBackupURL(url)
+        let rejected = settingsRejectedURL(url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.removeItem(at: rejected)
+        }
+        let current = Data("{ \"includeSystem\": true ".utf8)
+        try current.write(to: url)
+        for bad in [
+            "",
+            "{ \"ignoredLeftoverPaths\": ",
+            "{ \"unknownKey\": 1 }",
+            "{ \"confirmDelete\": \"yes\" }",
+            "{ \"ignoredLeftoverPaths\": [\"relative/path\"] }",
+            "{ \"ignoredLeftoverPaths\": [\"/tmp/Trailing/\"] }",
+        ] {
+            try Data(bad.utf8).write(to: backup)
+            XCTAssertThrowsError(try restoreSettingsBackup(from: url), bad)
+            XCTAssertEqual(try Data(contentsOf: url), current, bad)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: rejected.path), bad)
+        }
+    }
+
+    /// No backup is the state the runbook's step 3 is for, and it is reported
+    /// rather than turned into a default settings file: an empty file here would
+    /// look like a successful restore of nothing.
+    func testRestoreReportsAMissingBackup() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-restore-none-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/First"]), to: url)
+        let before = try Data(contentsOf: url)
+        XCTAssertThrowsError(try restoreSettingsBackup(from: url)) { error in
+            XCTAssertEqual(
+                error as? SettingsError,
+                SettingsError.unreadable(
+                    path: settingsBackupURL(url).path,
+                    reason: "there is no settings backup to restore"
+                )
+            )
+        }
+        XCTAssertEqual(try Data(contentsOf: url), before)
+    }
+
+    /// A restore onto a machine whose settings file is gone is the ordinary
+    /// case, not the broken one: there is nothing to keep, and the restore
+    /// still leaves a file the app will read.
+    func testRestoreWithoutASettingsFileWritesOneAndKeepsNothing() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-restore-gone-\(UUID().uuidString).json")
+        let backup = settingsBackupURL(url)
+        let rejected = settingsRejectedURL(url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.removeItem(at: rejected)
+        }
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/First"]), to: url)
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/Second"]), to: url)
+        try FileManager.default.removeItem(at: url)
+        XCTAssertEqual(try restoreSettingsBackup(from: url).ignoredLeftoverPaths, ["/tmp/First"])
+        XCTAssertEqual(try loadSettings(from: url).ignoredLeftoverPaths, ["/tmp/First"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rejected.path))
+    }
+
+    /// The restore reads the backup through `loadSettings` and writes the
+    /// normalized encoding, so a restore leaves a file a later save can compare
+    /// and a second restore does not keep a copy of a file identical to the
+    /// one already there.
+    func testRestoringTwiceKeepsOnlyTheFirstReplacedFile() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-restore-twice-\(UUID().uuidString).json")
+        let backup = settingsBackupURL(url)
+        let rejected = settingsRejectedURL(url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.removeItem(at: rejected)
+        }
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/First"]), to: url)
+        try saveSettings(AppAtticSettings(ignoredLeftoverPaths: ["/tmp/Second"]), to: url)
+        try Data("nonsense".utf8).write(to: url)
+        try restoreSettingsBackup(from: url)
+        let afterFirst = try Data(contentsOf: rejected)
+        try restoreSettingsBackup(from: url)
+        XCTAssertEqual(
+            try Data(contentsOf: rejected),
+            afterFirst,
+            "a restore that changed nothing kept a copy of the file that is already there"
+        )
+    }
+
     func testClearIgnoredLeftovers() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("appattic-settings-clear-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }

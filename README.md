@@ -64,6 +64,7 @@ confirmDelete: true
 ignoredLeftoverPaths: 0
 scan cache: /home/u/.local/share/appattic/last-scan.json
 settings backup: /home/u/.local/share/appattic/settings.json.bak (missing)
+settings replaced by a restore: /home/u/.local/share/appattic/settings.json.bad (missing)
 XDG_DATA_HOME: /home/u/.local/share
 XDG_CONFIG_HOME: /home/u/.config
 XDG_CACHE_HOME: /home/u/.cache

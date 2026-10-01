@@ -12,6 +12,7 @@ rather than in someone's head.
 |------|----------|-------------|---------------------|
 | `<data dir>/settings.json` | `confirmDelete`, `includeSystem`, and the leftover paths the user chose to ignore | No. The ignore list is paths the user typed, and no scan can recover them | Written whole and flushed before the save reports success: the scanner and the CLI through `mkstemp` at `0600`, `fsync`, `rename`, and a parent-directory `fsync`; the Linux window through `QSaveFile` at `0600`, `rename`, and the same two `fsync` calls in `writeDurableFile`. The file it replaces is kept as `settings.json.bak` |
 | `<data dir>/settings.json.bak` | The last settings file the app wrote that differs from the current one, kept by `saveSettings` and by the Linux window's `persistSettings` | It is a copy of the above, one change older. A save that changed nothing leaves it alone, so a repeated save cannot overwrite it with a copy of the current file | Written the same owner-only way, never read at run time |
+| `<data dir>/settings.json.bad` | The settings file a restore replaced, kept by `restoreSettingsBackup` so a restore that turns out to be the wrong one is not a second loss | It is a copy of whatever was in `settings.json` before the restore, so it is one restore older | Written the same owner-only way, never read at run time |
 | `<data dir>/last-scan.json` | The whole last scan: every app path and leftover path under the home directory | Yes. A rescan rebuilds it, at the cost of one run | Written the same way. Deleted when it is stale, after a run that changes the machine, and by `appattic erase` |
 | `$TMPDIR/appattic-script-*.sh`, `*.err` | A generated cleanup or update script and the tail of its stderr | Yes, the run regenerates it | `0600`, removed when the run ends, including when it fails |
 
@@ -46,22 +47,69 @@ written leaves the old file as the only copy of those paths.
    appattic config
    ```
 
-   `settings file:` and `settings backup:` name both paths, and the backup line
-   says `(missing)` when there is nothing to restore from. `config` loads
+   `settings file:`, `settings backup:`, and `settings replaced by a
+   restore:` name all three paths, and each says `(missing)` when there
+   is nothing to restore from. `config` loads
    `settings.json` first, so on a machine whose settings file no longer parses
    it exits 2 and prints nothing: the paths are then the defaults above,
    `~/.local/share/appattic/` on Linux and
    `~/Library/Application Support/AppAttic/` on macOS.
 
-2. If the backup is there, put it back:
+2. **In the window: press "Restore settings from backup"**, on the Settings
+   page under Ignored leftovers. It is the checked restore: the backup is read
+   with the same loader the window reads settings with, and nothing on disk
+   changes if the backup does not read. The macOS window offers the same button
+   on its settings error screen, which is where a settings file that does not
+   parse leaves you. The button is disabled, with the reason on its tooltip,
+   when there is no backup.
+
+   By hand, if the window is not what you have, the same restore is three
+   steps. The check comes first, because a copy overwrites the file it replaces
+   and cannot tell a backup that still reads from one that was truncated by a
+   failing disk: on a machine whose settings file is already unreadable it can
+   trade a file you can still read by hand for one you cannot.
+
+   `appattic config` is the check, but it reads `settings.json` first and so
+   exits 2 on exactly the machine that needs it. Point it at the backup instead,
+   which touches nothing:
 
    ```bash
-   cp ~/.local/share/appattic/settings.json.bak ~/.local/share/appattic/settings.json
+   mkdir -p /tmp/check/appattic
+   cp ~/.local/share/appattic/settings.json.bak /tmp/check/appattic/settings.json
+   XDG_DATA_HOME=/tmp/check appattic config
+   rm -rf /tmp/check
    ```
 
-   macOS: the same two paths under `~/Library/Application Support/AppAttic`.
-   Then `appattic config` again: the file it prints is the one the app will
-   read, and it reports the file values it found.
+   The path under `XDG_DATA_HOME` is `appattic/settings.json`, which is why the
+   copy goes there and not at the root. A config block means the backup is a
+   file the app will read. Any error, or an exit code other than 0, means it is
+   not: the three cases below.
+
+   - **The backup reads as settings.** Copy it in, but keep what was there
+     first, so a restore that turns out to be the wrong state is not a second
+     loss on a machine that already lost the first:
+
+     ```bash
+     d=~/.local/share/appattic
+     cp "$d/settings.json" "$d/settings.json.bad" 2>/dev/null || true
+     cp "$d/settings.json.bak" "$d/settings.json"
+     ```
+
+     macOS: the same directory under `~/Library/Application Support/AppAttic`.
+     Then `appattic config` again: the file it prints is the one the app will
+     read, and it reports the file values it found.
+
+   - **The backup does not.** Stop. It was written by the same durable write as
+     `settings.json`, so a backup that is truncated or emptied means the disk
+     was already failing, and putting it over the only other copy loses the
+     state for good. Nothing has been changed on disk. Copy
+     `settings.json.bak` aside and leave it where it is until the disk is
+     healthy.
+
+   - **There is no backup**, but `settings.json.bad` is there from an earlier
+     restore: the same two commands with `.bad` in place of `.bak`, and move
+     the current file aside as `settings.json.bak` rather than `.bad`, so the
+     one-generation chain still holds.
 
 3. If the backup is missing, the settings file has been saved once, or the
    copy of the earlier one did not land. Recreate it by hand: a file holding

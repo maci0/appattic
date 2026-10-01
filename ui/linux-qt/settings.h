@@ -55,6 +55,18 @@ QByteArray encodeSettingsJson(const AppSettings &s);
 QString settingsBackupPath(const QString &settingsPath);
 bool keepSettingsBackup(const QString &settingsPath);
 
+/// The file a restore replaced, and the restore that puts the backup back.
+/// The backup is the only copy of the ignore list once settings.json stops
+/// reading, so putting it back is a destructive step on a machine that is
+/// already broken: `restoreSettingsBackup` parses the backup with the same
+/// loader the window reads settings with and changes nothing if it does not
+/// parse, and keeps whatever was in settings.json as `settings.json.bad`, so a
+/// restore that turns out to be the wrong state is not a second loss. The Swift
+/// `restoreSettingsBackup` keeps the same two files, so both windows, the CLI
+/// and the macOS UI leave the same three files next to each other.
+QString settingsRejectedPath(const QString &settingsPath);
+bool restoreSettingsBackup(const QString &settingsPath, QString *err);
+
 /// Replace `path` with `raw` whole or not at all, and only report success once
 /// the bytes are on disk. The rename a save is made of publishes the file while
 /// its contents are still in the page cache, so without the fsync a crash can

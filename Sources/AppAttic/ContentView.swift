@@ -92,6 +92,10 @@ struct ContentView: View {
     @State private var confirmDelete = true
     @State private var settingsLoadFailed = false
     @State private var settingsLoadError = ""
+    /// Whether a backup is there to restore. Asked for once at launch and
+    /// re-asked after a restore, so the button is disabled rather than
+    /// failing on click when there is nothing to put back.
+    @State private var settingsBackupIsThere = false
     @State private var scriptCopied = false
 
     /// Read once: the page cannot change while the window is open, and a
@@ -156,6 +160,8 @@ struct ContentView: View {
             .background(Color.appBg)
         }
         .onAppear {
+            settingsBackupIsThere = FileManager.default.fileExists(
+                atPath: settingsBackupURL().path)
             do {
                 let settings = try loadSettings()
                 includeSystem = settings.includeSystem
@@ -362,6 +368,22 @@ struct ContentView: View {
                     .foregroundColor(Color.appDim)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
+                // The backup is the only copy of the ignore list once this
+                // file is unreadable, and `restoreSettingsBackup` checks it
+                // loads before it puts it back and keeps what was here as
+                // `settings.json.bad`, so this button cannot be the step that
+                // loses the state. A machine with no backup is told so rather
+                // than offered a restore that cannot happen.
+                Button("Restore from backup") { restoreSettingsFromBackup() }
+                    .padding(Metrics.xs)
+                    .disabled(!settingsBackupIsThere)
+                if !settingsBackupIsThere {
+                    Text("There is no settings backup to restore.")
+                        .font(.system(size: TypeScale.body))
+                        .foregroundColor(Color.appDim)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 360)
+                }
             } else {
                 Button("Rescan") { vm.scan(includeSystem: includeSystem) }
                     .padding(Metrics.xs)
@@ -1501,6 +1523,32 @@ struct ContentView: View {
                 vm.errorMessage = nil
             }
         } catch {
+            vm.errorMessage = settingsErrorUserMessage(error)
+            vm.holdsSettingsError = true
+        }
+    }
+
+    /// Put the settings backup back in place of a file that no longer loads,
+    /// then carry on as a normal start. The restore is the library's, so it
+    /// is the same checked, keep-what-was-there copy the runbook documents:
+    /// a backup that does not load changes nothing and is named, and the file
+    /// it replaced stays on disk as `settings.json.bad`.
+    func restoreSettingsFromBackup() {
+        do {
+            let restored = try restoreSettingsBackup()
+            includeSystem = restored.includeSystem
+            confirmDelete = restored.confirmDelete
+            vm.ignoredLeftovers = Set(restored.ignoredLeftoverPaths)
+            settingsLoadFailed = false
+            settingsLoadError = ""
+            vm.holdsSettingsError = false
+            vm.errorMessage = nil
+            settingsBackupIsThere = FileManager.default.fileExists(
+                atPath: settingsBackupURL().path)
+            vm.start(includeSystem: includeSystem)
+        } catch {
+            settingsBackupIsThere = FileManager.default.fileExists(
+                atPath: settingsBackupURL().path)
             vm.errorMessage = settingsErrorUserMessage(error)
             vm.holdsSettingsError = true
         }

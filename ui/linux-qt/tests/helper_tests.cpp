@@ -1246,6 +1246,14 @@ static int writeFile(const QString &path, const QByteArray &body) {
     return 0;
 }
 
+/// Null on a file that cannot be read, so a check that reads one and gets
+/// nothing says which file it was rather than parsing empty bytes.
+static QByteArray readFile(const QString &path) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return QByteArray();
+    return f.readAll();
+}
+
 /// Open descriptors in this process, from /proc. -1 where that is unavailable,
 /// so a non-Linux run skips the bound instead of failing it.
 static int openDescriptorCount() {
@@ -1963,6 +1971,129 @@ static int checkSettingsBackupRepeatedSave() {
     return 0;
 }
 
+/// The recovery the backup exists for, as the window runs it. The backup is the
+/// only copy of the ignore list once settings.json stops reading, so the
+/// restore is the one destructive step taken on a machine that is already
+/// broken, and three things have to hold: a backup that reads is put back, a
+/// backup that does not read changes nothing at all, and the file a restore
+/// replaced is still on disk afterwards.
+static int checkSettingsRestore() {
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "settings restore: temp dir failed\n");
+        return 1;
+    }
+    const QString path = tmp.filePath(QStringLiteral("settings.json"));
+    const QByteArray broken = QByteArrayLiteral("{ \"ignoredLeftoverPaths\": ");
+
+    /* A backup the loader refuses is reported and changes nothing: not the
+       settings file, which a user may still be able to read by hand, and not
+       the kept copy. Each of these is a way the backup itself gets truncated
+       or mangled, which is the whole reason to check it. */
+    const char *unusable[] = {
+        "",
+        "{ \"ignoredLeftoverPaths\": ",
+        "{ \"unknownKey\": 1 }",
+        "{ \"confirmDelete\": \"yes\" }",
+        "{ \"ignoredLeftoverPaths\": [\"relative/path\"] }",
+        "{ \"ignoredLeftoverPaths\": [\"/tmp/Trailing/\"] }",
+    };
+    for (const char *bad : unusable) {
+        if (writeFile(path, broken)) {
+            std::fprintf(stderr, "settings restore: could not stage the broken file\n");
+            return 1;
+        }
+        if (writeFile(settingsBackupPath(path), QByteArray(bad))) {
+            std::fprintf(stderr, "settings restore: could not stage the bad backup\n");
+            return 1;
+        }
+        QString err;
+        if (restoreSettingsBackup(path, &err)) {
+            std::fprintf(stderr, "settings restore: a backup that does not read was restored: %s\n", bad);
+            return 1;
+        }
+        if (err.isEmpty()) {
+            std::fprintf(stderr, "settings restore: a refused restore gave no reason: %s\n", bad);
+            return 1;
+        }
+        QFile kept(path);
+        if (!kept.open(QIODevice::ReadOnly) || kept.readAll() != broken) {
+            std::fprintf(stderr, "settings restore: a refused restore changed settings.json: %s\n", bad);
+            return 1;
+        }
+        if (QFile::exists(settingsRejectedPath(path))) {
+            std::fprintf(stderr, "settings restore: a refused restore kept a .bad file: %s\n", bad);
+            return 1;
+        }
+    }
+
+    /* The ordinary case: a backup that reads is put back, and the file it
+       replaced is kept as settings.json.bad so a restore that turns out to be
+       the wrong state is not a second loss on a machine that already lost the
+       first. */
+    AppSettings wanted;
+    wanted.ignoredLeftoverPaths = QStringList{QStringLiteral("/second")};
+    if (writeFile(settingsBackupPath(path), encodeSettingsJson(wanted))) {
+        std::fprintf(stderr, "settings restore: could not stage the good backup\n");
+        return 1;
+    }
+    QString err;
+    if (!restoreSettingsBackup(path, &err)) {
+        std::fprintf(stderr, "settings restore: a good backup was not restored (%s)\n", qPrintable(err));
+        return 1;
+    }
+    AppSettings got;
+    if (!parseSettingsJson(readFile(path), &got, &err)
+        || got.ignoredLeftoverPaths != wanted.ignoredLeftoverPaths) {
+        std::fprintf(stderr, "settings restore: the restored file is not the backup (%s)\n", qPrintable(err));
+        return 1;
+    }
+    QFile replaced(settingsRejectedPath(path));
+    if (!replaced.open(QIODevice::ReadOnly) || replaced.readAll() != broken) {
+        std::fprintf(stderr, "settings restore: the file the restore replaced was not kept\n");
+        return 1;
+    }
+    /* The kept file carries the account's own paths, so it is as private as the
+       file it was copied from. */
+    const QFile::Permissions perms = QFileInfo(settingsRejectedPath(path)).permissions();
+    if (perms & (QFileDevice::ReadGroup | QFileDevice::ReadOther)) {
+        std::fprintf(stderr, "settings restore: settings.json.bad is readable by others\n");
+        return 1;
+    }
+    /* A second restore changes nothing, so it must not keep a copy of the file
+       that is already in place and lose the one it already had. */
+    if (!restoreSettingsBackup(path, &err)) {
+        std::fprintf(stderr, "settings restore: the second restore failed (%s)\n", qPrintable(err));
+        return 1;
+    }
+    QFile stillThere(settingsRejectedPath(path));
+    if (!stillThere.open(QIODevice::ReadOnly) || stillThere.readAll() != broken) {
+        std::fprintf(stderr, "settings restore: a restore that changed nothing replaced the kept file\n");
+        return 1;
+    }
+
+    /* No backup at all is reported rather than turned into a defaults file:
+       an empty file here would look like a successful restore of nothing. */
+    QTemporaryDir empty;
+    if (!empty.isValid()) {
+        std::fprintf(stderr, "settings restore: temp dir failed\n");
+        return 1;
+    }
+    const QString bare = empty.filePath(QStringLiteral("settings.json"));
+    if (writeFile(bare, broken) || restoreSettingsBackup(bare, &err) || err.isEmpty()) {
+        std::fprintf(stderr, "settings restore: a missing backup was not reported\n");
+        return 1;
+    }
+    QFile untouched(bare);
+    if (!untouched.open(QIODevice::ReadOnly) || untouched.readAll() != broken) {
+        std::fprintf(stderr, "settings restore: a missing backup changed settings.json\n");
+        return 1;
+    }
+
+    std::fprintf(stdout, "settings restore: ok\n");
+    return 0;
+}
+
 /// A save is only a save once the bytes are on disk: the rename that publishes
 /// the file does not flush it, so a crash between the two leaves a correctly
 /// named settings.json holding a truncated write. The write reports failure
@@ -2216,6 +2347,7 @@ int main(int argc, char **argv) {
         checkRootDirDoneTotals(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
         checkSettingsBackup(), checkSettingsBackupRepeatedSave(), checkDurableWrite(),
+        checkSettingsRestore(),
         checkLocaleGrouping(), checkSizeLocaleDigits(),
         checkLegacySettingsMigration(), checkScriptFileRemoval(),
         checkScriptRunCleansUpItsFile(), checkScriptDeadlineStartsAtSpawn(),

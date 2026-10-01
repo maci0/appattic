@@ -124,6 +124,12 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
     /// case a user cannot act on alone, so the config output names it.
     public let settingsBackupPath: String
     public let settingsBackupExists: Bool
+    /// The settings file a restore replaced. Named with the backup because it is
+    /// the other half of a restore's undo: the copy the runbook used to tell a
+    /// user to make consumed the bytes it replaced, and these are what was
+    /// consumed.
+    public let settingsRejectedPath: String
+    public let settingsRejectedExists: Bool
     public let includeSystemFile: Bool
     public let includeSystemFlag: Bool
     public let confirmDelete: Bool
@@ -167,6 +173,8 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         self.settingsFileExists = FileManager.default.fileExists(atPath: settingsURL.path)
         self.settingsBackupPath = settingsBackupURL(settingsURL).path
         self.settingsBackupExists = FileManager.default.fileExists(atPath: settingsBackupURL(settingsURL).path)
+        self.settingsRejectedPath = settingsRejectedURL(settingsURL).path
+        self.settingsRejectedExists = FileManager.default.fileExists(atPath: settingsRejectedURL(settingsURL).path)
         self.includeSystemFile = settings.includeSystem
         self.includeSystemFlag = includeSystemFlag
         self.includeSystem = effectiveIncludeSystem(
@@ -206,6 +214,7 @@ public struct EffectiveConfig: Encodable, Equatable, Sendable {
         lines.append(contentsOf: [
             "scan cache: \(scanCachePath)",
             "settings backup: \(settingsBackupPath)\(settingsBackupExists ? "" : " (missing)")",
+            "settings replaced by a restore: \(settingsRejectedPath)\(settingsRejectedExists ? "" : " (missing)")",
             "XDG_DATA_HOME: \(dataHome)",
             "XDG_CONFIG_HOME: \(configHome)",
             "XDG_CACHE_HOME: \(cacheHome)",
@@ -465,4 +474,75 @@ private func keepSettingsBackup(at url: URL, replacingWith raw: Data) throws {
     let backup = settingsBackupURL(url)
     if let kept = try? Data(contentsOf: backup), kept == previous { return }
     try writeOwnerOnlyFile(previous, to: backup)
+}
+
+/// The settings file a restore replaced, kept beside the backup. Recovery
+/// material like the backup and read by nothing: it is what makes a restore
+/// that turned out to be the wrong one undoable, and `docs/privacy.md` is where
+/// the extra copy of the account's own paths is recorded.
+public func settingsRejectedURL(_ url: URL = defaultSettingsURL()) -> URL {
+    url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent + ".bad")
+}
+
+/// Put `settings.json.bak` back in place of `settings.json`, after checking
+/// that the backup is a file the app will actually load.
+///
+/// The copy `docs/runbooks/state-recovery.md` used to tell a user to make had
+/// nothing to check: a backup that is itself truncated, emptied by a full disk,
+/// or hand-mangled replaced a file that was still on disk with one the loader
+/// refuses, and the bytes the copy consumed were gone. So the backup is read
+/// through `loadSettings` — the same parser, and the only definition of a
+/// settings file the app accepts — before anything is written. A backup that
+/// does not load is reported as the failure it is and changes nothing on disk.
+///
+/// The Linux window's `restoreSettingsBackup` is the same function in Qt,
+/// with the same two files and the same check, because a backup a user can
+/// restore in one window and not the other is not a backup.
+///
+/// The file being replaced is kept as `settings.json.bad` first, one generation
+/// the way the backup is. A restore is a destructive step a user takes by hand
+/// on a machine that is already broken; if it is interrupted, or the file it
+/// wrote turns out to be the wrong state, what was there is still there. It is
+/// written the owner-only way the other two are and read at run time by
+/// nothing.
+///
+/// The restore itself goes through `writeOwnerOnlyFile`, so it is whole or not
+/// at all and is on disk before this returns, the same as a save.
+@discardableResult
+public func restoreSettingsBackup(
+    from url: URL = defaultSettingsURL()
+) throws -> AppAtticSettings {
+    let backup = settingsBackupURL(url)
+    guard FileManager.default.fileExists(atPath: backup.path) else {
+        throw SettingsError.unreadable(
+            path: backup.path,
+            reason: "there is no settings backup to restore"
+        )
+    }
+    // The parse is the check. A backup that loads is a file the app will read,
+    // so the restore cannot be the step that leaves the settings unloadable.
+    let restored = try loadSettings(from: backup)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    let raw: Data
+    do {
+        raw = try encoder.encode(restored.normalized())
+    } catch {
+        throw SettingsError.unwritable(path: url.path, reason: error.localizedDescription)
+    }
+    do {
+        try prepareStateDirectory(url.deletingLastPathComponent())
+        // Keep the state this restore replaces, so a restore that was wrong is
+        // still a `cp` from being undone. A file that is not there is not a
+        // failure: then the wanted state is a fresh settings.json.
+        if let current = try? Data(contentsOf: url), !current.isEmpty, current != raw {
+            try writeOwnerOnlyFile(current, to: settingsRejectedURL(url))
+        }
+        try writeOwnerOnlyFile(raw, to: url)
+    } catch let error as SettingsError {
+        throw error
+    } catch {
+        throw SettingsError.unwritable(path: url.path, reason: error.localizedDescription)
+    }
+    return restored
 }

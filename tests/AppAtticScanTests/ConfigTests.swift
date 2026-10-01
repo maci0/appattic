@@ -64,6 +64,32 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(kept.lines.contains { $0.contains(settingsBackupURL(url).path) }, "\(kept.lines)")
     }
 
+    /// The file a restore replaced is the third piece of recovery material and
+    /// the only one that tells a user which generation they are looking at. It
+    /// is named with the backup and says `(missing)` in the same way, so a
+    /// machine diff shows the restore history as plainly as the backup.
+    func testConfigNamesTheFileARestoreReplacedAndWhetherItIsThere() throws {
+        let url = try settingsFile(#"{"ignoredLeftoverPaths": ["/tmp/a"]}"#)
+        let rejected = settingsRejectedURL(url)
+        let missing = EffectiveConfig(settings: .default, settingsURL: url, env: [:])
+        XCTAssertEqual(missing.settingsRejectedPath, rejected.path)
+        XCTAssertFalse(missing.settingsRejectedExists)
+        XCTAssertTrue(
+            missing.lines.contains { $0.contains("\(rejected.path) (missing)") },
+            "\(missing.lines)"
+        )
+        try Data("{ \"ignoredLeftoverPaths\": ".utf8).write(to: url)
+        try Data(#"{"ignoredLeftoverPaths": ["/tmp/a"]}"#.utf8).write(to: rejected)
+        addTeardownBlock { try? FileManager.default.removeItem(at: rejected) }
+        let there = EffectiveConfig(settings: .default, settingsURL: url, env: [:])
+        XCTAssertTrue(there.settingsRejectedExists)
+        XCTAssertTrue(there.lines.contains { $0.contains(rejected.path) }, "\(there.lines)")
+        XCTAssertFalse(
+            there.lines.contains { $0.contains(rejected.path) && $0.hasSuffix("(missing)") },
+            "a present file reported as missing: \(there.lines)"
+        )
+    }
+
     func testLinesReportWhereIncludeSystemCameFrom() {
         var settings = AppAtticSettings.default
         settings.includeSystem = true
