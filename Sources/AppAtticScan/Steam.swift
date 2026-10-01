@@ -9,29 +9,105 @@ struct SteamAppManifest {
     var isInstalled: Bool
 }
 
+/// The quoted strings on one VDF line, in order, with the escapes resolved.
+///
+/// VDF escapes `\"` and `\\` inside a string, so a closing quote is found by
+/// scanning for the next `"` that is not preceded by an odd run of
+/// backslashes. Finding the raw next `"` instead truncated the first value at
+/// an escaped quote and read the text after it as a value of its own: a game
+/// named `He said "hi"` came out of `"name"\t\t"He said \"hi\""` as `He said \`
+/// plus a stray `""`, and that name is the row a person reads and the argument
+/// the uninstall script is built from.
+///
+/// An unterminated string ends the line rather than swallowing the rest of the
+/// file: the value it would have held is not knowable, and the pair reader
+/// already refuses a line that does not give it two.
 func vdfQuotedStrings(_ line: String) -> [String] {
     var out: [String] = []
     var i = line.startIndex
     while i < line.endIndex {
         guard let q = line[i...].firstIndex(of: "\"") else { break }
-        let start = line.index(after: q)
-        guard start < line.endIndex, let end = line[start...].firstIndex(of: "\"") else { break }
-        out.append(String(line[start..<end]))
-        i = line.index(after: end)
+        var start = line.index(after: q)
+        var value = String.UnicodeScalarView()
+        var closed = false
+        while start < line.endIndex {
+            let c = line[start]
+            if c == "\\" {
+                let next = line.index(after: start)
+                guard next < line.endIndex else { break }
+                // The format defines two escapes, `\\` and `\"`, and both take
+                // the character after the backslash. Any other `\x` is not an
+                // escape: the backslash is the character and the next one
+                // follows it, so a name holding `\a` keeps both and every value
+                // is still a span of the file with the quotes taken off. A
+                // trailing backslash ends the value as unterminated.
+                if line[next] == "\\" || line[next] == "\"" {
+                    value.append(line[next])
+                    start = line.index(after: next)
+                } else {
+                    value.append(c)
+                    start = line.index(after: start)
+                }
+                continue
+            }
+            if c == "\"" {
+                closed = true
+                break
+            }
+            value.append(c)
+            start = line.index(after: start)
+        }
+        guard closed else { break }
+        out.append(String(value))
+        i = line.index(after: start)
     }
     return out
+}
+
+/// A VDF comment, `//` to the end of the line, off the line it is on.
+///
+/// The comment is not a `//` inside a quoted string: a path or a name may hold
+/// two slashes (`/usr/`, `C://games`), and those are content. So the scan is
+/// over the quote-delimited runs only, and it stops at the first `//` that
+/// starts one.
+func vdfStripComment(_ line: String) -> Substring {
+    var inString = false
+    var escaped = false
+    var i = line.startIndex
+    while i < line.endIndex {
+        let c = line[i]
+        if escaped {
+            escaped = false
+        } else if inString, c == "\\" {
+            escaped = true
+        } else if c == "\"" {
+            inString.toggle()
+        } else if !inString, c == "/", line.index(after: i) < line.endIndex,
+                  line[line.index(after: i)] == "/"
+        {
+            return line[..<i]
+        }
+        i = line.index(after: i)
+    }
+    return line[...]
 }
 
 func vdfPairs(_ text: String, depth wanted: Int) -> [String: String] {
     var out: [String: String] = [:]
     var depth = 0
     for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let line = raw.trimmingCharacters(in: .whitespaces)
+        let line = String(vdfStripComment(String(raw).trimmingCharacters(in: .whitespaces)))
+            .trimmingCharacters(in: .whitespaces)
         if line.isEmpty { continue }
-        let quoted = vdfQuotedStrings(String(line))
+        let quoted = vdfQuotedStrings(line)
         if depth == wanted, quoted.count >= 2 {
             out[quoted[0]] = quoted[1]
         }
+        // The count is over the comment-free line, so a `}` a comment holds
+        // cannot close a block and a `{` it holds cannot open one. An
+        // unbalanced brace in prose otherwise desynchronises every later line:
+        // `// installer: }` above `"name"` dropped the rest of the manifest, so
+        // an installed game read as not installed and never reached the report.
         depth += line.filter { $0 == "{" }.count - line.filter { $0 == "}" }.count
         if depth < 0 { depth = 0 }
     }
@@ -66,8 +142,12 @@ func parseSteamLibraryFolders(_ text: String) -> [String] {
     var paths: [String] = []
     var seen = Set<String>()
     for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let line = raw.trimmingCharacters(in: .whitespaces)
-        let quoted = vdfQuotedStrings(String(line))
+        // Comment-stripped for the same reason `vdfPairs` strips it: a quoted
+        // string in a `//` line is not a path this reader may act on.
+        let line = String(vdfStripComment(String(raw).trimmingCharacters(in: .whitespaces)))
+            .trimmingCharacters(in: .whitespaces)
+        if line.isEmpty { continue }
+        let quoted = vdfQuotedStrings(line)
         if quoted.count >= 2, quoted[0].posixLowercased() == "path" {
             let path = quoted[1]
             if !path.isEmpty, seen.insert(path).inserted {

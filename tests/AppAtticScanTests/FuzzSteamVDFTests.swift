@@ -12,8 +12,11 @@ final class FuzzSteamVDFTests: XCTestCase {
     /// `"`, `{` and `}` are what the VDF readers key on, and `FuzzMutator`
     /// leaves them out of its hot bytes for the harnesses that hold two
     /// readers of one path against each other. Here they are the whole
-    /// grammar, so they are the bytes worth mutating.
-    private static let hotBytes: [UInt8] = FuzzMutator.hotBytes + [0x22, 0x7B, 0x7D]
+    /// grammar, so they are the bytes worth mutating. `\` and `/` are the other
+    /// two: a backslash is what escapes a quote out of being a delimiter, and
+    /// a `//` is a comment, so without them the two rules the readers are
+    /// built on are never the thing under test.
+    private static let hotBytes: [UInt8] = FuzzMutator.hotBytes + [0x22, 0x7B, 0x7D, 0x5C, 0x2F]
 
     /// Bit 2 of `StateFlags`, the bit that says the game is installed. The
     /// parser keeps it private, so it is spelled out here.
@@ -71,9 +74,13 @@ final class FuzzSteamVDFTests: XCTestCase {
         var depth = 0
         var capacity = 0
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
+            // The same comment strip the reader does, so a `}` in a comment
+            // moves the depth here exactly as it does there and the bound
+            // stays the one that counts only real pairs.
+            let line = String(vdfStripComment(String(raw).trimmingCharacters(in: .whitespaces)))
+                .trimmingCharacters(in: .whitespaces)
             if line.isEmpty { continue }
-            if depth == wanted, vdfQuotedStrings(String(line)).count >= 2 { capacity += 1 }
+            if depth == wanted, vdfQuotedStrings(line).count >= 2 { capacity += 1 }
             depth += line.filter { $0 == "{" }.count - line.filter { $0 == "}" }.count
             if depth < 0 { depth = 0 }
         }
@@ -92,10 +99,36 @@ final class FuzzSteamVDFTests: XCTestCase {
         // containment check is only meaningful for a span with something in
         // it.
         if !value.isEmpty {
-            XCTAssertTrue(text.contains(value), "value is not text the file holds: \(value.debugDescription) \(where_)", file: file, line: line)
+            XCTAssertTrue(
+                unescapeVDF(text).contains(value),
+                "value is not text the file holds: \(value.debugDescription) \(where_)",
+                file: file, line: line
+            )
         }
-        XCTAssertFalse(value.contains("\""), "quote left in value: \(value.debugDescription) \(where_)", file: file, line: line)
+        // A value never spans lines, whatever the file holds.
         XCTAssertFalse(value.contains("\n"), "value spans lines: \(value.debugDescription) \(where_)", file: file, line: line)
+    }
+
+    /// The file with VDF's two escapes resolved, the form a value is a span of
+    /// once the reader has taken the quotes off: `\"` in the file is a `"` in
+    /// the value, and `\\` a `\`. Only a backslash ahead of one of those two is
+    /// an escape; any other `\x` is a literal backslash the reader keeps, and
+    /// resolving it here would let a value pass that the file does not hold.
+    private func unescapeVDF(_ text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        var out = String.UnicodeScalarView()
+        var i = 0
+        while i < scalars.count {
+            if scalars[i].value == 0x5C, i + 1 < scalars.count,
+               scalars[i + 1].value == 0x5C || scalars[i + 1].value == 0x22 {
+                out.append(scalars[i + 1])
+                i += 2
+            } else {
+                out.append(scalars[i])
+                i += 1
+            }
+        }
+        return String(out)
     }
 
     /// The invariants `vdfPairs` must hold whatever it is handed: a key and a

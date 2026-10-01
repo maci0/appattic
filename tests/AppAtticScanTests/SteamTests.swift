@@ -43,6 +43,58 @@ final class SteamTests: XCTestCase {
         XCTAssertNil(parseSteamAppManifest(text))
     }
 
+    /// A `//` comment is prose, and prose holds braces. Counting the ones in a
+    /// comment moved the depth, so every key after the comment was read at the
+    /// wrong depth and dropped: an installed game came back as no manifest at
+    /// all and never reached the report.
+    func testParseAppManifestIgnoresBracesInComments() {
+        for comment in ["\t// installer: }", "\t// template: {", "\t// a { and a }"] {
+            let text = """
+            "AppState"
+            {
+            \t"appid"\t\t"570"
+            \(comment)
+            \t"name"\t\t"Dota 2"
+            \t"StateFlags"\t\t"4"
+            \t"installdir"\t\t"dota 2 beta"
+            }
+            """
+            let m = parseSteamAppManifest(text)
+            XCTAssertEqual(m?.appId, "570", comment)
+            XCTAssertEqual(m?.name, "Dota 2", comment)
+            XCTAssertEqual(m?.installDir, "dota 2 beta", comment)
+            XCTAssertTrue(m?.isInstalled ?? false, comment)
+        }
+    }
+
+    /// A library root is a path, and a path may hold `//`. A comment strip that
+    /// did not know about quoted strings cut every root in half.
+    func testLibraryFoldersKeepsDoubleSlashInsideAQuotedPath() {
+        let text = """
+        "libraryfolders"
+        {
+        \t"0"
+        \t{
+        \t\t"path"\t\t"//mnt/games/SteamLibrary"
+        \t}
+        }
+        """
+        XCTAssertEqual(parseSteamLibraryFolders(text), ["//mnt/games/SteamLibrary"])
+    }
+
+    /// VDF escapes a quote inside a value as `\"`. Reading the next raw `"` as
+    /// the close cut the value at the escape and read the remainder as a
+    /// value of its own, so the game name on the report row and in the
+    /// uninstall script was truncated.
+    func testQuotedStringsResolveVDFEscapes() {
+        XCTAssertEqual(vdfQuotedStrings("\"name\"\t\t\"He said \\\"hi\\\"\""), ["name", "He said \"hi\""])
+        XCTAssertEqual(vdfQuotedStrings("\"path\"\t\t\"C:\\\\games\""), ["path", "C:\\games"])
+        // An unterminated string ends the line rather than swallowing the
+        // rest of the file, so the closed key survives and the value is
+        // dropped: one string, and the pair reader refuses the line.
+        XCTAssertEqual(vdfQuotedStrings("\"name\"\t\t\"unclosed"), ["name"])
+    }
+
     func testLinuxSteamRootsHonorXdgDataHome() {
         PlatformOverride.linux = true
         defer { PlatformOverride.linux = nil }
