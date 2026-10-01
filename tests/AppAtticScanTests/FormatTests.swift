@@ -79,6 +79,23 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(mulBytes(512, 8), 4096)
     }
 
+    func testHumanSizeNeverPrintsANegativeSize() {
+        // `size_bytes` comes off the JSON a scan writes and any other tool (or
+        // hand) can edit, and nothing on the way in clamps its sign. A negative
+        // one is a size nobody measured, and the loop divides by 1024 with
+        // `abs`, so the sign used to survive every step and the row read
+        // "-1.9 MB" while the Qt window printed "unknown" for the same value.
+        XCTAssertEqual(humanSize(-1), "unknown")
+        XCTAssertEqual(humanSize(-1023), "unknown")
+        XCTAssertEqual(humanSize(-5000), "unknown")
+        XCTAssertEqual(humanSize(-2_000_000), "unknown")
+        XCTAssertEqual(humanSize(Int.min), "unknown")
+        // Nothing below zero reaches the unit loop, so no size carries a sign.
+        for size in [-1, -1_048_576, Int.min] {
+            XCTAssertFalse(humanSize(size).contains("-"), "\(size) -> \(humanSize(size))")
+        }
+    }
+
     func testHumanDays() {
         // The unit word and its plural form come from the locale, so a bucket is
         // pinned by the count it renders and by staying distinct from the

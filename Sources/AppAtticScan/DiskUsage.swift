@@ -519,6 +519,20 @@ func unescapeProcMountField(_ field: String) -> String {
     return out + rest
 }
 
+/// The unit `f_blocks` and `f_bavail` are counted in, as a byte count.
+///
+/// `f_frsize` is the fragment size and is what has to be used when it is
+/// nonzero: on a filesystem that allocates in blocks larger than the
+/// fragment, multiplying by anything else overstates the volume. It is
+/// zero on some network and FUSE mounts, and the whole product is then
+/// zero, so the volume reports "0 B" and drops out of the list entirely.
+/// `f_bsize` is the preferred block size, the unit `f_frsize` is itself
+/// derived from, and the only substitute the interface offers.
+func volumeBlockSize(_ st: statvfs) -> Int {
+    let fragment = Int(clamping: st.f_frsize)
+    return fragment > 0 ? fragment : Int(clamping: st.f_bsize)
+}
+
 /// Root file system first, then the home one, then the rest in collated
 /// mount-path order. Both platform arms sort with this: sorting the macOS rows
 /// on the path alone put `/` first only because it collates before `/Users`
@@ -559,7 +573,7 @@ public func listDiskVolumes(
             // filesystem, so both the conversion and the multiply are
             // checked: a wrapped total reads as negative, which drops the
             // volume below out of the list entirely.
-            let blockSize = Int(clamping: st.f_frsize)
+            let blockSize = volumeBlockSize(st)
             total = mulBytes(blockSize, Int(clamping: st.f_blocks))
             avail = mulBytes(blockSize, Int(clamping: st.f_bavail))
         }

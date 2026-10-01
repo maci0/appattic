@@ -72,7 +72,12 @@ func oneDecimal(_ n: Double) -> String {
 }
 
 /// Binary-unit size, one decimal above KB. Bytes print as an exact integer.
+/// A negative count is a size nobody measured, not a size below zero, so it
+/// reads as "unknown": the same word the Qt `humanSize` twin prints for the
+/// same value. The unit loop below would otherwise print "-1.9 MB" for it, and
+/// `abs` there would make the sign survive every division.
 public func humanSize(_ bytes: Int) -> String {
+    if bytes < 0 { return "unknown" }
     // Past the largest unit the loop stops, so the unit list has to reach the
     // size `Int.max` saturates at (8 EiB), not stop at PB and print 8192 PB.
     let units = ["B", "KB", "MB", "GB", "TB", "PB", "EB"]

@@ -1,4 +1,9 @@
 import XCTest
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 @testable import AppAtticScan
 
 final class DiskUsageTests: XCTestCase {
@@ -183,6 +188,32 @@ final class DiskUsageTests: XCTestCase {
         let missing = DiskRootError.missing(path: home + "/nope")
         XCTAssertEqual(missing.description, "no such directory: ~/nope")
         XCTAssertFalse(missing.description.contains(home), missing.description)
+    }
+
+    // The unit the volume reader multiplies `f_blocks` by. `statvfs` itself
+    // cannot be injected from a test, so the rule the reader applies to a
+    // result is pinned here instead: `f_frsize` wins whenever it names a
+    // real unit, and a zero fragment size falls back to `f_bsize` rather than
+    // multiplying the whole volume into zero.
+    func testVolumeBlockSize() {
+        var st = statvfs()
+        st.f_frsize = 4096
+        st.f_bsize = 8192
+        XCTAssertEqual(volumeBlockSize(st), 4096, "the fragment size is the unit f_blocks is counted in")
+        // What a network or FUSE mount reports: no fragment size, so every
+        // product came out zero and the volume dropped out of the list.
+        st.f_frsize = 0
+        XCTAssertEqual(volumeBlockSize(st), 8192, "a zero fragment size falls back to the block size")
+        // Both zero is a filesystem that cannot say; the caller reads the
+        // resulting total of 0 as an unmeasurable volume and skips it.
+        st.f_bsize = 0
+        XCTAssertEqual(volumeBlockSize(st), 0)
+        // The fallback is not free rein: a nonzero fragment size is still
+        // preferred over a larger block size, so a filesystem that allocates
+        // in larger blocks than it fragments is not overstated.
+        st.f_frsize = 512
+        st.f_bsize = 65536
+        XCTAssertEqual(volumeBlockSize(st), 512)
     }
 
     #if os(Linux)
