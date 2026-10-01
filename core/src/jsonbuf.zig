@@ -150,10 +150,14 @@ pub const W = struct {
 /// non-ASCII name still reads in a report there; see `sanitizedPackageName`.
 pub fn isSafeCmdIdent(s: []const u8) bool {
     if (s.len == 0 or s[0] == '-') return false;
+    // One pass, not a non-ASCII scan followed by `isSafeIdent`: a byte >= 0x80
+    // fails the same predicate `isIdentByte` already applies, and every
+    // manager's name in these listings is pure ASCII, so no UTF-8 validation is
+    // needed and there is nothing for a second walk to find.
     for (s) |c| {
-        if (c >= 0x80) return false;
+        if (!isIdentByte(c)) return false;
     }
-    return isSafeIdent(s);
+    return true;
 }
 
 pub fn isSafeIdent(s: []const u8) bool {
@@ -167,11 +171,45 @@ pub fn isSafeIdent(s: []const u8) bool {
         // accent in `~/.local/bin` is a real one that shadows a packaged file,
         // and refusing it hides the row.
         if (c >= 0x80) continue;
-        const ok = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
-            (c >= '0' and c <= '9') or c == '-' or c == '_' or c == '.' or c == '+';
-        if (!ok) return false;
+        if (!isIdentByte(c)) return false;
     }
     return true;
+}
+
+/// The ASCII bytes a name may be built from. A non-ASCII scalar is not one of
+/// them; `isSafeIdent` skips those, `isSafeCmdIdent` refuses them.
+///
+/// `@inline`: both callers run this once per byte of a name on the parse path
+/// for every package row, and the range test is the whole body, so the
+/// call is all the inliner has to remove.
+inline fn isIdentByte(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
+        (c >= '0' and c <= '9') or c == '-' or c == '_' or c == '.' or c == '+';
+}
+
+test "a name is built from exactly the ident bytes" {
+    // Spelled out rather than derived from `isIdentByte`, so widening the byte
+    // class is a test failure and not a silent change to what a manager is
+    // handed. Both name predicates read this one class, so a byte added here
+    // reaches `apt-get purge -y` and the confirm dialog; `/` and `:` would make
+    // one token of a name into a path and an option.
+    const want = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.+";
+    var c: usize = 1;
+    while (c < 0x80) : (c += 1) {
+        const b: u8 = @intCast(c);
+        const expected = std.mem.indexOfScalar(u8, want, b) != null;
+        try std.testing.expectEqual(expected, isIdentByte(b));
+    }
+    try std.testing.expect(!isIdentByte(0x00));
+    try std.testing.expect(!isIdentByte(0x80));
+    // The shapes a widened class would let through, named so the reason is in
+    // the test rather than only in this comment.
+    try std.testing.expect(!isIdentByte('/'));
+    try std.testing.expect(!isIdentByte(':'));
+    try std.testing.expect(!isIdentByte('@'));
+    try std.testing.expect(!isSafeCmdIdent("../../etc/passwd"));
+    try std.testing.expect(!isSafeCmdIdent("a/b"));
+    try std.testing.expect(!isSafeIdent("a/b"));
 }
 
 /// Bytes a POSIX shell reads as a literal inside an unquoted word. Same set
@@ -579,6 +617,48 @@ test "a name starting with a dash is not a command name" {
     try std.testing.expect(isSafePkgName("@scope/name"));
     try std.testing.expect(!isSafeComposerName("-vendor/pkg"));
     try std.testing.expect(isSafeComposerName("vendor/pkg"));
+}
+
+/// The definition `isSafeCmdIdent` is written as: a name is a command name when
+/// it is a filesystem name that carries no byte >= 0x80. The one-pass form
+/// skips that two-step and tests the bytes directly, which is the same answer
+/// in one walk instead of three; this pins the two against each other so the
+/// shortcut cannot drift into accepting a name the slow form refuses. A name
+/// this predicate widens reaches `apt-get purge -y` and the confirm dialog.
+fn isSafeCmdIdentDefinition(s: []const u8) bool {
+    if (s.len == 0 or s[0] == '-') return false;
+    for (s) |c| {
+        if (c >= 0x80) return false;
+    }
+    return isSafeIdent(s);
+}
+
+const fuzz_ident_names = packFuzzSlice("libfoo0\n.mozilla\nnode_modules\n@scope/name\nvendor/package\n");
+const fuzz_ident_reject = packFuzzSlice("-rf\n--force\nfoo;rm\nfoo bar\nfoo\nbar\n");
+const fuzz_ident_utf8 = packFuzzSlice("café\n日本語\nlibfoo\u{202E}dwp\nlib\u{200B}foo\n");
+const fuzz_ident_bytes = packFuzzSlice(&[_]u8{ 0xff, 0xc3, 0x80, 0x00, 0x01, 0x7f, 0x2f, '.', '@', '+', '-', '_' });
+const fuzz_ident_empty = packFuzzSlice("");
+
+test "fuzz a command name is a name with no non-ascii byte" {
+    try std.testing.fuzz({}, fuzzCmdIdent, .{ .corpus = &.{
+        &fuzz_ident_names,
+        &fuzz_ident_reject,
+        &fuzz_ident_utf8,
+        &fuzz_ident_bytes,
+        &fuzz_ident_empty,
+    } });
+}
+
+fn fuzzCmdIdent(_: void, smith: *std.testing.Smith) !void {
+    var raw: [512]u8 = undefined;
+    const s = raw[0..smith.slice(&raw)];
+    try std.testing.expectEqual(isSafeCmdIdentDefinition(s), isSafeCmdIdent(s));
+    // A name the wider predicate accepts has to be pure ASCII built from the
+    // ident bytes, or it is reaching a manager command with something else.
+    if (isSafeCmdIdent(s)) {
+        try std.testing.expect(s[0] != '-');
+        for (s) |c| try std.testing.expect(isIdentByte(c));
+    }
 }
 
 test "json string passes utf8 through" {
