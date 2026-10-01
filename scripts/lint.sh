@@ -627,6 +627,72 @@ done < <(grep -rnE '^[[:space:]]*(\||&&[[:space:]]*|;[[:space:]]*)?swift build '
          | grep -v -e 'scripts/swift-build.sh' -e 'verify-swift-reproducible.sh' || true)
 echo "swift build flags: ok (build path mapped out of every swift build)"
 
+# core/build-flags.sh and ui/linux-qt/CMakeLists.txt are two copies of one
+# hardening and path-mapping policy: CMake cannot read the shell list, so the
+# block there is maintained by hand and says so. Nothing enforced it, so a flag
+# added to the shell list reached the C host and the standalone binary but not
+# the Qt one, which links the same core/host/*.c translation units into the
+# shipped appattic-qt.
+#
+# The list is read from core/build-flags.sh rather than restated here, so this
+# gate cannot itself go stale: a flag added to the build is demanded of the
+# CMake block the same change adds it to. Flags the CMake block spells with a
+# generator expression (the FORTIFY pair, which is skipped under a Flatpak SDK
+# and in Debug) are checked as bare tokens, since the expression text still has
+# to name the flag.
+# shellcheck source=../core/build-flags.sh
+# shellcheck disable=SC2154  # assigned by appattic_host_flags, sourced above
+. "$ROOT/core/build-flags.sh"
+appattic_host_flags "$ROOT"
+cmake_hardening="$ROOT/ui/linux-qt/CMakeLists.txt"
+if [[ ! -r "$cmake_hardening" ]]; then
+    echo "error: missing $cmake_hardening" >&2
+    exit 1
+fi
+# The prefix maps appear twice there (source root and binary dir) and the
+# cc_ldflags tail is Linux-only there exactly as it is here, so a flag missing
+# from one build is a real drift rather than a platform the other cannot reach.
+required_hardening=()
+for f in "${cc_cflags[@]}" "${cc_ldflags[@]}"; do
+    case "$f" in
+        # Per-root paths differ between the two trees by construction.
+        -*prefix-map=*) continue ;;
+        # -O2 is CMake's CMAKE_BUILD_TYPE, -Wall/-Wextra are added to the C
+        # half of the list below, and -fPIE is CMAKE_POSITION_INDEPENDENT_CODE
+        # plus an explicit -pie in the linker flags.
+        -O2|-Wall|-Wextra|-fPIE) continue ;;
+        # Everything else is a hardening or mapping flag the two lists share.
+        *) ;;
+    esac
+    required_hardening+=("$f")
+done
+if [[ "${#required_hardening[@]}" -eq 0 ]]; then
+    echo "error: core/build-flags.sh produced no hardening flags to check" >&2
+    exit 1
+fi
+# Exact token, not a substring: `grep -F -fstack-clash-protection` is also
+# satisfied by a `-fstack-clash-protection-anything` left behind by a partial
+# edit, so a gate that cannot tell those two apart passes on a build that lost
+# the flag. Each value is a whole whitespace-delimited token in both lists, so
+# the match is anchored on a character that cannot continue a flag name: a
+# dash, a letter or a digit on either side of the token means the file names
+# some other flag that starts or ends with this one.
+flag_token_re() {
+    # shellcheck disable=SC2016  # the sed program is literal text, not an expansion
+    printf '(^|[^-[:alnum:]_=.,])%s([^[:alnum:]_-]|$)' \
+        "$(printf '%s' "$1" | sed 's/[][\\.*^$()|?+{}]/\\&/g')"
+}
+for flag in "${required_hardening[@]}"; do
+    if ! grep -qE "$(flag_token_re "$flag")" "$cmake_hardening"; then
+        echo "error: $cmake_hardening does not name $flag" >&2
+        echo "       core/build-flags.sh compiles the shipped C host with it and the" >&2
+        echo "       Qt binary links core/host/*.c too. Add it to" >&2
+        echo "       _appattic_hardening_cflags / _appattic_hardening_ldflags there." >&2
+        exit 1
+    fi
+done
+echo "hardening flags: ok (${#required_hardening[@]} flags shared by core/build-flags.sh and the Qt build)"
+
 # The desktop entry, the AppStream metainfo, the man page, and the Flatpak
 # manifest have to name the same app, the same binary, and the same icon, and
 # the install has to produce what they name. Nothing builds a Flatpak or an
