@@ -247,6 +247,14 @@ final class FuzzScanCacheTests: XCTestCase {
                             )
                         }
                     }
+                    // The Steam app id reaches a `steam://uninstall/<id>` URI, so
+                    // anything outside the identifier set is refused there.
+                    if item.source == "steam", let id = item.steam_appid, !id.isEmpty, !isSafeCmdIdent(id) {
+                        XCTAssertTrue(
+                            cmd.hasPrefix("# skipped"),
+                            "an unsafe Steam app id reached the script: \(id.debugDescription) in \(cmd.debugDescription) \(where_)"
+                        )
+                    }
                 }
             }
         }

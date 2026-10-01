@@ -331,6 +331,36 @@ final class ModelTests: XCTestCase {
         XCTAssertNil(parseGuardedRemove(cmd))
     }
 
+    /// A Steam app id comes from an `appmanifest_*.acf` on disk and is spliced
+    /// into a `steam://uninstall/<id>` URI, so a quote in it ends the shell word
+    /// and the rest runs as commands in the generated script. It was the one
+    /// argument reaching a command line without the gate the others get.
+    func testUninstallCommandRefusesASteamAppIdThatIsNotAnIdentifier() {
+        let item = SoftwareItem(
+            name: "EmuDevz",
+            kind: "app",
+            path: "/tmp/EmuDevz.app",
+            source: "steam",
+            steam_appid: "1';touch /tmp/appattic-pwned;'"
+        )
+        let cmd = uninstallCommand(for: item)
+        XCTAssertEqual(cmd, "# skipped 1';touch /tmp/appattic-pwned;': Steam app id is not a plain identifier")
+        XCTAssertFalse(cmd.contains("steam://uninstall/"), "no uninstall URI may reach the script")
+    }
+
+    /// A real app id is digits and must still be handed to the client, so the
+    /// gate above cannot be a blanket refusal of the Steam branch.
+    func testUninstallCommandKeepsAPlainSteamAppId() {
+        let item = SoftwareItem(
+            name: "EmuDevz",
+            kind: "app",
+            path: "/tmp/EmuDevz.app",
+            source: "steam",
+            steam_appid: "4260720"
+        )
+        XCTAssertTrue(uninstallCommand(for: item).contains("steam://uninstall/4260720"))
+    }
+
     func testLeftoverStatusAccessor() {
         let item = LeftoverItem(
             name: "python3",

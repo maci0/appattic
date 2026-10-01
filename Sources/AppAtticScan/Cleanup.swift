@@ -107,6 +107,22 @@ public func uninstallCommand(
     if let pkgId, !isSafeCommandArgument(pkgId) {
         return "# skipped \(shellComment(pkgId)): package id reads as a command option"
     }
+    // The Steam app id was the one argument reaching a command line unvalidated.
+    // It is spliced into a `steam://uninstall/<id>` URI, so a quote in it ends
+    // the shell word and the rest of the value runs as commands: the id comes
+    // from an `appmanifest_*.acf` under a Steam library, which is as
+    // attacker-controlled as a bundle name, and the generated script is run as
+    // the user. `shellQuote` is not the defense — it escapes for a shell word,
+    // and a URI path segment still has to be one. A Steam app id is digits, so
+    // the same `isSafeCmdIdent` the manager listings use is checked here: an id
+    // outside the identifier set is not a game this can hand to the client.
+    //
+    // Judged on the steam branch alone, because that is the only one that reads
+    // the id. Gating it for every source would let a leftover id on a row from
+    // another manager drop that row's removal, which the id has no part in.
+    if source == "steam", let id = steamAppId, !id.isEmpty, !isSafeCmdIdent(id) {
+        return "# skipped \(shellComment(id)): Steam app id is not a plain identifier"
+    }
     if source == "brew-formula" {
         let q = shellQuote(name)
         return guardedRemoveCommand(present: "brew list --formula \(q)", remove: "brew uninstall \(q)")
