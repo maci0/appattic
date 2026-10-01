@@ -16,6 +16,9 @@ colors:
   red: "#ff453a"
   yellow: "#ffd60a"
   green: "#30d158"
+  greenLight: "#1c6e30"
+  redLight: "#c01c28"
+  yellowLight: "#9e6600"
 typography:
   body:
     fontFamily: "system-ui, -apple-system, sans-serif"
@@ -94,6 +97,8 @@ Brand is the product language (leftovers, stale, outdated), not a split wordmark
 List and inspector fill is white in light mode, `#1e1e1e` in dark mode. Sidebar has no solid fill: AppKit uses the split-view sidebar material, Qt uses a source-list `QListWidget`. Status bar uses window chrome gray. Secondary text is darker gray in light mode (`Color(white: 0.32)`) so 11pt counts stay readable on white and on the sidebar material.
 
 Interactive accent is system blue. Status: system red (orphaned / REMOVE), amber (REVIEW / outdated version; darker than system yellow in light mode), green (KEEP). Never use color alone. Rows keep a text status.
+
+The three status values are one set spelled as bytes in all three shells, because a status color that means the same thing in the AppKit window, the Qt window, and the CLI has to be the same number in each. Light: REMOVE `#c01c28`, REVIEW `#9e6600`, KEEP `#1c6e30`. Dark: REMOVE `#ff453a`, REVIEW `#ffd60a`, KEEP `#30d158`. The light KEEP is the one that drifted (a lighter `#248a3d` in the AppKit window and the CLI, at 4.40:1 on white); the Qt shell had already measured its tones against the 4.5:1 body-text floor and moved its green, and the other two now carry that same value. Every light value answers to 4.5:1 on the white list fill, which `testLightTonesClearTheContrastFloor` in `tests/AppAtticScanTests/CLIParseTests.swift` measures rather than trusts.
 
 Row and pane separators are the hairline pair (`#c2c2c2`, `#4c4c4c`), not the platform's default frame color, which is a different strength under every theme. `appHairline` in `Theme.swift` and `aaHairlineColor` in `uistyle.h` are the same two values.
 

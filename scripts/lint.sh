@@ -269,6 +269,120 @@ if [[ "$qt_valid_values" != "$(tr '\n' ',' <<<"$swift_pages" | sed 's/,$//')" ]]
 fi
 echo "page vocabulary: ok"
 
+# One status palette, three trees. Remove, review, and keep are the same three
+# colors in the AppKit window (`appRed`/`appYellow`/`appGreen` in Theme.swift),
+# the Qt window (`toneFrom` in ui/linux-qt/main.cpp), and the CLI (`CliTone` in
+# CLIParse.swift). They cannot share a constant across the language boundary and
+# nothing compared them, so one shell can answer to a different green than the
+# other two for the same KEEP row, and one role then reads as two colors across
+# the three surfaces. That is not only a drift: the Qt shell had measured its
+# light green against the 4.5:1 body-text floor (WCAG 1.4.3) and moved it,
+# while the other two kept a lighter one at 4.40:1. Read all six values per
+# role here, which needs no Swift toolchain, and fail on any difference.
+#
+# Each helper emits one "r,g,b" line per value, light before dark. The three
+# spellings differ: Theme.swift writes `N.0 / 255.0`, the Qt window
+# `QColor(r, g, b)`, the CLI a truecolor SGR `38;2;r;g;b`.
+theme_file="$ROOT/Sources/AppAttic/Theme.swift"
+qt_file="$ROOT/ui/linux-qt/main.cpp"
+cli_file="$ROOT/Sources/AppAtticScan/CLIParse.swift"
+
+# awk, and not one `sed s///` per color: the Swift source spells each component
+# `N.0 / 255.0`, and the divisor, the decimal point, and the spaces around the
+# slashes all sit inside the pattern, so a sed that matches one component
+# spelling silently drops the other tone rather than reporting a difference.
+theme_tone() {
+    awk -v name="$1" '
+        # The number that follows "red: " is the whole red component, up to
+        # the " / 255.0" divisor that follows it. Reading the channel by its
+        # label rather than by a fixed offset keeps this working when the
+        # divisor is written on one channel and not another.
+        function chan(line, key,   s, rest) {
+            s = index(line, key)
+            if (s == 0) return ""
+            rest = substr(line, s + length(key))
+            sub(/ *\/.*$/, "", rest)
+            sub(/[ ,)].*$/, "", rest)
+            return rest + 0
+        }
+        $0 ~ "static let " name " = Color.adaptive\\(" { inside = 1 }
+        inside && /light: Color/ {
+            print chan($0, "red: ") "," chan($0, "green: ") "," chan($0, "blue: ")
+        }
+        inside && /dark: Color/ {
+            print chan($0, "red: ") "," chan($0, "green: ") "," chan($0, "blue: ")
+        }
+        inside && /^\s*\)$/ { inside = 0 }
+    ' "$theme_file"
+}
+# The Qt window names the dark value first in the ternary; light is wanted
+# first, so the light QColor is captured second and printed first.
+qt_tone() {
+    sed -n "s/^ *t\.$1 = dark ? QColor(\([0-9, ]*\)) : QColor(\([0-9, ]*\));/\2 \1/p" "$qt_file" \
+        | sed 's/, /,/g; s/,,/,/g'
+}
+# CliTone.light then CliTone.dark, each array in Role order (remove, review,
+# keep). The SGR pattern carries no `.*` in front of it, so one `p` prints every
+# triple on the line: a leading `.*` would be greedy and match only the last.
+cli_tone() {
+    for pair in light dark; do
+        grep -o "static let $pair = CliTone(sources: \[.*\]" "$cli_file" \
+            | grep -o '"38;2;[0-9]*;[0-9]*;[0-9]*"' \
+            | sed 's/"38;2;//; s/;/,/g; s/"//'
+    done
+}
+
+status_bad=0
+status_report() {
+    echo "       fix: one value per role per mode, spelled the same in all three:" >&2
+    # The backticks are the form being asked for, not a command.
+    # shellcheck disable=SC2016
+    echo '             Theme.swift `N.0 / 255.0`, main.cpp `QColor(r, g, b)`, CliTone `"38;2;r;g;b"`' >&2
+    status_bad=1
+}
+# The CLI array is read once: it carries all three roles, and re-running the
+# extraction per role would parse the same line three times to learn that.
+cli_vals="$(cli_tone)"
+if [[ -z "$cli_vals" ]]; then
+    echo "error: could not read the CliTone status arrays" >&2
+    exit 1
+fi
+for role_spec in "remove:appRed:red:1" "review:appYellow:amber:2" "keep:appGreen:green:3"; do
+    IFS=: read -r role_name theme_name qt_name cli_index <<<"$role_spec"
+    theme_vals="$(theme_tone "$theme_name")"
+    qt_vals="$(qt_tone "$qt_name")"
+    theme_light="$(echo "$theme_vals" | sed -n 1p)"
+    theme_dark="$(echo "$theme_vals" | sed -n 2p)"
+    qt_light="$(echo "$qt_vals" | awk '{print $1}')"
+    qt_dark="$(echo "$qt_vals" | awk '{print $2}')"
+    cli_light="$(echo "$cli_vals" | sed -n "${cli_index}p")"
+    cli_dark="$(echo "$cli_vals" | sed -n "$((cli_index + 3))p")"
+    if [[ -z "$theme_vals" || -z "$qt_vals" || -z "$cli_light" ]]; then
+        echo "error: could not read the $role_name status tone from all three trees" >&2
+        echo "       theme: '$theme_vals'" >&2
+        echo "       qt:    '$qt_vals'" >&2
+        echo "       cli:   light '$cli_light' dark '$cli_dark'" >&2
+        status_report
+        continue
+    fi
+    if [[ "$theme_light" != "$qt_light" || "$theme_dark" != "$qt_dark" ]]; then
+        echo "error: the $role_name status tone differs between Theme.swift and the Qt window" >&2
+        echo "       theme light $theme_light / dark $theme_dark" >&2
+        echo "       qt    light $qt_light / dark $qt_dark" >&2
+        status_report
+    fi
+    if [[ "$theme_light" != "$cli_light" || "$theme_dark" != "$cli_dark" ]]; then
+        echo "error: the $role_name status tone differs between Theme.swift and the CLI" >&2
+        echo "       theme light $theme_light / dark $theme_dark" >&2
+        echo "       cli   light $cli_light / dark $cli_dark" >&2
+        status_report
+    fi
+done
+if [[ "$status_bad" -ne 0 ]]; then
+    exit 1
+fi
+echo "status palette: ok (remove, review, and keep agree across the three shells)"
+
 # One on/off spelling, three trees. `configBoolSwitch` in the scan library
 # reports what `core/host/hostexec.c` will do with the two host-exec switches,
 # and Package.swift reads APPATTIC_NO_MAC_UI at manifest time, where it cannot

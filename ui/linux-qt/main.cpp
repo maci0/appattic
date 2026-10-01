@@ -1433,7 +1433,7 @@ private:
         auto *hint = hintLabel(
             QStringLiteral("Click a row to open it on its own page, with it selected")
         );
-        hint->setContentsMargins(16, 4, 16, 4);
+        hint->setContentsMargins(kSpaceLg, kSpaceXs, kSpaceLg, kSpaceXs);
         v->addWidget(hint);
         v->addWidget(tree, 1);
         v->addWidget(empty, 1);

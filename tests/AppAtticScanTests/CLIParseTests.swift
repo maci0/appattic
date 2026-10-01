@@ -416,10 +416,37 @@ final class CLIToneTests: XCTestCase {
     func testToneMatchesTheWindowStatusColors() {
         XCTAssertEqual(CliTone.light.forRole(.remove), "38;2;192;28;40")
         XCTAssertEqual(CliTone.light.forRole(.review), "38;2;158;102;0")
-        XCTAssertEqual(CliTone.light.forRole(.keep), "38;2;36;138;61")
+        XCTAssertEqual(CliTone.light.forRole(.keep), "38;2;28;110;48")
         XCTAssertEqual(CliTone.dark.forRole(.remove), "38;2;255;69;58")
         XCTAssertEqual(CliTone.dark.forRole(.review), "38;2;255;214;10")
         XCTAssertEqual(CliTone.dark.forRole(.keep), "38;2;48;209;88")
+    }
+
+    /// Each light tone is normal body text on a white terminal or a white
+    /// list pane, so it answers to 4.5:1 (WCAG 1.4.3). Keep was the one that
+    /// sat under it, at 4.40:1, which is why the three shells are measured
+    /// against the floor and not only against each other: a value every
+    /// surface agreed on was still one step too light.
+    func testLightTonesClearTheContrastFloor() {
+        let linear: (Int) -> Double = { v in
+            let s = Double(v) / 255.0
+            return s <= 0.04045 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4)
+        }
+        let contrast: (String) -> Double = { source in
+            let parts = source.split(separator: ";").compactMap { Int($0) }
+            guard parts.count == 5 else { return 0 }
+            let onWhite = 0.2126 * linear(parts[2])
+                + 0.7152 * linear(parts[3])
+                + 0.0722 * linear(parts[4])
+            return 1.05 / (onWhite + 0.05)
+        }
+        for role in [CliTone.Role.remove, .review, .keep] {
+            let ratio = contrast(CliTone.light.forRole(role))
+            XCTAssertGreaterThanOrEqual(
+                ratio, 4.5,
+                "\(CliTone.light.forRole(role)) measures \(ratio):1 on white, below the 4.5:1 floor"
+            )
+        }
     }
 
     func testToneFollowsColorFgbg() {

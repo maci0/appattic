@@ -342,8 +342,11 @@ public struct CliTone: Sendable, Equatable {
 
     /// A terminal that cannot report its background, or reports a light one.
     /// Amber on a light pair is 4.8:1; on the dark pair it is 1.4:1, which is
-    /// why the light pair is the fallback rather than the dark one.
-    public static let light = CliTone(sources: ["38;2;192;28;40", "38;2;158;102;0", "38;2;36;138;61"])
+    /// why the light pair is the fallback rather than the dark one. Keep is
+    /// the shared 28/110/48 the two windows draw (6.3:1 on white), not a
+    /// second lighter green that measured 4.4:1 and read as a different hue
+    /// from the same role on the other two surfaces.
+    public static let light = CliTone(sources: ["38;2;192;28;40", "38;2;158;102;0", "38;2;28;110;48"])
     /// For a terminal known to have a dark background, where these reach
     /// 4.9:1, 11.8:1, and 8.3:1.
     public static let dark = CliTone(sources: ["38;2;255;69;58", "38;2;255;214;10", "38;2;48;209;88"])

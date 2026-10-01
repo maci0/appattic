@@ -67,8 +67,8 @@ struct DiskUsageView: View {
                     Spacer()
                     Button("Stop") { stopScan() }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.horizontal, Metrics.lg)
+                .padding(.vertical, Metrics.sm)
                 HRule()
             }
             if scanning && root == nil {

@@ -36,17 +36,23 @@ extension Color {
     // those values: on a light pane system green reads 1.9:1 against white,
     // so the light pair is spelled out. Both are Apple's dark system values,
     // which the shared dark pair already matches.
+    //
+    // Written as bytes over 255, so one value is spelled the same way in all
+    // three shells and a level cannot drift by a rounding step between them.
+    // The light green was the one that had: it sat at 4.40:1 on white, under
+    // the 4.5:1 the red and amber above hold and the Qt shell measures its
+    // own tones against. It now carries the shared 28/110/48 (6.32:1).
     static let appRed = Color.adaptive(
-        light: Color(red: 0.753, green: 0.110, blue: 0.157),
-        dark: Color(red: 1.0, green: 0.271, blue: 0.227)
+        light: Color(red: 192.0 / 255.0, green: 28.0 / 255.0, blue: 40.0 / 255.0),
+        dark: Color(red: 255.0 / 255.0, green: 69.0 / 255.0, blue: 58.0 / 255.0)
     )
     static let appYellow = Color.adaptive(
-        light: Color(red: 0.620, green: 0.400, blue: 0.0),
-        dark: Color(red: 1.0, green: 0.839, blue: 0.039)
+        light: Color(red: 158.0 / 255.0, green: 102.0 / 255.0, blue: 0.0),
+        dark: Color(red: 255.0 / 255.0, green: 214.0 / 255.0, blue: 10.0 / 255.0)
     )
     static let appGreen = Color.adaptive(
-        light: Color(red: 0.141, green: 0.541, blue: 0.239),
-        dark: Color(red: 0.188, green: 0.820, blue: 0.345)
+        light: Color(red: 28.0 / 255.0, green: 110.0 / 255.0, blue: 48.0 / 255.0),
+        dark: Color(red: 48.0 / 255.0, green: 209.0 / 255.0, blue: 88.0 / 255.0)
     )
 }
 
