@@ -11,46 +11,41 @@ public func mulBytes(_ a: Int, _ b: Int) -> Int {
     return overflow ? Int.max : product
 }
 
-/// Decimal separator of `Locale.current`, cached against the locale it was
-/// read from: a `NumberFormatter` keeps the locale it was built with, so a
-/// value read once at startup would keep the old separator for the rest of the
-/// session after the user switches language. It is the locale's separator of
-/// record for the tests, which build their own formatter to check the labels
-/// against; `oneDecimal` reads its separator from its own formatter instead.
+/// `NumberFormatter`s for `Locale.current`, each cached against the locale it
+/// was built from: a formatter keeps the locale it was built with, so one built
+/// once at startup would keep the old digits and separator for the rest of the
+/// session after the user switches language. Building one costs about 20 µs,
+/// and `humanSize` formats every row of a disk tree and a scan report, so a
+/// fresh formatter per call dominated the function.
 ///
-/// A `NumberFormatter` is not safe to drive from two threads at once, so this
-/// shares the count formatter's lock and cache below rather than holding a
-/// second mutable formatter of its own.
-private var cachedDecimalSeparator: (locale: String, separator: String)?
-
-var localeDecimalSeparator: String {
-    localeNumberFormatLock.lock()
-    defer { localeNumberFormatLock.unlock() }
-    let id = Locale.current.identifier
-    if let cached = cachedDecimalSeparator, cached.locale == id { return cached.separator }
-    let separator = localeDecimalNumberFormatter().decimalSeparator ?? "."
-    cachedDecimalSeparator = (id, separator)
-    return separator
-}
-
-/// Cached against the locale it was built from, for the reason
-/// `localeDecimalSeparator` above gives, and under the same lock since a
-/// `NumberFormatter` is not safe to drive from two threads at once.
+/// A `NumberFormatter` is not safe to drive from two threads at once, so every
+/// read of either cache, and every use of the formatter it holds, happens under
+/// `localeNumberFormatLock`.
+private let localeNumberFormatLock = NSLock()
+private var cachedDecimalFormatter: (locale: String, formatter: NumberFormatter)?
 private var cachedCountFormatter: (locale: String, formatter: NumberFormatter)?
 
-private let localeNumberFormatLock = NSLock()
-
-/// A decimal-style formatter for `Locale.current`, with grouping off so the
-/// caller decides whether a value carries separators. Built fresh; the caches
-/// above hold the only long-lived instance.
+/// The one-decimal formatter for `Locale.current`, with grouping off. The
+/// caller holds `localeNumberFormatLock`.
 private func localeDecimalNumberFormatter() -> NumberFormatter {
+    let id = Locale.current.identifier
+    if let cached = cachedDecimalFormatter, cached.locale == id { return cached.formatter }
     let f = NumberFormatter()
     f.locale = .current
     f.numberStyle = .decimal
     f.usesGroupingSeparator = false
     f.maximumFractionDigits = 1
     f.minimumFractionDigits = 1
+    cachedDecimalFormatter = (id, f)
     return f
+}
+
+/// Decimal separator of `Locale.current`: the locale's separator of record for
+/// the tests, which build their own formatter to check the labels against.
+var localeDecimalSeparator: String {
+    localeNumberFormatLock.lock()
+    defer { localeNumberFormatLock.unlock() }
+    return localeDecimalNumberFormatter().decimalSeparator ?? "."
 }
 
 /// A whole count in `Locale.current`'s own grouping. `"\(n)"` interpolates
@@ -88,6 +83,8 @@ public func localeCount(_ n: Int) -> String {
 /// Grouping is off: a size prints one mantissa and a unit, and a "1.024,0" in
 /// a column the table sorts on reads as a different number than the one it is.
 func oneDecimal(_ n: Double) -> String {
+    localeNumberFormatLock.lock()
+    defer { localeNumberFormatLock.unlock() }
     return localeDecimalNumberFormatter().string(from: NSNumber(value: n)) ?? "\(n)"
 }
 
