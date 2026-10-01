@@ -92,15 +92,20 @@ pub fn writeUpgradeGuard(
     w.raw("; fi");
 }
 
+/// Slack in `writeRowGuard`'s row buffer for the two `Row` halves, on top of
+/// the longest package name `jsonbuf` accepts. Named so the buffer size and the
+/// assert that guards it cannot drift apart.
+const row_slack = 64;
+
 /// `if <list> | grep -qF -- '<row>'; then <remove> <name>; fi`. For the
 /// managers that have no per-package query and answer only with a listing.
 ///
 /// `name` must already have passed `jsonbuf.isSafePkgName`: `row_buf` below is
-/// sized `max_pkg_name_len + 64` for the longest name that check accepts plus
-/// the widest `Row` half, and a longer name would fail the compose with
-/// `w.failed` set, which reads as "the buffer filled up" rather than as "this
-/// caller skipped the name check". Every caller (npm, pnpm, bun, uv, pipx)
-/// validates before it gets here.
+/// sized `max_pkg_name_len + row_slack` for the longest name that check
+/// accepts plus the widest `Row` half, and a longer name would fail the compose
+/// with `w.failed` set, which reads as "the buffer filled up" rather than as
+/// "this caller skipped the name check". Every caller (npm, pnpm, bun, uv,
+/// pipx) validates before it gets here.
 pub fn writeRowGuard(
     w: *jsonbuf.W,
     q_buf: []u8,
@@ -112,17 +117,17 @@ pub fn writeRowGuard(
     w.raw("if ");
     w.raw(list);
     w.raw(" | grep -qF -- ");
-    var row_buf: [jsonbuf.max_pkg_name_len + 64]u8 = undefined;
-    // The 64 above is slack for the two `Row` halves, so a longer half is a
-    // caller that outgrew the buffer rather than a name too long to compose.
-    // Asserted here, where the buffer is, instead of left as a comment.
-    // The bound is the 64 the buffer was sized with, not 0: every real Row
-    // spells the package (`@`, ` v`, ` ` before a version) and a bound of 0
-    // tripped this assert on the first row written, taking npm, pip, and deno
-    // test runs down with it. composeRow below still fails to a null rather
-    // than to a slice past the end, so a caller that does outgrow it reports
-    // "the buffer filled up" instead of trapping.
-    std.debug.assert(row.before.len + row.after.len <= 64);
+    var row_buf: [jsonbuf.max_pkg_name_len + row_slack]u8 = undefined;
+    // The row_slack above is slack for the two `Row` halves, so a longer half
+    // is a caller that outgrew the buffer rather than a name too long to
+    // compose. Asserted here, where the buffer is, instead of left as a
+    // comment. The bound is the row_slack the buffer was sized with, not 0:
+    // every real Row spells the package (`@`, ` v`, ` ` before a version) and a
+    // bound of 0 tripped this assert on the first row written, taking npm,
+    // pip, and deno test runs down with it. composeRow below still fails to a
+    // null rather than to a slice past the end, so a caller that does outgrow
+    // it reports "the buffer filled up" instead of trapping.
+    std.debug.assert(row.before.len + row.after.len <= row_slack);
     std.debug.assert(name.len <= jsonbuf.max_pkg_name_len);
     const composed = composeRow(&row_buf, row, name) orelse {
         w.failed = true;
@@ -208,6 +213,29 @@ test "row guard spells a pipx row with its leading and trailing text" {
         "if pipx list | grep -qF -- 'package black '; then pipx uninstall black; fi",
         w.slice() orelse return error.Overflow,
     );
+}
+
+test "row guard composes a name at the longest jsonbuf accepts" {
+    // The buffer is max_pkg_name_len + row_slack, so the longest name that
+    // passes the caller's name check has to fit alongside the widest Row half
+    // any caller uses. Pinned here because the buffer size and the assert that
+    // guards it are separate expressions: a change to one that misses the
+    // other either turns a rejected name into a silently truncated guard, or
+    // into an assert that fires on every row guard the managers generate.
+    var buf = [_]u8{undefined} ** 1024;
+    var q_buf = [_]u8{undefined} ** 512;
+    var w = jsonbuf.W{ .buf = &buf };
+    const name_len = jsonbuf.max_pkg_name_len;
+    var name = [_]u8{undefined} ** name_len;
+    @memset(&name, 'a');
+    try std.testing.expect(jsonbuf.isSafePkgName(&name));
+    writeRowGuard(&w, &q_buf, "npm ls -g --depth=0", .{ .before = "package ", .after = " " }, "npm -g uninstall ", &name);
+    const out = w.slice() orelse return error.Overflow;
+    // The whole row is in the output, both halves and the name, so a compose
+    // that dropped the tail would show up as a missing prefix here.
+    try std.testing.expect(std.mem.indexOf(u8, out, "package aaa") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "then npm -g uninstall aaa") != null);
+    try std.testing.expect(!w.failed);
 }
 
 const fuzz_guard_names = packFuzzSlice("libfoo\nblack\ntypescript\n@scope/pkg\n");

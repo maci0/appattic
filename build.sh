@@ -55,6 +55,11 @@ fi
 # shellcheck source=scripts/find-swift.sh
 . "$ROOT/scripts/find-swift.sh"
 appattic_require_swift
+# The one spelling of the Swift build: the build root mapped out of the
+# binary, resolution disabled. See scripts/swift-build.sh for why the mapping
+# is here and not only in the C flags.
+# shellcheck source=scripts/swift-build.sh
+. "$ROOT/scripts/swift-build.sh"
 
 OS="$(uname -s)"
 HAVE_QT=0
@@ -82,8 +87,8 @@ resolve_bin() {
 if [[ "$OS" == Darwin ]]; then
     echo "Building AppAttic (CLI + UI, ${CONFIG})…"
     # Product-by-product: a full-package build also compiles Gtk/WinSDK extras from swift-cross-ui.
-    if swift build -c "$CONFIG" --product appattic --disable-automatic-resolution \
-        && swift build -c "$CONFIG" --product AppAtticUI --disable-automatic-resolution; then
+    if appattic_swift_build "$CONFIG" --product appattic \
+        && appattic_swift_build "$CONFIG" --product AppAtticUI; then
         HAVE_MAC_UI=1
     else
         # AppAtticUI needs swift-cross-ui 0.2.1, which needs a Swift 6 compiler;
@@ -91,11 +96,11 @@ if [[ "$OS" == Darwin ]]; then
         # the CLI alone rather than failing the whole build.
         export APPATTIC_NO_MAC_UI=1
         echo "note: AppAtticUI needs a Swift 6 compiler (swift-cross-ui 0.2.1); building the CLI only" >&2
-        swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
+        appattic_swift_build "$CONFIG" --product appattic
     fi
 elif [[ "$OS" == Linux ]]; then
     echo "Building AppAttic CLI (${CONFIG})…"
-    swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
+    appattic_swift_build "$CONFIG" --product appattic
     if [[ "$HAVE_QT" -eq 1 ]]; then
         echo "Building Linux Qt 6 UI…"
         bash scripts/linux-qt-link.sh "$CONFIG"
@@ -110,17 +115,17 @@ elif [[ "$OS" == Linux ]]; then
     fi
 else
     echo "Building AppAttic CLI (${CONFIG})…"
-    swift build -c "$CONFIG" --product appattic --disable-automatic-resolution
+    appattic_swift_build "$CONFIG" --product appattic
 fi
 
 CLI="$(resolve_bin appattic)" || {
-    echo "error: appattic binary not found after swift build -c ${CONFIG}" >&2
+    echo "error: appattic binary not found after appattic_swift_build $CONFIG" >&2
     exit 1
 }
 
 if [[ "$OS" == Darwin && "$HAVE_MAC_UI" -eq 1 ]]; then
     BIN="$(resolve_bin AppAtticUI)" || {
-        echo "error: AppAtticUI binary not found after swift build -c ${CONFIG}" >&2
+        echo "error: AppAtticUI binary not found after appattic_swift_build $CONFIG" >&2
         exit 1
     }
     mkdir -p AppAttic.app/Contents/MacOS

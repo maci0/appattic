@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fast local checks (lint + Zig core tests + scan tests + CLI + reproducible
-# artifacts).
+# artifacts, WASM/C and Swift).
 # Full Linux CI parity: bash scripts/check.sh --qt
 # No Swift toolchain, for core/src/ and core/host/ work: bash scripts/check.sh --core
 # Usage: bash scripts/check.sh [--core] [--qt]
@@ -24,7 +24,9 @@ Usage: bash scripts/check.sh [--core] [--qt]
 
   (default)  lint + Zig core tests + AppAtticScanTests + CLI debug build
              and the built CLI's help/exit-code/stream contract
-             (scripts/cli-contract.sh)
+             (scripts/cli-contract.sh), then both double-build checks
+             (scripts/verify-reproducible.sh for the WASM modules and the
+             C host, scripts/verify-swift-reproducible.sh for the CLI)
   --core     lint + Zig core tests + reproducible artifacts, no Swift
              toolchain needed. For core/src/, core/host/ and packaging work.
              Not the CI gate: the Swift steps do not run, and the run says so.
@@ -76,11 +78,14 @@ if appattic_require_zig; then
 fi
 
 if [[ "$RUN_SWIFT" -eq 1 ]]; then
+    # shellcheck source=swift-build.sh
+    . "$ROOT/scripts/swift-build.sh"
+
     echo "== AppAtticScanTests =="
     bash "$ROOT/scripts/test.sh"
 
     echo "== CLI debug =="
-    swift build -c debug --product appattic --disable-automatic-resolution
+    appattic_swift_build debug --product appattic
 
     # The built binary answers `--help`, exit codes, and which stream a result
     # lands on. Running it is the only way to see a stream mix-up, and a
@@ -94,6 +99,14 @@ fi
 # an artifact.
 echo "== reproducible artifacts =="
 bash "$ROOT/scripts/verify-reproducible.sh"
+
+if [[ "$RUN_SWIFT" -eq 1 ]]; then
+    # The same check for the Swift product. Two release builds, which is
+    # minutes rather than seconds, so it runs here and in CI but not in the
+    # --core path a contributor runs in a loop.
+    echo "== reproducible Swift CLI =="
+    bash "$ROOT/scripts/verify-swift-reproducible.sh"
+fi
 
 if [[ "$RUN_QT" -eq 1 ]]; then
     echo "== Qt UI link =="

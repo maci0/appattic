@@ -37,7 +37,10 @@ ENV WASMTIME_DIR=/opt/wasmtime-c-api
 WORKDIR /src
 COPY . .
 # AppAttic Qt 6 link is proven by scripts/linux-qt-link.sh (ldd libQt6Widgets + --smoke).
-RUN swift test --filter AppAtticScanTests --disable-automatic-resolution \
-    && swift build -c debug --product appattic --disable-automatic-resolution \
+# The CLI build goes through scripts/swift-build.sh so the checkout path is
+# mapped out of the binary, the same way every other build does it.
+RUN . scripts/swift-build.sh \
+    && swift test --filter AppAtticScanTests --disable-automatic-resolution \
+    && appattic_swift_build debug --product appattic \
     && bash scripts/linux-qt-link.sh \
     && bash scripts/verify-qt-link.sh

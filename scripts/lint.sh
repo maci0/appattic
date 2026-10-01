@@ -429,6 +429,37 @@ if [[ "$cite_bad" -ne 0 ]]; then
 fi
 echo "doc citations: ok (no line numbers to go stale)"
 
+# The Swift build maps the checkout path out of the binary through
+# scripts/swift-build.sh, and scripts/verify-swift-reproducible.sh proves the
+# mapping with a second build from a differently named directory. That proof is
+# only worth something if the check and the build carry the same flags: a
+# mapping added to one and not the other would let the gate pass on a build the
+# release never makes. Read the flag list out of both and compare, the same way
+# the host-exec argv check above compares two lists that must not drift.
+for flag in -ffile-prefix-map= -fdebug-prefix-map= -fmacro-prefix-map=; do
+    for file in scripts/swift-build.sh scripts/verify-swift-reproducible.sh; do
+        if ! grep -q -- "$flag" "$ROOT/$file"; then
+            echo "error: $file does not pass $flag; it and scripts/swift-build.sh" >&2
+            echo "       must carry the same prefix-map flags, or the double-build" >&2
+            echo "       check verifies a build the release never makes" >&2
+            exit 1
+        fi
+    done
+done
+# The helper is the only spelling of the Swift build, so a bare `swift build`
+# left anywhere is a build that skips the mapping and the resolution pin.
+while IFS= read -r stray; do
+    echo "error: $stray" >&2
+    echo "       runs swift build directly. Use appattic_swift_build from" >&2
+    echo "       scripts/swift-build.sh, which maps the build root out and" >&2
+    echo "       disables automatic resolution." >&2
+    exit 1
+done < <(grep -rnE '^[[:space:]]*(\||&&[[:space:]]*|;[[:space:]]*)?swift build ' \
+             "$ROOT/build.sh" "$ROOT/run.sh" "$ROOT/scripts" "$ROOT/Dockerfile" \
+             "$ROOT/.github/workflows" 2>/dev/null \
+         | grep -v -e 'scripts/swift-build.sh' -e 'verify-swift-reproducible.sh' || true)
+echo "swift build flags: ok (build path mapped out of every swift build)"
+
 # The desktop entry, the AppStream metainfo, the man page, and the Flatpak
 # manifest have to name the same app, the same binary, and the same icon, and
 # the install has to produce what they name. Nothing builds a Flatpak or an

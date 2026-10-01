@@ -13,7 +13,11 @@
 # case here answers in well under a second.
 #
 # Usage: bash scripts/cli-contract.sh [appattic-binary]
-set -uo pipefail
+# -euo pipefail, the spelling every other runnable script in this tree carries.
+# The CLI under test exits 2 on a usage error and 1 on a failed disk root, so
+# `set -e` would abort the run on the first case this script exists to assert;
+# the deliberate nonzero exits below are captured and checked by hand.
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -87,8 +91,13 @@ bad() { printf 'FAIL %s\n' "$1" >&2; fails=$((fails + 1)); }
 # run <expected-exit> <name> <args...>: run the CLI, capture stdout and stderr
 # separately, and assert the exit code. Sets OUT and ERR.
 run() {
-    local want="$1" name="$2"; shift 2
-    OUT="$("$BIN" "$@" 2>"$TMP/stderr")"; local got=$?
+    local want="$1" name="$2" got; shift 2
+    # `set +e` around the one command whose nonzero exit is the thing under
+    # test: with -e on, the first `run 2 ...` aborts the script instead of
+    # failing a case, and the report names a line rather than a contract.
+    set +e
+    OUT="$("$BIN" "$@" 2>"$TMP/stderr")"; got=$?
+    set -e
     ERR="$(cat "$TMP/stderr")"
     if [[ "$got" -eq "$want" ]]; then
         ok "$name (exit $got)"

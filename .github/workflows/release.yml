@@ -148,7 +148,11 @@ jobs:
       - name: Test scan library
         run: bash scripts/test.sh
       - name: Build AppAtticUI
-        run: swift build -c release --product AppAtticUI --disable-automatic-resolution
+        run: |
+          set -euo pipefail
+          # shellcheck source=../../scripts/swift-build.sh
+          . scripts/swift-build.sh
+          appattic_swift_build release --product AppAtticUI
       - name: Package macOS zip
         # set -euo pipefail, the spelling every other multi-line step in this
         # tree uses (linux.yml's Qt link steps). Without it a failed

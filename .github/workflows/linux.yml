@@ -35,7 +35,11 @@ jobs:
       - name: Test scan library
         run: bash scripts/test.sh
       - name: Build CLI
-        run: swift build -c debug --product appattic --disable-automatic-resolution
+        run: |
+          set -euo pipefail
+          # shellcheck source=../../scripts/swift-build.sh
+          . scripts/swift-build.sh
+          appattic_swift_build debug --product appattic
 
   lint:
     runs-on: ubuntu-24.04
@@ -151,7 +155,11 @@ jobs:
         run: bash scripts/test.sh
         id: swift_test
       - name: Build CLI
-        run: swift build -c debug --product appattic --disable-automatic-resolution
+        run: |
+          set -euo pipefail
+          # shellcheck source=../../scripts/swift-build.sh
+          . scripts/swift-build.sh
+          appattic_swift_build debug --product appattic
         if: steps.swift_test.outcome == 'success'
       - name: Reproducible artifacts
         # The claim the AppImage release ships on: the same source built twice
@@ -162,6 +170,16 @@ jobs:
         # release. The job already has zig and cc on PATH, the two things it
         # builds with; it builds into its own temp tree and touches no cache.
         run: bash scripts/verify-reproducible.sh
+      - name: Reproducible Swift CLI
+        # The same claim for the Swift product, which the step above does not
+        # cover: Identity.swift reads #filePath to find
+        # core/src/linux-system-names.txt when the resource bundle is missing,
+        # so an unmapped checkout path reaches the release binary and two
+        # runners on different paths give two different .build/release/appattic.
+        # scripts/swift-build.sh maps the root out; this step is what proves it
+        # still does. Two release builds, so it runs once, on the job that
+        # already has the pinned toolchain.
+        run: bash scripts/verify-swift-reproducible.sh
       - name: Link Qt UI
         if: success() || failure()
         run: |
@@ -238,7 +256,11 @@ jobs:
         run: bash scripts/test.sh
         id: swift_test_jammy
       - name: Build CLI
-        run: swift build -c debug --product appattic --disable-automatic-resolution
+        run: |
+          set -euo pipefail
+          # shellcheck source=../../scripts/swift-build.sh
+          . scripts/swift-build.sh
+          appattic_swift_build debug --product appattic
         if: steps.swift_test_jammy.outcome == 'success'
       - name: Link Qt UI
         if: success() || failure()
