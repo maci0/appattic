@@ -134,7 +134,7 @@ Keep: native toolkit, summary-then-depth, tree verbs, size-sorted installed list
 
 | TMOG language | AppAttic |
 |---------------|----------|
-| Native UI + shared core + helpers | AppKit (SwiftCrossUI) on macOS, Qt 6 Widgets on Linux (`ui/linux-qt`), WinUI on Windows. Zig WASM core + plugins |
+| Native UI + shared core + helpers | AppKit (SwiftCrossUI) on macOS, Qt 6 Widgets on Linux (`ui/linux-qt`). Zig WASM core + plugins. No Windows build; the Windows plugin ids in the core spec are backlog |
 | Summary without tabbing | Overview: totals plus largest leftovers and stale |
 | Deeper pages | Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settings |
 | Process tree: parent or one node | Package tree: remove unused deps with the parent, or one row |

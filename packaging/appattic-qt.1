@@ -115,6 +115,15 @@ Absolute cache root scanned for leftovers.
 .B XDG_STATE_HOME
 Absolute state root scanned for leftovers.
 .TP
+.B XDG_RUNTIME_DIR
+Session runtime root, read for the
+.I gvfs
+directory the network-folder disk scan opens at. Unset, empty, relative, or
+naming a root with no
+.I gvfs
+in it uses
+.IR ~/.gvfs .
+.TP
 .B WASMTIME_DIR
 Wasmtime C API prefix used at build time, not at run time.
 .PP

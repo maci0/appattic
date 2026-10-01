@@ -43,6 +43,10 @@ On Linux, `Package.swift` omits the SwiftCrossUI product and dependency. Platfor
 
 ## Library files (`Sources/AppAtticScan/`)
 
+The table below is the file list as of the port. `Util.swift` has since been
+split into the modules that own its parts (`Process`, `DiskSize`, `Format`,
+`Dates`, `Text`); read [`README.md`](../../../README.md) for the current one.
+
 | File | Responsibility |
 |------|----------------|
 | `Util.swift` | subprocess, `du`, human size, date helpers |

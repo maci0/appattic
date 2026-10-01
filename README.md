@@ -129,8 +129,8 @@ Environment:
 | `XDG_STATE_HOME` | Linux | Absolute state root scanned for leftovers, by the CLI and by the Linux window. |
 | `XDG_DATA_DIRS` | Linux | Colon-separated absolute data roots searched for desktop entries. Unset, empty, or a list whose entries are all relative uses `/usr/local/share:/usr/share`; relative entries in a longer list are dropped, and `appattic config` prints the list that survives. |
 | `XDG_RUNTIME_DIR` | Linux Qt | Runtime root of the session, read for the `gvfs` directory the network-folder scan opens at. Unset, empty, relative, or naming a root with no `gvfs` uses `~/.gvfs`. The CLI scans nothing with it; `appattic config` prints the root it resolves to. |
-| `ANDROID_HOME` | CLI and Linux Qt | An Android SDK root the scan treats as a user tool directory. The first of `ANDROID_HOME` and `ANDROID_SDK_ROOT` that holds a real SDK (one with `emulator`, `platform-tools`, `cmdline-tools`, or `platforms` in it) is the root in force; a value that names no such directory is read as unset, and the fixed default roots are searched instead. |
-| `ANDROID_SDK_ROOT` | CLI and Linux Qt | The other spelling of the same Android SDK root, searched after `ANDROID_HOME`. A value here that holds no SDK is reported by `appattic config` as ignored rather than as the root in force. |
+| `ANDROID_HOME` | CLI and macOS UI | An Android SDK root the scan treats as a user tool directory. The Linux window does not read it: its overlay roots are the WASM `path-shadow` and `path-user-bin` plugins, which have no Android rule. The first of `ANDROID_HOME` and `ANDROID_SDK_ROOT` that holds a real SDK (one with `emulator`, `platform-tools`, `cmdline-tools`, or `platforms` in it) is the root in force; a value that names no such directory is read as unset, and the fixed default roots are searched instead. |
+| `ANDROID_SDK_ROOT` | CLI and macOS UI | The other spelling of the same Android SDK root, searched after `ANDROID_HOME`. A value here that holds no SDK is reported by `appattic config` as ignored rather than as the root in force. |
 | `LANG` | CLI and macOS UI | The locale whose `.lproj` directory the macOS app-name lookup reads for an app's localized name. Unset, empty, or a value that is only an encoding opens the base English names. `appattic config` prints the locale it resolved to, so a diff of two machines shows why the same app is named differently. |
 | `FLATPAK_ID` | Linux Qt and the core host | Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags and package-manager queries go through `/run/host` and `flatpak-spawn --host`. Unset or empty is a normal host run. |
 
@@ -204,6 +204,16 @@ bash scripts/lint.sh
 ```
 
 A filter that matches no test fails rather than reporting a pass: `swift test` exits 0 having run zero tests, so a renamed class name reads as a green run. `scripts/test.sh` refuses that condition, as `core/build.sh` does for a `zig test` filter that matches nothing.
+
+Benchmarks, for comparing a change rather than gating on one. Both run on demand, and neither is in CI:
+
+```bash
+bash core/bench.sh [filter-substr]                      # Zig core parsers, Linux only
+swift build -c release --product appattic-bench --disable-automatic-resolution
+.build/release/appattic-bench [--json] [filter-substr]  # AppAtticScan hot paths
+```
+
+`core/bench.sh` times the Zig parsers natively: the leftover listing, the system-name check, the apt outdated parser, the JSON buffer, and the JSON dependency scanner. It needs Linux and the `.zig-version` toolchain, and is not part of `core/build.sh`. `appattic-bench` times the Swift scan library and prints the same `<name> <iters> <ns/op> <checksum>` line per benchmark, with `--json` writing those numbers as JSON. Both end with a `sink=<n>` line so the optimizer cannot drop a benchmarked loop.
 
 `scripts/test.sh` is the `swift test` to use: it carries `--disable-automatic-resolution`, the toolchain check against `.swift-version`, and, on macOS, `APPATTIC_NO_MAC_UI=1`. The CI jobs call it, so a local run and a workflow run are the same run. `swift test` builds every target in the package, and `AppAtticUI` needs a Swift 6 compiler while `.swift-version` pins 5.10.1, so a bare `swift test` fails to build on the pinned toolchain.
 

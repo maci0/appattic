@@ -7,7 +7,9 @@ import Glibc
 import AppAtticScan
 
 // Repeatable micro-benchmarks for AppAtticScan hotpaths.
-// Build: swift build -c release --product appattic-bench
+// Build: swift build -c release --product appattic-bench --disable-automatic-resolution
+//        (the flag every other swift build here carries, so a run resolves no
+//        package and picks up the pinned toolchain only)
 // Run:   .build/release/appattic-bench [--json] [filter-substr]
 // One line per benchmark: "<name> <iters> <ns/op> <checksum>".
 

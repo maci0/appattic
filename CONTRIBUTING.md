@@ -11,6 +11,7 @@ bash scripts/test.sh DiskSizeTests    # one class, or one test: Class/testName
 ./core/build.sh test brew.zig
 ./core/build.sh test jsonbuf.zig isSafeIdent
 ./core/build.sh test-core
+bash core/bench.sh                # Zig parser benchmarks, on demand, Linux only
 ```
 
 `core/build.sh` compiles and tests one module per process, one core at a time

@@ -77,11 +77,11 @@ The Linux Qt 6 window (`ui/linux-qt`) links `core/host/embed.c` and the same Was
 
 ## Benchmarks
 
-`bash core/bench.sh [filter-substr]` times the parsers and stores in
-`core/bench/bench.zig` natively: path listing, the JSON buffer, the JSON
-scanner, and the apt parser. It is not part of `core/build.sh` and not a
-gate; run it on demand to compare two changes. Linux only, and it needs the
-`.zig-version` toolchain.
+`bash core/bench.sh [filter-substr]` times the parsers in
+`core/bench/bench.zig` natively: the path listing, the system-name check (a hit
+and a miss), the apt outdated parser, the JSON buffer, and the JSON dependency
+scanner. It is not part of `core/build.sh` and not a gate; run it on demand to
+compare two changes. Linux only, and it needs the `.zig-version` toolchain.
 
 ## Backlog
 
