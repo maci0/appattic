@@ -87,9 +87,9 @@ Plugin membership lives in one place: the `wasm_sources` list in `core/build.sh`
 
 | id | Coeffect | Reports | Suggested commands (named objects only) |
 |---|---|---|---|
-| `apt` | `host.exec` `apt` | Outdated (`apt list --upgradable`, `updatable`). Orphans from `apt-get -s autoremove`. | Never silent `apt upgrade`. Named `apt-get purge` and named `apt install --only-upgrade` after confirm. |
+| `apt` | `host.exec` `apt-get` or `apt` or `dpkg` | Outdated (`apt list --upgradable`, `updatable`). Orphans from `apt-get -s autoremove`. | Never silent `apt upgrade`. Named `apt-get purge` and named `apt install --only-upgrade` after confirm. |
 | `pacman` | `host.exec` `pacman` | Outdated (`-Qu`, `updatable`). Orphans (`-Qdt`). | Named `pacman -Rns` and named `pacman -S pkg` after confirm. No `-Syu`. |
-| `aur` | `host.exec` `paru`/`yay`/`pikaur` | Outdated (`-Qua`, `updatable`). | Named `paru/yay/pikaur -S pkg` after confirm. |
+| `aur` | `host.exec` `paru` or `yay` or `pikaur` | Outdated (`-Qua`, `updatable`). | Named `paru/yay/pikaur -S pkg` after confirm. |
 | `dnf` | `host.exec` `dnf5` or `dnf` or `yum` (first found; yum is an alias, not its own id) | Outdated (`updatable`). Unneeded packages (`repoquery --unneeded`). | Named `dnf remove` / `yum remove`. Named `dnf upgrade pkg` / `yum upgrade pkg` after confirm. No full `dnf upgrade`. |
 | `zypper` | `host.exec` `zypper` | Outdated (`list-updates`, `updatable`). Unneeded (`packages --unneeded`). | Named `zypper rm` and named `zypper update pkg` after confirm. |
 | `brew` | `host.exec` `brew` | Outdated formulas/casks (`outdated --json=v2`), every row `updatable: true`. The untrusted-cask rule stays in Swift: `brew.zig` does not read Homebrew's `Refusing to load cask` error, so an outdated cask from an untrusted tap is offered for update like any other. No uninstall lines. | Named `brew upgrade <name>` only, after confirm. No greedy auto-cask force. |
@@ -99,7 +99,7 @@ Plugin membership lives in one place: the `wasm_sources` list in `core/build.sh`
 | `pnpm` | `host.exec` `pnpm` | User-global leftovers. | `pnpm remove -g` named. |
 | `bun` | `host.exec` `bun` | User-global leftovers. | `bun remove -g` named. |
 | `pip` | `host.exec` `pip` or `pip3` | Top-level user-site packages (`pip list --user --not-required`). Outdated report-only. Not walking every venv. | Named `pip uninstall` for globals. |
-| `deno` | `host.exec` `ls` of `~/.deno/bin` | User-global Deno installs. Not every project. | Named `deno uninstall --global`. |
+| `deno` | `host.exec` `deno` (globals read with `ls` of `~/.deno/bin`) | User-global Deno installs. Not every project. | Named `deno uninstall --global`. |
 | `pipx` | `host.exec` `pipx` | Unused pipx tools. | `pipx uninstall` named. |
 | `uv` | `host.exec` `uv` | `uv tool` leftovers. | `uv tool uninstall` named. |
 | `gem` | `host.exec` `gem` | User-install outdated (`gem outdated`). Report-only. No removal path at all: `gem.zig` emits `"script":null`, so no `gem uninstall` line exists. | Named `gem update` on the row after confirm, `updatable: false` keeps it out of the update script. |
@@ -121,7 +121,7 @@ Linux leftover roots plus `path-user-bin`, `path-home-dot`, and `path-shadow`. D
 | `path-xdg-lib` | `~/.local/lib` | Same | named `rm` |
 | `path-var-app` | `~/.var/app` | Flatpak user data when the app is gone (ids still come from `flatpak` when that plugin is ACTIVE) | named `rm` of leftover dir; uninstall still via `flatpak` |
 | `path-home-dot` | listed `homeDotData` leaves (`.mozilla`, `.wine`, …) | Leaf leftovers at `$HOME` | named `rm`. `.steam` here is a dir leaf, not the `steam` backlog plugin |
-| `path-shadow` | overlay dirs vs packaged dirs | User overlays that hide a same-named packaged file (`status` shadow). Cleanup removes the overlay only | named `rm` of overlay path |
+| `path-shadow` | `~/.local/bin`, `~/bin`, `~/.cargo/bin`, `~/.local/share/applications` against `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/usr/local/bin`, `/usr/share/applications`, `/usr/local/share/applications` | User overlays that hide a same-named packaged file (`status` shadow). Cleanup removes the overlay only | named `rm` of overlay path |
 | `path-user-bin` | `~/.local/bin`, `~/bin` | Broken symlinks | named `rm` of the link |
 
 ## Backlog
@@ -188,6 +188,8 @@ Each path plugin is a leftover-root guest (not a manager). Linux Qt and the host
 ## Shadowing
 
 Overlay-vs-packaged findings are plugin `path-shadow` (`path_shadow.wasm`), not a special case in core. Swift `listShadowingOverlays` and `ShadowTests` remain in `AppAtticScan` until the Swift scan is ported. Core may still group extra paths.
+
+The overlay roots are one list in three trees: the constants in `core/src/path_shadow.zig`, the `path_shadow` entry of `kHomeRules` (`ui/linux-qt/corehost.cpp`), and `defaultOverlayShadowRoots` (`Sources/AppAtticScan/Overlays.swift`). The plugin's tag and its query have to name the same roots, or a machine whose only overlay lives in a root the plugin does not read is tagged ACTIVE and reports no shadows, which reads as a clean machine. `scripts/lint.sh` compares the Zig constants against `kHomeRules` for that reason.
 
 ## Errors
 

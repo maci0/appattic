@@ -176,6 +176,41 @@ if ! cmp -s "$ROOT/core/src/linux-system-names.txt" \
 fi
 echo "system-name list mirror: ok"
 
+# One shadow-root list, two trees. The Zig plugin decides `path-shadow`'s
+# presence tag from the roots it queries, and so does the Qt window, but the
+# two live in different languages and nothing compared them. A root added to
+# the Qt table alone leaves the plugin ACTIVE on a machine whose only overlay
+# lives in that root, and the scan then reports no shadows, which reads as a
+# clean machine. `defaultOverlayShadowRoots` in the Swift scan library is the
+# same roots a third time; it is named here rather than read, because a Swift
+# array literal and a Zig comptime list are not one text to compare.
+zig_shadow_roots="$(sed -n '/^const overlay_local_bin = /,/^const package_usr_local_applications = /p' \
+    "$ROOT/core/src/path_shadow.zig" \
+    | grep -o 'pstore.home_sentinel ++ "[^"]*"' \
+    | sed 's/.*++ "//; s/"$//; s|^/*||')"
+qt_shadow_roots="$(sed -n '/^static const HomeRule kHomeRules/,/^};/p' \
+    "$ROOT/ui/linux-qt/corehost.cpp" \
+    | sed -n '/path_shadow/,/},/p' \
+    | grep -o '"\.[a-z/._]*"\|"bin"' | tr -d '"')"
+if [[ -z "$zig_shadow_roots" || -z "$qt_shadow_roots" ]]; then
+    echo "error: could not read the shadow overlay roots from either tree" >&2
+    echo "       fix: keep the 'const overlay_* = pstore.home_sentinel ++ ...' lines in" >&2
+    echo "             core/src/path_shadow.zig and the path_shadow entry in kHomeRules" >&2
+    echo "             in ui/linux-qt/corehost.cpp"
+    exit 1
+fi
+if [[ "$(printf '%s\n' "$zig_shadow_roots" | LC_ALL=C sort)" \
+        != "$(printf '%s\n' "$qt_shadow_roots" | LC_ALL=C sort)" ]]; then
+    echo "error: the shadow overlay roots differ between the Zig plugin and the Qt window" >&2
+    echo "       zig: $(printf '%s' "$zig_shadow_roots" | tr '\n' ' ')" >&2
+    echo "       qt:  $(printf '%s' "$qt_shadow_roots" | tr '\n' ' ')" >&2
+    echo "       fix: the same roots in core/src/path_shadow.zig, kHomeRules in" >&2
+    echo "             ui/linux-qt/corehost.cpp, and defaultOverlayShadowRoots in" >&2
+    echo "             Sources/AppAtticScan/Overlays.swift"
+    exit 1
+fi
+echo "shadow overlay roots: ok ($(printf '%s\n' "$zig_shadow_roots" | wc -l) roots)"
+
 # One page vocabulary, two shells. StartPage.swift declares the sidebar page
 # names and both windows read APPATTIC_PAGE, but the names are spelled out a
 # second time in the Qt window's page table and in the warning it prints for an

@@ -243,9 +243,70 @@ const none_json =
     \\{"plugin":"path-shadow","engine":null,"findings":[],"script":null,"dialog":{"title":"No overlay roots","body":"Overlay PATH dirs missing. Plugin inactive."},"note":"path missing"}
 ;
 
-const overlay_fixture = pstore.home_sentinel ++ "/.local/bin";
+// The overlay roots are the four the rest of the product names for a user
+// file that hides a packaged one: `~/.local/bin` and `~/bin` from the shell
+// PATH, `~/.cargo/bin` from the Rust toolchain's own PATH entry, and the
+// XDG data dir's `applications`, where a desktop file shadows a packaged one
+// of the same name. They are exactly the four `kHomeRules` in
+// `ui/linux-qt/corehost.cpp` tests to decide this plugin's presence tag, so a
+// machine whose only overlay is `~/.cargo/bin` is tagged ACTIVE and then found
+// nothing to report, which reads as a clean machine. `defaultOverlayShadowRoots`
+// in `Sources/AppAtticScan/Overlays.swift` is the same four on the Swift side;
+// keep the two in step.
+const overlay_local_bin = pstore.home_sentinel ++ "/.local/bin";
 const overlay_home_bin = pstore.home_sentinel ++ "/bin";
-const package_fixture = "/usr/bin";
+const overlay_cargo_bin = pstore.home_sentinel ++ "/.cargo/bin";
+const overlay_applications = pstore.home_sentinel ++ "/.local/share/applications";
+
+// The packaged roots, in the same order `defaultPackageShadowDirs` lists the
+// ones that need no discovery: the four FHS bin dirs and the two desktop
+// dirs first, so the finding a user sees is the one under a real packaged
+// tree. `max_package_dirs` bounds how many are prefiltered, and a root past
+// the bound is dropped with no note, so the bound is checked at compile time
+// rather than left to the next person who adds a root.
+const package_usr_bin = "/usr/bin";
+const package_usr_sbin = "/usr/sbin";
+const package_bin = "/bin";
+const package_sbin = "/sbin";
+const package_usr_local_bin = "/usr/local/bin";
+const package_usr_applications = "/usr/share/applications";
+const package_usr_local_applications = "/usr/local/share/applications";
+
+// The test fixture names, kept as the two-arg shorthand every existing test
+// passes to `findShadows`.
+const overlay_fixture = overlay_local_bin;
+const package_fixture = package_usr_bin;
+
+/// Every overlay root this plugin reads, in the order it reads them. One
+/// definition for `query_impl` and the root-set test, so a root added to one
+/// and not the other cannot pass.
+const overlay_roots = [_][]const u8{
+    overlay_local_bin,
+    overlay_home_bin,
+    overlay_cargo_bin,
+    overlay_applications,
+};
+
+/// Every packaged root `overlay_roots` is compared against. A dir past
+/// `max_package_dirs` is not prefiltered and its matches go unreported, so the
+/// count is checked where the bound is declared rather than left to overflow
+/// silently at the next root.
+const package_roots = [_][]const u8{
+    package_usr_bin,
+    package_usr_sbin,
+    package_bin,
+    package_sbin,
+    package_usr_local_bin,
+    package_usr_applications,
+    package_usr_local_applications,
+};
+
+comptime {
+    if (package_roots.len > max_package_dirs) {
+        @compileError("path-shadow lists more packaged roots than " ++
+            "max_package_dirs prefilters: raise the bound or drop a root.");
+    }
+}
 
 fn renderShadows(hits: []const ShadowFinding) bool {
     var w = jsonbuf.W{ .buf = &result_buf };
@@ -301,17 +362,95 @@ fn query_impl(present: i32) i32 {
         result_nbytes = @intCast(none_json.len);
         return 0;
     }
-    const overlays = [_][]const u8{ overlay_fixture, overlay_home_bin };
-    const packages = [_][]const u8{package_fixture};
     var hits: [32]ShadowFinding = undefined;
     var paths: [2048]u8 = undefined;
-    var n = findShadows(&overlays, &packages, &hits, &paths);
+    var n = findShadows(&overlay_roots, &package_roots, &hits, &paths);
     note.addTruncatedRows(n, hits.len);
     return note.renderShrinking(renderShadows, &hits, &n);
 }
 
 comptime {
     plugin_abi.bind(plugin_id, query_impl, &result_buf, &result_nbytes);
+}
+
+test "a shadow in ~/.cargo/bin over /usr/sbin is found" {
+    // The two roots kHomeRules tags on that the plugin used to skip: the
+    // plugin read ~/.local/bin and ~/bin against /usr/bin and nothing else, so
+    // a machine whose only overlay is a ~/.cargo/bin shim over /usr/sbin was
+    // tagged ACTIVE and reported no shadows, which reads as a clean machine.
+    // scripts/lint.sh holds this list against kHomeRules; this holds the scan
+    // to the list. A test on ~/.local/bin alone would pass against the old
+    // list too, which is why the probe sits in the two roots that were
+    // missing.
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // A name no real install ships. The other root sets in package_roots are
+    // real paths, so a fixture name that exists in one of them on the machine
+    // running this test would be found a second time and break the count.
+    const shadowed = "appattic-shadow-probe";
+
+    try tmp.dir.createDirPath(io, "cargo/bin");
+    try tmp.dir.createDirPath(io, "usr/sbin");
+    try tmp.dir.writeFile(io, .{ .sub_path = "cargo/bin/" ++ shadowed, .data = "#!/bin/sh\necho user\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "usr/sbin/" ++ shadowed, .data = "#!/bin/sh\necho distro\n" });
+
+    var overlay_rp: [512]u8 = undefined;
+    var package_rp: [512]u8 = undefined;
+    const overlay_dir = try tmp.dir.realPathFile(io, "cargo/bin", &overlay_rp);
+    const package_dir = try tmp.dir.realPathFile(io, "usr/sbin", &package_rp);
+
+    // The fixture stands in for the two named roots, in place, rather than
+    // for the last entries of whatever list is present. Substituting by
+    // position passes against the old two-root list too, because a trimmed
+    // list still has a last entry; substituting by name fails when the named
+    // root is gone, which is the regression this pins.
+    var overlays: [overlay_roots.len][]const u8 = overlay_roots;
+    var packages: [package_roots.len][]const u8 = package_roots;
+    var swapped_overlay = false;
+    for (&overlays) |*slot| {
+        if (std.mem.eql(u8, slot.*, overlay_cargo_bin)) {
+            slot.* = overlay_rp[0..overlay_dir];
+            swapped_overlay = true;
+        }
+    }
+    var swapped_package = false;
+    for (&packages) |*slot| {
+        if (std.mem.eql(u8, slot.*, package_usr_sbin)) {
+            slot.* = package_rp[0..package_dir];
+            swapped_package = true;
+        }
+    }
+    // A root that went missing from either list leaves the fixture out of the
+    // scan, and the finding count below would then pass for the wrong reason,
+    // so the swap itself is asserted first.
+    try std.testing.expect(swapped_overlay);
+    try std.testing.expect(swapped_package);
+
+    var hits: [8]ShadowFinding = undefined;
+    var paths: [1024]u8 = undefined;
+    const n = findShadows(&overlays, &packages, &hits, &paths);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqualStrings(shadowed, hits[0].name);
+    try std.testing.expect(std.mem.endsWith(u8, hits[0].path, "/cargo/bin/" ++ shadowed));
+    try std.testing.expect(std.mem.endsWith(u8, hits[0].shadows, "/usr/sbin/" ++ shadowed));
+}
+
+test "every packaged root is one the plugin can actually prefilter" {
+    // A packaged dir past max_package_dirs keeps a null listing, so the
+    // per-name probe still runs for it, but the dir was dropped from the
+    // prefiltered set and its cost is silently different from the rest. The
+    // comptime check above refuses to build past the bound; this says what the
+    // bound is, so raising it is a deliberate edit.
+    try std.testing.expect(package_roots.len <= max_package_dirs);
+    // /usr/bin has to be one of them: every shadow finding names a packaged
+    // file, and this is the packaged path a Linux install actually uses.
+    var found = false;
+    for (package_roots) |p| {
+        if (std.mem.eql(u8, p, package_fixture)) found = true;
+    }
+    try std.testing.expect(found);
 }
 
 test "listingHasName matches whole lines only" {
