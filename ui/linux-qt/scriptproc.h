@@ -34,7 +34,16 @@ class ScriptProcess : public QObject {
 
 public:
     explicit ScriptProcess(QObject *parent = nullptr);
+    /// `timeoutMs` overrides the run deadline, which is otherwise the
+    /// production `kScriptTimeoutMs`. Only the deadline-start tests set it;
+    /// a window wants the bound the runner documents.
+    explicit ScriptProcess(int timeoutMs, QObject *parent = nullptr);
     ~ScriptProcess() override;
+
+    /// Remaining milliseconds on the run deadline, or -1 when the deadline is
+    /// not armed. Armed means the process is spawned: a prepared run that has
+    /// not been started has spent no part of its budget.
+    qint64 deadlineRemaining() const;
 
     /// Write `script` to a temp file and set the run up. `errorText` is set and
     /// false is returned when the file cannot be written.
@@ -84,6 +93,9 @@ private:
 
     QProcess *m_proc = nullptr;
     QTimer *m_timer = nullptr;
+    /// The run deadline: `kScriptTimeoutMs` unless a caller asked for another,
+    /// which only the deadline tests do.
+    int m_timeoutMs = kScriptTimeoutMs;
     bool m_stopped = false;
     /// The run has been reported. `stop` reports a script that outlives both
     /// signals itself, so the `finished` that arrives later, if it ever does,

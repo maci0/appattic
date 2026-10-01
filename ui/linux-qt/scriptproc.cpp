@@ -77,7 +77,9 @@ bool removeScriptFile(const QString &path, QString &keepPath) {
     return false;
 }
 
-ScriptProcess::ScriptProcess(QObject *parent) : QObject(parent) {
+ScriptProcess::ScriptProcess(QObject *parent) : ScriptProcess(kScriptTimeoutMs, parent) {}
+
+ScriptProcess::ScriptProcess(int timeoutMs, QObject *parent) : QObject(parent), m_timeoutMs(timeoutMs) {
     // One timer for the object's life, not one per run: `prepare` is the entry
     // point a caller reuses, and a `new QTimer(this)` in it left the previous
     // one a child of this object, still holding its `timeout` connection, for
@@ -85,6 +87,12 @@ ScriptProcess::ScriptProcess(QObject *parent) : QObject(parent) {
     m_timer = new QTimer(this);
     m_timer->setSingleShot(true);
     connect(m_timer, &QTimer::timeout, this, &ScriptProcess::stop);
+}
+
+qint64 ScriptProcess::deadlineRemaining() const {
+    if (!m_timer) return -1;
+    const int left = m_timer->remainingTime();
+    return left < 0 ? -1 : qint64(left);
 }
 
 ScriptProcess::~ScriptProcess() {
@@ -171,8 +179,6 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
     env.insert(QStringLiteral("APT_LISTCHANGES_FRONTEND"), QStringLiteral("none"));
     proc->setProcessEnvironment(env);
 
-    m_timer->start(kScriptTimeoutMs);
-
     connect(proc, &QProcess::readyRead, this, [this, proc] { appendOutput(proc->readAll()); });
     connect(proc, &QProcess::finished, this, [this, proc, path = tmp.fileName()](int code) {
         appendOutput(proc->readAll());
@@ -203,7 +209,17 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
 }
 
 void ScriptProcess::start() {
-    if (m_proc) m_proc->start(QStringLiteral("/bin/sh"), {m_path});
+    if (!m_proc) return;
+    /* The deadline counts the run, not the gap between preparing it and
+       starting it. `prepare` and `start` are separate so a caller can connect
+       to `finished` and `failed` before the process exists, and that gap is
+       caller code: it builds the busy chrome, arms the confirm blockers, and
+       connects the handlers, so a caller that took a moment in between spent
+       that moment of the script's ten minutes already. Starting the timer here
+       also stops a prepared script that is never started from being torn down
+       by a deadline that fired against no process. */
+    m_timer->start(m_timeoutMs);
+    m_proc->start(QStringLiteral("/bin/sh"), {m_path});
 }
 
 void ScriptProcess::stop() {

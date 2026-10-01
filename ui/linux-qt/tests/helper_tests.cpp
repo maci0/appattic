@@ -2026,6 +2026,81 @@ static int checkScriptRunCleansUpItsFile() {
     return 0;
 }
 
+/// The run deadline counts the run, not the gap between preparing it and
+/// starting it. `prepare` and `start` are separate so a caller can connect to
+/// `finished` and `failed` before the process exists, and the production bound
+/// is ten minutes: a timer armed in `prepare` charged that whole gap to the
+/// script, and a prepared run that was never started was torn down by a
+/// deadline that fired against no process at all. Both are pinned here with a
+/// short bound, which is the only way to observe the deadline at all.
+static int checkScriptDeadlineStartsAtSpawn() {
+    /* Bounded well under the test's own wait, so a regression fails rather
+       than hangs the suite. */
+    const int kTestTimeoutMs = 900;
+    ScriptProcess proc(kTestTimeoutMs);
+    QString err;
+    if (!proc.prepare(QStringLiteral("#!/bin/sh\nsleep 30\n"), &err)) {
+        std::fprintf(stderr, "deadline: prepare failed (%s)\n", qPrintable(err));
+        return 1;
+    }
+    if (proc.deadlineRemaining() != -1) {
+        std::fprintf(stderr,
+                     "deadline: a prepared run has %lld ms left; the budget is "
+                     "armed before the process exists\n",
+                     static_cast<long long>(proc.deadlineRemaining()));
+        return 1;
+    }
+    /* Spin the event loop for longer than the bound. Nothing is running, so a
+       deadline armed in `prepare` has fired and called `stop`, which is what
+       this catches without having to read a QTimer that is not ours. */
+    QEventLoop idle;
+    QTimer::singleShot(kTestTimeoutMs * 2, &idle, &QEventLoop::quit);
+    bool stopped = false;
+    QObject::connect(&proc, &ScriptProcess::finished, &idle,
+                     [&stopped](int, bool, const QByteArray &) { stopped = true; });
+    idle.exec();
+    if (stopped) {
+        std::fprintf(stderr,
+                     "deadline: an unstarted run was stopped by the deadline\n");
+        return 1;
+    }
+    proc.start();
+    /* A QTimer rounds up to its own tick, so the bound is generous rather than
+       exact: what is pinned is that the budget is armed at all and is a whole
+       run's worth, not a fragment left over from before `start`. */
+    if (proc.deadlineRemaining() <= 0
+        || proc.deadlineRemaining() > kTestTimeoutMs * 2) {
+        std::fprintf(stderr,
+                     "deadline: a started run reports %lld ms left, want (0, %d]\n",
+                     static_cast<long long>(proc.deadlineRemaining()),
+                     kTestTimeoutMs * 2);
+        return 1;
+    }
+    /* And the deadline still stops a started run, which is the reason it is
+       armed at all: a run that is not started is left alone, a run that is
+       started and hangs is killed and reported. */
+    QEventLoop loop;
+    QObject::connect(&proc, &ScriptProcess::finished,
+                     &loop, [&loop](int, bool, const QByteArray &) { loop.quit(); });
+    QTimer cap;
+    QObject::connect(&cap, &QTimer::timeout, &loop, &QEventLoop::quit);
+    cap.setSingleShot(true);
+    cap.start(kTestTimeoutMs * 4);
+    loop.exec();
+    if (proc.running()) {
+        std::fprintf(stderr, "deadline: a started run outlived its bound\n");
+        return 1;
+    }
+    const QString left = proc.scriptLeftBehind();
+    if (!left.isEmpty()) {
+        std::fprintf(stderr, "deadline: a stopped run left its script behind (%s)\n",
+                     qPrintable(left));
+        return 1;
+    }
+    std::fprintf(stdout, "deadline: ok\n");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     /* QProcess and QTimer need a running event dispatcher, and
        checkScriptRunCleansUpItsFile() drives a real one. Constructed before
@@ -2039,7 +2114,7 @@ int main(int argc, char **argv) {
         checkSettingsBackup(), checkSettingsBackupRepeatedSave(), checkDurableWrite(),
         checkLocaleGrouping(),
         checkLegacySettingsMigration(), checkScriptFileRemoval(),
-        checkScriptRunCleansUpItsFile(),
+        checkScriptRunCleansUpItsFile(), checkScriptDeadlineStartsAtSpawn(),
     };
     for (const int rc : checks) {
         if (rc != 0) return rc;
