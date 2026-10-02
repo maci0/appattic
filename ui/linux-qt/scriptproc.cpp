@@ -303,8 +303,8 @@ void ScriptProcess::start() {
         /* QProcess buffers what is written before the child exists and flushes
            it at start, so the whole script goes in one write, and the channel
            is closed in `started`, where the child is known to be reading. */
-        connect(m_proc, &QProcess::started, this, [this]() {
-            m_proc->closeWriteChannel();
+        connect(m_proc, &QProcess::started, this, [proc = m_proc]() {
+            proc->closeWriteChannel();
         });
     } else {
         /* No stdin for a host run: the script must not wait on a terminal, and
