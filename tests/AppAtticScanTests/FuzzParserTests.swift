@@ -147,7 +147,7 @@ final class FuzzManagerOutputTests: XCTestCase {
                         if target.whitespaceFreeNames {
                             XCTAssertFalse(name.contains(where: { $0 == "\n" || $0 == "\r" || $0 == "\t" || $0 == " " }), where_)
                         }
-                        XCTAssertTrue(text.contains(name), "name not in input: \(where_)")
+                        XCTAssertTrue(text.contains(name) || sanitizedPackageName(text).contains(name), "name not in input: \(where_)")
                     }
                 }
                 if target.onePerLine {

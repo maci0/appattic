@@ -26,9 +26,9 @@ void requestCoreWasmCancel();
 void shutdownCoreWasm();
 void clearCoreWasmCancel();
 
-/* Inverse of the PATH rewrite taggedPluginSpecs makes. runCoreWasm already
-   restores on every return; this covers a worker that was terminated before
-   it could return. Safe to call when nothing was applied. */
+/* Inverse of the PATH rewrite for WASM scan operations. Both runCoreWasm and
+   taggedPluginSpecs bracket and restore on return; this covers a worker that
+   was terminated before it could return. Safe to call when nothing was applied. */
 void restoreCoreWasmPath();
 
 #endif

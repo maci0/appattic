@@ -214,9 +214,9 @@ final class ScriptReRunTests: XCTestCase {
             packageMarkManualCommand(entry("libfoo", "apt", "orphan")),
             "an apt orphan takes a mark-manual command"
         )
-        let guard = try XCTUnwrap(parseGuardedRemove(cmd), "untrapped mark: \(cmd)")
-        XCTAssertEqual(guard.present, "dpkg -s libfoo", cmd)
-        XCTAssertEqual(guard.action, "apt-mark manual libfoo", cmd)
+        let guarded = try XCTUnwrap(parseGuardedRemove(cmd), "untrapped mark: \(cmd)")
+        XCTAssertEqual(guarded.present, "dpkg -s libfoo", cmd)
+        XCTAssertEqual(guarded.action, "apt-mark manual libfoo", cmd)
 
         let script = "set -e\n\(cmd)\nprintf done"
         let first = try run(script)

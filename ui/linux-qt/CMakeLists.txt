@@ -82,6 +82,7 @@ add_library(wasmtime SHARED IMPORTED GLOBAL)
 set_target_properties(wasmtime PROPERTIES
     IMPORTED_LOCATION "${WASMTIME_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${WASMTIME_INCLUDE_DIR}"
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${WASMTIME_INCLUDE_DIR}"
     # The C API tarball ships no SONAME, so ld otherwise records the absolute
     # build path as DT_NEEDED and the installed or bundled binary only runs on
     # the machine that built it.
@@ -117,6 +118,8 @@ add_executable(appattic-qt
 )
 target_include_directories(appattic-qt PRIVATE
     "${APPATTIC_ROOT}/core/host"
+)
+target_include_directories(appattic-qt SYSTEM PRIVATE
     "${WASMTIME_INCLUDE_DIR}"
 )
 # Do not bake the configure-time source path into the binary. Runtime uses
@@ -297,6 +300,8 @@ add_executable(appattic-qt-helper-tests
 target_include_directories(appattic-qt-helper-tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${APPATTIC_ROOT}/core/host"
+)
+target_include_directories(appattic-qt-helper-tests SYSTEM PRIVATE
     "${WASMTIME_INCLUDE_DIR}"
 )
 target_link_libraries(appattic-qt-helper-tests PRIVATE

@@ -28,10 +28,13 @@ func vdfQuotedStrings(_ line: String) -> [String] {
     while i < line.endIndex {
         guard let q = line[i...].firstIndex(of: "\"") else { break }
         var start = line.index(after: q)
-        var value = String.UnicodeScalarView()
+        var value = ""
         var closed = false
         while start < line.endIndex {
             let c = line[start]
+            if c.isNewline {
+                break
+            }
             if c == "\\" {
                 let next = line.index(after: start)
                 guard next < line.endIndex else { break }
@@ -58,7 +61,7 @@ func vdfQuotedStrings(_ line: String) -> [String] {
             start = line.index(after: start)
         }
         guard closed else { break }
-        out.append(String(value))
+        out.append(value)
         i = line.index(after: start)
     }
     return out

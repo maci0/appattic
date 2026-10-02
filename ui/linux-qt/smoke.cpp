@@ -314,8 +314,8 @@ int runSmoke(int argc, char **argv) {
     SmokeState st;
     char err[1024];
     err[0] = '\0';
-    /* taggedPluginSpecs rewrites PATH to find user tool dirs; runCoreWasm holds
-       the inverse. A finished scan must not leave the embedder's PATH rewritten. */
+    /* taggedPluginSpecs and runCoreWasm bracket PATH to find user tool dirs;
+       a finished scan must not leave the embedder's PATH rewritten. */
     const QByteArray pathBefore = qgetenv("PATH");
     const int rc = runCoreWasm(
         core,

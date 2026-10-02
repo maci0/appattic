@@ -25,8 +25,8 @@ final class SearchTests: XCTestCase {
             owner: owner,
             reason: reason,
             summary: summary,
-            shadows: shadows,
-            extra_paths: extraPaths
+            extra_paths: extraPaths,
+            shadows: shadows
         )
     }
 
@@ -46,8 +46,8 @@ final class SearchTests: XCTestCase {
             source: source,
             tier: tier,
             reason: reason,
-            summary: summary,
-            outdated: outdated
+            outdated: outdated,
+            summary: summary
         )
     }
 

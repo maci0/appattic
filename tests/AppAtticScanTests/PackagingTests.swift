@@ -87,7 +87,7 @@ final class PackagingTests: XCTestCase {
         let rest = page
             .components(separatedBy: "appattic erase")
             .dropFirst()
-            .first
+            .first(where: { $0.contains("standard") || $0.contains("removes it") })
             .map { String($0.prefix(400)) } ?? ""
         XCTAssertFalse(rest.isEmpty, "the Qt man page no longer documents appattic erase")
         XCTAssertTrue(
@@ -836,7 +836,7 @@ final class PackagingTests: XCTestCase {
             stdout.split(separator: "\n").first { $0.contains(": ") },
             "linux-deps.sh printed no header line: \(stdout)"
         )
-        if ProcessInfo.processInfo.operatingSystemVersion.isMacOSX
+        if PlatformOverride.isDarwin
             || header.contains("host: macOS")
         {
             XCTAssertTrue(
@@ -861,7 +861,7 @@ final class PackagingTests: XCTestCase {
                 state.contains("present ") || state.contains("missing ") || state.contains("n/a "),
                 "\(tool) line is neither present, missing nor n/a: \(state)"
             )
-            if !ProcessInfo.processInfo.operatingSystemVersion.isMacOSX && tool == "Qt 6" {
+            if !PlatformOverride.isDarwin && tool == "Qt 6" {
                 XCTAssertFalse(
                     state.contains("n/a "),
                     "Qt 6 is a real dependency on Linux, so it reports present or missing, not n/a: \(state)"

@@ -293,11 +293,19 @@ inline QPalette aaPaletteWithReadablePlaceholder(const QPalette &in) {
 /// this costs nothing in a session with no screen reader attached.
 inline void aaAnnounce(QObject *obj, const QString &message) {
     if (!obj || message.isEmpty()) return;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
     QAccessibleAnnouncementEvent ev(obj, message);
     // Polite: these land beside whatever the user is doing rather than cutting
     // across it.
     ev.setPoliteness(QAccessible::AnnouncementPoliteness::Polite);
     QAccessible::updateAccessibility(&ev);
+#else
+    if (QAccessibleInterface *iface = QAccessible::queryAccessibleInterface(obj)) {
+        iface->setText(QAccessible::Description, message);
+    }
+    QAccessibleEvent ev(obj, QAccessible::DescriptionChanged);
+    QAccessible::updateAccessibility(&ev);
+#endif
 }
 
 /// The same, interrupting: for a message the user must not miss, which in this

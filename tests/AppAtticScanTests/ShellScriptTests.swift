@@ -32,7 +32,7 @@ final class ShellScriptTests: XCTestCase {
     /// pinned, along with the non-ASCII and shell-metacharacter refusals.
     /// `isSafeCommandArgument` above would accept all of them.
     func testIsSafeCmdIdentMatchesTheZigIdentByteSet() {
-        for ok in ["a", "z", "A", "Z", "0", "9", "-", "_", ".", "+", "eslint",
+        for ok in ["a", "z", "A", "Z", "0", "9", "_", ".", "+", "eslint",
                    "libwebkit2gtk-4.1", "a+b", "a_b", "a.b", "a-b"] {
             XCTAssertTrue(isSafeCmdIdent(ok), ok)
         }

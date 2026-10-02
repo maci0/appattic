@@ -36,6 +36,14 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.1.0" date="2026-10-02">
+      <description>
+        <p><code>appattic restore</code> is new. It puts <code>settings.json.bak</code> back in place of <code>settings.json</code> after checking that the backup loads, so an invalid or unreadable file changes nothing on disk; the file it replaces is preserved as <code>settings.json.bad</code>. It runs before regular settings are read, so it works on a system whose <code>settings.json</code> no longer parses. <code>--json FILE</code> writes the restore result as JSON. In the desktop windows, the Settings page adds a corresponding "Restore settings from backup" action.</p>
+        <p>A backup of the configuration is written to <code>settings.json.bak</code> by every settings save that changes the file, keeping the previous valid state. Saves that leave settings unchanged skip the backup so an older copy cannot be overwritten by a no-op save.</p>
+        <p>Outdated reporting explicitly identifies report-only packages. Footers and skip notes name language globals (npm, pnpm, Bun, pip, pipx, uv, RubyGems, Composer, Deno) alongside the App Store and Snap as report-only rows that are excluded from <code>appattic update</code>.</p>
+        <p>File permissions and path handling are hardened. Generated cleanup scripts and configuration backups are written owner-only (0600) to prevent visibility or races in shared temp directories. XDG root path normalization trims trailing separators consistently across the scan engine, the C host, and the Linux Qt interface.</p>
+      </description>
+    </release>
     <release version="3.0.0" date="2026-09-27">
       <description>
         <p>A JSON report target has to name a <code>.json</code> file. <code>--json scan</code> and <code>--json /var</code> are usage errors now, exit 2, where the first wrote whatever the argument named and the second failed late against a directory: <code>appattic --json erase</code> used to write a file named <code>erase</code> and never erase anything. Name the file you want, <code>--json scan.json</code>.</p>

@@ -611,7 +611,7 @@ public func resolveScan(
     forceLive: Bool,
     cacheURL: URL = defaultScanCacheURL(),
     now: Date = Date(),
-    clock: MonotonicFn = monotonicSeconds,
+    clock: @escaping MonotonicFn = monotonicSeconds,
     fingerprintFn: () -> String = { scanFingerprint() },
     liveScan: ((Bool) -> ScanData)? = nil
 ) -> ResolvedScan {

@@ -301,8 +301,10 @@ wasmtime_libdir() {
 wasmtime_from_prefix() {
     prefix=$1
     libdir=$(wasmtime_libdir "$prefix") || return 1
-    [[ -f "$prefix/include/wasmtime.h" ]] || return 1
-    wasmtime_cflags=(-I"$prefix/include")
+    # -isystem for third-party headers: they are not this tree's to fix,
+    # and their own warnings (`wasi.h` under -Wstrict-prototypes) would otherwise
+    # fail cc under -Werror.
+    wasmtime_cflags=(-isystem "$prefix/include")
     wasmtime_libs=(-L"$libdir" "-Wl,-rpath,$libdir" -lwasmtime)
 }
 

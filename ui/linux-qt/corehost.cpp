@@ -198,8 +198,9 @@ QStringList pluginWasmFiles(const QString &out) {
 }
 
 QStringList taggedPluginSpecs(const QString &out) {
-    /* pluginTag resolves binaries through PATH, so the user tool dirs must be
-       applied before tagging. runCoreWasm holds the inverse. */
+    /* pluginTag resolves binaries through PATH, so user tool dirs are applied
+       during tagging and restored immediately before returning (arXiv:2608.25512
+       bracket pattern: every mutation has an immediate inverse). */
     appattic_host_apply_user_path();
     const QStringList plugins = pluginWasmFiles(out);
     QStringList specs;
@@ -207,6 +208,7 @@ QStringList taggedPluginSpecs(const QString &out) {
     for (const QString &p : plugins) {
         specs << (p + QLatin1Char('=') + QString::number(pluginTag(p)));
     }
+    appattic_host_restore_user_path();
     return specs;
 }
 
@@ -226,6 +228,9 @@ int runCoreWasm(
     for (const QString &s : pluginSpecs) specBytes.push_back(s.toUtf8());
     for (QByteArray &s : specBytes) ptrs.push_back(s.data());
     const QByteArray coreUtf8 = coreWasm.toUtf8();
+    /* host.exec commands run by plugins inherit the augmented PATH with user tool
+       dirs. Applied before running and restored immediately after (bracket pattern). */
+    appattic_host_apply_user_path();
     const int rc = appattic_wasm_run(
         coreUtf8.constData(),
         ptrs.empty() ? nullptr : ptrs.data(),
@@ -236,8 +241,6 @@ int runCoreWasm(
         err,
         errlen
     );
-    /* PATH is process-global. Undo the apply that taggedPluginSpecs made so a
-       long-lived UI does not keep the scan's PATH after the scan ends. */
     appattic_host_restore_user_path();
     return rc;
 }

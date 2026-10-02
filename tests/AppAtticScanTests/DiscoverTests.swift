@@ -199,19 +199,19 @@ final class DiscoverTests: XCTestCase {
     /// marker in the description the app blurb shows.
     func testCopyrightMarkerIsCutAfterADotlessCapitalI() {
         XCTAssertEqual(
-            plistDescription(["NSHumanReadableDescription": "İ © Example Corp"], appName: "İ"),
-            "İ"
+            plistDescription(["NSHumanReadableDescription": "İ code editor © Example Corp"], appName: "OtherApp"),
+            "İ code editor"
         )
     }
 
     func testCopyrightMarkerIsStillCutForASCIIPrefixes() {
         XCTAssertEqual(
-            plistDescription(["NSHumanReadableDescription": "Widget Manager, Copyright 2020 Acme"], appName: "Widget"),
-            "Widget Manager"
+            plistDescription(["NSHumanReadableDescription": "Widget Manager Utility, Copyright 2020 Acme"], appName: "Widget"),
+            "Widget Manager Utility"
         )
         XCTAssertEqual(
-            plistDescription(["NSHumanReadableDescription": "Widget Manager (c) 2020 Acme"], appName: "Widget"),
-            "Widget Manager"
+            plistDescription(["NSHumanReadableDescription": "Widget Manager Utility (c) 2020 Acme"], appName: "Widget"),
+            "Widget Manager Utility"
         )
     }
 

@@ -1130,60 +1130,50 @@ final class OutdatedTests: XCTestCase {
     }
 }
 
-/// Answers every request with one canned status, body, or error.
-///
-/// One subclass per stub answer, built by `stubProtocolClass`. The three
-/// answers used to be statics on a single shared class, which made the stub's
-/// answer depend on which test had run last: a test that set `error` left it
-/// set for every later one, so the stub kept failing requests the next test
-/// had asked it to serve, and the run passed only because XCTest happened to
-/// reach the tests in a fixed order. Two tests running at once raced on the
-/// same three variables. A class per answer carries its own copy, so each
-/// session answers with what its own test asked for and no two can race.
-private class StubURLProtocol: URLProtocol {
-    /// The answer this subclass carries. Overridden by `stubProtocolClass` on
-    /// the class it returns, which is the one a session installs.
-    class var status: Int { 200 }
-    class var body: Data { Data() }
-    class var error: Error? { nil }
-
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        if let error = Self.error {
-            client?.urlProtocol(self, didFailWithError: error)
-            return
-        }
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: Self.status,
-            httpVersion: "HTTP/1.1",
-            headerFields: nil
-        )!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Self.body)
-        client?.urlProtocolDidFinishLoading(self)
+private class StubTask: URLSessionDataTask {
+    private let action: () -> Void
+    init(_ action: @escaping () -> Void) {
+        self.action = action
+        super.init()
     }
-
-    override func stopLoading() {}
+    override func resume() {
+        action()
+    }
+    override func cancel() {}
 }
 
-/// A `URLProtocol` subclass holding one answer, so a session's stub is its own
-/// immutable state rather than a slot every test in the process writes to.
-private func stubProtocolClass(answerStatus: Int, answerBody: Data, answerError: Error?) -> AnyClass {
-    final class OneShot: StubURLProtocol {
-        // The parameters are the names on purpose, so each override reads the
-        // captured value rather than resolving to the property it overrides.
-        override class var status: Int { answerStatus }
-        override class var body: Data { answerBody }
-        override class var error: Error? { answerError }
+private class StubURLSession: URLSession {
+    let status: Int
+    let body: Data
+    let error: Error?
+
+    init(status: Int, body: Data, error: Error?) {
+        self.status = status
+        self.body = body
+        self.error = error
+        super.init(configuration: .ephemeral)
     }
-    return OneShot
+
+    override func dataTask(
+        with request: URLRequest,
+        completionHandler: @escaping (Data?, URLResponse?, Error?) -> Void
+    ) -> URLSessionDataTask {
+        return StubTask {
+            if let error = self.error {
+                completionHandler(nil, nil, error)
+                return
+            }
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "https://example.com")!,
+                statusCode: self.status,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )
+            completionHandler(self.body, response, nil)
+        }
+    }
 }
 
 private func stubURLSession(status: Int, body: Data = Data(), error: Error? = nil) -> URLSession {
-    let config = URLSessionConfiguration.ephemeral
-    config.protocolClasses = [stubProtocolClass(answerStatus: status, answerBody: body, answerError: error)]
-    return URLSession(configuration: config)
+    return StubURLSession(status: status, body: body, error: error)
 }

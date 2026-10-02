@@ -195,7 +195,7 @@ static void life_cond_init(void) {
    scan may still hold one. Both locks are held by the caller, in that order,
    which is the order the teardown takes them in. */
 static void cache_clear_locked(void) {
-    for (int i = 0; i < g_mod_count; i++) {
+    for (int i = g_mod_count - 1; i >= 0; i--) {
         wasmtime_module_delete(g_mods[i].module);
         free(g_mods[i].path);
         g_mods[i].module = NULL;
@@ -509,7 +509,7 @@ static int call_i32_arg(
 
 static void drop_externs(wasmtime_extern_t **xs, int n) {
     int i;
-    for (i = 0; i < n; i++) {
+    for (i = n - 1; i >= 0; i--) {
         wasmtime_extern_delete(xs[i]);
     }
 }
@@ -731,7 +731,6 @@ static void skip_plugin_noted(
 }
 
 static int run_plugin(
-    wasmtime_context_t *ctx,
     wasmtime_linker_t *linker,
     wasm_engine_t *engine,
     char *spec,
@@ -770,10 +769,25 @@ static int run_plugin(
         return 0;
     }
 
+    /* arXiv:2608.25512 ch. 6.4: each plugin fiber owns its instance lifecycle.
+       Dropping the store on completion/skip/fail unloads the fiber and returns
+       its linear memory to INACTIVE. */
+    wasmtime_store_t *store = wasmtime_store_new(engine, NULL, NULL);
+    if (!store) {
+        skip_plugin_noted(on_json, user, id, "wasmtime_store_new failed");
+        if (!err_was_failed) {
+            e->failed = 0;
+            if (e->buf && e->len) e->buf[0] = '\0';
+        }
+        return 0;
+    }
+    wasmtime_context_t *ctx = wasmtime_store_context(store);
+
     wasmtime_module_t *mod = NULL;
     wasmtime_instance_t plug;
     if (instantiate(ctx, linker, engine, path, &mod, &plug, e) != 0) {
         skip_plugin_noted(on_json, user, id, "it could not be instantiated");
+        wasmtime_store_delete(store);
         if (!err_was_failed) {
             e->failed = 0;
             if (e->buf && e->len) e->buf[0] = '\0';
@@ -867,6 +881,7 @@ static int run_plugin(
 
     if (on_json) on_json((const char *)json, (size_t)rl, user);
     drop_externs(slots, ngot);
+    wasmtime_store_delete(store);
     return 0;
 
 skip_plugin:
@@ -877,6 +892,7 @@ skip_plugin:
        run's own err keeps the first fault it saw. */
     skip_plugin_noted(on_json, user, id, skip_reason);
     drop_externs(slots, ngot);
+    wasmtime_store_delete(store);
     if (!err_was_failed) {
         e->failed = 0;
         if (e->buf && e->len) e->buf[0] = '\0';
@@ -885,6 +901,7 @@ skip_plugin:
 
 fail_plugin:
     drop_externs(slots, ngot);
+    wasmtime_store_delete(store);
     return 1;
 }
 
@@ -1046,49 +1063,56 @@ static int wasm_run_locked(
         return 1;
     }
 
-    wasmtime_store_t *store = wasmtime_store_new(engine_rt, NULL, NULL);
-    wasmtime_context_t *ctx = wasmtime_store_context(store);
+    wasmtime_store_t *core_store = wasmtime_store_new(engine_rt, NULL, NULL);
+    if (!core_store) {
+        fail_msg(&e, "wasmtime_store_new failed");
+        wasmtime_linker_delete(linker);
+        return 1;
+    }
+    wasmtime_context_t *core_ctx = wasmtime_store_context(core_store);
 
     wasmtime_module_t *core_mod = NULL;
     wasmtime_instance_t core;
-    if (instantiate(ctx, linker, engine_rt, core_wasm, &core_mod, &core, &e) != 0) {
-        wasmtime_store_delete(store);
+    if (instantiate(core_ctx, linker, engine_rt, core_wasm, &core_mod, &core, &e) != 0) {
+        wasmtime_store_delete(core_store);
         wasmtime_linker_delete(linker);
         return 1;
     }
     wasmtime_extern_t core_abi;
-    if (must_export(ctx, &core, "core_abi_version", &core_abi, &e)) {
-        wasmtime_store_delete(store);
+    if (must_export(core_ctx, &core, "core_abi_version", &core_abi, &e)) {
+        wasmtime_store_delete(core_store);
         wasmtime_linker_delete(linker);
         return 1;
     }
     if (core_abi.kind != WASMTIME_EXTERN_FUNC) {
         fail_msg(&e, "core exports must be functions");
         wasmtime_extern_delete(&core_abi);
-        wasmtime_store_delete(store);
+        wasmtime_store_delete(core_store);
         wasmtime_linker_delete(linker);
         return 1;
     }
     int32_t abi = 0;
-    if (call_i32(ctx, &core_abi.of.func, &abi, &e) != 0) {
+    if (call_i32(core_ctx, &core_abi.of.func, &abi, &e) != 0) {
         wasmtime_extern_delete(&core_abi);
-        wasmtime_store_delete(store);
+        wasmtime_store_delete(core_store);
         wasmtime_linker_delete(linker);
         return 1;
     }
     if (abi != 1) {
         fail_msg(&e, "unsupported core abi");
         wasmtime_extern_delete(&core_abi);
-        wasmtime_store_delete(store);
+        wasmtime_store_delete(core_store);
         wasmtime_linker_delete(linker);
         return 1;
     }
+
+    wasmtime_extern_delete(&core_abi);
+    wasmtime_store_delete(core_store);
 
     int rc = 0;
     for (int i = 0; i < plugin_count; i++) {
         if (appattic_host_exec_cancelled()) break;
         if (run_plugin(
-                ctx,
                 linker,
                 engine_rt,
                 plugin_specs[i],
@@ -1103,8 +1127,6 @@ static int wasm_run_locked(
         }
     }
 
-    wasmtime_extern_delete(&core_abi);
-    wasmtime_store_delete(store);
     wasmtime_linker_delete(linker);
     return rc;
 }
