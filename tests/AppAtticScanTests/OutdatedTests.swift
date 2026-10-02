@@ -506,8 +506,11 @@ final class OutdatedTests: XCTestCase {
     /// The manager list in the footer is one fixed literal, so matching
     /// substrings of it against a pacman package proved nothing about pacman.
     /// What the input decides is which lines appear: an updatable package
-    /// brings the upgrade line, a report-only manager brings the report-only
-    /// line, and neither appears for the rest.
+    /// brings the upgrade line, a manager with no upgrade command brings the
+    /// report-only line, and neither appears for the rest. The language
+    /// globals are the case that used to fall through: the Linux plugins emit
+    /// outdated rows for them, and naming only the App Store and Snap left
+    /// those rows with no line at all.
     func testOutdatedReportFooterLinesFollowThePackageManagers() throws {
         let pacman = OutdatedPkg(name: "firefox", manager: "pacman", currentVersion: "1", latestVersion: "2")
         let untrusted = OutdatedPkg(
@@ -518,6 +521,7 @@ final class OutdatedTests: XCTestCase {
             kind: "untrusted"
         )
         let store = OutdatedPkg(name: "iMovie", manager: "app-store", currentVersion: "1", latestVersion: "2")
+        let gem = OutdatedPkg(name: "sass", manager: "gem", currentVersion: "3.7.4", latestVersion: "3.7.5")
         let upgradeLine = try XCTUnwrap(outdatedReportFooter([pacman]).first)
         XCTAssertEqual(outdatedReportFooter([pacman]).count, 1)
         XCTAssertTrue(upgradeLine.contains("appattic update --dry-run"), upgradeLine)
@@ -529,12 +533,17 @@ final class OutdatedTests: XCTestCase {
         )
         XCTAssertEqual(
             outdatedReportFooter([store]),
-            ["App Store and Snap stay report-only."],
-            "a report-only manager is never offered as an upgrade"
+            ["App Store, Snap, and the language globals stay report-only."],
+            "a manager with no upgrade command is never offered as an upgrade"
+        )
+        XCTAssertEqual(
+            outdatedReportFooter([gem]),
+            outdatedReportFooter([store]),
+            "a RubyGems row is report-only on the same terms as an App Store one"
         )
         XCTAssertEqual(
             outdatedReportFooter([pacman, untrusted, store]),
-            [upgradeLine, "Untrusted casks stay listed. AppAttic will not trust the tap.", "App Store and Snap stay report-only."],
+            [upgradeLine, "Untrusted casks stay listed. AppAttic will not trust the tap.", "App Store, Snap, and the language globals stay report-only."],
             "one line per branch that fires, in branch order"
         )
     }

@@ -62,6 +62,12 @@ public final class OutdatedPkg {
     }
 }
 
+/// Footer lines naming what an Outdated report does with each branch of rows.
+///
+/// A row with no entry in `UpgradableManager` is report-only, and the report
+/// says so rather than naming a subset: the Linux plugins also emit outdated
+/// rows for npm, pnpm, Bun, pip, pipx, uv, RubyGems, Composer, and Deno, and a
+/// footer that named only the App Store and Snap left those rows unexplained.
 public func outdatedReportFooter(_ pkgs: [OutdatedPkg]) -> [String] {
     var lines: [String] = []
     if pkgs.contains(where: \.updatable) {
@@ -70,10 +76,10 @@ public func outdatedReportFooter(_ pkgs: [OutdatedPkg]) -> [String] {
     if pkgs.contains(where: { $0.kind == "untrusted" }) {
         lines.append("Untrusted casks stay listed. AppAttic will not trust the tap.")
     }
-    if pkgs.contains(where: {
-        ["app-store", "snap"].contains($0.manager)
-    }) {
-        lines.append("App Store and Snap stay report-only.")
+    // `.updatable` is false for an untrusted cask too, so the kind is named
+    // here: that row raises the tap line above, not this one.
+    if pkgs.contains(where: { !$0.updatable && $0.kind != "untrusted" }) {
+        lines.append("App Store, Snap, and the language globals stay report-only.")
     }
     return lines
 }
@@ -108,8 +114,11 @@ private func outdatedManagerLabel(_ manager: String) -> String {
     return manager.contains("-") ? manager.replacingOccurrences(of: "-", with: " ") : manager
 }
 
+/// The note an empty update script carries. It names every branch of row an
+/// update pass drops, for the same reason `outdatedReportFooter` does: a row
+/// outside `UpgradableManager` has no upgrade command to write.
 public let outdatedSkippedManagersNote =
-    "Untrusted casks, App Store, and Snap are skipped."
+    "Untrusted casks, the App Store, Snap, and the language globals are skipped."
 
 public func outdatedReason(_ pkg: OutdatedPkg, page: String = "Outdated") -> String {
     outdatedReason(

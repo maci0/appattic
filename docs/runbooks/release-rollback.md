@@ -45,10 +45,12 @@ gh release delete vX.Y.Z --yes --cleanup-tag   # the release, its assets, and th
 ```
 
 `--cleanup-tag` is what deletes the tag, and it is what makes the number
-reusable: `scripts/check-version.sh` refuses to build a version whose tag
-already exists, so without it the same version cannot be re-tagged. If the tag
-is wanted for the history, delete the release alone and move the tag yourself
-only when no user has downloaded from it.
+reusable: `scripts/check-version.sh` fails when the declared version already
+carries a tag pointing at a different commit, so without it the same number
+cannot be shipped again. (A tag pointing at the commit under the tree is that
+normal release build, not a reuse.) If the tag is wanted for the history, delete
+the release alone and move the tag yourself only when no user has downloaded
+from it.
 
 The release page keeps a `deleted` marker rather than a redirect, so a user
 following an old download link lands on a 404. That is the correct outcome for

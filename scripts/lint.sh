@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Shellcheck, yamllint, host C warnings-as-errors, zig fmt when zig is on PATH,
-# and commit messages that credit an AI tool.
+# Static gates over the tree: shell and C compilation, the Zig fmt check, and
+# the consistency gates that hold the copies of a name, a list, or a switch in
+# step across the three trees. Run with --help for the list.
 # Usage: bash scripts/lint.sh
 set -euo pipefail
 
@@ -16,15 +17,24 @@ case "${1:-}" in
 Usage: bash scripts/lint.sh
 
   shellcheck on the shell scripts, yamllint on the YAML,
+  every script's --help names its own usage line,
   host C warnings-as-errors under every compiler on PATH,
   host C under ASan + UBSan, host C under -fanalyzer and clang --analyze,
   hostexec warnings-as-errors, dependency pin consistency,
   the system-name list matches across the Zig core and the Swift library,
+  the home-dot leaf list in the Swift library covers the plugin's,
+  the path-shadow overlay roots match between the Zig plugin and the Qt table,
+  one sidebar page vocabulary across the CLI, macOS and Qt shells,
+  the remove/review/keep status colors are the same in all three shells,
+  the same switch is spelled the same way wherever it is read,
+  the XDG roots are trimmed from the same blanks in all three trees,
   the host plugin argv matches the list core/build.sh emits,
   no `path:line` citation in the markdown, since line numbers rot silently,
+  every swift build maps the build path out of its flags,
+  the hardening flags match between core/build-flags.sh and the Qt build,
+  both Docker images copy every script linux-deps.sh sources,
   desktop entry, AppStream metainfo, man page, Flatpak manifest,
   every environment switch a binary reads is in that binary's man page,
-  the XDG roots are trimmed from the same blanks in all three trees,
   zig fmt --check, no AI tool credit in commit messages
 EOF
         exit 0

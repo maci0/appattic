@@ -265,9 +265,10 @@ commands:
 
 options:
   --json FILE         also write this command's result as JSON to FILE, which
-                      has to end in .json. The report commands write the whole
-                      scan, disk the disk tree, config, erase and restore write what
-                      those commands reported. On the report commands
+                      has to end in .json. The report commands and update write
+                      the whole scan, disk the disk tree, config, erase and
+                      restore write what those commands reported. On the report
+                      commands
                       --top, --category, --leftovers-only, and --stale-only
                       shape what is printed, not what is written. A value that
                       names no JSON file is a usage error, so `appattic --json
