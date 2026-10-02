@@ -290,6 +290,49 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    /// `man appattic` is where a user looks after a value is already exported
+    /// and something is being read as off, so every switch `appattic config`
+    /// reports has to be in its ENVIRONMENT section. The README test above
+    /// covers the README and `scripts/lint.sh` covers both man pages; this is
+    /// the same guarantee from the suite that owns the config surface, so a
+    /// contributor running `swift test` alone sees it.
+    ///
+    /// The four Qt-and-core-host switches are excluded: `configEnvEntries`
+    /// reports them because a Linux run's package results come from them, but
+    /// they are not this binary's variables and `man appattic-qt` documents
+    /// each one. `APPATTIC_PAGE` stays in the list, because its entry has to
+    /// say that the window reads it rather than leave a reader looking for a
+    /// sidebar this command does not have.
+    func testCLIManPageDocumentsEverySwitchItReports() throws {
+        let qtOnly: Set<String> = [
+            "APPATTIC_CORE_OUT",
+            "APPATTIC_HOST_EXEC_LIVE",
+            "APPATTIC_HOST_EXEC_FIXTURE",
+            "FLATPAK_ID",
+        ]
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let page = try String(
+            contentsOf: root.appendingPathComponent("packaging/appattic.1"),
+            encoding: .utf8
+        )
+        // Only the ENVIRONMENT section: FILES names the settings paths and
+        // OPTIONS names flags, so a whole-file search would pass on a page
+        // that documents a switch somewhere a reader would not look for it.
+        let start = try XCTUnwrap(page.range(of: "\n.SH ENVIRONMENT\n"))
+        let rest = page[start.upperBound...]
+        let end = try XCTUnwrap(rest.range(of: "\n.SH "))
+        let environment = String(rest[rest.startIndex..<end.lowerBound])
+        for entry in configEnvEntries(env: [:]) where !qtOnly.contains(entry.name) {
+            XCTAssertTrue(
+                environment.contains(entry.name),
+                "\(entry.name) is printed by 'appattic config' but is not in the ENVIRONMENT section of packaging/appattic.1"
+            )
+        }
+    }
+
     /// The README quotes a full `appattic config` run, and a quoted run whose
     /// order no longer matches the order the command prints is a second copy
     /// of the config surface, kept in step by hand. The env block is compared

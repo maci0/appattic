@@ -554,7 +554,9 @@ void appattic_host_restore_user_path(void) {
    Paths.swift` does. Surrounding blanks are trimmed before the absolute check,
    because both other readers do: a `XDG_CONFIG_HOME` that arrives padded is
    one directory for the CLI and another for this host, and the report the
-   window prints names the one this host did not scan. */
+   window prints names the one this host did not scan. The trim set is the one
+   those two remove and not `env_flag`'s narrower pair, which is why it is
+   spelled out here rather than shared with the host-exec switches below. */
 static const char *xdg_root_for(const char *arg, size_t *rel_len) {
     static const struct {
         const char *rel;
@@ -579,9 +581,22 @@ static const char *xdg_root_for(const char *arg, size_t *rel_len) {
             arg[APPATTIC_HOME_SENTINEL_LEN + n] != '/') continue;
         v = getenv(kRoots[i].env);
         if (!v) continue;
-        while (*v == ' ' || *v == '\t') v++;
+        /* Every blank `Sources/AppAtticScan/Paths.swift` removes and no
+           others. That is `trimmingCharacters(in: .whitespacesAndNewlines)`:
+           a space, a tab, a newline, a carriage return, a form feed, a
+           vertical tab, and the Unicode spaces. Trimming only the two
+           `env_flag` skips leaves a leading newline on the value, the
+           absolute check below then rejects it, and this host falls back to
+           `~/.config` while the CLI and the Qt window -- which both remove
+           the whole set -- scan the exported root. The two disagree about
+           which directory a finding names, and the finding is a path a
+           cleanup script removes. */
+        while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r' ||
+               *v == '\f' || *v == '\v') v++;
         len = strlen(v);
-        while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t')) len--;
+        while (len > 0 && (v[len - 1] == ' ' || v[len - 1] == '\t' ||
+                           v[len - 1] == '\n' || v[len - 1] == '\r' ||
+                           v[len - 1] == '\f' || v[len - 1] == '\v')) len--;
         if (len == 0 || len >= PATH_MAX) continue;
         memcpy(trimmed[i], v, len);
         trimmed[i][len] = '\0';

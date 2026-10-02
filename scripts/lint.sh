@@ -23,6 +23,8 @@ Usage: bash scripts/lint.sh
   the host plugin argv matches the list core/build.sh emits,
   no `path:line` citation in the markdown, since line numbers rot silently,
   desktop entry, AppStream metainfo, man page, Flatpak manifest,
+  every environment switch a binary reads is in that binary's man page,
+  the XDG roots are trimmed from the same blanks in all three trees,
   zig fmt --check, no AI tool credit in commit messages
 EOF
         exit 0
@@ -452,6 +454,119 @@ if [[ -z "$swift_on" || "$swift_on" != "$c_on" || "$swift_on" != "$manifest_on" 
     exit 1
 fi
 echo "switch spellings: ok"
+
+# Every environment variable a binary reads has to reach that binary's man
+# page. The README carries the full table and `appattic config` prints each
+# switch with the effect its value has, but `man appattic` is what a user
+# reaches for after a value is already exported and something is being read as
+# off. `configEnvEntries` in the scan library is the one list of what a run
+# reads, and ConfigTests requires the README to carry the same names. The CLI
+# man page had drifted behind both, missing XDG_DATA_DIRS (the system desktop
+# roots), ANDROID_HOME and ANDROID_SDK_ROOT (the tool roots the scan walks),
+# and LANG (the locale macOS app names are read in).
+#
+# `configEnvEntries` reports four switches this process does not act on --
+# APPATTIC_CORE_OUT, the two host-exec switches, and FLATPAK_ID are read by
+# the C core host and the Qt shell, and are listed because a Linux run's
+# package results come from them and a diff of two machines has to show that.
+# They are not missing from `man appattic`: they are not its variables, and
+# `man appattic-qt` documents each one. So the check is per binary, against the
+# page that documents that binary, and a name has to land on exactly one.
+#
+# The names are read out of the `entry("NAME"` calls, which are the same list
+# the array literal is built from, and compared against the ENVIRONMENT
+# section only: the FILES section names settings.json paths and the OPTIONS
+# section names flags, so a whole-file grep would pass on a page that documents
+# a variable somewhere unrelated to where a reader would look for it.
+config_env_section() {
+    sed -n '/^\.SH ENVIRONMENT$/,/^\.SH /p' "$1"
+}
+# Variables the Qt window and the C core host read, and `man appattic-qt`
+# documents. APPATTIC_PAGE is in both: both windows read it.
+config_qt_only_env="APPATTIC_CORE_OUT APPATTIC_HOST_EXEC_LIVE APPATTIC_HOST_EXEC_FIXTURE FLATPAK_ID"
+config_read_env="$(sed -n '/^public func configEnvEntries/,/^}/p' \
+    "$ROOT/Sources/AppAtticScan/Settings.swift" \
+    | sed -n 's/^ *entry("\([A-Z_][A-Z0-9_]*\)".*/\1/p' | LC_ALL=C sort -u)"
+if [[ -z "$config_read_env" ]]; then
+    echo "error: could not read the environment switches from configEnvEntries" >&2
+    echo "       fix: keep the entry(\"NAME\", unsetEffect:) calls in" >&2
+    echo "             Sources/AppAtticScan/Settings.swift" >&2
+    exit 1
+fi
+config_check_page() {
+    local page="$1" owner="$2" missing="" found=""
+    local name
+    for name in $config_read_env; do
+        local is_qt="no"
+        [[ " $config_qt_only_env " == *" $name "* ]] && is_qt="yes"
+        if [[ "$is_qt" == "yes" && "$owner" == "cli" ]]; then continue; fi
+        if [[ "$is_qt" == "no" && "$owner" == "qt" ]]; then continue; fi
+        if config_env_section "$ROOT/packaging/$page" | grep -qF "$name"; then
+            found+=" $name"
+        else
+            missing+=" $name"
+        fi
+    done
+    if [[ -n "$missing" ]]; then
+        echo "error: packaging/$page ENVIRONMENT section is missing:$missing" >&2
+        echo "       each one is read by $owner and printed by 'appattic config', so" >&2
+        echo "       a user debugging a value reaches for man and finds it absent" >&2
+        echo "       fix: add a .TP entry per variable in packaging/$page" >&2
+        return 1
+    fi
+    echo "$page environment: ok (${found# })"
+}
+config_check_page appattic.1 cli
+config_check_page appattic-qt.1 qt
+
+# One trim set for the XDG roots, three trees. The same reasoning as the
+# host-exec switches below, and the same failure it had: `xdgUserDir` in the
+# scan library trims `.whitespacesAndNewlines`, `QString::trimmed` in the Qt
+# shell trims the same set, and the C host trimmed only the two blanks
+# `env_flag` skips. A `XDG_CONFIG_HOME` carrying a leading newline therefore
+# resolved to the exported root in the CLI and the window and to `~/.config` in
+# the host, so one run named two different directories -- and the difference is
+# a path a cleanup script removes, not a line in a report.
+#
+# The C host is the tree to watch, because it is the one that spells its trim
+# out as a chain of comparisons and so can quietly be narrowed back to the
+# pair. The Swift side names the whole `.whitespacesAndNewlines` set and is
+# asserted to still do so; the C side spells its blanks out as escapes and is
+# compared against those, which is also how a reader sees them at the call
+# site. U+0020 is a bare ' ' and so does not match the escape pattern.
+c_xdg_trim="$(sed -n '/^static const char \*xdg_root_for/,/^}/p' "$ROOT/core/host/hostexec.c" \
+    | grep -o "'\\\\[a-z]'" | LC_ALL=C sort -u | tr -d '\n')"
+c_xdg_trim+="' '"
+# The Swift side is a named Foundation set rather than a list of characters, so
+# it is asserted rather than diffed: it has to still be the whole set.
+if ! grep -q 'trimmingCharacters(in: .whitespacesAndNewlines)' \
+        "$ROOT/Sources/AppAtticScan/Paths.swift"; then
+    echo "error: xdgUserDir no longer trims .whitespacesAndNewlines" >&2
+    echo "       fix: keep the XDG roots on the whole blank set. The C host and" >&2
+    echo "             ui/linux-qt read the same four variables, and a set of" >&2
+    echo "             only space and tab reads a padded root in one tree and" >&2
+    echo "             ignores it in another." >&2
+    exit 1
+fi
+for c_blank in ' ' '\t' '\n' '\r' '\f' '\v'; do
+    if [[ "$c_xdg_trim" != *"'$c_blank'"* ]]; then
+        echo "error: the C host no longer trims '$c_blank' from an XDG root" >&2
+        echo "       got: $c_xdg_trim" >&2
+        echo "       fix: xdg_root_for in core/host/hostexec.c must skip every" >&2
+        echo "             blank .whitespacesAndNewlines removes, or a root" >&2
+        echo "             carrying one is a directory for the CLI and not for" >&2
+        echo "             the host." >&2
+        exit 1
+    fi
+done
+if ! grep -q 'QString::fromUtf8(qgetenv(root.env)).trimmed()' \
+        "$ROOT/ui/linux-qt/finding.cpp"; then
+    echo "error: ui/linux-qt/finding.cpp no longer trims the XDG roots" >&2
+    echo "       fix: keep QString::trimmed() on the qgetenv call; it is the" >&2
+    echo "             same blank set the scan library and the C host use." >&2
+    exit 1
+fi
+echo "xdg trim set: ok (the same blanks in the scan library, the C host, and Qt)"
 
 # The same rule names what "surrounding blanks" means, and the three trees had
 # three different answers: env_flag skips a space and a tab, the scan library

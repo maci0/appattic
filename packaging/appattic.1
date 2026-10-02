@@ -218,6 +218,46 @@ and
 .TP
 .BR XDG_CONFIG_HOME ", " XDG_CACHE_HOME ", " XDG_STATE_HOME
 Absolute configuration, cache, and state roots, scanned for leftovers.
+.TP
+.B XDG_DATA_DIRS
+Colon-separated absolute data roots searched for desktop entries. Unset, empty,
+or a list whose entries are all relative uses
+.IR /usr/local/share:/usr/share ;
+relative entries in a longer list are dropped, and
+.B appattic config
+prints the list that survives.
+.TP
+.BR ANDROID_HOME ", " ANDROID_SDK_ROOT
+An Android SDK root the scan treats as a user tool directory. The first of the
+two that holds a real SDK is the root in force; a value that names no such
+directory is read as unset, and the fixed default roots are searched instead.
+.B appattic config
+reports which root is in force and whether an exported value was ignored.
+.TP
+.B APPATTIC_PAGE
+Read by the GUI window, not by this command; listed because
+.B appattic config
+reports it with every other switch a Linux run's window reads. The sidebar
+page the window opens on:
+.BR overview ,
+.BR leftovers ,
+.BR stale ,
+.BR outdated ,
+.BR packages ,
+.BR disk ,
+or
+.BR settings .
+An unset or empty value opens the overview; an unknown name is reported on
+stderr and also opens the overview. See
+.BR appattic\-qt (1).
+.TP
+.B LANG
+The locale whose
+.I .lproj
+directory the macOS app-name lookup reads for an app's localized name. Unset,
+empty, or a value that is only an encoding opens the base English names.
+.B appattic config
+prints the locale it resolved to.
 .PP
 Per the XDG Base Directory specification, an empty or relative XDG path is
 ignored and the standard user default is used. The accepted values and their

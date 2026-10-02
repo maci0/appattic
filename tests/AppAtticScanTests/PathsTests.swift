@@ -79,6 +79,17 @@ final class PathsTests: XCTestCase {
             xdgConfigHome(home: home, env: ["XDG_CONFIG_HOME": "/"]),
             "/"
         )
+        // A newline is one of the blanks `.whitespacesAndNewlines` removes, so
+        // a value carrying one names the same directory. This is the case a
+        // trim set of only space and tab gets wrong, and it was wrong here:
+        // `env_flag` in `core/host/hostexec.c` skipped only the two, left the
+        // leading newline on, failed its absolute check, and fell back to
+        // `~/.config` for a run the CLI and the Qt window both scanned under
+        // the exported root. The finding is a path a cleanup script removes.
+        XCTAssertEqual(
+            xdgDataHome(home: home, env: ["XDG_DATA_HOME": "\n  /tmp/myshare\t\n"]),
+            "/tmp/myshare"
+        )
         // A trailing separator names the same root. `core/host/hostexec.c` and
         // `ui/linux-qt/finding.cpp` drop it too: the host builds the argument
         // the core scans from this value, and one that ends in a separator

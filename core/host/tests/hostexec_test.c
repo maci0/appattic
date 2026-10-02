@@ -265,6 +265,25 @@ static int check_xdg_root(void) {
             return fail("xdg: padded value did not resolve to the configured root");
         }
     }
+    /* A newline around the value is the same directory too, and this is the
+       case a trim set of only space and tab gets wrong: the leading newline
+       survives it, the absolute check rejects what is left, and this host
+       falls back to ~/.config while `xdgUserDir` in the scan library (which
+       trims .whitespacesAndNewlines) and `QString::trimmed` in the Qt shell
+       both scan the exported root. The finding is a path a cleanup script
+       removes, so the two answers cannot both stand. */
+    {
+        char wrapped[PATH_MAX + 8];
+        snprintf(wrapped, sizeof wrapped, "\n  %s\t\n", tmpl);
+        setenv("XDG_CONFIG_HOME", wrapped, 1);
+        n = appattic_host_exec("ls -1 /home/user/.config", out, sizeof out);
+        out[n < (int)sizeof out ? n : (int)sizeof out - 1] = '\0';
+        if (n <= 0 || !strstr(out, "marker")) {
+            unlink(marker);
+            rmdir(tmpl);
+            return fail("xdg: newline-padded value did not resolve to the configured root");
+        }
+    }
     /* A trailing separator is the same directory, and the rest of the argument
        starts with one, so the root is stored without it: `Sources/AppAtticScan/
        Paths.swift` and `ui/linux-qt/finding.cpp` normalize it the same way. */
