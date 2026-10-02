@@ -24,6 +24,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The same cache the Linux jobs keep, and for the same reason: this job
+      # runs scripts/test.sh (a full AppAtticScanTests build) and then a CLI
+      # debug build, both with no cache, so every push re-resolved the
+      # dependencies and recompiled the package from scratch. The key is the
+      # test job's, unchanged: runner.os, job id, and the same input set, so a
+      # hit is a cache this job's own sources wrote.
+      - name: Cache build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .build
+            .swiftpm
+          # Same toolchain and same inputs as the Linux test job's key, and the
+          # same refusal of restore-keys: a prefix that ignores the hash also
+          # ignores the toolchain, and macos-14 carries its own Swift in
+          # /usr/local/bin, which is exactly the tree a wrong restore hands
+          # back.
+          key: >-
+            ${{ runner.os }}-${{ github.job }}-${{
+            hashFiles('Package.resolved', 'Package.swift', '.swift-version',
+            'Sources/**/*.swift', 'tests/**/*.swift',
+            'benchmarks/**/*.swift') }}
       - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "5.10.1"

@@ -541,6 +541,173 @@ check_action_pins() {
     done
 }
 
+# One actions/cache step, from the workflow it was read out of: the job it
+# belongs to, the pinned commit, its paths, its key, and whether it carries a
+# restore-keys fallback. Five tab-separated fields, paths and key already folded
+# onto one line by the reader. Echoed rather than assigned, so the caller owns
+# the comparison and this stays a reader.
+#
+# Read as text, not parsed: yamllint is what proves the YAML parses, and this
+# runs after it in the same gate, so a second parser here would only be another
+# thing that can disagree with the first.
+cache_steps_in_workflow() {
+    local workflow="$1"
+    local line job="" pin="" paths="" key="" restore=0
+    local in_cache=0 in_field="" block_indent=0 ind trimmed se_jobs=0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" == "jobs:" ]] && { se_jobs=1; continue; }
+        # A job header: two spaces, an id, a colon. Only after `jobs:`, since
+        # `on:` carries two-space keys of its own (push, pull_request,
+        # workflow_dispatch) that would otherwise read as job names.
+        if [[ "$se_jobs" -eq 1 && "$line" =~ ^\ \ ([A-Za-z0-9_-]+): ]]; then
+            cache_step_emit
+            job="${BASH_REMATCH[1]}"
+            continue
+        fi
+        [[ -n "$line" ]] || continue
+
+        ind="${line%%[![:space:]]*}"
+        ind="${#ind}"
+        # The body of a folded block: indented past the key that opened it, so a
+        # folded key reads as one expression however it wraps. A dedent ends it.
+        if [[ -n "$in_field" ]]; then
+            if [[ "$ind" -gt "$block_indent" ]]; then
+                case "$in_field" in
+                    key)  key="$key $line" ;;
+                    path) paths="$paths $line" ;;
+                    # Only key and path are ever stored, and both are named
+                    # above; an arm that cannot match is here so the reader
+                    # drops a line it does not understand instead of keeping it.
+                    *) ;;
+                esac
+                continue
+            fi
+            in_field=""
+        fi
+
+        # Strip the indent, and the list dash after it: `-` is the first
+        # non-space character of a step, so it goes with the indent.
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        trimmed="${trimmed#- }"
+        case "$trimmed" in
+            "uses: actions/cache@"*)
+                cache_step_emit
+                in_cache=1
+                pin="${trimmed#uses: actions/cache@}"
+                pin="${pin%% *}"
+                continue ;;
+            "uses: "*)
+                cache_step_emit
+                continue ;;
+            # Not a step header. Nothing below reads a line outside a step.
+            *) ;;
+        esac
+        [[ "$in_cache" -eq 1 ]] || continue
+        case "$trimmed" in
+            "restore-keys:"*) restore=1; continue ;;
+            *) ;;
+        esac
+        # A block scalar opener. Tested before the plain-value arms below, or the
+        # plain arm would swallow the marker and read it as a directory name.
+        if [[ "$trimmed" =~ ^path:\ ([\>|])[-+0-9]*$ ]]; then
+            in_field="path"; block_indent="$ind"; continue
+        fi
+        if [[ "$trimmed" =~ ^key:\ ([\>|])[-+0-9]*$ ]]; then
+            in_field="key"; block_indent="$ind"; continue
+        fi
+        case "$trimmed" in
+            "path: "*) paths="$paths ${trimmed#path: }" ; continue ;;
+            "key: "*)  key="$key ${trimmed#key: }" ; continue ;;
+            # A comment, a `name:`, anything else inside the step's `with:`.
+            *) ;;
+        esac
+    done < "$workflow"
+    cache_step_emit
+}
+
+# The actions/cache step in hand, as five tab-separated fields. Nested, so it
+# sees the reader's locals without exporting them.
+cache_step_emit() {
+    [[ "$in_cache" -eq 1 ]] || return 0
+    printf '%s\t%s\t%s\t%s\t%s\n' "$job" "$pin" \
+        "$(printf '%s' "$paths" | tr -s '[:space:]' ' ')" \
+        "$(printf '%s' "$key" | tr -s '[:space:]' ' ')" "$restore"
+    in_cache=0; pin=""; paths=""; key=""; restore=0
+}
+
+# Every cache step names a directory the build writes, and gets it back only
+# under a key that names its inputs. Nothing else in this tree reads those two
+# things: yamllint proves the YAML parses, and check_action_pins above reads the
+# pin line. So a cache step whose path nothing writes, whose key hashes no input,
+# or that carries a restore-keys prefix all read as well-formed and run. The cost
+# is a cold build on every push, or a restore of a tree this commit never built,
+# and neither fails anything.
+#
+# These are the rules the keys already in the tree satisfy, restated so a new
+# one cannot arrive without them:
+#   - every path is a directory in the tree, or one a build creates. The build
+#     outputs are gitignored and so absent from a clean checkout, which is why
+#     they are listed here rather than demanded of the filesystem;
+#   - the key names the runner OS, so a macOS job and a Linux job whose inputs
+#     agree cannot collide on one entry;
+#   - the key hashes at least one file, so it moves when the inputs move;
+#   - no restore-keys, for the reason every key comment in the workflows already
+#     gives: a prefix that ignores the hash also ignores the toolchain, so it
+#     hands back exactly the cache the key exists to keep out.
+check_cache_steps() {
+    local workflow job pin paths key restore rel gen known os_marker
+    os_marker='runner'".os"
+    # Build outputs the caches name: gitignored, so not in a clean tree, and
+    # written by the build rather than committed.
+    local -a generated=(.build .swiftpm .zig-cache .zig-cache-local dist)
+    for workflow in "$ROOT"/.github/workflows/*.yml; do
+        [[ -f "$workflow" ]] || continue
+        while IFS=$'\t' read -r job pin paths key restore; do
+            [[ -n "$job" ]] || continue
+            if [[ "${#pin}" -ne 40 || "$pin" == *[!0-9a-f]* ]]; then
+                fail "${workflow#"$ROOT"/} ($job): actions/cache is not pinned to a 40-character commit SHA: $pin"
+            fi
+            if [[ "$restore" == "1" ]]; then
+                fail "${workflow#"$ROOT"/} ($job): cache step carries restore-keys; a prefix that ignores the hash also ignores the toolchain and serves the cache the key exists to keep out"
+            fi
+            if [[ -z "$key" ]]; then
+                fail "${workflow#"$ROOT"/} ($job): cache step has no key, so nothing is ever restored and every run is cold"
+            else
+                case "$key" in
+                    *"$os_marker"*) ;;
+                    *) fail "${workflow#"$ROOT"/} ($job): cache key does not name the runner OS; a macOS job and a Linux job whose inputs agree would share one entry" ;;
+                esac
+                case "$key" in
+                    *hashFiles*) ;;
+                    *) fail "${workflow#"$ROOT"/} ($job): cache key hashes no input, so it cannot move when the inputs do" ;;
+                esac
+            fi
+            for rel in $paths; do
+                [[ -n "$rel" ]] || continue
+                rel="${rel%/}"
+                [[ -n "$rel" ]] || continue
+                [[ -e "$ROOT/$rel" ]] && continue
+                known=0
+                for gen in "${generated[@]}"; do
+                    case "$rel" in "$gen"|"$gen"/*) known=1 ;; *) ;; esac
+                done
+                # An `if`, not `(( ... )) && fail`: the arithmetic returns 1 on
+                # the ordinary path where the path IS a build output, and that
+                # status would become this function's return value, which under
+                # set -e aborts deps.sh with no message at all.
+                if ((known == 0)); then
+                    fail "${workflow#"$ROOT"/} ($job): caches '$rel', which is not in the tree and not a build output; the step caches nothing and every run is cold"
+                fi
+            done
+        done < <(cache_steps_in_workflow "$workflow")
+    done
+    # A gate that only ever fails by calling fail(). Without this the function
+    # returns the status of its last command, and set -e reads that as a
+    # failure the operator never sees reported.
+    return 0
+}
+
 # Zig and Swift versions are read from version files that must agree with the
 # pinned artifact names.
 check_version_anchors() {
@@ -936,6 +1103,7 @@ run_check() {
     check_artifact_versions_in_tree
     check_tool_pins
     check_action_pins
+    check_cache_steps
     check_pinned_swift_versions
     check_swiftpm_pins
     if [[ "$FAILURES" -ne 0 ]]; then
