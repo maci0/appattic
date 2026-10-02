@@ -1098,7 +1098,10 @@ static int run_live_forked(char **argv, char *out, size_t cap) {
                 spawn_argv[2] = "--";
             }
             if (off == 4) spawn_argv[3] = "--";
-            for (; argv[i] != NULL && i < MAX_TOK; i++) {
+            /* The bound first: it is what keeps the read in range, so testing
+               it before the argv dereference says so instead of leaving it to a
+               reader who has to trust parse_argv's cap. */
+            for (; i < MAX_TOK && argv[i] != NULL; i++) {
                 spawn_argv[i + off] = argv[i];
             }
             spawn_argv[i + off] = NULL;
