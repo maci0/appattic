@@ -51,7 +51,7 @@ A flag that names the commands it belongs to (`--yes` on `update`, `--allocated`
 
 `--` ends the options, so a `disk` path that starts with a dash is reachable: `appattic disk -- -backup`.
 
-`appattic config` scans nothing. It prints the settings file this machine resolved, whether it exists, every setting value with the layer it came from, and the paths the XDG variables resolved to. Use it to tell a wrong value from a wrong path, and `--json FILE` to diff two machines:
+`appattic config` scans nothing. It prints the settings file this machine resolved, whether it exists, every setting value with the layer it came from, every `ignoredLeftoverPaths` entry in full (they are your own absolute paths, so the output is worth reading before you paste it anywhere), the three settings files it uses and which of them are there, and the paths the XDG variables resolved to. Nothing on that output is redacted, and the environment block prints every switch the app reads at its full value. Use it to tell a wrong value from a wrong path, and `--json FILE` to diff two machines:
 
 ```bash
 appattic config
