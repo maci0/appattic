@@ -559,7 +559,9 @@ fi
 # though it had been checked, so a reader following a stale citation lands on
 # whatever moved onto that line. The symbol is what a reader greps for, and it
 # does not go stale. The spec cited twelve of these and six had already drifted
-# by the time this check landed.
+# by the time this check landed. docs/THREAT_MODEL.md and SECURITY.md joined on
+# 2026-10-02: the model carried 218 and most had drifted. A bare `:NNN` cites a
+# line of the file named just before it, so it counts here too.
 doc_cite_files=(
     "$ROOT/README.md"
     "$ROOT/DESIGN.md"
@@ -570,13 +572,15 @@ doc_cite_files=(
     "$ROOT/docs/privacy.md"
     "$ROOT/docs/tmog-design-language.md"
     "$ROOT/docs/runbooks/state-recovery.md"
+    "$ROOT/docs/THREAT_MODEL.md"
+    "$ROOT/SECURITY.md"
 )
 cite_bad=0
 for _cite_src in "${doc_cite_files[@]}"; do
     while IFS= read -r _cite; do
         echo "error: ${_cite_src#"$ROOT"/} cites a line number: $_cite" >&2
         cite_bad=1
-    done < <(rg -N -o '`[A-Za-z0-9_./-]+\.(zig|swift|cpp|h|c|sh|sh):[0-9]+`' "$_cite_src" 2>/dev/null \
+    done < <(rg -N -o '`[A-Za-z0-9_./-]+\.(zig|swift|cpp|h|c|sh):[0-9]+`|`:[0-9]+`' "$_cite_src" 2>/dev/null \
         | sort -u || true)
 done
 if [[ "$cite_bad" -ne 0 ]]; then
@@ -586,6 +590,32 @@ if [[ "$cite_bad" -ne 0 ]]; then
     echo '             (`groupLinuxLeftovers`, `ui/linux-qt/finding.cpp`)' >&2
     exit 1
 fi
+
+# A gate that has only ever been seen passing proves nothing about the half
+# that matters: the rejection. Both citation shapes go through one regex, and
+# the bare `:NNN` half arrived with the security docs, so plant each shape in
+# every gated file and require the same regex to find it. A doc that cites
+# lines, a regex that misses a shape, and this check all agreeing that the doc
+# is clean is the failure this is here to catch.
+# The backticks are the citation forms being asked about, not a command.
+# shellcheck disable=SC2016
+cite_re='`[A-Za-z0-9_./-]+\.(zig|swift|cpp|h|c|sh):[0-9]+`|`:[0-9]+`'
+for _cite_src in "${doc_cite_files[@]}"; do
+    # shellcheck disable=SC2016  # the two citation forms, as literals
+    for _plant in '`core/src/apt.zig:94`' '`:94`'; do
+        if ! rg -N -o "$cite_re" <(printf '%s\n' "$_plant") 2>/dev/null | grep -qxF "$_plant"; then
+            echo "error: the doc-citation regex does not flag $_plant" >&2
+            echo "       it is meant to, so a doc citing that shape would pass" >&2
+            echo "       this gate and ship a citation that rots." >&2
+            exit 1
+        fi
+    done
+    # And the real doc is clean under the same regex, so the two agree.
+    if rg -N -o "$cite_re" "$_cite_src" 2>/dev/null | grep -q .; then
+        echo "error: ${_cite_src#"$ROOT"/} cites a line number" >&2
+        exit 1
+    fi
+done
 echo "doc citations: ok (no line numbers to go stale)"
 
 # The Swift build maps the checkout path out of the binary through
