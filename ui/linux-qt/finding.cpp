@@ -463,7 +463,17 @@ QDateTime parseIsoInstant(const QString &value) {
         if (dot >= 0) {
             int digitEnd = dot + 1;
             int count = 0;
-            while (digitEnd < s.size() && s.at(digitEnd).isDigit()) {
+            // ASCII digits, the form ISO-8601 spells and the Swift twin in
+            // `Dates.swift` requires. `QChar::isDigit()` is category Nd over the
+            // whole Unicode range, so a fraction written in Arabic-Indic digits
+            // counts here and the splice at `dot + 1 + 3` lands inside the run:
+            // "2026-01-01T15:00:00.1" + U+0662..U+0666 comes back as a
+            // mixed-script fraction the date parsers below all reject, and the
+            // timestamp is dropped rather than shown. The Swift reader refuses
+            // the same string for the same reason.
+            while (digitEnd < s.size()) {
+                const char16_t u = s.at(digitEnd).unicode();
+                if (u < u'0' || u > u'9') break;
                 ++count;
                 ++digitEnd;
             }

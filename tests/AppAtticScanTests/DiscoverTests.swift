@@ -192,6 +192,29 @@ final class DiscoverTests: XCTestCase {
         XCTAssertNil(app.extra["comment"])
     }
 
+    /// The copyright marker is located in the description itself, not in a
+    /// folded copy of it. `posixLowercased` expands "İ" (U+0130) to "i" + U+0307,
+    /// so the fold of "İ © Example" carries one more grapheme than the text and
+    /// an offset taken from the fold lands the cut on the "©" — leaving the
+    /// marker in the description the app blurb shows.
+    func testCopyrightMarkerIsCutAfterADotlessCapitalI() {
+        XCTAssertEqual(
+            plistDescription(["NSHumanReadableDescription": "İ © Example Corp"], appName: "İ"),
+            "İ"
+        )
+    }
+
+    func testCopyrightMarkerIsStillCutForASCIIPrefixes() {
+        XCTAssertEqual(
+            plistDescription(["NSHumanReadableDescription": "Widget Manager, Copyright 2020 Acme"], appName: "Widget"),
+            "Widget Manager"
+        )
+        XCTAssertEqual(
+            plistDescription(["NSHumanReadableDescription": "Widget Manager (c) 2020 Acme"], appName: "Widget"),
+            "Widget Manager"
+        )
+    }
+
     func testUnityPlayerGetInfoStringIsNotADescription() {
         XCTAssertNil(plistDescription(
             ["NSHumanReadableDescription": "Unity Player version 6000.0.43f1 (97272b72f107). (c) 2005-2025 Unity Technologies. All rights reserved."],

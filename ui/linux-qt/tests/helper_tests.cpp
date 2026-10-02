@@ -1275,6 +1275,31 @@ static int checkTiming() {
         return 1;
     }
 
+    // A fraction written in Arabic-Indic digits is not an ISO-8601 fraction,
+    // and the millisecond trim must not treat it as one: `QChar::isDigit()` is
+    // category Nd over all of Unicode, so counting it spliced the string at
+    // `dot + 1 + 3` inside the run and handed every parser a mixed-script
+    // fraction they all reject — the timestamp vanished instead of reading as
+    // unparseable input. Same rule and same reason as the Swift
+    // `truncateISOFractionalSeconds`, which requires `isASCII` for this reason.
+    const QString arabicFraction = QString::fromUtf8("2026-04-01T15:00:00.\xd9\xa1\xd9\xa2\xd9\xa3\xd9\xa4\xd9\xa5\xd9\xa6Z");
+    if (parseIsoInstant(arabicFraction).isValid()) {
+        std::fprintf(stderr, "timing: an Arabic-Indic fraction must not parse as ISO-8601\n");
+        return 1;
+    }
+    const QString mixedFraction = QString::fromUtf8("2026-04-01T15:00:00.1\xd9\xa2\xd9\xa3\xd9\xa4\xd9\xa5\xd9\xa6Z");
+    if (parseIsoInstant(mixedFraction).isValid()) {
+        std::fprintf(stderr, "timing: a mixed-script fraction must not parse as ISO-8601\n");
+        return 1;
+    }
+    // The ASCII path is unchanged: six ASCII digits still trim to three.
+    const QDateTime stillMicro = parseIsoInstant(QStringLiteral("2026-04-01T15:00:00.123456Z"));
+    if (!stillMicro.isValid()
+        || qAbs(stillMicro.toMSecsSinceEpoch() - naiveZ.toMSecsSinceEpoch() - 123) > 1) {
+        std::fprintf(stderr, "timing: ASCII microseconds still truncate to millis\n");
+        return 1;
+    }
+
     Finding idle;
     idle.idleDays = 120;
     if (modifiedLabel(idle) != localeCount(120) + QLatin1String(" days ago")) {

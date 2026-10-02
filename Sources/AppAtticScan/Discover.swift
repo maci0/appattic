@@ -167,11 +167,18 @@ public func plistDescription(_ info: [String: Any], appName: String) -> String? 
     let raw = (info["NSHumanReadableDescription"] as? String) ?? (info["CFBundleGetInfoString"] as? String)
     guard var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
     if isJunkAppBlurb(text) { return nil }
-    let low = text.posixLowercased()
+    // The marker is located in `text` itself, case-insensitively, and cut out
+    // of `text`: a fold-then-index pair is not a mapping. `posixLowercased`
+    // changes the grapheme count whenever it expands a scalar, and "İ" (U+0130)
+    // is the one that does — it folds to "i" + U+0307. So in "İ © Example Corp"
+    // the fold carries 17 graphemes and the text 16, the " ©" marker sits at
+    // offset 2 of the fold, and offsetting `text` by 2 lands the cut on the "©"
+    // itself: the blurb keeps the marker. Every marker is ASCII apart from the
+    // "©", which has no case, so searching `text` with `.caseInsensitive` finds
+    // exactly the same spellings the fold did.
     for marker in [", copyright", " copyright", ", ©", " ©", " (c)", "(c)"] {
-        if let r = low.range(of: marker), r.lowerBound > low.startIndex {
-            let idx = text.index(text.startIndex, offsetBy: low.distance(from: low.startIndex, to: r.lowerBound))
-            text = String(text[..<idx]).trimmingCharacters(in: CharacterSet(charactersIn: " ,.-"))
+        if let r = text.range(of: marker, options: .caseInsensitive), r.lowerBound > text.startIndex {
+            text = String(text[..<r.lowerBound]).trimmingCharacters(in: CharacterSet(charactersIn: " ,.-"))
             break
         }
     }
