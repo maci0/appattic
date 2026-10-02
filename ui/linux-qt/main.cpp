@@ -105,6 +105,11 @@ static QString packageChildMarkKey(const QString &parentUid, const QString &chil
 /// past its own timeout does not, and the wait has to end for the app to.
 static const int kScanThreadDrainMs = 8000;
 
+// The page rail's fixed width. setMinimumWidthForToolbars adds it to the widest
+// page toolbar to get a minimum the layout can actually honor, so it lives
+// here as a name both the layout and that arithmetic can use.
+static const int kSidebarWidth = 220;
+
 static bool isDarkPalette(const QPalette &p) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     const Qt::ColorScheme scheme = QGuiApplication::styleHints()->colorScheme();
@@ -419,7 +424,6 @@ public:
     explicit MainWindow() {
         // The title follows the page (fillCurrent), so it is not set here.
         resize(1180, 720);
-        setMinimumSize(800, 520);
 
         m_scanThread = new QThread(this);
         m_worker = new ScanWorker;
@@ -435,7 +439,7 @@ public:
         outer->setHandleWidth(1);
 
         auto *side = new QWidget;
-        side->setFixedWidth(220);
+        side->setFixedWidth(kSidebarWidth);
         auto *sv = new QVBoxLayout(side);
         sv->setContentsMargins(0, kSpaceSm, 0, kSpaceSm);
         sv->setSpacing(0);
@@ -496,6 +500,7 @@ public:
         rv->setSpacing(0);
 
         auto *tools = new QToolBar;
+        m_tools = tools;
         tools->setMovable(false);
         tools->setFloatable(false);
         tools->setIconSize(QSize(16, 16));
@@ -558,6 +563,14 @@ public:
         auto *toolSpacer = new QWidget;
         toolSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         tools->addWidget(toolSpacer);
+        /* The toolbar hides whatever it cannot fit into the overflow chevron,
+           rightmost first, and the rightmost items here are Search, Select All
+           and Rescan. At the window's own minimum width the page title and the
+           count were what pushed those three controls out of sight: the page
+           behind them already says what they are, so they are the items that
+           yield instead. */
+        aaElidableToolbarLabel(m_pageTitle);
+        aaElidableToolbarLabel(m_count, 90);
         m_searchAct = tools->addWidget(m_search);
         m_filterAct = tools->addWidget(m_filter);
         m_selectAllAct = tools->addWidget(m_selectAll);
@@ -831,6 +844,7 @@ public:
         loadSettings();
         refreshRestoreButton();
         applySystemAppearance();
+        setMinimumWidthForToolbars();
         applyInitialPage();
         fillCurrent();
         if (!m_settingsError) rescan();
@@ -3401,6 +3415,32 @@ private:
         m_script->start();
     }
 
+    /* Promise a window width the toolbars can keep.
+
+       A `QToolBar` does not shrink what it cannot fit: it moves the tail into
+       the overflow chevron, and the tail is always the rightmost items, which
+       here are Search, Select All and Rescan on the list pages and the size
+       pickers, the file-system checkbox and the search field on Disk Usage. A
+       800px minimum, narrower than any of those toolbars need, therefore hid
+       the primary action behind a chevron on the size the app advertised as
+       its smallest -- the window looked like it had no Rescan button and no
+       search field.
+
+       So the minimum is the widest page toolbar's real content width, plus the
+       220px sidebar, plus the margin the splitter reserves for its handle and
+       the chevron button Qt draws once anything is eligible to overflow. The
+       page toolbars elide their title and breadcrumb first (see
+       aaElidableToolbarLabel), so between this minimum and a narrow laptop
+       window the information yields and the controls stay on screen. */
+    void setMinimumWidthForToolbars() {
+        const int sidebar = kSidebarWidth;
+        const int chrome = 40;  // splitter handle, layout margin, overflow chevron
+        int needed = aaToolbarContentWidth(m_tools);
+        if (m_diskPage) needed = qMax(needed, m_diskPage->requiredWidth());
+        setMinimumWidth(qMax(800, sidebar + needed + chrome));
+        setMinimumHeight(520);
+    }
+
     void applySystemAppearance() {
         if (!m_table || m_applyingAppearance) return;
         m_applyingAppearance = true;
@@ -3636,6 +3676,7 @@ private:
     }
 
     QListWidget *m_sidebar = nullptr;
+    QToolBar *m_tools = nullptr;
     QListWidget *m_settingsNav = nullptr;
     QLabel *m_pageTitle = nullptr;
     QStackedWidget *m_stack = nullptr;

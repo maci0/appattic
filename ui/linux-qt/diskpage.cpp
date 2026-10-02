@@ -176,6 +176,7 @@ class DiskPage::Impl {
 public:
     QStackedWidget *stack = nullptr;
     QWidget *locations = nullptr;
+    QToolBar *tools = nullptr;
     QWidget *scanPage = nullptr;
     QTreeWidget *volumes = nullptr;
     QTreeWidget *tree = nullptr;
@@ -324,6 +325,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     sv->setContentsMargins(0, 0, 0, 0);
     sv->setSpacing(0);
     auto *tools = new QToolBar;
+    d->tools = tools;
     tools->setMovable(false);
     tools->setFloatable(false);
     tools->setIconSize(QSize(16, 16));
@@ -377,6 +379,16 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     auto *diskSpacer = new QWidget;
     diskSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     tools->addWidget(diskSpacer);
+    /* This toolbar carries eleven controls and the breadcrumb, which is the
+       one item on it that only repeats where the tree and the chart already
+       show. A toolbar drops its rightmost items into the overflow chevron
+       when it cannot fit them, so at the default window width the size pickers,
+       the file-system checkbox and the search field went behind a chevron: the
+       chart could not be restyled, the next scan's scope could not be changed,
+       and there was no search box on screen to type into. The breadcrumb
+       elides instead; the label is selectable and the page status line under
+       the tree prints the same path, so nothing is lost by shortening it. */
+    aaElidableToolbarLabel(d->crumb, 140);
     tools->addWidget(d->stopBtn);
     tools->addWidget(d->rescanBtn);
     tools->addWidget(d->upBtn);
@@ -1104,6 +1116,14 @@ void DiskPage::updateChrome() {
 }
 
 #include "diskpage.moc"
+
+int DiskPage::requiredWidth() const {
+    if (!d->tools) return 0;
+    // The filler is the toolbar's slack, not a control: it has no size hint and
+    // shrinks to nothing long before anything else, so it must not be counted
+    // here or every page would look like it needed room for empty space.
+    return aaToolbarContentWidth(d->tools);
+}
 
 int DiskPage::streamedRows() const { return d->streamedRows; }
 

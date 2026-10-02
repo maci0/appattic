@@ -16,6 +16,15 @@
 
 #include "diskusage.h"
 #include "finding.h"
+#include "uistyle.h"
+
+#include <QApplication>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QToolBar>
+#include <QVBoxLayout>
+#include <QWidget>
 
 #include <QDir>
 #include <QFile>
@@ -259,14 +268,76 @@ int checkLeftoverPoolCancellation() {
     return 0;
 }
 
+/// The list-page toolbar must keep Search, Select All and Rescan on screen at
+/// the window's own minimum width. A `QToolBar` that cannot fit its items
+/// pushes the rightmost ones into the overflow chevron rather than shrinking
+/// them, so a minimum narrower than the toolbar's real content width hid the
+/// primary action and the search field behind a chevron. This builds the same
+/// toolbar the window does and asserts that the width `setMinimumWidthForToolbars`
+/// derives from it actually holds every control.
+int checkToolbarMinimumWidth() {
+    auto *tools = new QToolBar;
+    tools->setMovable(false);
+    tools->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    auto *title = new QLabel(QStringLiteral("Stale Apps"));
+    auto *count = new QLabel(QStringLiteral("42 stale apps · 12 Oct 2026, 09:41"));
+    auto *filler = new QWidget;
+    filler->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    auto *search = new QLineEdit;
+    search->setFixedWidth(200);
+    auto *selectAll = new QPushButton(QStringLiteral("Select All"));
+    auto *rescan = new QPushButton(QStringLiteral("Rescan"));
+    tools->addWidget(title);
+    tools->addWidget(count);
+    tools->addWidget(filler);
+    aaElidableToolbarLabel(title);
+    aaElidableToolbarLabel(count, 90);
+    tools->addWidget(search);
+    tools->addWidget(selectAll);
+    tools->addWidget(rescan);
+
+    const int content = aaToolbarContentWidth(tools);
+    const int sidebar = 220;
+    const int chrome = 40;
+    const int minWindow = sidebar + content + chrome;
+
+    // Show the toolbar at exactly the width the window would promise it and
+    // confirm nothing lands in the overflow chevron.
+    auto *host = new QWidget;
+    auto *lay = new QVBoxLayout(host);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->addWidget(tools);
+    host->resize(minWindow - sidebar, 520);
+    host->show();
+    tools->ensurePolished();
+
+    int rc = 0;
+    for (QAction *a : tools->actions()) {
+        QWidget *w = tools->widgetForAction(a);
+        if (!w || w == filler) continue;
+        if (!w->isVisible()) {
+            rc |= fail("control hidden by toolbar overflow at the minimum width",
+                       qPrintable(a->text().isEmpty() ? QStringLiteral("widget") : a->text()));
+        }
+    }
+    // host owns the toolbar through the layout; deleting host is enough.
+    delete host;
+    return rc;
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    // QToolBar sizes itself against the application font, so the toolbar check
+    // needs a QApplication; the threaded checks above it are Qt-Core only and
+    // are unaffected by having one.
+    QApplication app(argc, argv);
     int rc = 0;
     rc |= checkDeferredWalkTotals();
     rc |= checkWalkCancellation();
     rc |= checkLeftoverSizePool();
     rc |= checkLeftoverPoolCancellation();
+    rc |= checkToolbarMinimumWidth();
     if (rc == 0) std::fprintf(stderr, "race_tests: ok\n");
     return rc;
 }

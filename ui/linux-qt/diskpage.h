@@ -32,6 +32,14 @@ public:
     /// fixture, which is what the other disk checks already cost.
     bool checkRescanResumes();
 
+    /// The width this page's toolbar needs before it would drop any control
+    /// into its overflow chevron. The window reads it, together with the list
+    /// page's, to set a minimum width the toolbars can actually honor: a
+    /// `QToolBar` hides its rightmost items rather than shrinking them, so a
+    /// window minimum smaller than this hides Rescan, the search field and the
+    /// file-system checkbox behind a chevron with no button on screen.
+    int requiredWidth() const;
+
 signals:
     void statusMessage(const QString &text);
 

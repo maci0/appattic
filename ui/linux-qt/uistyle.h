@@ -3,15 +3,18 @@
 
 #include <QAbstractItemView>
 #include <QAccessible>
+#include <QAction>
 #include <QApplication>
 #include <QFont>
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QFontMetrics>
 #include <QFrame>
+#include <QLabel>
 #include <QPalette>
 #include <QStyle>
 #include <QStyleOptionViewItem>
+#include <QToolBar>
 #include <QWidget>
 
 // TMOG type roles on Linux: Selawik for UI when installed, Michroma for
@@ -196,6 +199,55 @@ inline int aaRowPx(const QWidget *w = nullptr) {
         w
     );
     return qMax(sz.height(), floor);
+}
+
+/// Let a toolbar's informational labels give up width before its controls do.
+///
+/// A `QToolBar` that cannot fit its items does not shrink them: it moves the
+/// tail into the "»" overflow chevron, and the first to go is whatever sits
+/// rightmost. On this window the rightmost items are the ones the user needs to
+/// act -- Search, Select All, Rescan -- so at the window's own minimum width
+/// the primary actions sat behind a chevron with no field and no button on
+/// screen. A page title and a count only restate what the page already says, so
+/// they are the items that may yield: `Ignored` lets them elide down to
+/// `minPx` and no further, and the controls keep their natural width.
+///
+/// `minPx` is a floor in real pixels, not a font metric, so a longer
+/// translation elides instead of pushing the controls out again.
+inline void aaElidableToolbarLabel(QLabel *label, int minPx = 120) {
+    if (!label) return;
+    label->setMinimumWidth(minPx);
+    label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+}
+
+/// The width a toolbar needs before it starts hiding items into the overflow
+/// chevron. A toolbar with a filler spacer absorbs the difference in that
+/// spacer, so this is the sum of the real controls and nothing else. Measured
+/// rather than hardcoded: the fonts differ per platform and the labels carry
+/// locale-formatted counts, so a fixed number here would go stale the first
+/// time a translation or a font changed it.
+inline int aaToolbarContentWidth(const QToolBar *bar) {
+    if (!bar) return 0;
+    int total = 0;
+    // widgetForAction takes a non-const action even on a const toolbar, so the
+    // actions are copied rather than iterated by reference.
+    const QList<QAction *> actions = bar->actions();
+    for (QAction *a : actions) {
+        QWidget *w = bar->widgetForAction(a);
+        if (!w || !w->isWidgetType()) continue;
+        // A filler spacer is the toolbar's slack: it has no content to show and
+        // shrinks to nothing first, so it must not count toward the width the
+        // window has to promise. An elidable label (Ignored) does have a floor
+        // -- the minimumWidth aaElidableToolbarLabel set on it -- and the
+        // toolbar will not shrink it past that, so the floor is what counts.
+        if (w->sizePolicy().horizontalPolicy() == QSizePolicy::Ignored
+            && w->minimumWidth() <= 0) {
+            continue;
+        }
+        const int floor = w->minimumWidth();
+        total += floor > 0 ? floor : w->sizeHint().width();
+    }
+    return total;
 }
 
 inline void aaApplySourceList(QAbstractItemView *view) {

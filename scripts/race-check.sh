@@ -158,9 +158,10 @@ if [[ "$RUN_QT" -eq 1 ]]; then
             cat "$OUT/build.log" >&2
             exit 1
         fi
-        # The disk walk uses QFile/QDir and a temp dir but never opens a
-        # window, so it runs without a display; set the platform anyway so a
-        # machine with a broken display cannot make this step flaky.
+        # The disk walk uses QFile/QDir and a temp dir, and the toolbar check
+        # only lays widgets out without showing anything to a user, so the run
+        # needs no display; set the platform anyway so a machine with a broken
+        # display cannot make this step flaky.
         QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" "$BUILD/appattic-qt-race-tests"
         QT_RAN=1
     fi
