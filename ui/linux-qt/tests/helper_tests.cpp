@@ -2706,6 +2706,64 @@ static int checkScriptFileRemoval() {
     return 0;
 }
 
+/// The prepared script carries the `rm -rf` list the user just confirmed, and
+/// it lands in the shared temp directory. It has to be private to its owner
+/// for as long as it exists, and private *before* the body is written: a mode
+/// applied after the write leaves a window in which every local account can
+/// read the list, and rewrite it before the shell reads it. Pinned here
+/// because the fix is an ordering, and an ordering is not something a later
+/// edit notices has changed.
+static int checkScriptRunIsPrivateBeforeItsBody() {
+    ScriptProcess proc;
+    QString err;
+    if (!proc.prepare(QStringLiteral("#!/bin/sh\nexit 0\n"), &err)) {
+        std::fprintf(stderr, "script mode: prepare failed (%s)\n", qPrintable(err));
+        return 1;
+    }
+    const QString path = proc.scriptLeftBehind();
+    if (path.isEmpty() || !QFile::exists(path)) {
+        std::fprintf(stderr, "script mode: the prepared script is not on disk\n");
+        return 1;
+    }
+    // Checked bit by bit, and each bit with its own `&`, because
+    // `QFileDevice::Permissions` is Qt's own flag set, not a POSIX mode: Qt 6
+    // spells the three owner bits `ReadOwner`/`WriteOwner`/`ExeOwner` and then
+    // repeats the same three as `ReadUser`/`WriteUser`/`ExeUser`, so a mode of
+    // 0700 reads back as all six. Comparing the whole value against a packed
+    // `ReadOwner|WriteOwner|ExeOwner` is what failed first here: it is true of
+    // a correct file and false of no real file. The test that matters is the
+    // one below it: a group or other bit is the window the pre-write chmod
+    // exists to close.
+    const QFileDevice::Permissions perms = QFile::permissions(path);
+    const auto set = [perms](QFileDevice::Permissions bit) { return (perms & bit) != 0; };
+    if (!set(QFileDevice::ReadOwner) || !set(QFileDevice::WriteOwner)
+        || !set(QFileDevice::ExeOwner)) {
+        std::fprintf(stderr,
+                     "script mode: the prepared script is not owner-only (0x%x)\n",
+                     unsigned(perms));
+        return 1;
+    }
+    if (set(QFileDevice::ReadGroup) || set(QFileDevice::WriteGroup)
+        || set(QFileDevice::ExeGroup) || set(QFileDevice::ReadOther)
+        || set(QFileDevice::WriteOther) || set(QFileDevice::ExeOther)) {
+        std::fprintf(stderr,
+                     "script mode: the prepared script is readable or writable by others (0x%x)\n",
+                     unsigned(perms));
+        return 1;
+    }
+    // The file still has to go: this check prepares a run it never starts, so
+    // nothing else removes it, and the destructor is the last attempt. Clean it
+    // up here so the mode check does not leave a script in the temp directory.
+    QString left;
+    removeScriptFile(path, left);
+    if (QFile::exists(path)) {
+        std::fprintf(stderr, "script mode: the prepared script survived its removal\n");
+        return 1;
+    }
+    std::fprintf(stdout, "script mode: ok\n");
+    return 0;
+}
+
 /// A real run through ScriptProcess: the temp file the runner writes must be
 /// gone once the script has finished, and the runner must not report one left
 /// behind. The removal that did not land is pinned above against a path that
@@ -3004,6 +3062,7 @@ int main(int argc, char **argv) {
         checkScriptRunCleansUpItsFile(), checkScriptDeadlineStartsAtSpawn(),
         checkScriptFailedRunIsOver(),
         checkScriptLeavesTheSandbox(),
+        checkScriptRunIsPrivateBeforeItsBody(),
     };
     for (const int rc : checks) {
         if (rc != 0) return rc;

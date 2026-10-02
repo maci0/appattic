@@ -198,8 +198,30 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
         if (errorText) *errorText = QStringLiteral("Could not write the script to run.");
         return false;
     }
-    tmp.write(script.toUtf8());
+    /* Owner-only mode before the body, not after it. QTemporaryFile creates at
+       the umask default, which is 0644 under the usual 022, and the temp
+       directory is shared: for as long as the write below is in flight every
+       local account can read the `rm -rf` list the user just confirmed, and a
+       reader that gets in before the chmod can rewrite it. The file is empty at
+       this point, so there is nothing to disclose and a mode that cannot be set
+       means the run is refused rather than run from a file anyone else can
+       read. Same order as `writeDurableFile` in settings.cpp. */
+    if (!QFile::setPermissions(tmp.fileName(), QFile::ReadOwner | QFile::WriteOwner)) {
+        tmp.close();
+        QFile::remove(tmp.fileName());
+        if (errorText) *errorText = QStringLiteral("Could not make the script private to run it.");
+        return false;
+    }
+    const QByteArray body = script.toUtf8();
+    if (tmp.write(body) != body.size()) {
+        tmp.close();
+        QFile::remove(tmp.fileName());
+        if (errorText) *errorText = QStringLiteral("Could not write the script to run.");
+        return false;
+    }
     tmp.close();
+    /* The execute bit comes after the write, because the file does not have to
+       be runnable while it holds the body. */
     QFile::setPermissions(tmp.fileName(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
 
     m_path = tmp.fileName();
