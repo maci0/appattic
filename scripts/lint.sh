@@ -619,6 +619,24 @@ if [[ "$c_trim" != "09 20 " ]]; then
 fi
 echo "switch trim set: ok"
 
+# A command whose two spellings differ by libc rather than by kernel is
+# reached through a capability probe, not through `uname -s`. `stat` is the
+# case this tree has: GNU takes `-c %Y`, BSD and macOS take `-f %m`, and
+# `run.sh` reads a build's mtime to decide which of two binaries is newer.
+# Branching on the OS name sent every host not spelled Darwin to the GNU
+# flag, and that does not fail loudly -- `stat` errors, the empty result
+# compares as 0, every candidate ties, and the first one wins, so the older
+# build launched with only a stray `stat: illegal option -- c` on stderr.
+#
+# The check runs run.sh against both spellings and asserts which build it
+# launched. A grep over the source cannot see any of that: it proves the
+# probe text is present, not that the probe is what run.sh ends up using.
+bash "$ROOT/scripts/check-stat-portability.sh"
+
+# `build.sh` needs no probe of its own: its `date -u -r` sits inside the Darwin
+# branch it already guards, so the OS name there selects a platform the
+# manifest declares rather than standing in for a capability.
+
 # One plugin list, three trees. `wasm_sources` in core/build.sh is the
 # declaration the spec names, and the argv the build derives from it is copied
 # into core/README.md and into the spec's Host load list. The two documents are

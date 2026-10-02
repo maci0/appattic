@@ -5,12 +5,30 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APPATTIC_OS="$(uname -s)"
 
+# `stat`'s two spellings for the same field, decided by what the host's own
+# `stat` accepts rather than by what `uname` calls it: GNU takes `-c %Y`, BSD
+# and macOS take `-f %m`, and `stat` is the one command here that differs by
+# libc rather than by kernel. Sending every host not spelled Darwin to the GNU
+# flag fails quietly, not loudly -- `stat` writes to stderr, returns nothing,
+# and an empty result compares as 0 against an initial best_mtime of 0, so
+# every candidate ties, `>=` keeps the first, and `find_bin` below launches the
+# older build with nothing but a stray error on stderr. The stat portability
+# check in scripts/lint.sh drives both spellings and asserts which build won.
+# The probe runs once, against a file this script has already found, and a
+# stat offering neither spelling is reported rather than read as "epoch 0".
+APPATTIC_STAT_FLAG=""
 file_mtime() {
-    if [[ "$APPATTIC_OS" == Darwin ]]; then
-        stat -f %m "$1"
-    else
-        stat -c %Y "$1"
+    if [[ -z "$APPATTIC_STAT_FLAG" ]]; then
+        if stat -c %Y "$1" >/dev/null 2>&1; then
+            APPATTIC_STAT_FLAG=(-c %Y)
+        elif stat -f %m "$1" >/dev/null 2>&1; then
+            APPATTIC_STAT_FLAG=(-f %m)
+        else
+            echo "error: this host's stat has neither the GNU (-c) nor the BSD (-f) spelling" >&2
+            return 1
+        fi
     fi
+    stat "${APPATTIC_STAT_FLAG[@]}" "$1"
 }
 
 find_bin() {
