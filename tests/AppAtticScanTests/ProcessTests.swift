@@ -293,6 +293,41 @@ final class ProcessTests: XCTestCase {
         XCTAssertEqual(whichCommand(late), second.appendingPathComponent(late).path)
     }
 
+    /// The node versions under `~/.nvm/versions/node` are searched newest
+    /// first, the order nvm itself resolves an unqualified `node` in. Sorting
+    /// the directory names as text searched `v9.11.2` before `v10.24.1`, so
+    /// every `npm`, `npx`, and `corepack` lookup answered from an install ten
+    /// major releases old: the scan measured the wrong global set, and the
+    /// cache fingerprint was stamped from it.
+    func testNvmVersionOrderPutsTheNewestVersionFirst() {
+        XCTAssertEqual(
+            nvmVersionOrder(["v9.11.2", "v10.24.1", "v8.17.0"]),
+            ["v10.24.1", "v9.11.2", "v8.17.0"]
+        )
+        // A major line that has not shipped a minor yet still outranks the one
+        // below it, and `v21.6.2` is the later release of `v21` rather than its
+        // prefix, the way nvm's semver ordering reads it.
+        XCTAssertEqual(
+            nvmVersionOrder(["v21.6.2", "v21", "v20.11.1", "v22"]),
+            ["v22", "v21.6.2", "v21", "v20.11.1"]
+        )
+        // Leading zeros are the same number, so the tie falls to the text and
+        // the order is stable rather than the sort's own doing.
+        XCTAssertEqual(
+            nvmVersionOrder(["v18.09.1", "v18.9.1"]),
+            ["v18.09.1", "v18.9.1"]
+        )
+        // A name that spells no version is still searched, after every version
+        // the reader could compare, and its own order is the caller's.
+        XCTAssertEqual(
+            nvmVersionOrder(["node", "v20.0.0", "iojs-v1.0.0"]),
+            ["v20.0.0", "iojs-v1.0.0", "node"]
+        )
+        // Empty, and a lone `v` that is a prefix of no version.
+        XCTAssertEqual(nvmVersionOrder([]), [])
+        XCTAssertEqual(nvmVersionOrder(["v"]), ["v"])
+    }
+
     /// Every spawned process, including the generated cleanup and update
     /// scripts, runs with this PATH. The cleanup directories go first so a
     /// stale user copy cannot shadow the one the script is about to remove,

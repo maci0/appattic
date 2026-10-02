@@ -76,10 +76,16 @@ private func whichSearchDirectories() -> [String] {
         "/sbin",
     ]
     let nvmRoot = home + "/.nvm/versions/node"
-    // `directoryEntryNames` sorts, so the node versions are searched in a
-    // stable order and two installs of the same tool resolve to the same one
-    // on every process.
-    for v in directoryEntryNames(nvmRoot) {
+    // Newest nvm version first, so a tool installed in more than one resolves
+    // to the copy nvm itself would run. `directoryEntryNames` sorts as text,
+    // and a version is an ordinal, not a word: `v9.11.2` sorts before `v10.24.1`
+    // (`9` < `1` is false, so the shorter string wins the comparison), so the
+    // text order searched a Node ten releases old first and every `npm`,
+    // `npx`, and `corepack` lookup answered from it. The scan then measured
+    // the wrong install's globals and stamped a cache fingerprint from them.
+    // Order is by version so two installs still resolve to the same one on
+    // every process.
+    for v in nvmVersionOrder(directoryEntryNames(nvmRoot)) {
         extras.append(nvmRoot + "/" + v + "/bin")
     }
     let pathDirs = (ProcessInfo.processInfo.environment["PATH"] ?? "")
@@ -90,6 +96,73 @@ private func whichSearchDirectories() -> [String] {
     let resolved = (extras + pathDirs).filter { !$0.isEmpty && seen.insert($0).inserted }
     cachedWhichDirectories = resolved
     return resolved
+}
+
+/// nvm's `v<major>[.<minor>[.<patch>]]` directory names, newest version first.
+///
+/// nvm resolves an unqualified `node` to the highest version installed, so the
+/// search list does too: the first directory holding a tool is the copy the
+/// machine actually runs, and a tool installed in two versions is measured,
+/// cleaned, and fingerprinted as the one in force. A name that does not spell
+/// a version at all (`node`, a directory the user made) comes after every
+/// version, in the caller's sorted order, so a name this cannot read is still
+/// searched and the order stays the same on every process.
+///
+/// Comparison is numeric per component, so `v10` outranks `v9`, and a missing
+/// component counts as zero, so `v21.6.2` outranks `v21` the way nvm's own
+/// semver ordering does rather than the way a prefix comparison would. Two
+/// names whose versions are equal, `v18.09.1` and `v18.9.1` both being
+/// 18.9.1, are separated by their text, which keeps the order deterministic
+/// without the caller having to sort first.
+func nvmVersionOrder(_ names: [String]) -> [String] {
+    func parts(_ name: String) -> [Int]? {
+        guard name.hasPrefix("v") else { return nil }
+        let fields = name.dropFirst().split(separator: ".", omittingEmptySubsequences: false)
+        guard !fields.isEmpty else { return nil }
+        var out: [Int] = []
+        for field in fields {
+            // `isASCII && isNumber` because `Character.isNumber` is also true for
+            // non-ASCII digits, the same rule `classifyLinuxSystemName` follows
+            // for `core42`.
+            guard !field.isEmpty, field.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let value = Int(field)
+            else { return nil }
+            out.append(value)
+        }
+        return out
+    }
+    func compare(_ lp: [Int], _ rp: [Int]) -> Int {
+        for i in 0..<max(lp.count, rp.count) {
+            // A component the name does not spell is a zero, so `v21` is
+            // 21.0.0 and `v21.6.2` is the later release of the same line.
+            let a = i < lp.count ? lp[i] : 0
+            let b = i < rp.count ? rp[i] : 0
+            if a != b { return a > b ? 1 : -1 }
+        }
+        return 0
+    }
+    return names.enumerated().sorted { lhs, rhs in
+        let lp = parts(lhs.element)
+        let rp = parts(rhs.element)
+        switch (lp, rp) {
+        case let (l?, r?):
+            if l != r {
+                let byVersion = compare(l, r)
+                // Newest first, so a name that sorts before is the older one:
+                // `compare` answers 1 for the greater version.
+                if byVersion != 0 { return byVersion > 0 }
+            }
+        default:
+            // A readable version outranks a name that spells none; between two
+            // of the same kind the text below decides.
+            if (lp != nil) != (rp != nil) { return lp != nil }
+        }
+        // The text, then the offset: `sorted` is not stable, and the offset is
+        // what puts two names the text cannot separate in the order the caller
+        // read them in on every process.
+        if lhs.element != rhs.element { return lhs.element < rhs.element }
+        return lhs.offset < rhs.offset
+    }.map { $0.element }
 }
 
 /// Cached process username: environment copy + trims + folds per call cost

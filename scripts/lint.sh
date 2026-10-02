@@ -202,6 +202,48 @@ if ! cmp -s "$ROOT/core/src/linux-system-names.txt" \
 fi
 echo "system-name list mirror: ok"
 
+# One home-dot leaf list, two trees, and the Zig side is deliberately the
+# narrower one. The Swift scan walks an explicit root per app directory
+# (`homeDotData`), and the Zig `path-home-dot` plugin instead runs `ls -1Ab`
+# over $HOME and keeps the names it lists, so a credential tree the plugin
+# should never touch (`.ssh`, `.gnupg`, `.aws`) can stay out of the generated
+# cleanup script while the Swift half still reports the directory as data.
+# That makes the Zig allow a SUBSET of the Swift roots rather than a copy, and
+# the relation was only written down in a comment on `homeDotData`, so the two
+# could drift in the direction that loses rows with nothing to notice.
+#
+# What is enforced is the subset relation, not equality: a name the Swift half
+# scans and the plugin drops is the documented shape, while a name only the
+# plugin has is a root the plugin removes and no other half knows about.
+python3 - "$ROOT" <<'PY' || exit 1
+import re
+import sys
+
+root = sys.argv[1]
+with open(f"{root}/Sources/AppAtticScan/Leftovers.swift", encoding="utf-8") as fh:
+    swift_src = fh.read()
+with open(f"{root}/core/src/path_listing.zig", encoding="utf-8") as fh:
+    zig_src = fh.read()
+
+swift_match = re.search(r"let homeDotData = \[([^]]*)\]", swift_src, re.S)
+zig_match = re.search(r'\.id = "path-home-dot".*?\.allow = "([^"]*)"', zig_src, re.S)
+if swift_match is None or zig_match is None:
+    print("error: could not read homeDotData or the path-home-dot allow list", file=sys.stderr)
+    print("       fix: one of the two spellings moved; update this gate", file=sys.stderr)
+    sys.exit(1)
+
+swift = re.findall(r'"([^"]+)"', swift_match.group(1))
+# The Zig string is a Zig escape sequence, so its separators are two characters.
+zig = [n for n in zig_match.group(1).split(r"\n") if n]
+
+only_zig = [n for n in zig if n not in swift]
+if only_zig:
+    print("error: path-home-dot keeps names the Swift half does not scan:", *only_zig, file=sys.stderr)
+    print("       fix: add them to homeDotData, or drop them from the plugin allow list", file=sys.stderr)
+    sys.exit(1)
+PY
+echo "home-dot leaf list subset: ok"
+
 # One shadow-root list, two trees. The Zig plugin decides `path-shadow`'s
 # presence tag from the roots it queries, and so does the Qt window, but the
 # two live in different languages and nothing compared them. A root added to
