@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run AppAttic's threaded code under ThreadSanitizer.
 #
-# Two places in this tree run their own threads, and both are the kind of code
+# Three places in this tree run their own threads, and all are the kind of code
 # a data race hides in rather than reveals:
 #
 #   core/host/hostexec.c   the UI applies the user PATH on the thread that
@@ -22,13 +22,25 @@
 #                          asserts those totals and every row's own size, which
 #                          is what fails when the ordering is wrong.
 #
-# A sanitizer trace is the strongest race evidence a run can give, so both are
-# built and run under one. Nothing here installs anything: a missing toolchain
-# is a named skip, never a download.
+#   Sources/AppAtticScan    a scan fans out through `pmap`, so `progress` was
+#                          invoked from several worker threads at once while the
+#                          caller kept unsynchronised state behind the callback.
+#                          ScanConcurrencyTests pins the serialized contract and
+#                          the one-scan-at-a-time scope of the shared failure
+#                          set; its header names `swift test --sanitize=thread`
+#                          as what turns the assertions into memory-ordering
+#                          evidence, and nothing ran it. The two trees above had
+#                          a sanitizer gate and this one did not, so a race in
+#                          the Swift fan-out could not fail any check.
 #
-# Usage: scripts/race-check.sh [--qt]
+# A sanitizer trace is the strongest race evidence a run can give, so all of
+# them are built and run under one. Nothing here installs anything: a missing
+# toolchain is a named skip, never a download.
+#
+# Usage: scripts/race-check.sh [--qt] [--swift]
 #   (default)  the C host concurrency test under TSan (needs only cc)
 #   --qt       also the Qt worker-pool tests under TSan (needs Qt 6)
+#   --swift    also the Swift scan library under TSan (needs the pinned Swift)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -38,12 +50,14 @@ export LANG=C
 export TZ=UTC
 
 RUN_QT=0
+RUN_SWIFT=0
 for arg in "$@"; do
     case "$arg" in
         --qt) RUN_QT=1 ;;
+        --swift) RUN_SWIFT=1 ;;
         -h|--help)
             cat <<'EOF'
-Usage: scripts/race-check.sh [--qt]
+Usage: scripts/race-check.sh [--qt] [--swift]
 
   (default)  ThreadSanitizer run of the C host concurrency test (core/host),
              which needs only a C compiler.
@@ -51,6 +65,11 @@ Usage: scripts/race-check.sh [--qt]
              ThreadSanitizer, which covers the diskusage.cpp walk and the
              finding.cpp leftover-size pool. Needs Qt 6 and CMake; Wasmtime is
              not required for this one, unlike the Qt helper tests.
+  --swift    additionally run AppAtticScanTests under ThreadSanitizer, which
+             covers the `pmap` fan-out and the shared progress callback in
+             ScanConcurrencyTests. Needs the pinned Swift toolchain and the
+             concurrency suite; runs into its own build tree so the
+             instrumented objects cannot land in the caller's .build.
 
 Exits 1 on a sanitizer report or a failed assertion, so it is usable as a CI
 step. A toolchain that is absent is a named skip, not a failure.
@@ -59,7 +78,7 @@ EOF
             ;;
         *)
             echo "error: unknown argument: $arg" >&2
-            echo "Usage: $0 [--qt]" >&2
+            echo "Usage: $0 [--qt] [--swift]" >&2
             echo "       $0 --help" >&2
             exit 2
             ;;
@@ -147,11 +166,87 @@ if [[ "$RUN_QT" -eq 1 ]]; then
     fi
 fi
 
-if [[ "$HOST_RAN" -eq 0 && "$QT_RAN" -eq 0 ]]; then
-    echo "race-check: nothing ran (no toolchain for either check)"
+SWIFT_RAN=0
+if [[ "$RUN_SWIFT" -eq 1 ]]; then
+    echo "== Swift scan library under ThreadSanitizer =="
+    # Same rule as find-zig.sh: a host without the pinned toolchain gets a
+    # named skip, and CI never passes on the skip. appattic_require_swift
+    # already names the exact version it needs and exits 1 on a mismatch, so
+    # an instrumented run cannot quietly use a different compiler than the
+    # build ships with.
+    # shellcheck source=find-swift.sh
+    . "$ROOT/scripts/find-swift.sh"
+    if ! appattic_find_swift; then
+        echo "race-check: swift not found; skipping the Swift check"
+        echo "           bash scripts/linux-deps.sh --install-swift"
+        # Same rule as appattic_require_zig and the Qt gate: a local checkout
+        # without the toolchain is a note, CI never passes on the skip. A CI
+        # that installed 5.10.1 and could not find it here is a PATH problem,
+        # and a green step would hide it.
+        if [[ "${CI:-}" == "true" ]]; then
+            echo "error: swift missing in CI; this step needs it" >&2
+            exit 1
+        fi
+    elif ! appattic_swift_version >/dev/null 2>&1; then
+        # The .swift-version read failed, which appattic_require_swift would
+        # turn into an exit. Naming it here keeps the skip a skip.
+        echo "race-check: no readable .swift-version; skipping the Swift check"
+    else
+        appattic_require_swift
+        # Its own build tree under the run's temp root, for the reason the C
+        # host binary is built out of tree: `swift test --sanitize=thread`
+        # links an instrumented AppAtticScan, and letting that land in the
+        # checkout's .build would hand the next non-instrumented build a
+        # stale instrumented object and a `--scratch-path` is what keeps the
+        # two apart. The out-of-tree C build above is the same rule.
+        SCRATCH="$OUT/swift"
+        mkdir -p "$SCRATCH"
+        # The same flags every other swift build here carries:
+        # --disable-automatic-resolution so the run resolves nothing, and the
+        # filter so the instrumented run is the concurrency suite rather than
+        # the whole scan library under a sanitizer. A filter that matches
+        # nothing is the silent-green failure scripts/test.sh refuses; the same
+        # check is repeated here for the same reason.
+        log="$OUT/swift-tsan.log"
+        set +e
+        ( cd "$ROOT" && swift test \
+            --filter ScanConcurrencyTests \
+            --sanitize=thread \
+            --scratch-path "$SCRATCH" \
+            --disable-automatic-resolution ) >"$log" 2>&1
+        rc=$?
+        set -e
+        cat "$log"
+        if [[ "$rc" -ne 0 ]]; then
+            echo "error: the Swift concurrency suite failed under ThreadSanitizer" >&2
+            exit 1
+        fi
+        # A TSan finding exits 66 (the exitcode set above); a compile or a
+        # failed assertion is a different nonzero, so name the case rather
+        # than printing the same "failed" for both. The pass is not proven by
+        # the exit code alone: a filter that matched no test exits 0 having run
+        # nothing, which is why the executed-count check below is the same one
+        # scripts/test.sh makes.
+        executed="$(grep -oE 'Executed [0-9]+ tests?' "$log" | grep -oE '[0-9]+' | sort -n | tail -1)"
+        if [[ -z "$executed" || "$executed" -eq 0 ]]; then
+            echo "error: no ScanConcurrencyTests test matched; nothing ran, and" >&2
+            echo "       that is not a pass. Did the class get renamed?" >&2
+            echo "       (find the name: rg -n 'class' tests/AppAtticScanTests/)" >&2
+            exit 1
+        fi
+        SWIFT_RAN=1
+    fi
+fi
+
+if [[ "$HOST_RAN" -eq 0 && "$QT_RAN" -eq 0 && "$SWIFT_RAN" -eq 0 ]]; then
+    echo "race-check: nothing ran (no toolchain for any check)"
     exit 1
 fi
 if [[ "$HOST_RAN" -eq 1 && "$QT_RAN" -eq 0 && "$RUN_QT" -eq 1 ]]; then
     echo "note: the Qt worker-pool check was skipped; only the C host ran"
+fi
+if [[ "$SWIFT_RAN" -eq 0 && "$RUN_SWIFT" -eq 1 ]]; then
+    echo "note: the Swift scan-library check was skipped; it is the one tree"
+    echo "      whose pmap fan-out no other sanitizer run reaches"
 fi
 echo "race-check: no sanitizer reports"

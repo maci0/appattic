@@ -23,7 +23,9 @@ for arg in "$@"; do
 Usage: bash scripts/check.sh [--core] [--qt]
 
   (default)  lint + Zig core tests + the C host under ThreadSanitizer
-             (scripts/race-check.sh) + AppAtticScanTests + CLI debug build
+             (scripts/race-check.sh) + AppAtticScanTests + the Swift scan
+             library under ThreadSanitizer (scripts/race-check.sh --swift)
+             + CLI debug build
              and the built CLI's help/exit-code/stream contract
              (scripts/cli-contract.sh), then both double-build checks
              (scripts/verify-reproducible.sh for the WASM modules and the
@@ -33,8 +35,9 @@ Usage: bash scripts/check.sh [--core] [--qt]
              and packaging work. Not the CI gate: the Swift steps do not run,
              and the run says so.
   --qt       full Linux CI parity, including the Qt worker pools under
-             ThreadSanitizer, bash scripts/linux-qt-link.sh and the
-             scripts/verify-qt-link.sh proof checks
+             ThreadSanitizer, bash scripts/linux-qt-link.sh, the
+             scripts/verify-qt-link.sh proof checks, and the Qt release
+             double-build (scripts/verify-qt-reproducible.sh)
 
   One test class instead of the suite: bash scripts/test.sh DiskSizeTests
 EOF
@@ -94,6 +97,14 @@ if [[ "$RUN_SWIFT" -eq 1 ]]; then
     echo "== AppAtticScanTests =="
     bash "$ROOT/scripts/test.sh"
 
+    echo "== ThreadSanitizer (Swift scan library) =="
+    # The pmap fan-out is the third threaded tree, and the one no other
+    # sanitizer run reaches: the C host and the Qt pools are the other two.
+    # ScanConcurrencyTests pins the serialized progress callback and names
+    # `swift test --sanitize=thread` as what turns those assertions into
+    # memory-ordering evidence, and nothing ran it.
+    bash "$ROOT/scripts/race-check.sh" --swift
+
     echo "== CLI debug =="
     appattic_swift_build debug --product appattic
 
@@ -128,6 +139,12 @@ if [[ "$RUN_QT" -eq 1 ]]; then
     echo "== Qt UI link =="
     bash "$ROOT/scripts/linux-qt-link.sh"
     bash "$ROOT/scripts/verify-qt-link.sh"
+
+    echo "== reproducible Qt release binary =="
+    # The third double-build, and the one that covers the binary
+    # scripts/linux-appimage.sh packs into the AppImage. The other two cover
+    # the WASM modules and the Swift CLI, and neither reaches this one.
+    bash "$ROOT/scripts/verify-qt-reproducible.sh"
 else
     echo "note: skip Qt UI (pass --qt). CI Linux jobs run scripts/linux-qt-link.sh"
 fi
@@ -135,7 +152,8 @@ fi
 # A green --core must never be read as a full pass, so the skipped steps are
 # named on the last line of the run rather than only in --help.
 if [[ "$RUN_SWIFT" -eq 0 ]]; then
-    echo "note: --core did NOT run AppAtticScanTests or the CLI build, and did not run"
-    echo "      the Qt worker pools under ThreadSanitizer (pass --qt). That is the CI gate;"
-    echo "      run 'bash scripts/check.sh' once Swift is installed, or push and let CI run it."
+    echo "note: --core did NOT run AppAtticScanTests, the Swift scan library under"
+    echo "      ThreadSanitizer, or the CLI build, and did not run the Qt worker"
+    echo "      pools under ThreadSanitizer (pass --qt). That is the CI gate; run"
+    echo "      'bash scripts/check.sh' once Swift is installed, or push and let CI run it."
 fi

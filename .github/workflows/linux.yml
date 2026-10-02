@@ -179,6 +179,22 @@ jobs:
         # enforce, since the job container is pinned by tag alone.
         run: bash scripts/test.sh
         id: swift_test
+      - name: ThreadSanitizer (Swift scan library)
+        # The third threaded tree, and the one the step above does not reach:
+        # that one is race-check.sh --qt, which builds the C host and the Qt
+        # worker pools, and neither compiles a line of Swift. A scan fans out
+        # through `pmap` and the progress callback is shared across those
+        # workers, which is the shape a data race hides in; ScanConcurrencyTests
+        # pins the serialized contract and its header names
+        # `swift test --sanitize=thread` as what makes those assertions
+        # memory-ordering evidence. Nothing in the tree ran it, so the Swift
+        # fan-out was the one thread pool with no sanitizer gate.
+        #
+        # After the Swift install, not beside the --qt step above: the pinned
+        # 5.10.1 toolchain has to be on PATH first, which is the same ordering
+        # reason the install step itself carries.
+        if: steps.swift_test.outcome == 'success'
+        run: bash scripts/race-check.sh --swift
       - name: Build CLI
         run: |
           set -euo pipefail
@@ -216,6 +232,17 @@ jobs:
         # still does. Two release builds, so it runs once, on the job that
         # already has the pinned toolchain.
         run: bash scripts/verify-swift-reproducible.sh
+      - name: Reproducible Qt release binary
+        # The third of the three double-builds, and the one that covers the
+        # binary the AppImage release packs. The step above covers the WASM
+        # modules and the C host, the one before it the Swift CLI, and
+        # neither reaches appattic-qt: the primary shipped Linux artifact had
+        # no rebuild-and-compare anywhere, so a prefix map dropped from
+        # ui/linux-qt/CMakeLists.txt would have shipped green. This job
+        # already has Qt 6, cmake, ninja and the Wasmtime C API the configure
+        # needs, and the script builds into its own temp tree, so it touches
+        # no cache and no artifact of the steps around it.
+        run: bash scripts/verify-qt-reproducible.sh
       - name: Link Qt UI
         if: success() || failure()
         run: |
