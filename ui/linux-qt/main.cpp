@@ -2191,10 +2191,11 @@ private:
         }
 
         const bool searching = !m_search->text().trimmed().isEmpty();
-        // A search that matches nothing is a search miss, including mid-scan.
-        // An empty page with no search still running has not answered yet.
-        const bool scanningEmpty = emptyScanPending()
-            || (pageScanStillOpen(scanRunning(), rows.size()) && !searching);
+        // The count is the page before the search box. A typed search on a
+        // page that has not produced a row yet is still the scan, not
+        // "nothing matched". A miss on rows that already arrived is a miss.
+        const bool scanningEmpty = listEmptyIsScan(
+            emptyScanPending(), scanRunning(), countPage(page), searching);
         const bool scanFailed = emptyScanFailed();
         const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
         if (rows.isEmpty() && scanningEmpty) {
@@ -2953,7 +2954,8 @@ private:
             // order away, and this runs on every selection change.
             if (filteredRows(page, false).isEmpty()) {
                 const bool searching = !m_search->text().trimmed().isEmpty();
-                const bool pending = emptyScanPending() || (scanRunning() && !searching);
+                const bool pending = listEmptyIsScan(
+                    emptyScanPending(), scanRunning(), countPage(page), searching);
                 title = pageEmptyTitle(
                     page, pending, emptyScanFailed(), searching ? QStringList() : m_scanNotes
                 );
@@ -3144,10 +3146,14 @@ private:
     void refreshActionBar() {
         qint64 bytes = 0;
         int unsized = 0;
+        int measured = 0;
         for (const Finding &f : m_findings) {
             if (!m_marked.contains(f.uid()) && !m_markedManual.contains(f.uid())) continue;
             if (f.bytes < 0) ++unsized;
-            else bytes = addSatBytes(bytes, f.bytes);
+            else {
+                bytes = addSatBytes(bytes, f.bytes);
+                ++measured;
+            }
         }
         const int n = actionBarSelectionCount(m_findings, m_marked, m_markedManual);
         const Page page = currentPage();
@@ -3155,17 +3161,9 @@ private:
             n > 0 && page != Page::Overview && page != Page::Settings && page != Page::DiskUsage
         );
         m_actionCount->setText(QStringLiteral("%1 selected").arg(localeCount(n)));
-        // A marked row with no measurement (`bytes < 0`) makes the total a
-        // partial sum. Say so instead of printing the part that did measure as
-        // the whole selection.
-        QString bytesText;
-        if (bytes > 0) {
-            bytesText = humanSize(bytes);
-            if (unsized > 0) bytesText += QStringLiteral(" (partial)");
-        } else if (unsized > 0) {
-            bytesText = QStringLiteral("unknown");
-        }
-        m_actionBytes->setText(bytesText);
+        // A measured zero stays on the bar. An unmeasured row stays unknown.
+        // A child marked alone has no size of its own, so the slot stays empty.
+        m_actionBytes->setText(actionBarBytesText(bytes, measured, unsized));
         const bool busy = m_scanning;
         const bool canDelete = scriptHasCommands(cleanupScript());
         const bool canUpdate = scriptHasCommands(updateScript());

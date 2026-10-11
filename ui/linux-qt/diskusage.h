@@ -137,6 +137,13 @@ QString diskChartFolderLabel(int childCount, int sizedChildCount, bool unreadabl
 bool diskTrashAllowed(bool scanning, const DiskNode *selected, const DiskNode *root);
 /// Size order for a finished walk. `allocatedSize` false orders by file length.
 void orderScannedDiskTree(DiskNode *node, bool allocatedSize);
+/// A size toggle or a search typed while folders are still streaming must not
+/// wipe the rows already on screen. The finished tree is what those controls
+/// rebuild, and it does not exist until the walk ends.
+bool diskStreamRowsStay(bool scanning, bool hasFinishedRoot);
+/// Row to select again after the devices list is rebuilt. -1 when nothing was
+/// selected or that mount is no longer there.
+int volumeRowToReselect(const QString &selectedPath, const QVector<QString> &paths);
 /// Home and End move by the distance from `current` to that end. A relative
 /// jump of `count - 1` wraps to the other end.
 int diskChartKeyDelta(int count, int current, bool endKey);

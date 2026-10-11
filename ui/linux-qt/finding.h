@@ -264,6 +264,11 @@ bool listMarkUsesTickbox(Page page);
 /// A running scan with no rows on this page has not answered. Rows from
 /// another plugin do not make this page a finished empty.
 bool pageScanStillOpen(bool scanning, int pageRows);
+/// Whether an empty list is still the scan, not a finished miss. `pageRowCount`
+/// is that page before the search box. A typed search does not finish a page
+/// that has no rows of its own yet, and it does not hide a miss once those
+/// rows exist.
+bool listEmptyIsScan(bool scanPending, bool scanning, int pageRowCount, bool searching);
 /// A progress tick replaces the scan-age suffix and leaves the row count.
 QString countLineWithScanStatus(const QString &countLine, const QString &status);
 /// A script run sets the same busy flag as a scan so the buttons stay
@@ -300,6 +305,10 @@ int actionBarSelectionCount(
     const QSet<QString> &marked,
     const QSet<QString> &markedManual
 );
+/// Size slot on the action bar. A measured zero stays "0 B". No measured row
+/// and an unmeasured one stays "unknown". Nothing selected leaves the slot
+/// empty. `measured` counts marked rows whose size was read, including zero.
+QString actionBarBytesText(qint64 bytes, int measured, int unsized);
 /// Path-plugin notes, and a result blob that could not be read. Other notes
 /// belong to the package pages.
 QStringList leftoverScanNotes(const QStringList &notes);

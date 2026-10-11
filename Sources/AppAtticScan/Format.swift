@@ -251,6 +251,12 @@ public func settingsLoadRecoveryHint() -> String {
     "Repair the file and click Rescan, or restore the backup."
 }
 
+/// Outdated table header for the version column. The cell is the pair, so
+/// the header names both sides.
+public func outdatedVersionColumnTitle() -> String {
+    "Current → Latest"
+}
+
 /// Outdated row text. One missing side stays `unknown`. Both missing collapse
 /// to that word. An untrusted tap is not a version pair.
 public func outdatedVersionText(current: String?, latest: String?, untrusted: Bool) -> String {

@@ -847,10 +847,22 @@ void DiskPage::scanRemote() {
 }
 
 void DiskPage::refreshVolumes() {
+    QString selectedPath;
+    if (QTreeWidgetItem *cur = d->volumes->currentItem()) {
+        selectedPath = cur->data(1, Qt::UserRole).toString();
+    }
     d->volumes->clear();
     const QVector<DiskVolume> vols = listDiskVolumes();
+    QVector<QString> paths;
+    paths.reserve(vols.size());
+    for (const DiskVolume &v : vols) paths.append(v.rootPath);
+    const int restoreAt = volumeRowToReselect(selectedPath, paths);
+    int index = 0;
+    QTreeWidgetItem *restore = nullptr;
     for (const DiskVolume &v : vols) {
         auto *it = new QTreeWidgetItem(d->volumes);
+        if (index == restoreAt) restore = it;
+        ++index;
         QString name = v.name;
         if (v.isHome && !v.isRoot) name += QStringLiteral(" (Home)");
         it->setText(0, name);
@@ -870,6 +882,7 @@ void DiskPage::refreshVolumes() {
         it->setTextAlignment(4, Qt::AlignTrailing | Qt::AlignVCenter);
         it->setTextAlignment(5, Qt::AlignTrailing | Qt::AlignVCenter);
     }
+    if (restore) d->volumes->setCurrentItem(restore);
     for (int i = 0; i < 6; ++i) d->volumes->resizeColumnToContents(i);
 }
 
@@ -1005,6 +1018,7 @@ static void appendChildren(QTreeWidgetItem *parent, DiskNode *node, int depth) {
 }
 
 void DiskPage::fillTree() {
+    if (diskStreamRowsStay(m_scanning, d->root != nullptr)) return;
     d->tree->clear();
     d->filterMatches = -1;
     if (!d->root) return;
@@ -1022,6 +1036,7 @@ void DiskPage::fillTree() {
 }
 
 void DiskPage::fillTreeFiltered() {
+    if (diskStreamRowsStay(m_scanning, d->root != nullptr)) return;
     d->tree->clear();
     if (!d->root) return;
     const QString q = searchFold(d->filter.trimmed());

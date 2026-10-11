@@ -2310,6 +2310,18 @@ static int checkDiskUsage() {
     }
     const int collation = checkDiskTreeCollation();
     if (collation != 0) return collation;
+    if (!diskStreamRowsStay(true, false) || diskStreamRowsStay(true, true)
+        || diskStreamRowsStay(false, false)) {
+        std::fprintf(stderr, "disk: a streaming tree must keep the rows already shown\n");
+        return 1;
+    }
+    const QVector<QString> mounts{QStringLiteral("/"), QStringLiteral("/home")};
+    if (volumeRowToReselect(QString(), mounts) != -1
+        || volumeRowToReselect(QStringLiteral("/home"), mounts) != 1
+        || volumeRowToReselect(QStringLiteral("/gone"), mounts) != -1) {
+        std::fprintf(stderr, "disk: a refreshed device list must keep the selected mount\n");
+        return 1;
+    }
     std::fprintf(stdout, "disk: ok\n");
     return 0;
 }
@@ -3303,6 +3315,21 @@ int checkDashboardStates() {
     }
     if (!pageScanStillOpen(true, 0) || pageScanStillOpen(true, 3) || pageScanStillOpen(false, 0)) {
         std::fprintf(stderr, "a running page with no rows must stay open, and a finished one must not\n");
+        return 1;
+    }
+    if (!listEmptyIsScan(false, true, 0, true)
+        || listEmptyIsScan(false, true, 4, true)
+        || listEmptyIsScan(false, false, 0, true)
+        || !listEmptyIsScan(true, false, 0, false)) {
+        std::fprintf(stderr, "a search must not finish a page that has no rows yet\n");
+        return 1;
+    }
+    if (actionBarBytesText(0, 1, 0) != humanSize(0)
+        || actionBarBytesText(0, 0, 1) != QLatin1String("unknown")
+        || !actionBarBytesText(0, 0, 0).isEmpty()
+        || actionBarBytesText(0, 1, 1) != humanSize(0) + QLatin1String(" (partial)")
+        || actionBarBytesText(120, 1, 1) != humanSize(120) + QLatin1String(" (partial)")) {
+        std::fprintf(stderr, "action bar hid a measured zero or an unknown size\n");
         return 1;
     }
     const QString kept = countLineWithScanStatus(

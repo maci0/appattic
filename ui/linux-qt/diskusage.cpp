@@ -804,6 +804,18 @@ void orderScannedDiskTree(DiskNode *node, bool allocatedSize) {
     node->sortChildren(allocatedSize);
 }
 
+bool diskStreamRowsStay(bool scanning, bool hasFinishedRoot) {
+    return scanning && !hasFinishedRoot;
+}
+
+int volumeRowToReselect(const QString &selectedPath, const QVector<QString> &paths) {
+    if (selectedPath.isEmpty()) return -1;
+    for (int i = 0; i < paths.size(); ++i) {
+        if (paths.at(i) == selectedPath) return i;
+    }
+    return -1;
+}
+
 int diskChartKeyDelta(int count, int current, bool endKey) {
     if (count <= 0) return 0;
     if (current < 0) current = 0;

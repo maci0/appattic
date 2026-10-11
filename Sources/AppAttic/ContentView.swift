@@ -929,7 +929,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("Manager")
                 .frame(width: Col.mgr, alignment: .leading)
-            Text("Current")
+            Text(outdatedVersionColumnTitle())
                 .frame(width: Col.ver, alignment: .trailing)
         }
     }

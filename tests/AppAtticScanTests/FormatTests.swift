@@ -250,5 +250,6 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(outdatedVersionText(current: nil, latest: nil, untrusted: false), "unknown")
         XCTAssertEqual(outdatedVersionText(current: "", latest: "2", untrusted: false), "unknown → 2")
         XCTAssertEqual(outdatedVersionText(current: "1", latest: "2", untrusted: true), "untrusted tap")
+        XCTAssertEqual(outdatedVersionColumnTitle(), "Current → Latest")
     }
 }

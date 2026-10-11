@@ -1590,6 +1590,14 @@ bool pageScanStillOpen(bool scanning, int pageRows) {
     return scanning && pageRows <= 0;
 }
 
+bool listEmptyIsScan(bool scanPending, bool scanning, int pageRowCount, bool searching) {
+    // The search box is not what finishes the page. Callers pass the page's
+    // own row count, before the filter, so a miss on rows that already
+    // arrived stays a miss.
+    (void)searching;
+    return scanPending || pageScanStillOpen(scanning, pageRowCount);
+}
+
 QString countLineWithScanStatus(const QString &countLine, const QString &status) {
     const QString sep = QStringLiteral(" · ");
     const int at = countLine.indexOf(sep);
@@ -1642,6 +1650,14 @@ QString packageChildWhy(bool parentMarked) {
 
 QString packageChildMarkKey(const QString &parentUid, const QString &child) {
     return parentUid + QChar(0x1e) + child;
+}
+
+QString actionBarBytesText(qint64 bytes, int measured, int unsized) {
+    if (measured <= 0 && unsized <= 0) return {};
+    if (measured <= 0) return QStringLiteral("unknown");
+    QString text = humanSize(bytes);
+    if (unsized > 0) text += QStringLiteral(" (partial)");
+    return text;
 }
 
 int actionBarSelectionCount(
