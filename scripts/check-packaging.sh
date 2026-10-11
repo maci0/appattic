@@ -201,6 +201,36 @@ update_url="$(sed -n 's/^UPDATE_URL=//p' scripts/linux-appimage.sh | head -n 1)"
 [[ "$update_url" == *'${UPDATE_ZSYNC#'* ]] \
     || fail "scripts/linux-appimage.sh builds UPDATE_URL from the image, not from UPDATE_ZSYNC"
 
+# appimagetool leaves the .zsync in the working directory. The function the
+# build calls has to move it beside the image, and leave a file that is already
+# there alone. This runs that function; it does not build an AppImage.
+place_fn="$(awk '/^place_appimage_zsync\(\)/,/^}/' scripts/linux-appimage.sh)"
+[[ -n "$place_fn" ]] || fail "scripts/linux-appimage.sh has no place_appimage_zsync"
+zsync_tmp="$(mktemp -d)"
+mkdir -p "$zsync_tmp/work" "$zsync_tmp/dist"
+printf 'from-cwd' > "$zsync_tmp/work/AppAttic-x86_64.AppImage.zsync"
+(
+    # shellcheck disable=SC1090
+    eval "$place_fn"
+    place_appimage_zsync "$zsync_tmp/dist/AppAttic-x86_64.AppImage.zsync" "$zsync_tmp/work"
+)
+[[ -f "$zsync_tmp/dist/AppAttic-x86_64.AppImage.zsync" ]] \
+    || fail "place_appimage_zsync left the update file in the working directory"
+[[ ! -f "$zsync_tmp/work/AppAttic-x86_64.AppImage.zsync" ]] \
+    || fail "place_appimage_zsync copied the update file instead of moving it"
+printf 'beside' > "$zsync_tmp/dist/AppAttic-x86_64.AppImage.zsync"
+printf 'cwd' > "$zsync_tmp/work/AppAttic-x86_64.AppImage.zsync"
+(
+    # shellcheck disable=SC1090
+    eval "$place_fn"
+    place_appimage_zsync "$zsync_tmp/dist/AppAttic-x86_64.AppImage.zsync" "$zsync_tmp/work"
+)
+[[ "$(cat "$zsync_tmp/dist/AppAttic-x86_64.AppImage.zsync")" == "beside" ]] \
+    || fail "place_appimage_zsync replaced the update file already beside the image"
+[[ "$(cat "$zsync_tmp/work/AppAttic-x86_64.AppImage.zsync")" == "cwd" ]] \
+    || fail "place_appimage_zsync moved a second update file over the one beside the image"
+rm -rf "$zsync_tmp"
+
 # The AppImage bundles no shell, so AppRun runs under whatever /bin/sh the
 # user's machine has. A bash shebang or a bashism there makes the image refuse
 # to start on a host with no bash, and the CI --smoke cannot see it: that runs
