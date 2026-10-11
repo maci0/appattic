@@ -273,14 +273,14 @@ jobs:
           bash scripts/verify-qt-link.sh
       - name: Upload Qt link proof
         if: success() || failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-qt-link-${{ github.job }}
           path: ui/linux-qt/build/LINUX_QT_LINK.txt
           if-no-files-found: error
       - name: Upload UI renders
         if: success() || failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-qt-shots-${{ github.job }}
           path: ui/linux-qt/build/shots/*.png
@@ -378,7 +378,7 @@ jobs:
           bash scripts/verify-qt-link.sh
       - name: Upload Qt link proof
         if: success() || failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-qt-link-${{ github.job }}
           path: ui/linux-qt/build/LINUX_QT_LINK.txt
@@ -440,7 +440,7 @@ jobs:
         shell: bash
       - name: Upload Qt link proof
         if: success() || failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-qt-link-${{ github.job }}
           path: ui/linux-qt/build/LINUX_QT_LINK.txt
