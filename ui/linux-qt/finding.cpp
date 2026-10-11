@@ -1509,12 +1509,29 @@ void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line,
    `localeCount` for the count and not a hardcoded digit: this bar already
    prints locale digits for the counts beside it, and one ASCII number among
    Arabic-Indic ones is the bug `localeCount` exists to fix. */
+/// A plugin that did not run because its tool or folder is absent. That is
+/// an empty manager, not a scan that failed to answer. The note text is the
+/// inactive document the plugins publish (`pacman missing`, `Plugin inactive`,
+/// `no container engine`).
+static bool scanNoteReportsAbsence(const QString &note) {
+    const int sep = note.indexOf(QStringLiteral(": "));
+    const QString reason = sep < 0 ? note : note.mid(sep + 2);
+    if (reason.contains(QLatin1String("Plugin inactive"))) return true;
+    if (reason == QLatin1String("no container engine")) return true;
+    return reason.endsWith(QLatin1String(" missing"));
+}
+
 QString scanNoteClause(const QStringList &notes) {
-    if (notes.isEmpty()) return QString();
-    const QString joined = redactHomePaths(notes.join(QStringLiteral("; ")));
-    return notes.size() == 1
+    QStringList live;
+    live.reserve(notes.size());
+    for (const QString &note : notes) {
+        if (!scanNoteReportsAbsence(note)) live.append(note);
+    }
+    if (live.isEmpty()) return QString();
+    const QString joined = redactHomePaths(live.join(QStringLiteral("; ")));
+    return live.size() == 1
         ? QStringLiteral("Scan incomplete: %1").arg(joined)
-        : QStringLiteral("%1 scans incomplete: %2").arg(localeCount(notes.size()), joined);
+        : QStringLiteral("%1 scans incomplete: %2").arg(localeCount(live.size()), joined);
 }
 
 QString scanShortEmptyDetail(bool finished, const QStringList &notes) {
@@ -1540,6 +1557,23 @@ QString linuxStaleSummaryPhrase(int count) {
     if (count <= 0) return QStringLiteral("stale not scanned");
     if (count == 1) return QStringLiteral("1 stale");
     return localeCount(count) + QStringLiteral(" stale");
+}
+
+QString pageCountLabel(Page page, int n, bool scanning) {
+    switch (page) {
+    case Page::Leftovers:
+        return n == 1 ? QStringLiteral("1 leftover") : localeCount(n) + QStringLiteral(" leftovers");
+    case Page::Stale:
+        if (n <= 0) return linuxStaleInstrumentText(scanning, n);
+        return n == 1 ? QStringLiteral("1 stale app") : localeCount(n) + QStringLiteral(" stale apps");
+    case Page::Outdated:
+        return n == 1 ? QStringLiteral("1 outdated package")
+                      : localeCount(n) + QStringLiteral(" outdated packages");
+    case Page::Packages:
+        return n == 1 ? QStringLiteral("1 package") : localeCount(n) + QStringLiteral(" packages");
+    default:
+        return localeCount(n);
+    }
 }
 
 bool packageMatchesFilter(const Finding &f, const QString &filter) {

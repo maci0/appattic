@@ -253,6 +253,9 @@ QString linuxStaleInstrumentText(bool scanning, int count);
 QString linuxStaleEmptyDetail();
 /// Status-bar phrase for the stale slot. Zero is not a clean count.
 QString linuxStaleSummaryPhrase(int count);
+/// Toolbar count for one list page. A stale count of zero is "Not scanned"
+/// after the scan and "…" while it runs. Other pages keep a real zero.
+QString pageCountLabel(Page page, int n, bool scanning);
 /// Leaves are distro orphans (`kind == "orphan"`). Globals are language
 /// globals. Other package rows stay on All and off both chips.
 bool packageMatchesFilter(const Finding &f, const QString &filter);

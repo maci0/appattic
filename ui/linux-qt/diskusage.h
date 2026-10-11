@@ -107,9 +107,10 @@ struct StreamTotals {
 
 DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts);
 /// Allocated bytes for a file or directory tree. -1 when the path cannot be
-/// stat'ed, and -1 when a directory cannot be opened. The directory inode's
-/// own block count is not the tree, so a leftover that cannot be read stays
-/// unknown instead of a few kilobytes.
+/// stat'ed, and -1 when a directory in the tree cannot be opened. The
+/// directory inode's own block count is not that directory's contents, so a
+/// leftover with an unreadable directory stays unknown instead of a short
+/// total presented as the whole size.
 qint64 measurePathBytes(const QString &path, const DiskScanOptions &opts = DiskScanOptions());
 QVector<DiskVolume> listDiskVolumes();
 /// Bytes a volume row reports as used, so the row reconciles:

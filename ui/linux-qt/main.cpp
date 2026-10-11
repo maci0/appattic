@@ -2750,18 +2750,7 @@ private:
     }
 
     QString countLabel(Page page, int n) const {
-        switch (page) {
-        case Page::Leftovers:
-            return n == 1 ? QStringLiteral("1 leftover") : localeCount(n) + QStringLiteral(" leftovers");
-        case Page::Stale:
-            return n == 1 ? QStringLiteral("1 stale app") : localeCount(n) + QStringLiteral(" stale apps");
-        case Page::Outdated:
-            return n == 1 ? QStringLiteral("1 outdated package") : localeCount(n) + QStringLiteral(" outdated packages");
-        case Page::Packages:
-            return n == 1 ? QStringLiteral("1 package") : localeCount(n) + QStringLiteral(" packages");
-        default:
-            return localeCount(n);
-        }
+        return pageCountLabel(page, n, scanRunning());
     }
 
     bool scanRunning() const {

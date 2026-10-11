@@ -434,7 +434,8 @@ void measureWalkFd(
     const DiskScanOptions &opts,
     std::unordered_set<InodeKey, InodeKeyHash> *seen,
     qint64 *apparent,
-    qint64 *allocated
+    qint64 *allocated,
+    bool *incomplete
 );
 
 void measureVisit(
@@ -444,7 +445,8 @@ void measureVisit(
     const DiskScanOptions &opts,
     std::unordered_set<InodeKey, InodeKeyHash> *seen,
     qint64 *apparent,
-    qint64 *allocated
+    qint64 *allocated,
+    bool *incomplete
 ) {
     if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) return;
     if (isCancelled(opts)) return;
@@ -462,8 +464,14 @@ void measureVisit(
     if (seenDir || (opts.oneFileSystem && meta.dev != rootDev)) return;
     seen->insert(key);
     const int childFd = openChildDir(dirfd, name);
-    if (childFd < 0) return;
-    measureWalkFd(childFd, rootDev, opts, seen, apparent, allocated);
+    // The inode size above is not the subtree. A directory that cannot be
+    // entered leaves the total short, so the caller must not report it as
+    // the whole leftover.
+    if (childFd < 0) {
+        *incomplete = true;
+        return;
+    }
+    measureWalkFd(childFd, rootDev, opts, seen, apparent, allocated, incomplete);
     close(childFd);
 }
 
@@ -474,7 +482,8 @@ void measureWalkFd(
     const DiskScanOptions &opts,
     std::unordered_set<InodeKey, InodeKeyHash> *seen,
     qint64 *apparent,
-    qint64 *allocated
+    qint64 *allocated,
+    bool *incomplete
 ) {
     if (isCancelled(opts)) return;
     alignas(8) char buf[16384];
@@ -493,7 +502,7 @@ void measureWalkFd(
             const Dirent64View d = viewDirent64(buf, bpos);
             if (d.reclen < kDirent64MinRecLen || bpos + d.reclen > nread) break;
             bpos += d.reclen;
-            measureVisit(fd, d.name, rootDev, opts, seen, apparent, allocated);
+            measureVisit(fd, d.name, rootDev, opts, seen, apparent, allocated, incomplete);
         }
     }
 }
@@ -504,7 +513,8 @@ void measureWalkFd(
     const DiskScanOptions &opts,
     std::unordered_set<InodeKey, InodeKeyHash> *seen,
     qint64 *apparent,
-    qint64 *allocated
+    qint64 *allocated,
+    bool *incomplete
 ) {
     if (isCancelled(opts)) return;
     const int dupfd = dup(fd);
@@ -516,7 +526,7 @@ void measureWalkFd(
     }
     while (dirent *ent = readdir(dir)) {
         if (isCancelled(opts)) break;
-        measureVisit(fd, ent->d_name, rootDev, opts, seen, apparent, allocated);
+        measureVisit(fd, ent->d_name, rootDev, opts, seen, apparent, allocated, incomplete);
     }
     closedir(dir);
 }
@@ -699,8 +709,10 @@ qint64 measurePathBytes(const QString &path, const DiskScanOptions &opts) {
     qint64 allocated = rootMeta.allocated;
     std::unordered_set<InodeKey, InodeKeyHash> seen;
     seen.insert(InodeKey{rootMeta.dev, rootMeta.ino});
-    measureWalkFd(fd, rootMeta.dev, opts, &seen, &apparent, &allocated);
+    bool incomplete = false;
+    measureWalkFd(fd, rootMeta.dev, opts, &seen, &apparent, &allocated, &incomplete);
     close(fd);
+    if (incomplete) return -1;
     if (allocated > 0) return allocated;
     return apparent < 0 ? 0 : apparent;
 #else

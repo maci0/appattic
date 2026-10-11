@@ -1068,6 +1068,43 @@ static int verifyHelpers() {
                     static_cast<long long>(unreadRows[0].bytes));
                 return 1;
             }
+            const QString nested = tmp.path() + QStringLiteral("/nested");
+            const QString nestedLocked = nested + QStringLiteral("/locked");
+            if (!QDir().mkpath(nestedLocked)) {
+                std::fprintf(stderr, "leftover size: nested mkpath failed\n");
+                return 1;
+            }
+            QFile visible(nested + QStringLiteral("/visible.bin"));
+            QFile buried(nestedLocked + QStringLiteral("/buried.bin"));
+            if (!visible.open(QIODevice::WriteOnly) || visible.write(QByteArray(4096, 'x')) != 4096
+                || !buried.open(QIODevice::WriteOnly) || buried.write(QByteArray(8192, 'y')) != 8192) {
+                std::fprintf(stderr, "leftover size: nested write failed\n");
+                return 1;
+            }
+            visible.close();
+            buried.close();
+            if (!QFile::setPermissions(nestedLocked, QFileDevice::Permissions())) {
+                std::fprintf(stderr, "leftover size: could not drop nested permissions\n");
+                return 1;
+            }
+            const qint64 nestedMeasured = measurePathBytes(nested);
+            Finding nestedRow = sized;
+            nestedRow.path = nested;
+            nestedRow.bytes = -1;
+            QVector<Finding> nestedRows;
+            nestedRows << nestedRow;
+            enrichLeftoverSizes(nestedRows);
+            if (!QFile::setPermissions(nestedLocked, owner)) {
+                std::fprintf(stderr, "leftover size: could not restore nested permissions\n");
+                return 1;
+            }
+            if (nestedMeasured != -1 || nestedRows[0].bytes >= 0) {
+                std::fprintf(stderr,
+                    "leftover size: unreadable subdirectory reported %lld (row %lld)\n",
+                    static_cast<long long>(nestedMeasured),
+                    static_cast<long long>(nestedRows[0].bytes));
+                return 1;
+            }
         }
         QVector<Finding> many;
         for (int i = 0; i < 8; ++i) {
@@ -3304,13 +3341,39 @@ int checkDashboardStates() {
     }
     const QStringList pathNote{QStringLiteral("path-xdg-config: ls did not answer")};
     const QStringList aptNote{QStringLiteral("apt: query failed")};
+    const QStringList absentNote{QStringLiteral("pacman: pacman missing")};
+    const QStringList absentPath{QStringLiteral("path-xdg-cache: ~/.cache is missing. Plugin inactive.")};
+    const QStringList absentEngine{QStringLiteral("container-runtime: no container engine")};
+    const QString mixed = scanNoteClause(QStringList{
+        QStringLiteral("pacman: pacman missing"),
+        QStringLiteral("apt: query failed"),
+    });
+    if (!scanNoteClause(absentNote).isEmpty()
+        || !scanNoteClause(absentPath).isEmpty()
+        || !scanNoteClause(absentEngine).isEmpty()
+        || !mixed.contains(QLatin1String("query failed"))
+        || mixed.contains(QLatin1String("pacman missing"))
+        || mixed.contains(QLatin1String("scans incomplete"))) {
+        std::fprintf(stderr, "an absent manager must not read as an incomplete scan\n");
+        return 1;
+    }
     if (finishedListEmptyTitle(Page::Leftovers, pathNote) != QLatin1String("Scan incomplete")
         || finishedListEmptyTitle(Page::Leftovers, aptNote) != QLatin1String("No leftover data")
+        || finishedListEmptyTitle(Page::Leftovers, absentPath) != QLatin1String("No leftover data")
         || finishedListEmptyTitle(Page::Leftovers, QStringList()) != QLatin1String("No leftover data")
         || finishedListEmptyTitle(Page::Stale, pathNote) != QLatin1String("Not scanned")
         || finishedListEmptyTitle(Page::Outdated, aptNote) != QLatin1String("Scan incomplete")
-        || finishedListEmptyTitle(Page::Packages, aptNote) != QLatin1String("Scan incomplete")) {
+        || finishedListEmptyTitle(Page::Outdated, absentNote) != QLatin1String("No outdated packages")
+        || finishedListEmptyTitle(Page::Packages, aptNote) != QLatin1String("Scan incomplete")
+        || finishedListEmptyTitle(Page::Packages, absentNote) != QLatin1String("No unused packages")) {
         std::fprintf(stderr, "an incomplete leftover query must not read as a clean empty\n");
+        return 1;
+    }
+    if (pageCountLabel(Page::Stale, 0, false) != QLatin1String("Not scanned")
+        || pageCountLabel(Page::Stale, 0, true) != linuxStaleInstrumentText(true, 0)
+        || pageCountLabel(Page::Stale, 1, false) != QLatin1String("1 stale app")
+        || pageCountLabel(Page::Leftovers, 0, false) != localeCount(0) + QStringLiteral(" leftovers")) {
+        std::fprintf(stderr, "a stale count of zero must stay not scanned\n");
         return 1;
     }
     if (leftoverScanNotes(aptNote).size() != 0 || leftoverScanNotes(pathNote).size() != 1) {

@@ -348,25 +348,20 @@ pub fn parseListing(
         const line_len = pstore.unescapeLsB(raw);
         const line = std.mem.trim(u8, raw[0..line_len], " \t\r");
         if (line.len == 0) continue;
-        // The row is still `ls -b` text here. Unescaping it before the split
-        // put a name carrying a newline back across a line boundary, so one
-        // leftover became two rows joined onto the root, and both halves are
-        // plain ident bytes. Splitting first and unescaping the name here is
-        // what keeps the row count the way `ls -1b` printed it.
-        const escaped_name = pstore.basenameOf(line);
-        if (escaped_name.len == 0) continue;
-        if (std.mem.eql(u8, escaped_name, ".") or std.mem.eql(u8, escaped_name, "..")) continue;
-        // Room for the unescaped name, which is never longer than the escaped
-        // one: every `ls -b` escape is at least two bytes and stands for one.
-        if (used + escaped_name.len > path_store.len) {
+        // The line was unescaped above, after the split. The basename is
+        // already the real name. Decoding it again turns a literal `\172appa`
+        // into `zappa`, and the cleanup command then names a different path.
+        const decoded_name = pstore.basenameOf(line);
+        if (decoded_name.len == 0) continue;
+        if (std.mem.eql(u8, decoded_name, ".") or std.mem.eql(u8, decoded_name, "..")) continue;
+        if (used + decoded_name.len > path_store.len) {
             dropped.* += 1;
             continue;
         }
         const name_start = used;
-        @memcpy(path_store[used..][0..escaped_name.len], escaped_name);
-        used += escaped_name.len;
-        const name_len = pstore.unescapeLsB(path_store[name_start..used]);
-        const name = path_store[name_start..][0..name_len];
+        @memcpy(path_store[used..][0..decoded_name.len], decoded_name);
+        used += decoded_name.len;
+        const name = path_store[name_start..][0..decoded_name.len];
         // `isSafeIdent` now sees the real bytes, so a name holding a newline,
         // a backslash, or any other escaped byte is dropped here rather than
         // becoming an `rm -rf` row for a path that does not exist.
@@ -551,6 +546,29 @@ test "a note lands inside the result object" {
     try std.testing.expect(renderRows(spec, &.{}));
     note = .{};
     try std.testing.expect(jsonbuf.isValidJson(resultSlice()));
+}
+
+test "parseListing does not decode a backslash twice" {
+    var hits: [8]Orphan = undefined;
+    var paths: [512]u8 = undefined;
+    var dropped: usize = 0;
+    var dropbuf: [64]u8 = undefined;
+    // `ls -b` prints a file named `\172appa` as `\\172appa`. One decode leaves
+    // the backslash in the name, which `isSafeIdent` drops. A second decode
+    // reads the octal and emits `zappa`.
+    const n = parseLiteral(
+        &dropbuf,
+        "\\\\172appa\ngone-app\n",
+        "",
+        "/home/user/.cache",
+        &hits,
+        &paths,
+        "",
+        &dropped,
+    );
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqualStrings("gone-app", hits[0].name);
+    try std.testing.expectEqualStrings("/home/user/.cache/gone-app", hits[0].path);
 }
 
 test "parseListing orphans names not in keep" {
