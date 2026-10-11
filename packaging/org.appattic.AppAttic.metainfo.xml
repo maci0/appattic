@@ -36,6 +36,14 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.1.1" date="2026-10-12">
+      <description>
+        <p>Missing measurements stay on screen. An unreadable leftover directory, a directory the walk could not enter, a disk root that could not be opened, and a volume whose capacity was not read show as unknown rather than a size of zero or the directory inode. A measured zero stays on the action bar. The Overview stale total says when part of that size was not measured, and the Stale toolbar says Not scanned when that count was never measured.</p>
+        <p>An empty result no longer reads as a finished clean machine. Leftovers says the scan is incomplete when a path query did not answer. An absent package manager is an empty list, not an incomplete scan. A search typed on a list that has not produced a row yet stays in progress. A file system the disk walk did not enter says Not scanned instead of Empty.</p>
+        <p>A disk scan keeps the folders it has already shown when the size mode or the search changes, and the devices list keeps the selected mount. Disk order follows the size picker, and Home and End on the chart land on the ends. Package review rows stay amber. Marking one dependency alone opens the action bar. A missing package version stays visible, and the outdated column names both the current version and the latest. A bundle version the scan found reaches the stale row. A leftover name is read once, so a literal backslash is not turned into a different path.</p>
+        <p>A confirmed package script uses the same tools the scan found, including ones installed only for your user. A settings file that will not load tells you to repair the file and rescan, or restore the backup. Saving settings enables Restore settings from backup once that backup exists.</p>
+      </description>
+    </release>
     <release version="3.1.0" date="2026-10-02">
       <description>
         <p><code>appattic restore</code> is new. It puts <code>settings.json.bak</code> back in place of <code>settings.json</code> after checking that the backup loads, so an invalid or unreadable file changes nothing on disk; the file it replaces is preserved as <code>settings.json.bad</code>. It runs before regular settings are read, so it works on a system whose <code>settings.json</code> no longer parses. <code>--json FILE</code> writes the restore result as JSON. In the desktop windows, the Settings page adds a corresponding "Restore settings from backup" action.</p>
