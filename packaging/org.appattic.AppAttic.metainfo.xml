@@ -36,6 +36,11 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.1.2" date="2026-10-12">
+      <description>
+        <p>The Linux AppImage is published with its update file again. That file was left in the build directory instead of beside the image, so the release stopped after building the image and an update check had nothing to download.</p>
+      </description>
+    </release>
     <release version="3.1.1" date="2026-10-12">
       <description>
         <p>Missing measurements stay on screen. An unreadable leftover directory, a directory the walk could not enter, a disk root that could not be opened, and a volume whose capacity was not read show as unknown rather than a size of zero or the directory inode. A measured zero stays on the action bar. The Overview stale total says when part of that size was not measured, and the Stale toolbar says Not scanned when that count was never measured.</p>
