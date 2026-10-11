@@ -372,7 +372,7 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
             if vm.holdsSettingsError {
-                Text("Fix the file, or change a setting to write a new one.")
+                Text(settingsLoadRecoveryHint())
                     .font(.system(size: TypeScale.body))
                     .foregroundColor(Color.appDim)
                     .multilineTextAlignment(.center)
@@ -1288,7 +1288,7 @@ struct ContentView: View {
                     item.kind == "global" ? "Global" : "Orphan",
                     color: item.kind == "global" ? Color.appYellow : Color.appRed
                 )
-                if let version = item.version, !version.isEmpty {
+                if let version = inspectorVersionText(packages: true, version: item.version) {
                     infoRow("Version", version, mono: true)
                 }
                 infoRow("Size", packageSizeLabel(item), mono: true)

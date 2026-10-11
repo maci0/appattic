@@ -35,6 +35,7 @@
 #include <cstring>
 #include <limits>
 #include <thread>
+#include <unistd.h>
 
 static int verifyHelpers() {
     // Sizes and counts print the locale's separators and digits, so the
@@ -1027,6 +1028,46 @@ static int verifyHelpers() {
             std::fprintf(stderr, "leftover size: expected measured bytes, got %lld\n",
                 static_cast<long long>(one[0].bytes));
             return 1;
+        }
+        // Root can open a mode-000 directory, so this only runs for a user
+        // that actually gets EACCES. Restore the mode before the temp dir
+        // is removed, including on the failure path.
+        if (::geteuid() != 0) {
+            const QString locked = tmp.path() + QStringLiteral("/locked");
+            if (!QDir().mkpath(locked)) {
+                std::fprintf(stderr, "leftover size: locked mkpath failed\n");
+                return 1;
+            }
+            QFile hidden(locked + QStringLiteral("/data.bin"));
+            if (!hidden.open(QIODevice::WriteOnly) || hidden.write(QByteArray(8192, 'x')) != 8192) {
+                std::fprintf(stderr, "leftover size: locked write failed\n");
+                return 1;
+            }
+            hidden.close();
+            const QFileDevice::Permissions owner =
+                QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+            if (!QFile::setPermissions(locked, QFileDevice::Permissions())) {
+                std::fprintf(stderr, "leftover size: could not drop directory permissions\n");
+                return 1;
+            }
+            const qint64 measured = measurePathBytes(locked);
+            Finding unread = sized;
+            unread.path = locked;
+            unread.bytes = -1;
+            QVector<Finding> unreadRows;
+            unreadRows << unread;
+            enrichLeftoverSizes(unreadRows);
+            if (!QFile::setPermissions(locked, owner)) {
+                std::fprintf(stderr, "leftover size: could not restore directory permissions\n");
+                return 1;
+            }
+            if (measured != -1 || unreadRows[0].bytes >= 0) {
+                std::fprintf(stderr,
+                    "leftover size: unreadable directory reported %lld (row %lld)\n",
+                    static_cast<long long>(measured),
+                    static_cast<long long>(unreadRows[0].bytes));
+                return 1;
+            }
         }
         QVector<Finding> many;
         for (int i = 0; i < 8; ++i) {
@@ -3233,6 +3274,13 @@ int checkDashboardStates() {
     if (versionSlotText(QString()) != QLatin1String("unknown")
         || versionSlotText(QStringLiteral("1.2")) != QLatin1String("1.2")) {
         std::fprintf(stderr, "a missing version slot must stay on screen\n");
+        return 1;
+    }
+    if (inspectorVersionText(Page::Packages, QString()) != QLatin1String("unknown")
+        || inspectorVersionText(Page::Packages, QStringLiteral("1.2")) != QLatin1String("1.2")
+        || !inspectorVersionText(Page::Stale, QString()).isEmpty()
+        || inspectorVersionText(Page::Stale, QStringLiteral("9")) != QLatin1String("9")) {
+        std::fprintf(stderr, "a package with no version must keep the version slot\n");
         return 1;
     }
     if (!packageChildWhy(false).contains(QLatin1String("Selected alone"))

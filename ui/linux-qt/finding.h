@@ -278,6 +278,10 @@ QString toolbarActivitySuffix(
 );
 /// Missing version slot. The list cell already says this; the inspector must too.
 QString versionSlotText(const QString &version);
+/// Version fact for one inspector. Packages always keeps the slot, and an
+/// empty version stays `unknown`. Other pages omit an empty version. An empty
+/// return means the slot stays off that page.
+QString inspectorVersionText(Page page, const QString &version);
 /// Outdated version column. One missing side stays on screen as `unknown`.
 /// Both missing collapse to that one word. An untrusted tap is not a version.
 QString outdatedVersionLabel(const Finding &f);

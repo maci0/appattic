@@ -1583,6 +1583,11 @@ QString versionSlotText(const QString &version) {
     return version.isEmpty() ? QStringLiteral("unknown") : version;
 }
 
+QString inspectorVersionText(Page page, const QString &version) {
+    if (page != Page::Packages && version.isEmpty()) return QString();
+    return versionSlotText(version);
+}
+
 QString outdatedVersionLabel(const Finding &f) {
     if (f.kind.contains(QLatin1String("untrusted")) || f.status == QLatin1String("untrusted")) {
         return QStringLiteral("untrusted tap");

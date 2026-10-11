@@ -218,6 +218,36 @@ final class RecommendTests: XCTestCase {
         XCTAssertEqual(software.first { $0.name == "Sketch" }?.summary, "Digital design app")
     }
 
+    func testAppBundleVersionReachesTheSoftwareRow() {
+        let app = AppRecord(
+            path: "/Applications/Sketch.app",
+            displayName: "Sketch",
+            bundleId: "com.bohemiancoding.sketch3",
+            extra: ["version": "99.1"]
+        )
+        let software = buildSoftware(
+            apps: [app],
+            brew: BrewSnapshot(available: false),
+            dataItems: [],
+            history: HistoryIndex(),
+            includeDarwinNonApp: false
+        )
+        XCTAssertEqual(software.first?.version, "99.1")
+        let blank = AppRecord(
+            path: "/Applications/Blank.app",
+            displayName: "Blank",
+            extra: ["version": ""]
+        )
+        let blankRow = buildSoftware(
+            apps: [blank],
+            brew: BrewSnapshot(available: false),
+            dataItems: [],
+            history: HistoryIndex(),
+            includeDarwinNonApp: false
+        )
+        XCTAssertNil(blankRow.first?.version)
+    }
+
     func testBrewCaskWithoutAppStillListed() {
         let brew = BrewSnapshot(
             available: true,

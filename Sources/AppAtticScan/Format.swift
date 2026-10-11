@@ -234,6 +234,23 @@ public func versionSlotText(_ version: String?) -> String {
     return version
 }
 
+/// Version fact for an inspector. Packages always keeps the slot, and an
+/// empty version stays `unknown`. Other pages omit an empty version.
+public func inspectorVersionText(packages: Bool, version: String?) -> String? {
+    if !packages {
+        guard let version, !version.isEmpty else { return nil }
+        return version
+    }
+    return versionSlotText(version)
+}
+
+/// Line under a settings file that would not load. The pane has no setting
+/// control, and saving is refused until the file loads, so the recovery is
+/// the file itself or its backup. Rescan reloads that file.
+public func settingsLoadRecoveryHint() -> String {
+    "Repair the file and click Rescan, or restore the backup."
+}
+
 /// Outdated row text. One missing side stays `unknown`. Both missing collapse
 /// to that word. An untrusted tap is not a version pair.
 public func outdatedVersionText(current: String?, latest: String?, untrusted: Bool) -> String {

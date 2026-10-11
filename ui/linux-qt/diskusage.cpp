@@ -688,10 +688,7 @@ qint64 measurePathBytes(const QString &path, const DiskScanOptions &opts) {
         return meta.apparent < 0 ? -1 : meta.apparent;
     }
     const int fd = open(native.constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (fd < 0) {
-        if (meta.allocated > 0) return meta.allocated;
-        return meta.apparent < 0 ? 0 : meta.apparent;
-    }
+    if (fd < 0) return -1;
     FileMeta rootMeta;
     if (!fillMetaFd(fd, &rootMeta) || !rootMeta.isDir) {
         close(fd);

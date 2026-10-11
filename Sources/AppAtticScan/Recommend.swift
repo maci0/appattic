@@ -358,6 +358,10 @@ public func buildSoftware(
         } else {
             source = "pkg/other"
         }
+        // Discover keeps CFBundleShortVersionString (else CFBundleVersion) in
+        // extra. The stale row and its inspector read Software.version, so a
+        // blank extra value stays nil rather than an empty slot.
+        let bundleVersion = a.extra["version"].flatMap { $0.isEmpty ? nil : $0 }
         let sw = Software(
             name: a.displayName,
             kind: "app",
@@ -368,6 +372,7 @@ public func buildSoftware(
             lastUsed: a.lastUsed,
             usageSource: a.lastUsedSource ?? (a.isSystem ? "unknown" : nil),
             installedAt: a.installedAt,
+            version: bundleVersion,
             pkgId: a.extra["pkg_id"] ?? a.extra["desktop_id"] ?? a.bundleId,
             bundleId: a.bundleId,
             extra: a.extra

@@ -3007,7 +3007,8 @@ private:
         if (!f->manager.isEmpty() || !f->engine.isEmpty()) {
             addFact(QStringLiteral("Manager"), managerLabel(*f), t.text);
         }
-        if (!f->version.isEmpty()) addFact(QStringLiteral("Version"), f->version, t.text, true);
+        const QString versionFact = inspectorVersionText(page, f->version);
+        if (!versionFact.isEmpty()) addFact(QStringLiteral("Version"), versionFact, t.text, true);
         if (!f->revision.isEmpty()) addFact(QStringLiteral("Revision"), f->revision, t.text, true);
         if (page == Page::Outdated) {
             addFact(QStringLiteral("Current"), versionSlotText(f->currentVersion), t.text, true);
