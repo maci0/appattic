@@ -144,9 +144,7 @@ struct ContentView: View {
                     .padding(Metrics.sm)
                     HRule()
                 }
-                if vm.isScanning && vm.scanData == nil {
-                    scanningState
-                } else if let error = vm.errorMessage, vm.scanData == nil {
+                if let error = vm.errorMessage, vm.scanData == nil, !vm.isScanning {
                     errorState(error)
                 } else {
                     detailBody
@@ -216,11 +214,14 @@ struct ContentView: View {
     private var confirmTitle: String {
         switch confirmMode {
         case .update:
-            return "Update \(vm.selectedOutdated.count) Homebrew or Flatpak packages?"
+            let managers = vm.outdatedRows
+                .filter { vm.selectedOutdated.contains($0.id) }
+                .map(\.manager)
+            return updateConfirmTitle(count: vm.selectedOutdated.count, managers: managers)
         case .markManual:
             return "Mark \(vm.selectedMarkManual.count) packages as manually installed?"
         case .delete:
-            return "Delete \(vm.cleanupSelectionCount) selected items? This runs the previewed uninstall script now. Steam may still ask you to confirm."
+            return "Delete \(vm.cleanupSelectionCount) selected items? This runs the cleanup script now. Steam may still ask you to confirm."
         }
     }
 
@@ -291,6 +292,10 @@ struct ContentView: View {
                 Text(vm.progressMessage)
                     .font(.system(size: TypeScale.body))
                     .foregroundColor(Color.appDim)
+                if let fraction = scanProgressFraction(line: vm.progressMessage) {
+                    ProgressView(value: fraction)
+                        .frame(width: 120)
+                }
             } else if toolbarCount == nil, !vm.statusText.isEmpty {
                 Text(vm.statusText)
                     .font(.system(size: TypeScale.small))
@@ -316,7 +321,7 @@ struct ContentView: View {
                 }
                 .disabled(vm.isScanning)
             }
-            Button("Rescan") { vm.scan(includeSystem: includeSystem) }
+            Button("Rescan") { rescan() }
                 .disabled(vm.isScanning)
         }
     }
@@ -345,6 +350,10 @@ struct ContentView: View {
                 .font(.system(size: TypeScale.body))
                 .foregroundColor(Color.appDim)
                 .frame(maxWidth: 360)
+            if let fraction = scanProgressFraction(line: vm.progressMessage) {
+                ProgressView(value: fraction)
+                    .frame(width: 120)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -385,7 +394,7 @@ struct ContentView: View {
                         .frame(maxWidth: 360)
                 }
             } else {
-                Button("Rescan") { vm.scan(includeSystem: includeSystem) }
+                Button("Rescan") { rescan() }
                     .padding(Metrics.xs)
             }
             Spacer()
@@ -415,6 +424,62 @@ struct ContentView: View {
     }
 
     var overview: some View {
+        if vm.isScanning && vm.scanData == nil {
+            overviewWhileFirstScan
+        } else {
+            overviewFinished
+        }
+    }
+
+    /// Instruments and the three lists stay on screen before the first result.
+    /// Each value is the in-progress mark, and each list names the plugin.
+    private var overviewWhileFirstScan: some View {
+        let progress = vm.progressMessage.isEmpty ? "Scanning…" : vm.progressMessage
+        let mark = overviewInstrumentValue(scanningWithoutResults: true, finished: "")
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: Metrics.lg * 2) {
+                overviewStat("Installed", mark)
+                overviewStat("Leftovers", mark)
+                overviewStat("Leftover data", mark)
+                overviewStat("Stale", mark)
+                overviewStat("Outdated", mark)
+                overviewStat("Packages", mark)
+                overviewStat("Last scan", mark)
+                Spacer(minLength: 0)
+            }
+            .padding(Metrics.lg)
+            .padding(Metrics.md)
+            HRule()
+            ScrollView {
+                HStack(alignment: .top, spacing: 0) {
+                    overviewColumn(title: "Largest leftovers") {
+                        Text(progress)
+                            .font(.system(size: TypeScale.body))
+                            .foregroundColor(Color.appDim)
+                            .padding(Metrics.lg)
+                    }
+                    VRule()
+                    overviewColumn(title: "Largest stale apps") {
+                        Text(progress)
+                            .font(.system(size: TypeScale.body))
+                            .foregroundColor(Color.appDim)
+                            .padding(Metrics.lg)
+                    }
+                    VRule()
+                    overviewColumn(title: "Outdated packages") {
+                        Text(progress)
+                            .font(.system(size: TypeScale.body))
+                            .foregroundColor(Color.appDim)
+                            .padding(Metrics.lg)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var overviewFinished: some View {
         let leftoverRows = vm.overviewLeftovers
         let staleRows = vm.overviewStale
         let outdatedRows = vm.overviewOutdated
@@ -423,7 +488,7 @@ struct ContentView: View {
                 HStack(alignment: .top, spacing: Metrics.lg * 2) {
                     overviewStat("Installed", "\(totals.apps_installed)")
                     overviewStat("Leftovers", "\(visibleOrphanCount)", Color.appRed)
-                    overviewStat("Leftover data", humanSize(visibleOrphanedBytes), Color.appGreen)
+                    overviewStat("Leftover data", leftoverDataLabel, Color.appRed)
                     overviewStat(
                         "Stale",
                         overviewStaleTotalLabel(count: vm.listedStaleCount, bytes: staleReclaimableBytes(staleRows)),
@@ -450,6 +515,9 @@ struct ContentView: View {
                         ) {
                             selected = .packages
                         }
+                    } else if vm.scanData?.incomplete == true {
+                        let copy = dashboardIncompleteCopy()
+                        emptyState(copy.title, copy.detail)
                     } else {
                         emptyState(
                             "Nothing to review",
@@ -469,6 +537,7 @@ struct ContentView: View {
                                         leftoverWhat(item),
                                         leftoverSizeLabel(item)
                                     ) {
+                                        vm.searchText = ""
                                         leftoverSel = item.path
                                         selected = .leftovers
                                     }
@@ -482,6 +551,7 @@ struct ContentView: View {
                             overviewColumn(title: "Largest stale apps") {
                                 ForEach(Array(staleRows.prefix(12)), id: \.path) { item in
                                     overviewTappableRow(item.name, staleOverviewDetail(item), staleSizeLabel(item)) {
+                                        vm.searchText = ""
                                         staleSel = item.path
                                         selected = .stale
                                     }
@@ -497,10 +567,13 @@ struct ContentView: View {
                                     overviewTappableRow(
                                         item.displayName,
                                         outdatedSummaryFallback(item),
-                                        item.kind == "untrusted"
-                                            ? "untrusted tap"
-                                            : "\(item.current_version ?? "-") → \(item.latest_version ?? "?")"
+                                        outdatedVersionText(
+                                            current: item.current_version,
+                                            latest: item.latest_version,
+                                            untrusted: item.kind == "untrusted"
+                                        )
                                     ) {
+                                        vm.searchText = ""
                                         outdatedSel = item.id
                                         selected = .outdated
                                     }
@@ -562,14 +635,30 @@ struct ContentView: View {
         .onTapGesture(perform: action)
     }
 
+    private func emptyCopy(title: String, detail: String, packageCheck: Bool = false) -> (title: String, detail: String) {
+        if let pending = dashboardPendingCopy(
+            scanning: vm.isScanning,
+            hasResults: vm.scanData != nil,
+            progress: vm.progressMessage
+        ) {
+            return (pending.title, pending.detail)
+        }
+        if packageCheck, vm.searchText.isEmpty, vm.scanData?.incomplete == true {
+            let copy = dashboardIncompleteCopy()
+            return (copy.title, copy.detail)
+        }
+        return (title, detail)
+    }
+
     var leftoverPage: some View {
         let rows = vm.leftoverRows
         let selectedPath = resolvedSelection(leftoverSel, visibleIds: rows.map(\.path))
+        let empty = emptyCopy(title: "No leftover data", detail: leftoverEmptyDetail)
         return HStack(alignment: .top, spacing: 0) {
             listPane(
                 isEmpty: rows.isEmpty,
-                emptyTitle: "No leftover data",
-                emptyDetail: leftoverEmptyDetail,
+                emptyTitle: empty.title,
+                emptyDetail: empty.detail,
                 header: { leftoverHeader }
             ) {
                 ForEach(rows, id: \.path) { item in
@@ -590,22 +679,26 @@ struct ContentView: View {
     }
 
     private var leftoverCountLabel: String {
-        let n = vm.leftoverRows.count
-        return n == 1 ? "1 leftover" : "\(n) leftovers"
+        visibleRowCount(
+            scanning: vm.isScanning, hasResults: vm.scanData != nil,
+            count: vm.leftoverRows.count, one: "leftover", many: "leftovers"
+        )
     }
 
     var stalePage: some View {
         let rows = vm.staleRows
         let selectedPath = resolvedSelection(staleSel, visibleIds: rows.map(\.path))
+        let finishedDetail = vm.searchText.isEmpty
+            ? (vm.includeSystem
+                ? "No remove, review, or system apps in this scan."
+                : "No remove or review candidates.")
+            : "No stale apps match this search."
+        let empty = emptyCopy(title: "No stale apps", detail: finishedDetail)
         return HStack(alignment: .top, spacing: 0) {
             listPane(
                 isEmpty: rows.isEmpty,
-                emptyTitle: "No stale apps",
-                emptyDetail: vm.searchText.isEmpty
-                    ? (vm.includeSystem
-                        ? "No remove, review, or system apps in this scan."
-                        : "No remove or review candidates.")
-                    : "No stale apps match this search.",
+                emptyTitle: empty.title,
+                emptyDetail: empty.detail,
                 header: { staleHeader }
             ) {
                 ForEach(rows, id: \.path) { item in
@@ -626,20 +719,27 @@ struct ContentView: View {
     }
 
     private var staleCountLabel: String {
-        let n = vm.staleRows.count
-        return n == 1 ? "1 stale app" : "\(n) stale apps"
+        visibleRowCount(
+            scanning: vm.isScanning, hasResults: vm.scanData != nil,
+            count: vm.staleRows.count, one: "stale app", many: "stale apps"
+        )
     }
 
     var outdatedPage: some View {
         let rows = vm.outdatedRows
         let selectedId = resolvedSelection(outdatedSel, visibleIds: rows.map(\.id))
+        let empty = emptyCopy(
+            title: "No outdated packages",
+            detail: vm.searchText.isEmpty
+                ? "Brew, Flatpak, Snap, apt, pacman, AUR, dnf, yum, zypper, and the App Store reported nothing, or those tools are not installed."
+                : "No outdated packages match this search.",
+            packageCheck: true
+        )
         return HStack(alignment: .top, spacing: 0) {
             listPane(
                 isEmpty: rows.isEmpty,
-                emptyTitle: "No outdated packages",
-                emptyDetail: vm.searchText.isEmpty
-                    ? "Brew, Flatpak, Snap, apt, pacman, AUR, dnf, yum, zypper, and the App Store reported nothing, or those tools are not installed."
-                    : "No outdated packages match this search.",
+                emptyTitle: empty.title,
+                emptyDetail: empty.detail,
                 header: { outdatedHeader }
             ) {
                 ForEach(rows, id: \.id) { item in
@@ -660,8 +760,10 @@ struct ContentView: View {
     }
 
     private var outdatedCountLabel: String {
-        let n = vm.outdatedRows.count
-        return n == 1 ? "1 outdated package" : "\(n) outdated packages"
+        visibleRowCount(
+            scanning: vm.isScanning, hasResults: vm.scanData != nil,
+            count: vm.outdatedRows.count, one: "outdated package", many: "outdated packages"
+        )
     }
 
     var packageFilterChips: some View {
@@ -690,11 +792,12 @@ struct ContentView: View {
     var packagePage: some View {
         let rows = packageRows
         let selectedId = resolvedSelection(packageSel, visibleIds: rows.map(\.id))
+        let empty = emptyCopy(title: "No unused packages", detail: packageEmptyDetail, packageCheck: true)
         return HStack(alignment: .top, spacing: 0) {
             listPane(
                 isEmpty: rows.isEmpty,
-                emptyTitle: "No unused packages",
-                emptyDetail: packageEmptyDetail,
+                emptyTitle: empty.title,
+                emptyDetail: empty.detail,
                 header: { packageHeader }
             ) {
                 ForEach(rows, id: \.id) { item in
@@ -715,8 +818,10 @@ struct ContentView: View {
     }
 
     private var packageCountLabel: String {
-        let n = packageRows.count
-        return n == 1 ? "1 package" : "\(n) packages"
+        visibleRowCount(
+            scanning: vm.isScanning, hasResults: vm.scanData != nil,
+            count: packageRows.count, one: "package", many: "packages"
+        )
     }
 
     private var packageEmptyDetail: String {
@@ -759,6 +864,10 @@ struct ContentView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if isEmpty {
+                if vm.isScanning && vm.scanData == nil {
+                    header()
+                    HRule()
+                }
                 if !vm.searchText.isEmpty {
                     emptyState(emptyTitle, emptyDetail, actionTitle: "Clear search") {
                         vm.searchText = ""
@@ -928,11 +1037,11 @@ struct ContentView: View {
     func compactOutdatedRow(_ item: OutdatedEntry, selected: Bool) -> some View {
         let marked = vm.selectedOutdated.contains(item.id)
         let ver: String
-        if item.kind == "untrusted" {
-            ver = "untrusted tap"
-        } else {
-            ver = "\(item.current_version ?? "-") → \(item.latest_version ?? "?")"
-        }
+        ver = outdatedVersionText(
+            current: item.current_version,
+            latest: item.latest_version,
+            untrusted: item.kind == "untrusted"
+        )
         return HStack(spacing: Metrics.sm) {
             rowMarkCell(marked, selected: selected)
             Text(item.displayName)
@@ -1007,7 +1116,7 @@ struct ContentView: View {
     }
 
     func leftoverSecondaryColor(_ item: LeftoverItem) -> Color {
-        item.leftoverStatus == .shadow ? Color.appYellow.opacity(0.85) : Color.appDim
+        item.leftoverStatus == .shadow ? Color.appYellow.opacity(shadowLocationOpacity()) : Color.appDim
     }
 
     func leftoverStatusColor(_ item: LeftoverItem) -> Color {
@@ -1143,8 +1252,8 @@ struct ContentView: View {
                 if item.kind == "untrusted" {
                     infoRow("Status", "untrusted tap", color: Color.appYellow)
                 } else {
-                    infoRow("Current", item.current_version ?? "-", mono: true)
-                    infoRow("Latest", item.latest_version ?? "?", color: Color.appYellow, mono: true)
+                    infoRow("Current", versionSlotText(item.current_version), mono: true)
+                    infoRow("Latest", versionSlotText(item.latest_version), color: Color.appYellow, mono: true)
                 }
             }
             Spacer()
@@ -1210,10 +1319,15 @@ struct ContentView: View {
     }
 
     func inspectorPane<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: Metrics.md) {
-            content()
+        // A long path or app-data block used to push Include, Ignore and Reveal
+        // off the pane. The actions sit after the facts and scroll with them.
+        ScrollView {
+            VStack(alignment: .leading, spacing: Metrics.md) {
+                content()
+            }
+            .padding(Metrics.lg)
+            .frame(minWidth: 280, maxWidth: 360, alignment: .topLeading)
         }
-        .padding(Metrics.lg)
         .frame(minWidth: 280, maxWidth: 360, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.appBg)
     }
@@ -1307,7 +1421,7 @@ struct ContentView: View {
                         Toggle("", isOn: confirmDeleteBinding)
                             .toggleStyle(.switch)
                     }
-                    Text("Shows an alert before rm, brew uninstall, package remove, or named package updates.")
+                    Text("Shows an alert before rm, brew uninstall, package remove, or named package updates. Off runs the script immediately.")
                         .font(.system(size: TypeScale.small))
                         .foregroundColor(Color.appDim)
                 }
@@ -1383,9 +1497,14 @@ struct ContentView: View {
                 .font(.system(size: TypeScale.small))
                 .foregroundColor(Color.appDim)
             if vm.cleanupSelectionCount > 0 {
-                Text(humanSize(vm.selectionReclaimableBytes))
+                Text(vm.selectionByteLabel)
                     .font(.system(size: TypeScale.monoSmall))
-                    .foregroundColor(Color.appGreen)
+                    .foregroundColor(Color.appRed)
+                if vm.selectionLeavesAppData {
+                    Text("App data stays")
+                        .font(.system(size: TypeScale.small))
+                        .foregroundColor(Color.appDim)
+                }
             }
             Spacer()
             Button("Clear") { vm.clearSelection() }
@@ -1475,13 +1594,49 @@ struct ContentView: View {
         staleSizeText(
             sizeBytes: item.size_bytes ?? 0,
             sizeMeasured: item.size_measured != false,
-            dataBytes: item.data_bytes ?? 0
+            dataBytes: item.data_bytes ?? 0,
+            dataMeasured: item.data_measured ?? false
         )
     }
 
-    private var visibleOrphanedBytes: Int {
-        visibleOrphanedLeftovers(vm.scanData?.leftovers ?? [], ignoring: vm.ignoredLeftovers)
-            .reduce(0) { addBytes($0, $1.size_bytes ?? 0) }
+    private var leftoverDataLabel: String {
+        let items = visibleOrphanedLeftovers(vm.scanData?.leftovers ?? [], ignoring: vm.ignoredLeftovers)
+        var bytes = 0
+        var sized = 0
+        var unsized = 0
+        for item in items {
+            if item.size_measured, let n = item.size_bytes {
+                bytes = addBytes(bytes, n)
+                sized += 1
+            } else {
+                unsized += 1
+            }
+        }
+        return measuredBytesLabel(bytes: bytes, sized: sized, unsized: unsized)
+    }
+
+    /// Reload a settings file that failed at launch, then scan. The error says
+    /// Rescan is the way back, and saving stays refused while the load failed.
+    func rescan() {
+        if settingsLoadFailed {
+            do {
+                let settings = try loadSettings()
+                includeSystem = settings.includeSystem
+                confirmDelete = settings.confirmDelete
+                vm.ignoredLeftovers = Set(settings.ignoredLeftoverPaths)
+                settingsLoadFailed = false
+                settingsLoadError = ""
+                vm.holdsSettingsError = false
+                vm.errorMessage = nil
+            } catch {
+                settingsLoadFailed = true
+                settingsLoadError = settingsErrorUserMessage(error)
+                vm.errorMessage = settingsLoadError
+                vm.holdsSettingsError = true
+                return
+            }
+        }
+        vm.scan(includeSystem: includeSystem)
     }
 
     private var includeSystemBinding: Binding<Bool> {

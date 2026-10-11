@@ -105,6 +105,15 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertEqual(diskTreeHiddenEntries(root, top: 0), 3)
     }
 
+    func testReportsPartialTotalWalksDescendants() {
+        let root = DiskUsageNode(name: "root", path: "/tmp/root", isDir: true)
+        XCTAssertFalse(root.reportsPartialTotal())
+        let child = DiskUsageNode(name: "secret", path: "/tmp/root/secret", isDir: true, unreadable: true)
+        root.children = [child]
+        XCTAssertTrue(root.reportsPartialTotal())
+        XCTAssertFalse(root.unreadable)
+    }
+
     func testDiskJSONRoundTripFields() throws {
         let node = DiskUsageNode(name: "a", path: "/a", apparent: 4, allocated: 8, items: 2, isDir: true)
         node.children = [DiskUsageNode(name: "b", path: "/a/b", apparent: 4, allocated: 8)]
@@ -159,6 +168,25 @@ final class DiskUsageTests: XCTestCase {
         )
         XCTAssertEqual(NSDictionary(dictionary: got), NSDictionary(dictionary: want))
         XCTAssertEqual(got["apparent"] as? Int, Int.max, "Int.max must survive the digit buffer")
+    }
+
+    func testDevicesListKeepsAFailedScanStatus() {
+        XCTAssertEqual(
+            diskDevicesStatus(status: "no such directory: /tmp/missing", scanning: false, hasRoot: false),
+            "no such directory: /tmp/missing"
+        )
+        XCTAssertNil(diskDevicesStatus(status: "no such directory: /tmp/missing", scanning: true, hasRoot: false))
+        XCTAssertNil(diskDevicesStatus(status: "12 MB · 3 items", scanning: false, hasRoot: true))
+        XCTAssertNil(diskDevicesStatus(status: "   ", scanning: false, hasRoot: false))
+    }
+
+    func testFolderContentsLabelDoesNotCountTheFolderItself() {
+        XCTAssertEqual(diskFolderContentsLabel(items: 1), "Empty")
+        XCTAssertEqual(diskFolderContentsLabel(items: 0), "Empty")
+        XCTAssertEqual(diskFolderContentsLabel(items: 2), "1 item")
+        XCTAssertEqual(diskFolderContentsLabel(items: 4), "\(localeCount(3)) items")
+        XCTAssertEqual(diskFolderContentsLabel(items: 1, unreadable: true), "unreadable")
+        XCTAssertEqual(diskFolderContentsLabel(items: 4, unreadable: true), "\(localeCount(3)) items")
     }
 
     func testValidateDiskRootRejectsMissingPathAndFile() throws {

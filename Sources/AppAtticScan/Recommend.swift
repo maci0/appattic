@@ -192,10 +192,17 @@ func attachOwnedData(_ sw: Software, name: String, bundleId: String?, items: [Da
 }
 
 /// App size plus its matched data size, `"n/a"` for a part that was not
-/// measured. `dataBytes` is dropped when it is zero, so a row with no data
-/// reads as the app size alone.
-public func staleSizeText(sizeBytes: Int, sizeMeasured: Bool, dataBytes: Int) -> String {
+/// measured. Measured data of zero bytes is no data, so the row reads as the
+/// app size alone. Unmeasured data stays on screen even when the byte count
+/// is zero: that zero is "not measured", not an empty container.
+public func staleSizeText(sizeBytes: Int, sizeMeasured: Bool, dataBytes: Int, dataMeasured: Bool = true) -> String {
     let app = sizeMeasured ? humanSize(sizeBytes) : "n/a"
+    if !dataMeasured {
+        if dataBytes > 0 {
+            return "\(app) + \(humanSize(dataBytes)) + n/a"
+        }
+        return "\(app) + n/a"
+    }
     if dataBytes > 0 {
         return "\(app) + \(humanSize(dataBytes))"
     }

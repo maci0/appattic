@@ -1251,6 +1251,34 @@ static int verifyHelpers() {
             return 1;
         }
     }
+    // The container build cache is listed and has no command. Offering it as
+    // Include puts a tick on a row the script then skips.
+    {
+        Finding cache;
+        cache.plugin = QStringLiteral("container-runtime");
+        cache.kind = QStringLiteral("build-cache");
+        cache.status = QStringLiteral("review");
+        if (canMarkCleanup(cache, Page::Packages)) {
+            std::fprintf(stderr, "build-cache: a row with no command must not be tickable\n");
+            return 1;
+        }
+        Finding image;
+        image.plugin = QStringLiteral("container-runtime");
+        image.kind = QStringLiteral("dangling-image");
+        image.status = QStringLiteral("orphaned");
+        image.name = QStringLiteral("<none>:<none>");
+        image.id = QStringLiteral("abc123");
+        image.command = QStringLiteral("docker rmi abc123");
+        if (!canMarkCleanup(image, Page::Packages)) {
+            std::fprintf(stderr, "dangling image: a row with a command must be tickable\n");
+            return 1;
+        }
+        if (displayName(image) != QLatin1String("<none>:<none> abc123")) {
+            std::fprintf(stderr, "dangling image: name must include the id (%s)\n",
+                displayName(image).toUtf8().constData());
+            return 1;
+        }
+    }
     return 0;
 }
 
@@ -2148,6 +2176,58 @@ static int checkDiskUsage() {
     }
     if (diskContentsLabel(5, true) != localeCount(4) + QLatin1String(" items")) {
         std::fprintf(stderr, "disk: items label\n");
+        return 1;
+    }
+    if (diskContentsLabel(1, true, true) != QLatin1String("unreadable")
+        || diskContentsLabel(5, true, true) != localeCount(4) + QLatin1String(" items")) {
+        std::fprintf(stderr, "disk: unreadable directory must not read as empty\n");
+        return 1;
+    }
+    if (diskChartFolderLabel(0, 0, true) != QLatin1String("unreadable")
+        || diskChartFolderLabel(2, 0, true) != QLatin1String("unreadable")
+        || !diskChartFolderLabel(2, 1, true).isEmpty()) {
+        std::fprintf(stderr, "disk: unreadable chart caption\n");
+        return 1;
+    }
+    DiskNode scanRoot;
+    DiskNode scanChild;
+    if (diskTrashAllowed(true, &scanChild, &scanRoot)
+        || diskTrashAllowed(false, &scanChild, nullptr)
+        || diskTrashAllowed(false, nullptr, &scanRoot)
+        || diskTrashAllowed(false, &scanRoot, &scanRoot)
+        || !diskTrashAllowed(false, &scanChild, &scanRoot)) {
+        std::fprintf(stderr, "disk: trash must wait for a finished child\n");
+        return 1;
+    }
+    DiskNode orderRoot;
+    auto *sparse = new DiskNode;
+    sparse->name = QStringLiteral("sparse");
+    sparse->path = QStringLiteral("/sparse");
+    sparse->apparent = 1000;
+    sparse->allocated = 10;
+    auto *dense = new DiskNode;
+    dense->name = QStringLiteral("dense");
+    dense->path = QStringLiteral("/dense");
+    dense->apparent = 100;
+    dense->allocated = 80;
+    orderRoot.children.append(sparse);
+    orderRoot.children.append(dense);
+    orderScannedDiskTree(&orderRoot, false);
+    if (orderRoot.children.first()->name != QLatin1String("sparse")) {
+        std::fprintf(stderr, "disk: apparent order put %s first\n",
+            qPrintable(orderRoot.children.first()->name));
+        return 1;
+    }
+    orderScannedDiskTree(&orderRoot, true);
+    if (orderRoot.children.first()->name != QLatin1String("dense")) {
+        std::fprintf(stderr, "disk: allocated order put %s first\n",
+            qPrintable(orderRoot.children.first()->name));
+        return 1;
+    }
+    if (diskChartKeyDelta(4, 1, true) != 2 || diskChartKeyDelta(4, 1, false) != -1
+        || diskChartKeyDelta(4, 0, false) != 0 || diskChartKeyDelta(4, 3, true) != 0
+        || diskChartKeyDelta(0, 0, true) != 0) {
+        std::fprintf(stderr, "disk: Home and End must land on the ends\n");
         return 1;
     }
     const int collation = checkDiskTreeCollation();
@@ -3069,6 +3149,185 @@ static int checkScriptLeavesTheSandbox() {
     return 0;
 }
 
+int checkDashboardStates() {
+    if (linuxInstalledInstrumentText() != QLatin1String("Not scanned")) {
+        std::fprintf(stderr, "installed instrument must stay Not scanned\n");
+        return 1;
+    }
+    if (linuxStaleInstrumentText(true, 0) != QStringLiteral("…")
+        || linuxStaleInstrumentText(false, 0) != QLatin1String("Not scanned")
+        || linuxStaleInstrumentText(false, 2) != localeCount(2)) {
+        std::fprintf(stderr, "stale instrument hid the missing scan or a real count\n");
+        return 1;
+    }
+    if (linuxStaleEmptyDetail() != QLatin1String("Installed system apps are not part of this scan.")
+        || linuxStaleSummaryPhrase(0) != QLatin1String("stale not scanned")
+        || linuxStaleSummaryPhrase(1) != QLatin1String("1 stale")
+        || linuxStaleSummaryPhrase(2) != localeCount(2) + QLatin1String(" stale")) {
+        std::fprintf(stderr, "stale empty copy still reads as a clean zero\n");
+        return 1;
+    }
+    if (!pageScanStillOpen(true, 0) || pageScanStillOpen(true, 3) || pageScanStillOpen(false, 0)) {
+        std::fprintf(stderr, "a running page with no rows must stay open, and a finished one must not\n");
+        return 1;
+    }
+    const QString kept = countLineWithScanStatus(
+        QStringLiteral("4 leftovers · apt (1/9)"),
+        QStringLiteral("pacman (2/9)")
+    );
+    if (kept != QStringLiteral("4 leftovers · pacman (2/9)")) {
+        std::fprintf(stderr, "progress replaced the row count: %s\n", qPrintable(kept));
+        return 1;
+    }
+    if (countLineWithScanStatus(QString(), QStringLiteral("npm (3/9)")) != QLatin1String("npm (3/9)")) {
+        std::fprintf(stderr, "a count with no age should become the scan status\n");
+        return 1;
+    }
+    Finding orphan;
+    orphan.plugin = QStringLiteral("apt");
+    orphan.kind = QStringLiteral("orphan");
+    orphan.name = QStringLiteral("libfoo");
+    Finding runtime;
+    runtime.plugin = QStringLiteral("flatpak");
+    runtime.kind = QStringLiteral("unused-runtime");
+    runtime.name = QStringLiteral("org.gnome.Platform");
+    Finding global;
+    global.plugin = QStringLiteral("npm");
+    global.kind = QStringLiteral("global");
+    global.name = QStringLiteral("typescript");
+    if (!packageMatchesFilter(orphan, QStringLiteral("leaves"))
+        || packageMatchesFilter(runtime, QStringLiteral("leaves"))
+        || packageMatchesFilter(global, QStringLiteral("leaves"))
+        || !packageMatchesFilter(global, QStringLiteral("globals"))
+        || packageMatchesFilter(orphan, QStringLiteral("globals"))
+        || !packageMatchesFilter(runtime, QStringLiteral("all"))) {
+        std::fprintf(stderr, "leaves must be distro orphans, not every non-global package\n");
+        return 1;
+    }
+    if (!listMarkUsesTickbox(Page::Leftovers)
+        || listMarkUsesTickbox(Page::Stale)
+        || listMarkUsesTickbox(Page::Outdated)
+        || listMarkUsesTickbox(Page::Packages)) {
+        std::fprintf(stderr, "the tickbox is the leftover column only\n");
+        return 1;
+    }
+    if (diskChartFolderLabel(0, 0) != QLatin1String("Empty folder")
+        || diskChartFolderLabel(2, 0) != QLatin1String("No file here has a size")
+        || !diskChartFolderLabel(2, 1).isEmpty()) {
+        std::fprintf(stderr, "a folder of zero-byte files must not read as empty\n");
+        return 1;
+    }
+    if (activityIsScan(true, false) != true || activityIsScan(true, true) || activityIsScan(false, true)) {
+        std::fprintf(stderr, "a script run is not a scan\n");
+        return 1;
+    }
+    if (toolbarActivitySuffix(true, QStringLiteral("Removing 2 items"), true, QStringLiteral("Scanning"), QStringLiteral("today"))
+            != QStringLiteral("Removing 2 items")
+        || toolbarActivitySuffix(false, QString(), true, QStringLiteral("pacman (2/9)"), QStringLiteral("today"))
+            != QLatin1String("pacman (2/9)")
+        || toolbarActivitySuffix(false, QString(), false, QStringLiteral("Scanning…"), QStringLiteral("today"))
+            != QLatin1String("today")) {
+        std::fprintf(stderr, "toolbar suffix picked the wrong activity\n");
+        return 1;
+    }
+    if (versionSlotText(QString()) != QLatin1String("unknown")
+        || versionSlotText(QStringLiteral("1.2")) != QLatin1String("1.2")) {
+        std::fprintf(stderr, "a missing version slot must stay on screen\n");
+        return 1;
+    }
+    if (!packageChildWhy(false).contains(QLatin1String("Selected alone"))
+        || !packageChildWhy(true).contains(QLatin1String("Included with the parent"))
+        || packageChildWhy(true).contains(QLatin1String("Selected alone"))) {
+        std::fprintf(stderr, "a marked parent is not a child selected alone\n");
+        return 1;
+    }
+    const QStringList oneNote{QStringLiteral("apt: query failed")};
+    const QString shortNote = scanShortEmptyDetail(true, oneNote);
+    if (shortNote.isEmpty()
+        || !shortNote.contains(QLatin1String("Scan incomplete"))
+        || !scanShortEmptyDetail(false, oneNote).isEmpty()
+        || !scanShortEmptyDetail(true, QStringList()).isEmpty()) {
+        std::fprintf(stderr, "an incomplete package check must not read as a clean empty\n");
+        return 1;
+    }
+    if (linuxStaleEmptyDetail() != QLatin1String("Installed system apps are not part of this scan.")) {
+        std::fprintf(stderr, "stale empty detail changed\n");
+        return 1;
+    }
+    const QStringList pathNote{QStringLiteral("path-xdg-config: ls did not answer")};
+    const QStringList aptNote{QStringLiteral("apt: query failed")};
+    if (finishedListEmptyTitle(Page::Leftovers, pathNote) != QLatin1String("Scan incomplete")
+        || finishedListEmptyTitle(Page::Leftovers, aptNote) != QLatin1String("No leftover data")
+        || finishedListEmptyTitle(Page::Leftovers, QStringList()) != QLatin1String("No leftover data")
+        || finishedListEmptyTitle(Page::Stale, pathNote) != QLatin1String("Not scanned")
+        || finishedListEmptyTitle(Page::Outdated, aptNote) != QLatin1String("Scan incomplete")
+        || finishedListEmptyTitle(Page::Packages, aptNote) != QLatin1String("Scan incomplete")) {
+        std::fprintf(stderr, "an incomplete leftover query must not read as a clean empty\n");
+        return 1;
+    }
+    if (leftoverScanNotes(aptNote).size() != 0 || leftoverScanNotes(pathNote).size() != 1) {
+        std::fprintf(stderr, "leftover notes must be path plugins, not package checks\n");
+        return 1;
+    }
+    Finding dnf;
+    dnf.currentVersion = QString();
+    dnf.latestVersion = QStringLiteral("1.2");
+    const QString dnfVer = outdatedVersionLabel(dnf);
+    if (!dnfVer.startsWith(QLatin1String("unknown")) || !dnfVer.endsWith(QLatin1String("1.2"))
+        || dnfVer.contains(QLatin1Char('-')) || dnfVer.contains(QLatin1Char('?'))) {
+        std::fprintf(stderr, "a missing installed version must stay unknown: %s\n", qPrintable(dnfVer));
+        return 1;
+    }
+    Finding bothMissing;
+    if (outdatedVersionLabel(bothMissing) != QLatin1String("unknown")) {
+        std::fprintf(stderr, "two missing versions must stay one unknown\n");
+        return 1;
+    }
+    Finding untrusted;
+    untrusted.kind = QStringLiteral("untrusted");
+    untrusted.currentVersion = QStringLiteral("1");
+    if (outdatedVersionLabel(untrusted) != QLatin1String("untrusted tap")) {
+        std::fprintf(stderr, "an untrusted tap is not a version pair\n");
+        return 1;
+    }
+    Finding reviewPkg;
+    reviewPkg.plugin = QStringLiteral("container-runtime");
+    reviewPkg.kind = QStringLiteral("container");
+    reviewPkg.status = QStringLiteral("review");
+    Finding orphanPkg;
+    orphanPkg.plugin = QStringLiteral("apt");
+    orphanPkg.kind = QStringLiteral("orphan");
+    orphanPkg.status = QStringLiteral("orphaned");
+    Finding globalPkg;
+    globalPkg.plugin = QStringLiteral("npm");
+    globalPkg.kind = QStringLiteral("global");
+    if (findingStatusTone(reviewPkg, Page::Packages) != StatusTone::Review
+        || findingStatusTone(orphanPkg, Page::Packages) != StatusTone::Remove
+        || findingStatusTone(globalPkg, Page::Packages) != StatusTone::Review) {
+        std::fprintf(stderr, "a package review row must be amber, and a remove row red\n");
+        return 1;
+    }
+    Finding parent;
+    parent.plugin = QStringLiteral("apt");
+    parent.kind = QStringLiteral("orphan");
+    parent.id = QStringLiteral("parent");
+    parent.name = QStringLiteral("parent");
+    parent.children = QStringList{QStringLiteral("libone")};
+    QSet<QString> childOnly;
+    childOnly.insert(packageChildMarkKey(parent.uid(), QStringLiteral("libone")));
+    QSet<QString> parentOnly;
+    parentOnly.insert(parent.uid());
+    const QVector<Finding> one{parent};
+    if (actionBarSelectionCount(one, childOnly, QSet<QString>()) != 1
+        || actionBarSelectionCount(one, parentOnly, QSet<QString>()) != 1
+        || actionBarSelectionCount(one, QSet<QString>(), QSet<QString>()) != 0) {
+        std::fprintf(stderr, "a dependency marked alone must open the action bar\n");
+        return 1;
+    }
+    std::fprintf(stdout, "dashboard: ok\n");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     /* QProcess and QTimer need a running event dispatcher, and
        checkScriptRunCleansUpItsFile() drives a real one. Constructed before
@@ -3076,7 +3335,7 @@ int main(int argc, char **argv) {
        inside a check still has one to deliver `finished` on. */
     QCoreApplication app(argc, argv);
     const int checks[] = {
-        verifyHelpers(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
+        verifyHelpers(), checkDashboardStates(), checkPrivacy(), checkTiming(), checkDeferredFdBound(),
         checkRootDirDoneTotals(), checkStreamTotals(),
         checkDiskUsage(), checkScanWorkerToken(), checkScanCache(), checkSettings(),
         checkSettingsBackup(), checkSettingsBackupRepeatedSave(), checkDurableWrite(),

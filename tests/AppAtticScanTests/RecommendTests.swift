@@ -612,6 +612,14 @@ final class RecommendTests: XCTestCase {
             staleSizeText(sizeBytes: 0, sizeMeasured: false, dataBytes: 4_000_000),
             "n/a + \(humanSize(4_000_000))"
         )
+        XCTAssertEqual(
+            staleSizeText(sizeBytes: 10_000_000, sizeMeasured: true, dataBytes: 0, dataMeasured: false),
+            "\(humanSize(10_000_000)) + n/a"
+        )
+        XCTAssertEqual(
+            staleSizeText(sizeBytes: 10_000_000, sizeMeasured: true, dataBytes: 50_000, dataMeasured: false),
+            "\(humanSize(10_000_000)) + \(humanSize(50_000)) + n/a"
+        )
     }
 
     func testStaleReclaimableBytesSumsAppAndOwnedData() {

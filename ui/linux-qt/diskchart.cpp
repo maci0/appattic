@@ -1,5 +1,6 @@
 #include "diskchart.h"
 
+#include "diskusage.h"
 #include "finding.h"
 #include "uistyle.h"
 
@@ -357,9 +358,12 @@ void DiskChart::paintTreemap(QPainter &p, const QRect &box) {
             );
         }
     }
-    if (kids.isEmpty()) {
+    const QString emptyLabel = diskChartFolderLabel(
+        m_view->children.size(), kids.size(), m_view->unreadable
+    );
+    if (!emptyLabel.isEmpty()) {
         p.setPen(palette().placeholderText().color());
-        p.drawText(box, Qt::AlignCenter, QStringLiteral("Empty folder"));
+        p.drawText(box, Qt::AlignCenter, emptyLabel);
     }
 }
 
@@ -495,13 +499,16 @@ void DiskChart::keyPressEvent(QKeyEvent *event) {
         }
         break;
     case Qt::Key_Home:
-        moveCursor(0);
-        emit nodeFocused(m_cursor);
-        event->accept();
-        return;
     case Qt::Key_End: {
         const QVector<DiskNode *> nodes = navigableNodes();
-        moveCursor(nodes.size() - 1);
+        int at = 0;
+        for (int i = 0; i < nodes.size(); ++i) {
+            if (nodes[i] == m_cursor) {
+                at = i;
+                break;
+            }
+        }
+        moveCursor(diskChartKeyDelta(nodes.size(), at, event->key() == Qt::Key_End));
         emit nodeFocused(m_cursor);
         event->accept();
         return;

@@ -16,6 +16,10 @@ struct DiskNode {
     qint64 mtime = 0;
     bool isDir = false;
     bool unreadable = false;
+    /// An ancestor of a node this walk could not read. The node itself is
+    /// still readable, so the row does not say "unreadable"; the total is not
+    /// the whole tree, and the status line says so.
+    bool partial = false;
     bool mountPoint = false;
     DiskNode *parent = nullptr;
     QVector<DiskNode *> children;
@@ -57,6 +61,9 @@ struct DiskScanOptions {
     /// every deferred subtree has been measured and added.
     void (*dirDone)(const DiskNode &node, void *user) = nullptr;
     void *user = nullptr;
+    /// `true` orders by allocated blocks. The Disk Usage size picker can ask
+    /// for apparent length instead. The default matches the picker's first item.
+    bool sortAllocated = true;
 };
 
 /// Saturating sum of byte counts. Overflow becomes
@@ -116,7 +123,21 @@ QVector<DiskVolume> listDiskVolumes();
 /// available, and the columns sum past the size. Total minus available is
 /// the pair that adds up, and it is what the Swift volume list carries.
 qint64 volumeUsedBytes(qint64 total, qint64 available);
-QString diskContentsLabel(qint64 items, bool isDir);
+/// `unreadable` is a directory the walk could not enter. That is not an empty
+/// directory. The default keeps a readable folder on the existing wording.
+QString diskContentsLabel(qint64 items, bool isDir, bool unreadable = false);
+/// Treemap caption when no child has a positive size. A folder of zero-byte
+/// files is not an empty folder. An unreadable folder is not empty either.
+/// Empty when some child has a size, so the chart paints cells instead of a caption.
+QString diskChartFolderLabel(int childCount, int sizedChildCount, bool unreadable = false);
+/// Move to Trash is a finished child of a finished scan. The scan root, a
+/// null selection, and the folder the walk is still reading are not targets.
+bool diskTrashAllowed(bool scanning, const DiskNode *selected, const DiskNode *root);
+/// Size order for a finished walk. `allocatedSize` false orders by file length.
+void orderScannedDiskTree(DiskNode *node, bool allocatedSize);
+/// Home and End move by the distance from `current` to that end. A relative
+/// jump of `count - 1` wraps to the other end.
+int diskChartKeyDelta(int count, int current, bool endKey);
 QString diskModifiedLabel(qint64 mtime);
 
 #endif

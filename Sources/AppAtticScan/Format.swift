@@ -122,6 +122,16 @@ public func humanSize(_ bytes: Int) -> String {
     return oneDecimal(n) + " " + units[unit]
 }
 
+/// A sum that may include rows whose size was not measured.
+/// No rows: "0 B". Rows and none measured: "unknown". Mixed: the measured
+/// sum plus " partial". All measured: the sum.
+public func measuredBytesLabel(bytes: Int, sized: Int, unsized: Int) -> String {
+    if sized == 0 && unsized == 0 { return humanSize(0) }
+    if sized == 0 { return "unknown" }
+    if unsized > 0 { return humanSize(bytes) + " partial" }
+    return humanSize(bytes)
+}
+
 /// Whole-day age, with the unit chosen by magnitude: hours below 1 day (at
 /// least 1h, so a future or fractional value never prints a zero count), days
 /// below 14, weeks below 28 days, months below a year, then years. Every
@@ -191,6 +201,101 @@ private let durationFormatters: [Calendar.Component: (DateComponents) -> String?
 private let asciiDurationUnits: [Calendar.Component: String] = [
     .hour: "h", .day: "d", .weekOfMonth: "w", .month: "mo", .year: "y",
 ]
+
+/// Opacity of the amber location text on an unselected shadow leftover.
+/// The review tone already sits on the 4.5:1 floor against white. Scaling it
+/// toward the list fill drops the location under that floor.
+public func shadowLocationOpacity() -> Double { 1 }
+
+/// Instrument value before the first result of a scan. The slot stays, and it
+/// reads as in progress rather than as a measured zero.
+public func overviewInstrumentValue(scanningWithoutResults: Bool, finished: String) -> String {
+    scanningWithoutResults ? "…" : finished
+}
+
+/// Empty-list copy while a scan has not produced a result yet. Nil once there
+/// is a result, so the page's own finished empty copy is what shows.
+public func dashboardPendingCopy(scanning: Bool, hasResults: Bool, progress: String) -> (title: String, detail: String)? {
+    guard scanning, !hasResults else { return nil }
+    let detail = progress.isEmpty ? "Scanning…" : progress
+    return ("Scanning", detail)
+}
+
+/// Finished empty copy when a package check failed. The Outdated page, the
+/// Packages page, and an overview that would otherwise say nothing is there
+/// use this. Stale and leftovers are a different measurement.
+public func dashboardIncompleteCopy() -> (title: String, detail: String) {
+    ("Scan incomplete", "A package check failed, so this list is not a complete answer.")
+}
+
+/// One version slot. Empty and missing both stay on screen as `unknown`.
+public func versionSlotText(_ version: String?) -> String {
+    guard let version, !version.isEmpty else { return "unknown" }
+    return version
+}
+
+/// Outdated row text. One missing side stays `unknown`. Both missing collapse
+/// to that word. An untrusted tap is not a version pair.
+public func outdatedVersionText(current: String?, latest: String?, untrusted: Bool) -> String {
+    if untrusted { return "untrusted tap" }
+    if versionSlotText(current) == "unknown", versionSlotText(latest) == "unknown" {
+        return "unknown"
+    }
+    return "\(versionSlotText(current)) → \(versionSlotText(latest))"
+}
+
+/// Phase line for a scan toolbar. Phase 0 is the text alone, so a line that
+/// has not entered the phase list does not grow a counter.
+public func scanProgressLine(phase: Int, total: Int, text: String) -> String {
+    if phase <= 0 || total <= 0 { return text }
+    return "\(text) (\(phase)/\(total))"
+}
+
+/// Fraction for the compact scan bar. Nil when the line has no trailing N/M.
+public func scanProgressFraction(line: String) -> Double? {
+    guard line.hasSuffix(")"), let open = line.lastIndex(of: "(") else { return nil }
+    let bodyStart = line.index(after: open)
+    let bodyEnd = line.index(before: line.endIndex)
+    guard bodyStart < bodyEnd else { return nil }
+    let parts = line[bodyStart..<bodyEnd].split(separator: "/", omittingEmptySubsequences: false)
+    guard parts.count == 2, let n = Int(parts[0]), let total = Int(parts[1]), total > 0, n >= 0 else {
+        return nil
+    }
+    return Double(n) / Double(total)
+}
+
+/// Update confirm. The named managers are the ones in the selection. Three or
+/// more stay generic so the title does not invent a pair the selection does not have.
+public func updateConfirmTitle(count: Int, managers: [String]) -> String {
+    var seen = Set<String>()
+    var labels: [String] = []
+    for manager in managers {
+        let label = manager.replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if label.isEmpty || seen.contains(label) { continue }
+        seen.insert(label)
+        labels.append(label)
+    }
+    labels.sort()
+    if labels.count >= 3 {
+        return "Update \(count) packages?"
+    }
+    let noun = count == 1 ? "package" : "packages"
+    if labels.isEmpty {
+        return "Update \(count) \(noun)?"
+    }
+    if labels.count == 1 {
+        return "Update \(count) \(labels[0]) \(noun)?"
+    }
+    return "Update \(count) \(labels[0]) or \(labels[1]) \(noun)?"
+}
+
+/// Toolbar count. A scan with no result yet has not measured zero rows.
+public func visibleRowCount(scanning: Bool, hasResults: Bool, count: Int, one: String, many: String) -> String {
+    if scanning && !hasResults { return "…" }
+    if count == 1 { return "1 \(one)" }
+    return "\(count) \(many)"
+}
 
 private func duration(_ unit: Calendar.Component, _ count: Int) -> String {
     var components = DateComponents()

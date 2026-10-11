@@ -63,6 +63,13 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(humanSize(1023 * 1024), "1023\(dot)0 KB")
     }
 
+    func testMeasuredBytesLabelKeepsAnUnknownOutOfACompleteSum() {
+        XCTAssertEqual(measuredBytesLabel(bytes: 0, sized: 0, unsized: 0), "0 B")
+        XCTAssertEqual(measuredBytesLabel(bytes: 0, sized: 0, unsized: 2), "unknown")
+        XCTAssertEqual(measuredBytesLabel(bytes: 2048, sized: 1, unsized: 1), "2\(expectedDecimalSeparator())0 KB partial")
+        XCTAssertEqual(measuredBytesLabel(bytes: 2048, sized: 1, unsized: 0), "2\(expectedDecimalSeparator())0 KB")
+    }
+
     func testHumanSizeFractionUsesTheLocaleDigits() {
         // The fraction used to be interpolated as ASCII while the whole part
         // beside it came out localized, so an Arabic window read "1.0 MB" in
@@ -175,5 +182,62 @@ final class FormatTests: XCTestCase {
         for label in [humanDays(28.0), humanDays(28.9)] {
             XCTAssertTrue(label.hasPrefix(expectedCount(1)), "month floor -> \(label)")
         }
+    }
+
+    func testOverviewStaysInProgressUntilAScanAnswers() {
+        XCTAssertEqual(overviewInstrumentValue(scanningWithoutResults: true, finished: "12"), "…")
+        XCTAssertEqual(overviewInstrumentValue(scanningWithoutResults: false, finished: "12"), "12")
+        let pending = dashboardPendingCopy(scanning: true, hasResults: false, progress: "pacman (2/9)")
+        XCTAssertEqual(pending?.title, "Scanning")
+        XCTAssertEqual(pending?.detail, "pacman (2/9)")
+        XCTAssertNil(dashboardPendingCopy(scanning: false, hasResults: false, progress: "pacman (2/9)"))
+        XCTAssertNil(dashboardPendingCopy(scanning: true, hasResults: true, progress: "pacman (2/9)"))
+        XCTAssertEqual(
+            visibleRowCount(scanning: true, hasResults: false, count: 0, one: "leftover", many: "leftovers"),
+            "…"
+        )
+        XCTAssertEqual(
+            visibleRowCount(scanning: false, hasResults: true, count: 1, one: "leftover", many: "leftovers"),
+            "1 leftover"
+        )
+        XCTAssertEqual(
+            visibleRowCount(scanning: false, hasResults: true, count: 4, one: "leftover", many: "leftovers"),
+            "4 leftovers"
+        )
+    }
+
+    func testScanProgressNamesThePhaseAndTheBarReadsIt() {
+        XCTAssertEqual(scanProgressLine(phase: 0, total: 6, text: "Starting"), "Starting")
+        XCTAssertEqual(
+            scanProgressLine(phase: 2, total: 6, text: "Checking usage metadata…"),
+            "Checking usage metadata… (2/6)"
+        )
+        XCTAssertEqual(scanProgressFraction(line: "Checking usage metadata… (2/6)"), 2.0 / 6.0)
+        XCTAssertNil(scanProgressFraction(line: "Starting"))
+        XCTAssertNil(scanProgressFraction(line: "note (nope)"))
+        let incomplete = dashboardIncompleteCopy()
+        XCTAssertEqual(incomplete.title, "Scan incomplete")
+        XCTAssertFalse(incomplete.detail.isEmpty)
+        XCTAssertEqual(updateConfirmTitle(count: 2, managers: []), "Update 2 packages?")
+        XCTAssertEqual(updateConfirmTitle(count: 1, managers: ["apt"]), "Update 1 apt package?")
+        XCTAssertEqual(
+            updateConfirmTitle(count: 3, managers: ["brew-cask", "flatpak", "brew-cask"]),
+            "Update 3 brew cask or flatpak packages?"
+        )
+        XCTAssertEqual(
+            updateConfirmTitle(count: 4, managers: ["apt", "pacman", "aur"]),
+            "Update 4 packages?"
+        )
+    }
+
+    func testMissingVersionStaysOnScreen() {
+        XCTAssertEqual(versionSlotText(nil), "unknown")
+        XCTAssertEqual(versionSlotText(""), "unknown")
+        XCTAssertEqual(versionSlotText("1.2"), "1.2")
+        XCTAssertEqual(outdatedVersionText(current: nil, latest: "1.2", untrusted: false), "unknown → 1.2")
+        XCTAssertEqual(outdatedVersionText(current: "1.0", latest: nil, untrusted: false), "1.0 → unknown")
+        XCTAssertEqual(outdatedVersionText(current: nil, latest: nil, untrusted: false), "unknown")
+        XCTAssertEqual(outdatedVersionText(current: "", latest: "2", untrusted: false), "unknown → 2")
+        XCTAssertEqual(outdatedVersionText(current: "1", latest: "2", untrusted: true), "untrusted tap")
     }
 }

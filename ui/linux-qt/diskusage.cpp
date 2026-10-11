@@ -207,6 +207,15 @@ void pathPop(char *path, size_t *len, size_t saved) {
 /// once, which keeps the walk off the descriptor limit on a wide tree.
 constexpr size_t kMaxDeferredDirFds = 64;
 
+/// The node could not be read. Ancestors stay readable and are marked partial
+/// so a total printed for them is not offered as the whole tree. `unreadable`
+/// is not copied up: the CLI prints that word on the node that failed.
+static void noteUnreadable(DiskNode *node) {
+    if (!node) return;
+    node->unreadable = true;
+    for (DiskNode *p = node->parent; p; p = p->parent) p->partial = true;
+}
+
 void addChildTotals(DiskNode *node, const DiskNode *child) {
     node->apparent = addSatBytes(node->apparent, child->apparent);
     node->allocated = addSatBytes(node->allocated, child->allocated);
@@ -279,7 +288,7 @@ void visitEntry(
     if (meta.isDir && !child->mountPoint) {
         const int childFd = openChildDir(dirfd, name);
         if (childFd < 0) {
-            child->unreadable = true;
+            noteUnreadable(child);
             deferDir = false;
         } else if (deferDir) {
             WalkJob job;
@@ -357,7 +366,7 @@ void walkDirFd(
         const long nread = syscall(SYS_getdents64, fd, buf, sizeof buf);
         if (nread < 0) {
             if (errno == EINTR) continue;
-            node->unreadable = true;
+            noteUnreadable(node);
             return;
         }
         if (nread == 0) break;
@@ -392,13 +401,13 @@ void walkDirFd(
     }
     const int dupfd = dup(fd);
     if (dupfd < 0) {
-        node->unreadable = true;
+        noteUnreadable(node);
         return;
     }
     DIR *dir = fdopendir(dupfd);
     if (!dir) {
         close(dupfd);
-        node->unreadable = true;
+        noteUnreadable(node);
         return;
     }
     // `errno` is cleared per call, not once before the loop: `visitEntry`
@@ -413,7 +422,7 @@ void walkDirFd(
         if (isCancelled(*ctx->opts)) break;
         visitEntry(node, fd, ent->d_name, path, pathLen, pathCap, ctx, defer);
     }
-    if (errno != 0) node->unreadable = true;
+    if (errno != 0) noteUnreadable(node);
     closedir(dir);
     if (emitDone && ctx->opts->dirDone) ctx->opts->dirDone(*node, ctx->opts->user);
 }
@@ -581,13 +590,13 @@ DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts) {
     const QByteArray native = QFile::encodeName(path);
     const int fd = open(native.constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) {
-        node->unreadable = true;
+        noteUnreadable(node);
         return node;
     }
     FileMeta meta;
     if (!fillMetaFd(fd, &meta) || !meta.isDir) {
         close(fd);
-        node->unreadable = true;
+        noteUnreadable(node);
         return node;
     }
     node->mtime = meta.mtime;
@@ -597,7 +606,7 @@ DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts) {
     const size_t nlen = size_t(native.size());
     if (nlen >= sizeof pathBuf) {
         close(fd);
-        node->unreadable = true;
+        noteUnreadable(node);
         return node;
     }
     std::memcpy(pathBuf, native.constData(), nlen);
@@ -660,9 +669,9 @@ DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts) {
     // nothing: what it managed to measure is not a subtree total, and the
     // window shows the cancelled state instead of a partial row.
     if (opts.dirDone && !isCancelled(opts)) opts.dirDone(*node, opts.user);
-    node->sortChildren(true);
+    orderScannedDiskTree(node, opts.sortAllocated);
 #else
-    node->unreadable = true;
+    noteUnreadable(node);
 #endif
     return node;
 }
@@ -765,12 +774,38 @@ qint64 volumeUsedBytes(qint64 total, qint64 available) {
     return total - available;
 }
 
-QString diskContentsLabel(qint64 items, bool isDir) {
+QString diskChartFolderLabel(int childCount, int sizedChildCount, bool unreadable) {
+    if (sizedChildCount > 0) return {};
+    if (unreadable) return QStringLiteral("unreadable");
+    if (childCount > 0) return QStringLiteral("No file here has a size");
+    return QStringLiteral("Empty folder");
+}
+
+QString diskContentsLabel(qint64 items, bool isDir, bool unreadable) {
     if (!isDir) return QStringLiteral("1 file");
+    if (unreadable && items <= 1) return QStringLiteral("unreadable");
     if (items <= 1) return QStringLiteral("Empty");
     const qint64 n = items - 1;
     if (n == 1) return QStringLiteral("1 item");
     return localeCount(n) + QStringLiteral(" items");
+}
+
+void orderScannedDiskTree(DiskNode *node, bool allocatedSize) {
+    if (!node) return;
+    node->sortChildren(allocatedSize);
+}
+
+int diskChartKeyDelta(int count, int current, bool endKey) {
+    if (count <= 0) return 0;
+    if (current < 0) current = 0;
+    if (current >= count) current = count - 1;
+    const int target = endKey ? count - 1 : 0;
+    return target - current;
+}
+
+bool diskTrashAllowed(bool scanning, const DiskNode *selected, const DiskNode *root) {
+    if (scanning || !selected || !root) return false;
+    return selected != root;
 }
 
 QString diskModifiedLabel(qint64 mtime) {

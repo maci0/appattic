@@ -542,6 +542,11 @@ QString modifiedLabel(const Finding &f, const QDateTime &now) {
 }
 
 QString displayName(const Finding &f) {
+    // Two dangling images share the name `<none>:<none>`. The id is what the
+    // removal names, so the row, its tooltip and the inspector have to show it.
+    if (f.name == QLatin1String("<none>:<none>") && !f.id.isEmpty()) {
+        return f.name + QLatin1Char(' ') + f.id;
+    }
     if (!f.name.isEmpty()) return f.name;
     if (!f.id.isEmpty()) return f.id;
     if (!f.path.isEmpty()) return QFileInfo(f.path).fileName();
@@ -1497,8 +1502,9 @@ void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line,
    them beside the counts. A plugin that answered with an empty list and a note
    (every query command refused, or a render that could not fit a single row)
    has said the page is short of the machine and produced no row to carry the
-   word, so this is the only place the claim can still be read. Empty when
-   every plugin answered completely, so the common case says nothing extra.
+   word. The status bar carries the clause, and an empty Outdated or Packages
+   page does too (`scanShortEmptyDetail`). Empty when every plugin answered
+   completely, so the common case says nothing extra.
 
    `localeCount` for the count and not a hardcoded digit: this bar already
    prints locale digits for the counts beside it, and one ASCII number among
@@ -1509,6 +1515,160 @@ QString scanNoteClause(const QStringList &notes) {
     return notes.size() == 1
         ? QStringLiteral("Scan incomplete: %1").arg(joined)
         : QStringLiteral("%1 scans incomplete: %2").arg(localeCount(notes.size()), joined);
+}
+
+QString scanShortEmptyDetail(bool finished, const QStringList &notes) {
+    if (!finished || notes.isEmpty()) return QString();
+    return scanNoteClause(notes);
+}
+
+QString linuxInstalledInstrumentText() {
+    return QStringLiteral("Not scanned");
+}
+
+QString linuxStaleInstrumentText(bool scanning, int count) {
+    if (count > 0) return localeCount(count);
+    if (scanning) return QStringLiteral("…");
+    return QStringLiteral("Not scanned");
+}
+
+QString linuxStaleEmptyDetail() {
+    return QStringLiteral("Installed system apps are not part of this scan.");
+}
+
+QString linuxStaleSummaryPhrase(int count) {
+    if (count <= 0) return QStringLiteral("stale not scanned");
+    if (count == 1) return QStringLiteral("1 stale");
+    return localeCount(count) + QStringLiteral(" stale");
+}
+
+bool packageMatchesFilter(const Finding &f, const QString &filter) {
+    if (filter == QLatin1String("globals")) return isGlobalKind(f);
+    if (filter == QLatin1String("leaves")) return f.kind == QLatin1String("orphan");
+    return true;
+}
+
+bool listMarkUsesTickbox(Page page) {
+    return page == Page::Leftovers;
+}
+
+bool pageScanStillOpen(bool scanning, int pageRows) {
+    return scanning && pageRows <= 0;
+}
+
+QString countLineWithScanStatus(const QString &countLine, const QString &status) {
+    const QString sep = QStringLiteral(" · ");
+    const int at = countLine.indexOf(sep);
+    if (at < 0) return status;
+    return countLine.left(at) + sep + status;
+}
+
+bool activityIsScan(bool scanning, bool scriptRunning) {
+    return scanning && !scriptRunning;
+}
+
+QString toolbarActivitySuffix(
+    bool scriptRunning,
+    const QString &scriptProgress,
+    bool scanning,
+    const QString &scanStatus,
+    const QString &scanAge
+) {
+    if (scriptRunning) return scriptProgress;
+    if (scanning) return scanStatus;
+    return scanAge;
+}
+
+QString versionSlotText(const QString &version) {
+    return version.isEmpty() ? QStringLiteral("unknown") : version;
+}
+
+QString outdatedVersionLabel(const Finding &f) {
+    if (f.kind.contains(QLatin1String("untrusted")) || f.status == QLatin1String("untrusted")) {
+        return QStringLiteral("untrusted tap");
+    }
+    if (f.currentVersion.isEmpty() && f.latestVersion.isEmpty()) return QStringLiteral("unknown");
+    return versionSlotText(f.currentVersion) + QStringLiteral(" → ")
+        + versionSlotText(f.latestVersion);
+}
+
+QString packageChildWhy(bool parentMarked) {
+    if (parentMarked) {
+        return QStringLiteral(
+            "Included with the parent. The parent command removes this dependency too."
+        );
+    }
+    return QStringLiteral("Selected alone. Remove this package, not the parent tree.");
+}
+
+QString packageChildMarkKey(const QString &parentUid, const QString &child) {
+    return parentUid + QChar(0x1e) + child;
+}
+
+int actionBarSelectionCount(
+    const QVector<Finding> &findings,
+    const QSet<QString> &marked,
+    const QSet<QString> &markedManual
+) {
+    int n = 0;
+    for (const Finding &f : findings) {
+        if (marked.contains(f.uid()) || markedManual.contains(f.uid())) {
+            ++n;
+            continue;
+        }
+        if (!isPackage(f)) continue;
+        for (const QString &child : f.children) {
+            if (marked.contains(packageChildMarkKey(f.uid(), child))) ++n;
+        }
+    }
+    return n;
+}
+
+QStringList leftoverScanNotes(const QStringList &notes) {
+    QStringList out;
+    for (const QString &note : notes) {
+        if (note.startsWith(QLatin1String("path-"))
+            || note.startsWith(QLatin1String("a plugin result could not be read"))) {
+            out.append(note);
+        }
+    }
+    return out;
+}
+
+QString finishedListEmptyTitle(Page page, const QStringList &notes) {
+    const QStringList relevant = page == Page::Leftovers ? leftoverScanNotes(notes) : notes;
+    if (page != Page::Stale
+        && (page == Page::Leftovers || page == Page::Outdated || page == Page::Packages)
+        && !scanShortEmptyDetail(true, relevant).isEmpty()) {
+        return QStringLiteral("Scan incomplete");
+    }
+    switch (page) {
+    case Page::Leftovers:
+        return QStringLiteral("No leftover data");
+    case Page::Stale:
+        return QStringLiteral("Not scanned");
+    case Page::Outdated:
+        return QStringLiteral("No outdated packages");
+    case Page::Packages:
+        return QStringLiteral("No unused packages");
+    default:
+        return QStringLiteral("Nothing to review");
+    }
+}
+
+StatusTone findingStatusTone(const Finding &f, Page page) {
+    if (f.status == QLatin1String("review") || f.status == QLatin1String("shadow")
+        || f.status == QLatin1String("outdated")) {
+        return StatusTone::Review;
+    }
+    if (page == Page::Packages) {
+        return isGlobalKind(f) ? StatusTone::Review : StatusTone::Remove;
+    }
+    if (f.status == QLatin1String("orphaned") || f.status == QLatin1String("remove")) {
+        return StatusTone::Remove;
+    }
+    if (f.status == QLatin1String("keep")) return StatusTone::Keep;
+    return StatusTone::Neutral;
 }
 
 bool isGlobalKind(const Finding &f) {
@@ -1595,11 +1755,10 @@ bool canMarkCleanup(const Finding &f, Page page) {
         // rule: the path is never deleted because its status is unreadable.
         return !leftoverCleanupCommand(f).isEmpty();
     }
-    // Not a leftover. A package row's `"global"`, `"installed"`, or
-    // `"outdated"` is equally outside this enum and equally ordinary; its
-    // command and kind decide, which is where they always did.
-    return !f.command.isEmpty() || status == LeftoverStatus::Orphaned
-        || status == LeftoverStatus::Review || isShadowFinding(f);
+    // Not a leftover. The cleanup script copies `f.command` and skips an empty
+    // one, so a review row with no command (the container build cache, which
+    // the plugin marks omitted) must not be offered as Include or Select All.
+    return !f.command.isEmpty();
 }
 
 QStringList leftoverIgnoreKeys(const Finding &f) {
@@ -1637,6 +1796,10 @@ QString searchHaystack(const Finding &f) {
     hay += f.summary;
     hay += QLatin1Char('\n');
     hay += f.reason;
+    hay += QLatin1Char('\n');
+    hay += f.currentVersion;
+    hay += QLatin1Char('\n');
+    hay += f.latestVersion;
     for (const QString &p : f.extraPaths) {
         hay += QLatin1Char('\n');
         hay += p;

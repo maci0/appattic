@@ -238,6 +238,34 @@ private final class SerialProgress: @unchecked Sendable {
     }
 }
 
+/// The six top-level phases of one scan, numbered onto the lines `progress`
+/// already emits. Nested collector lines keep the current index. The lock
+/// matches `SerialProgress`: a callback must not re-enter a scan.
+private final class PhasedProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private let total: Int
+    private var phase = 0
+    private let emit: (String) -> Void
+
+    init(total: Int, _ emit: @escaping (String) -> Void) {
+        self.total = total
+        self.emit = emit
+    }
+
+    func advance(_ text: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        phase += 1
+        emit(scanProgressLine(phase: phase, total: total, text: text))
+    }
+
+    func callAsFunction(_ text: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        emit(scanProgressLine(phase: phase, total: total, text: text))
+    }
+}
+
 /// Full scan, returning the live objects instead of the `ScanData` form.
 ///
 /// The `apps`, `brew`, `leftoverItems`, `leftoverAgents`, `leftoverRoots`,
@@ -272,10 +300,11 @@ public func performScan(
     scanLock.lock()
     defer { scanLock.unlock() }
     let serialProgress = SerialProgress(progress)
-    // Every collector below takes `(String) -> Void`, so shadowing the
-    // parameter here routes all of them, and their `pmap` workers, through the
-    // serialising wrapper.
-    let progress = serialProgress.callAsFunction
+    // Six top-level phases. Nested collector lines go through `progress` and
+    // keep the index `advance` last published. SerialProgress still owns the
+    // emit so worker threads do not interleave the callback.
+    let phased = PhasedProgress(total: 6, serialProgress.callAsFunction)
+    let progress = phased.callAsFunction
     let t0 = clock()
     let result = ScanResult(scannedAt: now)
     resetScanCheckFailures()
@@ -285,7 +314,7 @@ public func performScan(
     // list from launch is a scan that misses what was installed since.
     resetWhichSearchDirectories()
 
-    progress("Scanning installed applications…")
+    phased.advance("Scanning installed applications…")
     var found = apps ?? findApps(progress: progress, run: run, clock: clock)
     let leftoverApps = found
     if !includeSystem {
@@ -293,7 +322,7 @@ public func performScan(
     }
     result.apps = found
 
-    progress("Checking usage metadata…")
+    phased.advance("Checking usage metadata…")
     if !skipLiveUsage {
         fillAppUsage(&result.apps, progress: progress, run: run, now: now)
     }
@@ -301,12 +330,12 @@ public func performScan(
     let brewInfo = brew ?? collectBrew(progress: progress, which: which, run: run)
     result.brewAvailable = brewInfo.available
 
-    progress("Checking for outdated packages…")
+    phased.advance("Checking for outdated packages…")
     let linuxPkgs = linuxOutdated ?? collectLinux(progress: progress, which: which, run: run)
     let masPkgs = appStoreOutdated ?? queryAppstore(result.apps, progress: progress, which: which, run: run)
     result.outdated = applyUntrustedCasks(brewInfo.outdated + linuxPkgs + masPkgs, refused: brewInfo.untrustedCasks)
 
-    progress("Scanning for leftover data…")
+    phased.advance("Scanning for leftover data…")
     if let leftoverItems {
         result.dataItems = leftoverItems
         result.orphanAgents = leftoverAgents ?? []
@@ -334,7 +363,7 @@ public func performScan(
 
     applyPrefsFallback(&result.apps, items: result.dataItems)
 
-    progress("Building recommendations…")
+    phased.advance("Building recommendations…")
     result.software = buildSoftware(
         apps: result.apps,
         brew: brewInfo,
@@ -347,7 +376,7 @@ public func performScan(
     applyOutdated(result.software, pkgs: result.outdated)
     attachSummariesFromSoftware(result.software, pkgs: result.outdated)
     result.verdicts = evaluateAll(result.software, now: now)
-    progress("Listing unused distro packages and language globals…")
+    phased.advance("Listing unused distro packages and language globals…")
     result.packages = packages ?? collectPackages(progress: progress, which: which, run: run)
     // A check that ran and failed is an unknown, not an empty list. It reaches
     // the scan cache through `incomplete`, so the next run retries instead of

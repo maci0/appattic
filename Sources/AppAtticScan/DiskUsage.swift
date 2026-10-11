@@ -63,6 +63,17 @@ public final class DiskUsageNode {
         }
         for c in children { c.sortChildren(allocatedSize: allocatedSize) }
     }
+
+    /// True when this node or a descendant could not be read, so a total
+    /// printed for it is not the whole tree.
+    public func reportsPartialTotal() -> Bool {
+        var stack: [DiskUsageNode] = [self]
+        while let node = stack.popLast() {
+            if node.unreadable { return true }
+            stack.append(contentsOf: node.children)
+        }
+        return false
+    }
 }
 
 /// One mounted volume as the volume list shows it: its name, where it is
@@ -157,6 +168,27 @@ public enum DiskRootError: Error, Equatable, CustomStringConvertible, LocalizedE
     }
 
     public var errorDescription: String? { description }
+}
+
+/// Status line for the devices list. A scan failure clears the tree and
+/// returns here; the message has to come with it. A running scan and an open
+/// tree draw their own status, so this stays empty then.
+/// Contents column for a folder. `items` counts the folder itself, the same
+/// way the Linux label does: one entry is empty, otherwise the children.
+/// An unreadable folder with nothing read is not empty.
+public func diskFolderContentsLabel(items: Int, unreadable: Bool = false) -> String {
+    if unreadable && items <= 1 { return "unreadable" }
+    if items <= 1 { return "Empty" }
+    let n = items - 1
+    if n == 1 { return "1 item" }
+    return "\(localeCount(n)) items"
+}
+
+public func diskDevicesStatus(status: String, scanning: Bool, hasRoot: Bool) -> String? {
+    if scanning || hasRoot { return nil }
+    let trimmed = status.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return nil }
+    return trimmed
 }
 
 /// `disk PATH` must name a directory. A typo would otherwise print a one-line

@@ -5,6 +5,7 @@
 #include "finding.h"
 #include "uistyle.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QAtomicInteger>
 #include <QCheckBox>
@@ -27,15 +28,46 @@
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStyledItemDelegate>
 #include <QThread>
 #include <QTimer>
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QTreeWidgetItemIterator>
+
+/// Selected disk rows use the system highlight. Contents and Modified are
+/// painted with the placeholder color, which stays gray on that blue unless
+/// the delegate forces the on-accent color the findings lists already use.
+class DiskRowDelegate : public QStyledItemDelegate {
+public:
+    explicit DiskRowDelegate(QObject *parent = nullptr) : QStyledItemDelegate(parent) {}
+
+    void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override {
+        QStyledItemDelegate::initStyleOption(option, index);
+        // Contents and Modified are secondary text. Reading the palette at
+        // paint time keeps a light/dark switch on the 4.5:1 colour. A colour
+        // copied onto the item when the row was built stays the old grey.
+        QColor ink;
+        if (option->state & QStyle::State_Selected) {
+            ink = option->palette.color(QPalette::HighlightedText);
+        } else if (index.column() == 3 || index.column() == 4) {
+            ink = option->palette.color(QPalette::PlaceholderText);
+        } else {
+            return;
+        }
+        option->palette.setColor(QPalette::Text, ink);
+        option->palette.setColor(QPalette::WindowText, ink);
+        option->palette.setColor(QPalette::HighlightedText, ink);
+        option->palette.setBrush(QPalette::Text, ink);
+        option->palette.setBrush(QPalette::WindowText, ink);
+        option->palette.setBrush(QPalette::HighlightedText, ink);
+    }
+};
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -196,6 +228,10 @@ public:
     QLineEdit *search = nullptr;
     QPushButton *devicesBtn = nullptr;
     QPushButton *backBtn = nullptr;
+    // The toolbar action, not the button: QToolBar keeps a widget visible
+    // while its action is visible, so hide() on the button alone leaves Back
+    // on the devices list before any scan exists.
+    QAction *backAct = nullptr;
     QThread *thread = nullptr;
     DiskScanWorker *worker = nullptr;
     DiskNode *root = nullptr;
@@ -280,7 +316,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     scanBar->addWidget(folderBtn);
     scanBar->addWidget(fsBtn);
     scanBar->addWidget(remoteBtn);
-    scanBar->addWidget(d->backBtn);
+    d->backAct = scanBar->addWidget(d->backBtn);
+    d->backAct->setVisible(false);
     lv->addWidget(scanBar);
     d->volumes = new QTreeWidget;
     d->volumes->setColumnCount(6);
@@ -421,6 +458,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     auto *split = new QSplitter(Qt::Horizontal);
     split->setHandleWidth(1);
     d->tree = new QTreeWidget;
+    d->tree->setItemDelegate(new DiskRowDelegate(d->tree));
     d->tree->setColumnCount(5);
     d->tree->setHeaderLabels({
         QStringLiteral("Name"),
@@ -488,7 +526,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     });
     connect(d->sizeMode, &QComboBox::currentIndexChanged, this, [this] {
         d->allocated = d->sizeMode->currentData().toInt() != 0;
-        if (d->root) d->root->sortChildren(d->allocated);
+        orderScannedDiskTree(d->root, d->allocated);
         d->chart->setAllocated(d->allocated);
         fillTree();
     });
@@ -497,6 +535,9 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         fillTreeFiltered();
     });
     connect(d->tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *it, QTreeWidgetItem *) {
+        // A single click selects. Opening the folder is Enter or a double
+        // click: doing it here moved the chart and the breadcrumb onto a child
+        // while the tree still listed the parent.
         selectNode(d->nodeFromItem(it));
     });
     connect(d->tree, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *it) {
@@ -504,17 +545,14 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         if (!n || it->childCount() > 0) return;
         appendChildren(it, n, 10);
     });
-    connect(d->tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *it, int) {
+    connect(d->tree, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *it, int) {
         DiskNode *n = d->nodeFromItem(it);
         if (!n || !n->isDir) return;
-        // The crumb, the chart and the tree have to name the same folder: the
-        // single click already moved the view, so without the refill the tree
-        // kept listing the parent while the breadcrumb read as the child, and
-        // "Up" then jumped the tree to a view it had never shown.
+        // Enter and a double click open the folder. The chart, the breadcrumb
+        // and the tree then name that folder.
         d->chart->setView(n);
-        d->selected = n;
         fillTree();
-        updateChrome();
+        selectNode(n);
     });
     connect(d->tree, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
         QTreeWidgetItem *it = d->tree->itemAt(pos);
@@ -522,7 +560,9 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         QMenu m(d->tree);
         m.addAction(QStringLiteral("Open"), this, [this] { openSelected(); });
         m.addAction(QStringLiteral("Copy path"), this, [this] { copyPath(); });
-        m.addAction(QStringLiteral("Move to Trash"), this, [this] { trashSelected(); });
+        if (diskTrashAllowed(m_scanning, d->selected, d->root)) {
+            m.addAction(QStringLiteral("Move to Trash"), this, [this] { trashSelected(); });
+        }
         if (d->selected && d->selected->isDir) {
             m.addAction(QStringLiteral("Scan this folder"), this, [this] {
                 if (d->selected) startScan(d->selected->path);
@@ -531,23 +571,45 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         m.exec(d->tree->mapToGlobal(pos));
     });
     connect(d->chart, &DiskChart::nodeActivated, this, [this](DiskNode *n) {
+        if (!n) return;
+        // The chart has already moved its view for a folder drill or a click
+        // on the centre that goes up. The tree follows, or it keeps listing
+        // the folder the chart just left.
+        if (d->filter.trimmed().isEmpty()) {
+            DiskNode *view = d->chart->viewRoot();
+            if (view && d->nodeFromItem(d->tree->topLevelItem(0)) != view) fillTree();
+        }
+        {
+            const QSignalBlocker block(d->tree);
+            QTreeWidgetItemIterator it(d->tree);
+            while (*it) {
+                if (d->nodeFromItem(*it) == n) {
+                    d->tree->setCurrentItem(*it);
+                    break;
+                }
+                ++it;
+            }
+        }
         selectNode(n);
-        updateChrome();
     });
     // The chart and the tree show the same folders. Driving one with the
     // keyboard and reading the other is the norm (chart keys, tree for a
     // screen reader), so moving the chart's cursor selects the matching tree
-    // row and vice versa; the two never disagree about what is selected.
+    // row. The blocker keeps that selection from being read as a new click.
     connect(d->chart, &DiskChart::nodeFocused, this, [this](DiskNode *n) {
-        if (!n || d->filter.trimmed().isEmpty()) return;
-        QTreeWidgetItemIterator it(d->tree);
-        while (*it) {
-            if ((*it)->data(0, Qt::UserRole).value<void *>() == static_cast<void *>(n)) {
-                d->tree->setCurrentItem(*it);
-                return;
+        if (!n) return;
+        {
+            const QSignalBlocker block(d->tree);
+            QTreeWidgetItemIterator it(d->tree);
+            while (*it) {
+                if (d->nodeFromItem(*it) == n) {
+                    d->tree->setCurrentItem(*it);
+                    break;
+                }
+                ++it;
             }
-            ++it;
         }
+        selectNode(n);
     });
     connect(d->worker, &DiskScanWorker::progress, this, [this](int token, qint64 dirs, const QString &path) {
         if (token != d->scanToken) return;
@@ -651,7 +713,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
                 kid->mtime = mtime;
                 d->streamRoot->apparent = sumApparent;
                 d->streamRoot->allocated = sumAllocated;
-                d->streamRoot->sortChildren(d->allocated);
+                orderScannedDiskTree(d->streamRoot, d->allocated);
                 d->streamedSegments = d->streamRoot->children.size();
                 d->chart->setRoot(d->streamRoot);
                 updateChrome();
@@ -666,6 +728,7 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         d->tree->clear();
         delete d->root;
         d->root = tree;
+        orderScannedDiskTree(d->root, d->allocated);
         d->selected = d->root;
         d->progress->hide();
         d->progressLabel->hide();
@@ -859,20 +922,20 @@ void DiskPage::rescan() {
 
 void DiskPage::showEvent(QShowEvent *event) {
     QWidget::showEvent(event);
-    d->backBtn->setVisible(!d->scanPath.isEmpty() && d->stack->currentWidget() == d->locations);
+    d->backAct->setVisible(!d->scanPath.isEmpty() && d->stack->currentWidget() == d->locations);
 }
 
 void DiskPage::showLocations() {
     d->stack->setCurrentWidget(d->locations);
     // Only offer the way back once there is a scan to return to, so the button
     // never sits there as a dead control on a first visit.
-    d->backBtn->setVisible(!d->scanPath.isEmpty());
+    d->backAct->setVisible(!d->scanPath.isEmpty());
     refreshVolumes();
 }
 
 void DiskPage::showScan() {
     d->stack->setCurrentWidget(d->scanPage);
-    d->backBtn->setVisible(true);
+    d->backAct->setVisible(true);
 }
 
 /// A row built from values alone: the streaming path cannot touch the
@@ -898,7 +961,7 @@ static QTreeWidgetItem *makeValueItem(
     it->setText(0, label);
     it->setText(1, humanSize(apparent));
     it->setText(2, humanSize(allocated));
-    it->setText(3, diskContentsLabel(items, isDir));
+    it->setText(3, diskContentsLabel(items, isDir, unreadable));
     it->setText(4, diskModifiedLabel(mtime));
     it->setToolTip(0, plainTooltip(path));
     const QFont nums = aaNumericFont();
@@ -906,9 +969,6 @@ static QTreeWidgetItem *makeValueItem(
     it->setFont(2, nums);
     it->setTextAlignment(1, Qt::AlignTrailing | Qt::AlignVCenter);
     it->setTextAlignment(2, Qt::AlignTrailing | Qt::AlignVCenter);
-    const QColor dim = QApplication::palette().color(QPalette::PlaceholderText);
-    it->setForeground(3, dim);
-    it->setForeground(4, dim);
     return it;
 }
 
@@ -988,8 +1048,8 @@ void DiskPage::fillTreeFiltered() {
 }
 
 void DiskPage::selectNode(DiskNode *node) {
+    if (d->selected == node) return;
     d->selected = node;
-    if (node && node->isDir) d->chart->setView(node);
     updateChrome();
 }
 
@@ -1027,16 +1087,20 @@ void DiskPage::copyPath() {
 }
 
 void DiskPage::trashSelected() {
-    if (!d->selected || d->selected == d->root) return;
+    if (!diskTrashAllowed(m_scanning, d->selected, d->root)) return;
     const QString path = d->selected->path;
     /* The rescan below re-walks the whole scan root, so on a home folder that
        is minutes of "Scanning…" the user agreed to without knowing, and the
        place they were standing in the tree is where they come back to. Say
        both, in the alert that gates it, rather than only in the status bar
        once the walk has already started. */
-    const QString msg = QStringLiteral("Move “%1” and everything in it to Trash?\n\n"
-                                       "AppAttic will scan the disk again afterwards.")
-                        .arg(d->selected->name);
+    const QString shown = redactHomePaths(path);
+    const QString msg = d->selected->isDir
+        ? QStringLiteral("Move “%1” to Trash?\n\nEverything in it goes too.\n\n"
+                         "AppAttic will scan the disk again afterwards.")
+              .arg(shown)
+        : QStringLiteral("Move “%1” to Trash?\n\nAppAttic will scan the disk again afterwards.")
+              .arg(shown);
     if (askPlain(this, QStringLiteral("Move to Trash"), msg) != QMessageBox::Yes) {
         return;
     }
@@ -1081,7 +1145,7 @@ void DiskPage::updateChrome() {
     DiskNode *view = d->chart->viewRoot();
     d->upBtn->setEnabled(!scanning && view && view->parent);
     d->openBtn->setEnabled(d->selected);
-    d->trashBtn->setEnabled(!scanning && d->selected && d->selected != d->root);
+    d->trashBtn->setEnabled(diskTrashAllowed(scanning, d->selected, d->root));
     d->crumb->setText(view ? view->path : (d->scanPath.isEmpty() ? QStringLiteral("Devices") : d->scanPath));
     if (d->root && !scanning) {
         if (d->filterMatches >= 0) {
@@ -1098,8 +1162,10 @@ void DiskPage::updateChrome() {
             d->status->setText(
                 humanSize(d->root->metric(d->allocated))
                 + QStringLiteral(" · ")
-                + diskContentsLabel(d->root->items, true)
-                + (d->root->unreadable ? QStringLiteral(" · some folders could not be read") : QString())
+                + diskContentsLabel(d->root->items, true, d->root->unreadable)
+                + ((d->root->unreadable || d->root->partial)
+                       ? QStringLiteral(" · some folders could not be read")
+                       : QString())
             );
         }
     } else if (scanning) {

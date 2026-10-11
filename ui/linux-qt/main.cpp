@@ -95,11 +95,6 @@ static void resetWidgetPalette(QWidget *w) {
     w->setPalette(QApplication::palette());
 }
 
-static QString packageChildMarkKey(const QString &parentUid, const QString &child) {
-    return parentUid + QChar(0x1e) + child;
-}
-
-
 /// How long the destructor waits for the scan thread. A run notices the cancel
 /// flag between plugins, so a normal quit returns at once; a subprocess wedged
 /// past its own timeout does not, and the wait has to end for the app to.
@@ -140,21 +135,12 @@ static QString pageSearchEmpty(Page page) {
     }
 }
 
-static QString pageEmptyTitle(Page page, bool scanning, bool scanFailed) {
+static QString pageEmptyTitle(
+    Page page, bool scanning, bool scanFailed, const QStringList &notes = {}
+) {
     if (scanning) return QStringLiteral("Scanning");
     if (scanFailed) return QStringLiteral("Scan failed");
-    switch (page) {
-    case Page::Leftovers:
-        return QStringLiteral("No leftover data");
-    case Page::Stale:
-        return QStringLiteral("No stale apps");
-    case Page::Outdated:
-        return QStringLiteral("No outdated packages");
-    case Page::Packages:
-        return QStringLiteral("No unused packages");
-    default:
-        return QStringLiteral("Nothing to review");
-    }
+    return finishedListEmptyTitle(page, notes);
 }
 
 static QString pageEmptyDetail(
@@ -164,7 +150,8 @@ static QString pageEmptyDetail(
     const QString &search,
     int ignoredCount,
     const QString &packageFilter,
-    const QString &errorText
+    const QString &errorText,
+    const QStringList &notes = {}
 ) {
     if (scanning) {
         return QStringLiteral(
@@ -177,6 +164,8 @@ static QString pageEmptyDetail(
     if (!search.trimmed().isEmpty()) return pageSearchEmpty(page);
     switch (page) {
     case Page::Leftovers: {
+        const QString note = scanShortEmptyDetail(true, leftoverScanNotes(notes));
+        if (!note.isEmpty()) return note;
         QString body = QStringLiteral(
             "No leftover data from uninstalled apps, and no PATH or desktop overlays hiding package-manager files."
         );
@@ -189,45 +178,40 @@ static QString pageEmptyDetail(
         return body;
     }
     case Page::Stale:
-        return QStringLiteral("No unused installed apps in this scan.");
-    case Page::Outdated:
-        return QStringLiteral(
+        return linuxStaleEmptyDetail();
+    case Page::Outdated: {
+        const QString clean = QStringLiteral(
             "No outdated packages. Brew, Flatpak, Snap, apt, pacman, AUR, dnf, yum, zypper, and the App Store reported nothing, or those tools are not installed."
         );
-    case Page::Packages:
+        const QString note = scanShortEmptyDetail(true, notes);
+        return note.isEmpty() ? clean : note;
+    }
+    case Page::Packages: {
+        QString clean;
         if (packageFilter == QLatin1String("globals")) {
-            return QStringLiteral("No user-global npm, pnpm, bun, pipx, or uv tools.");
-        }
-        if (packageFilter == QLatin1String("leaves")) {
-            return QStringLiteral(
+            clean = QStringLiteral("No user-global npm, pnpm, bun, pipx, or uv tools.");
+        } else if (packageFilter == QLatin1String("leaves")) {
+            clean = QStringLiteral(
                 "No distro orphans. apt/pacman/dnf/yum/zypper reported nothing, or those tools are not installed."
             );
+        } else {
+            clean = QStringLiteral(
+                "No distro orphans or language globals. Missing package managers simply have nothing to list."
+            );
         }
-        return QStringLiteral(
-            "No distro orphans or language globals. Missing package managers simply have nothing to list."
-        );
+        const QString note = scanShortEmptyDetail(true, notes);
+        return note.isEmpty() ? clean : note;
+    }
     default:
         return QStringLiteral("No leftover data, stale apps, or outdated packages in this scan.");
     }
 }
 
-static QString outdatedVersionLabel(const Finding &f) {
-    if (f.kind.contains(QLatin1String("untrusted")) || f.status == QLatin1String("untrusted")) {
-        return QStringLiteral("untrusted tap");
-    }
-    // Same word the size column uses when a value is missing, instead of a bare
-    // dash next to real versions.
-    if (f.currentVersion.isEmpty() && f.latestVersion.isEmpty()) return QStringLiteral("unknown");
-    return (f.currentVersion.isEmpty() ? QStringLiteral("-") : f.currentVersion)
-        + QStringLiteral(" → ")
-        + (f.latestVersion.isEmpty() ? QStringLiteral("?") : f.latestVersion);
-}
-
 static QString scanSummaryMessage(int leftovers, int stale, int outdated, int packages, const QString &when) {
-    return QStringLiteral("Scanned %1 · %2 leftovers, %3 stale, %4 outdated, %5 packages")
+    return QStringLiteral("Scanned %1 · %2 leftovers, %3, %4 outdated, %5 packages")
         .arg(when.isEmpty() ? QStringLiteral("now") : when)
         .arg(localeCount(leftovers))
-        .arg(localeCount(stale))
+        .arg(linuxStaleSummaryPhrase(stale))
         .arg(localeCount(outdated))
         .arg(localeCount(packages));
 }
@@ -243,15 +227,15 @@ static QString scanSummaryMessage(int leftovers, int stale, int outdated, int pa
    manual sequence. */
 static QString settingsUnreadableMessage(const QString &path) {
     return redactHomePaths(QStringLiteral(
-        "Could not read settings at %1. AppAttic will not overwrite that file until you save "
-        "settings. The backup %1.bak holds the settings from before the last change."
+        "Could not read settings at %1. AppAttic will not overwrite that file. "
+        "Repair it and click Rescan, or restore the backup %1.bak."
     ).arg(path));
 }
 
 static QString settingsInvalidMessage(const QString &path, const QString &err) {
     return redactHomePaths(QStringLiteral(
-        "Settings at %1 are not valid (%2). AppAttic will not overwrite that file until you save "
-        "settings. The backup %1.bak holds the settings from before the last change."
+        "Settings at %1 are not valid (%2). AppAttic will not overwrite that file. "
+        "Repair it and click Rescan, or restore the backup %1.bak."
     ).arg(path, err));
 }
 
@@ -302,15 +286,16 @@ static Tone toneFrom(const QPalette &p) {
 }
 
 static QColor statusColor(const Finding &f, const Tone &t, Page page) {
-    if (page == Page::Packages) {
-        return isGlobalKind(f) ? t.amber : t.red;
-    }
-    if (f.status == QLatin1String("orphaned") || f.status == QLatin1String("remove")) return t.red;
-    if (f.status == QLatin1String("review") || f.status == QLatin1String("shadow")
-        || f.status == QLatin1String("outdated")) {
+    switch (findingStatusTone(f, page)) {
+    case StatusTone::Remove:
+        return t.red;
+    case StatusTone::Review:
         return t.amber;
+    case StatusTone::Keep:
+        return t.green;
+    case StatusTone::Neutral:
+        return t.dim;
     }
-    if (f.status == QLatin1String("keep")) return t.green;
     return t.dim;
 }
 
@@ -524,7 +509,9 @@ public:
         m_search->setPlaceholderText(QStringLiteral("Search"));
         m_search->setClearButtonEnabled(true);
         m_search->setFixedWidth(200);
-        m_search->setToolTip(QStringLiteral("Filter the current list by name, path, or kind"));
+        m_search->setToolTip(
+            QStringLiteral("Filter the current list by name, path, kind, or version")
+        );
         // The placeholder is a hint that vanishes as soon as the box has
         // text, so it is not a name: it is what a screen reader falls back to
         // while the box is empty, and "Search" never says what is searched.
@@ -564,13 +551,17 @@ public:
         toolSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         tools->addWidget(toolSpacer);
         /* The toolbar hides whatever it cannot fit into the overflow chevron,
-           rightmost first, and the rightmost items here are Search, Select All
-           and Rescan. At the window's own minimum width the page title and the
-           count were what pushed those three controls out of sight: the page
-           behind them already says what they are, so they are the items that
-           yield instead. */
-        aaElidableToolbarLabel(m_pageTitle);
-        aaElidableToolbarLabel(m_count, 90);
+           rightmost first. The count is the row total plus the scan age, so
+           the floor is that whole string. A 90px floor clipped it to
+           "8 outdated p." and hid the age. A longer live phase still yields,
+           and the tooltip keeps the full line. The page title is the Michroma
+           name of the page and keeps its own text width. */
+        const QFontMetrics countFm(m_count->font());
+        const int countFloor = countFm.horizontalAdvance(
+            QStringLiteral("8,888 outdated packages · 2026-10-11T19:12:15"))
+            + m_count->contentsMargins().left()
+            + m_count->contentsMargins().right();
+        aaElidableToolbarLabel(m_count, countFloor);
         m_searchAct = tools->addWidget(m_search);
         m_filterAct = tools->addWidget(m_filter);
         m_selectAllAct = tools->addWidget(m_selectAll);
@@ -770,11 +761,20 @@ public:
             m_settingsNav->clearSelection();
             showPage();
         });
-        connect(m_settingsNav, &QListWidget::itemClicked, this, [this](QListWidgetItem *) {
-            m_sidebar->clearSelection();
-            m_settingsNav->setCurrentRow(0);
+        auto openSettings = [this] {
+            // selectPage clears the sidebar's current row. clearSelection
+            // alone leaves it, so clicking that same page does not switch
+            // back from Settings.
+            selectPage(Page::Settings);
             m_settingsNav->setFocus(Qt::MouseFocusReason);
-            showPage();
+        };
+        // itemClicked is the pointer. itemActivated is Enter, which a one-row
+        // list otherwise never handles.
+        connect(m_settingsNav, &QListWidget::itemClicked, this, [openSettings](QListWidgetItem *) {
+            openSettings();
+        });
+        connect(m_settingsNav, &QListWidget::itemActivated, this, [openSettings](QListWidgetItem *) {
+            openSettings();
         });
         connect(m_rescan, &QPushButton::clicked, this, &MainWindow::rescan);
         connect(m_search, &QLineEdit::textChanged, this, [this] {
@@ -801,7 +801,6 @@ public:
         connect(m_table, &QTreeView::clicked, this, [this](const QModelIndex &idx) {
             if (!idx.isValid() || idx.column() != 0) return;
             if (m_scanning) return;
-            if (currentPage() == Page::Leftovers) return;
             const QString uid = m_model->data(idx, Qt::UserRole).toString();
             if (uid.isEmpty()) return;
             const Finding *f = findingByUid(uid);
@@ -812,6 +811,10 @@ public:
                 rebuildInspector();
                 return;
             }
+            // A checkable row toggles from the checkbox itself (Space and the
+            // indicator both call setData). Handling the click as well flips
+            // the mark twice.
+            if (m_model->data(idx, Qt::CheckStateRole).isValid()) return;
             if (m_markedManual.contains(uid)) {
                 m_markedManual.remove(uid);
             } else if (m_marked.contains(uid) && !canMarkCleanup(*f, currentPage())) {
@@ -905,6 +908,16 @@ private slots:
 
     void rescan() {
         if (m_scanning) return;
+        // A broken settings file is refused until it loads. Rescan is the
+        // recovery the error names: try the file again, and scan only once it
+        // parses. Saving stays refused while the flag is set.
+        if (m_settingsError) {
+            loadSettings();
+            if (m_settingsError) {
+                fillCurrent();
+                return;
+            }
+        }
         const QString out = coreOutDir();
         const QString core = out + QStringLiteral("/appattic_core.wasm");
         if (!QFileInfo::exists(core)) {
@@ -919,6 +932,7 @@ private slots:
             return;
         }
         m_scanning = true;
+        m_scanNotes.clear();
         m_scanPhase = QStringLiteral("Starting scan…");
         m_scanIndex = 0;
         m_scanTotal = 0;
@@ -967,6 +981,7 @@ private slots:
     void scanFinished(const QVector<Finding> &findings, const QString &err, int rc,
                       const QStringList &notes) {
         m_scanning = false;
+        m_scanNotes = notes;
         m_scanPhase.clear();
         m_scanIndex = 0;
         m_scanTotal = 0;
@@ -998,7 +1013,7 @@ private slots:
             const QString noteClause = scanNoteClause(notes);
             const QString line = noteClause.isEmpty()
                 ? summary
-                : summary + QLatin1String(" · ") + noteClause;
+                : summary + QStringLiteral(" · ") + noteClause;
             statusBar()->showMessage(line);
             // The scan runs for a while with nothing on screen changing, and it
             // ends with a count the user has to notice. A screen reader hears
@@ -1053,7 +1068,7 @@ private slots:
             showScriptSheet(
                 ScriptKind::Delete,
                 script,
-                QStringLiteral("Delete %1 selected items? This runs the uninstall script now.")
+                QStringLiteral("Delete %1 selected items? This runs the script shown here now.")
                     .arg(localeCount(cleanupMarkCount())),
                 QStringLiteral("Delete")
             );
@@ -1402,11 +1417,15 @@ private:
         t->setIndentation(0);
         t->setHeaderLabels({QStringLiteral("Name"), QStringLiteral("What"), trailing});
         t->header()->setStretchLastSection(false);
-        // Only the name takes the slack: "What" and the trailing column are
-        // short labels, and stretching them elided names that had room.
-        t->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-        t->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+        // "What" is a sentence. Sizing it to that text pushed Size past the
+        // edge of the pane. Name keeps a readable width, What takes the rest
+        // and elides, and the size stays on screen. The full sentence is the
+        // row's tooltip.
+        t->header()->setMinimumSectionSize(72);
+        t->header()->setSectionResizeMode(0, QHeaderView::Interactive);
+        t->header()->setSectionResizeMode(1, QHeaderView::Stretch);
         t->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+        t->setColumnWidth(0, 160);
         t->setFrameShape(QFrame::NoFrame);
         t->setTextElideMode(Qt::ElideRight);
         t->header()->setHighlightSections(false);
@@ -1475,7 +1494,9 @@ private:
         m_confirmBox = new QCheckBox(QStringLiteral("Confirm before running"));
         m_confirmBox->setChecked(true);
         auto *delHint = hintLabel(
-            QStringLiteral("Shows an alert before rm, package remove, or updates.")
+            QStringLiteral(
+                "Shows an alert before rm, package remove, or updates. Off runs the script immediately."
+            )
         );
         delCol.second->addWidget(m_confirmBox);
         delCol.second->addWidget(delHint);
@@ -1622,10 +1643,7 @@ private:
         for (const Finding &f : m_findings) {
             if (!matchPage(f, page)) continue;
             if (page == Page::Leftovers && leftoverIsIgnored(f, m_ignored)) continue;
-            if (page == Page::Packages) {
-                if (filt == QLatin1String("globals") && !isGlobalKind(f)) continue;
-                if (filt == QLatin1String("leaves") && isGlobalKind(f)) continue;
-            }
+            if (page == Page::Packages && !packageMatchesFilter(f, filt)) continue;
             if (needQ && !searchHaystack(f).contains(q)) continue;
             rows.push_back(f);
         }
@@ -1683,7 +1701,7 @@ private:
         const bool disk = page == Page::DiskUsage;
         m_stack->setCurrentIndex(settings ? 2 : (overview ? 0 : (disk ? 3 : 1)));
         const bool list = !settings && !overview && !disk;
-        const bool scanLive = m_scanning && !m_scanPhase.isEmpty();
+        const bool scanLive = (m_scanning && !m_scanPhase.isEmpty()) || m_script != nullptr;
         const auto vis = [](QAction *act, QWidget *w, bool on) {
             if (act) act->setVisible(on);
             if (w) w->setVisible(on);
@@ -1746,27 +1764,29 @@ private:
         const int outdated = countPage(Page::Outdated);
         const int packages = countPage(Page::Packages);
         qint64 leftoverBytes = 0;
-        bool leftoverSized = false;
+        int leftoverSized = 0;
+        int leftoverUnsized = 0;
         for (const Finding &f : m_findings) {
             if (!matchPage(f, Page::Leftovers) || leftoverIsIgnored(f, m_ignored)) continue;
-            if (f.bytes < 0) continue;
-            leftoverSized = true;
+            if (f.bytes < 0) {
+                leftoverUnsized += 1;
+                continue;
+            }
+            leftoverSized += 1;
             leftoverBytes = addSatBytes(leftoverBytes, f.bytes);
         }
         const bool scanningEmpty = emptyScanPending();
+        const bool failedEmpty = emptyScanFailed();
         const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
         const QString pending = QStringLiteral("…");
         const QString blockedMark = QStringLiteral("-");
-        // The Linux scan has no installed-app count to show, and a scan cannot
-        // fill this one in. "Not scanned" read as a failed measurement next to
-        // four real numbers; the marker says the value does not exist here.
-        m_statInstalled->setText(QStringLiteral("n/a"));
+        m_statInstalled->setText(linuxInstalledInstrumentText());
         m_statInstalled->setToolTip(
             QStringLiteral("This Linux scan does not count installed apps.")
         );
         auto statCount = [&](int n) {
-            if (scanningEmpty) return pending;
-            if (settingsBlocked) return blockedMark;
+            if (scanningEmpty || pageScanStillOpen(scanRunning(), n)) return pending;
+            if (settingsBlocked || failedEmpty) return blockedMark;
             return localeCount(n);
         };
         m_statLeftovers->setText(statCount(leftovers));
@@ -1775,14 +1795,16 @@ private:
             p.setColor(QPalette::WindowText, (!scanningEmpty && !settingsBlocked && leftovers) ? t.red : t.text);
             m_statLeftovers->setPalette(p);
         }
-        m_statLeftoverData->setText(
-            scanningEmpty ? pending
-                          : (settingsBlocked ? blockedMark
-                                             : (leftovers > 0 && !leftoverSized
-                                                    ? QStringLiteral("unknown")
-                                                    : humanSize(leftoverBytes)))
-        );
-        m_statStale->setText(statCount(stale));
+        QString leftoverData = humanSize(leftoverBytes);
+        const bool leftoverPending = scanningEmpty
+            || pageScanStillOpen(scanRunning(), leftoverSized + leftoverUnsized);
+        if (leftoverPending) leftoverData = pending;
+        else if (settingsBlocked || failedEmpty) leftoverData = blockedMark;
+        else if (leftoverSized == 0 && leftoverUnsized > 0) leftoverData = QStringLiteral("unknown");
+        else if (leftoverUnsized > 0) leftoverData = humanSize(leftoverBytes) + QStringLiteral(" partial");
+        m_statLeftoverData->setText(leftoverData);
+        if (settingsBlocked || failedEmpty) m_statStale->setText(blockedMark);
+        else m_statStale->setText(linuxStaleInstrumentText(scanRunning() || scanningEmpty, stale));
         m_statOutdated->setText(statCount(outdated));
         m_statPackages->setText(statCount(packages));
         m_statInstalled->setFont(aaBodyFont());
@@ -1834,32 +1856,52 @@ private:
                                            : (Qt::AlignTrailing | Qt::AlignVCenter)
                 );
             }
+            const bool columnPending = scanningEmpty || pageScanStillOpen(scanRunning(), n);
             const QString text = settingsBlocked
                 ? QStringLiteral("Settings could not be loaded.")
-                : (scanningEmpty ? QStringLiteral("Scanning…") : emptyText);
+                : (failedEmpty
+                    ? QStringLiteral("Scan failed")
+                    : (columnPending
+                        ? scanStatusText()
+                        : (page == Page::Stale ? linuxStaleEmptyDetail() : emptyText)));
             empty->setText(text);
             empty->setVisible(n == 0);
             tree->setVisible(n > 0);
         };
+        const QStringList leftoverNotes = leftoverScanNotes(
+            !scanRunning() && m_hasScanned && !failedEmpty ? m_scanNotes : QStringList()
+        );
+        const QString leftoverNote = scanShortEmptyDetail(true, leftoverNotes);
         fillOv(
             m_ovLeftovers,
             m_ovLeftEmpty,
             Page::Leftovers,
-            QStringLiteral("No leftover data from uninstalled apps.")
+            leftoverNote.isEmpty()
+                ? QStringLiteral("No leftover data from uninstalled apps.")
+                : leftoverNote
         );
         fillOv(
             m_ovStale,
             m_ovStaleEmpty,
             Page::Stale,
-            QStringLiteral("No unused installed apps in this scan.")
+            linuxStaleEmptyDetail()
         );
+        const QString outdatedNote = scanShortEmptyDetail(!scanRunning() && m_hasScanned && !failedEmpty, m_scanNotes);
         fillOv(
             m_ovOutdated,
             m_ovOutEmpty,
             Page::Outdated,
-            QStringLiteral("No outdated packages in this scan.")
+            outdatedNote.isEmpty()
+                ? QStringLiteral("No outdated packages in this scan.")
+                : outdatedNote
         );
-        m_count->setText(m_scanning ? scanStatusText() : QString());
+        setCountText(toolbarActivitySuffix(
+            m_script != nullptr,
+            m_scriptProgress,
+            scanRunning(),
+            scanStatusText(),
+            QString()
+        ));
     }
 
     QStringList pageHeaders(Page page) const {
@@ -1881,13 +1923,13 @@ private:
         }
     }
 
-    void setupColumns(Page page, const QStringList &headers) {
+    void setupColumns(Page, const QStringList &headers) {
         // Qt samples this many rows per column when sizing; 1000 (the default)
         // cost 17 ms of a 2000 row fill, 100 costs 1 ms. The auto-sized columns
         // hold short labels, so a sampled maximum is enough.
         m_table->header()->setResizeContentsPrecision(100);
         m_table->header()->setSectionResizeMode(0, QHeaderView::Fixed);
-        m_table->setColumnWidth(0, page == Page::Leftovers ? 36 : 28);
+        m_table->setColumnWidth(0, 36);
         for (int c = 1; c < headers.size(); ++c) {
             // Interactive here, sized once per fill: ResizeToContents re-measures
             // its columns on every insertion.
@@ -1940,33 +1982,35 @@ private:
         }
         const QString name = displayName(f);
         if (column == 0) {
-            const bool checkable = page == Page::Leftovers && canMarkCleanup(f, page);
+            const bool checkable = canMarkCleanup(f, page);
+            const bool tickbox = listMarkUsesTickbox(page) && checkable;
             switch (role) {
             case Qt::DisplayRole:
-                if (checkable) return QString();
+                if (tickbox) return markedKeep ? QStringLiteral("keep") : QString();
                 return (markedCleanup || markedKeep) ? QStringLiteral("in") : QString();
             case Qt::CheckStateRole:
-                if (!checkable) return {};
+                if (!tickbox) return {};
                 return int(markedCleanup ? Qt::Checked : Qt::Unchecked);
             case Qt::ForegroundRole:
                 return ctx.highlight;
             case Qt::SizeHintRole:
-                return QSize(page == Page::Leftovers ? 36 : 28, 0);
+                return QSize(36, 0);
             case Qt::ToolTipRole:
                 if (markedCleanup) {
-                    return page == Page::Leftovers
-                               ? QStringLiteral("Included. Untick to remove from the selection.")
-                               : QStringLiteral("Included. Click to remove from the selection.");
+                    return tickbox
+                        ? QStringLiteral("Included. Untick to remove from the selection.")
+                        : QStringLiteral("Included. Clear it from the inspector.");
                 }
                 if (markedKeep) {
                     return QStringLiteral(
-                        "Marked as manually installed. Click to remove from the selection."
+                        "Marked as manually installed. Clear it from the inspector."
                     );
                 }
-                if (canMarkCleanup(f, page)) {
-                    return page == Page::Leftovers
-                               ? QStringLiteral("Tick to include in cleanup.")
-                               : QStringLiteral("Click to include in cleanup, update, or remove.");
+                if (checkable) {
+                    if (!tickbox) return QStringLiteral("Include it from the inspector.");
+                    if (page == Page::Outdated) return QStringLiteral("Tick to include in the update.");
+                    if (page == Page::Packages) return QStringLiteral("Tick to include in the removal.");
+                    return QStringLiteral("Tick to include in cleanup.");
                 }
                 return QString();
             default:
@@ -2110,13 +2154,10 @@ private:
             tone.amber,
             palette().color(QPalette::Highlight),
         };
-        const bool checkboxColumn = page == Page::Leftovers;
         m_model->setContent(
             headers,
             page == Page::Outdated ? -1 : headers.size() - 1,
-            checkboxColumn
-                ? QStringLiteral("Tick to include the leftover in cleanup")
-                : QStringLiteral("Click to include the item in cleanup, update, or remove"),
+            QStringLiteral("Tick to include the row. A row with no command has no tick."),
             hasKids && page == Page::Packages,
             rows,
             [this, ctx](const Finding &f, const QString &child, int column, int role) {
@@ -2149,7 +2190,11 @@ private:
             m_selectedChild.clear();
         }
 
-        const bool scanningEmpty = emptyScanPending();
+        const bool searching = !m_search->text().trimmed().isEmpty();
+        // A search that matches nothing is a search miss, including mid-scan.
+        // An empty page with no search still running has not answered yet.
+        const bool scanningEmpty = emptyScanPending()
+            || (pageScanStillOpen(scanRunning(), rows.size()) && !searching);
         const bool scanFailed = emptyScanFailed();
         const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
         if (rows.isEmpty() && scanningEmpty) {
@@ -2168,7 +2213,8 @@ private:
                         : m_error->text()
                 );
             } else {
-                m_emptyTitle->setText(pageEmptyTitle(page, scanningEmpty, scanFailed));
+                const QStringList notesForEmpty = searching ? QStringList() : m_scanNotes;
+                m_emptyTitle->setText(pageEmptyTitle(page, scanningEmpty, scanFailed, notesForEmpty));
                 m_emptyDetail->setText(
                     pageEmptyDetail(
                         page,
@@ -2177,16 +2223,16 @@ private:
                         m_search->text(),
                         m_ignored.size(),
                         m_filter->currentData().toString(),
-                        m_error->text()
+                        m_error->text(),
+                        notesForEmpty
                     )
                 );
             }
             m_clearSearch->setVisible(
                 !m_search->text().trimmed().isEmpty() && !scanningEmpty && !scanFailed && !settingsBlocked
             );
-            // A settings error is fixed by editing the file, and Rescan reads
-            // the same broken file again: offering the button there is a dead
-            // end next to copy that says to fix the file.
+            // The toolbar Rescan reloads a broken settings file. This button is
+            // the scan-failure retry, and a settings error is not one of those.
             m_emptyRetry->setVisible(scanFailed && !scanningEmpty);
         } else {
             m_table->show();
@@ -2196,14 +2242,15 @@ private:
         }
         m_inspectorScroll->setVisible(m_table->isVisible());
         QString count = countLabel(page, rows.size());
-        if (scanningEmpty) {
-            count = scanStatusText();
-        } else if (m_scanning) {
-            count += QStringLiteral(" · ") + scanStatusText();
-        } else if (!m_scanAt.isEmpty()) {
-            count += QStringLiteral(" · ") + m_scanAt;
-        }
-        m_count->setText(count);
+        const QString suffix = toolbarActivitySuffix(
+            m_script != nullptr,
+            m_scriptProgress,
+            scanRunning(),
+            scanStatusText(),
+            m_scanAt
+        );
+        if (!suffix.isEmpty()) count += QStringLiteral(" · ") + suffix;
+        setCountText(count);
         // The findings table is where the whole app is read out, and one widget
         // serves four list pages. Named per page here: a bare "tree" tells a
         // screen-reader user nothing about what they landed on, and this is
@@ -2412,6 +2459,19 @@ public:
                 std::fprintf(
                     stderr,
                     "disk-stream: the announcement does not name the folder under the cursor\n"
+                );
+                return 1;
+            }
+            landed.clear();
+            for (const int key : {Qt::Key_Home, Qt::Key_End}) {
+                QKeyEvent ev(QEvent::KeyPress, key, Qt::NoModifier);
+                QApplication::sendEvent(chart, &ev);
+            }
+            if (landed.size() != 2 || !landed.at(0) || !landed.at(1)
+                || landed.at(1)->parent != landed.at(0)) {
+                std::fprintf(
+                    stderr,
+                    "disk-stream: Home and End did not land on the folder and its last child\n"
                 );
                 return 1;
             }
@@ -2681,6 +2741,14 @@ private:
         return n > 0;
     }
 
+    void setCountText(const QString &text) {
+        if (!m_count) return;
+        m_count->setText(text);
+        // The toolbar floor fits the count and the scan age. A live phase can
+        // still be longer, and the same words stay available on hover.
+        m_count->setToolTip(text);
+    }
+
     QString countLabel(Page page, int n) const {
         switch (page) {
         case Page::Leftovers:
@@ -2696,9 +2764,13 @@ private:
         }
     }
 
+    bool scanRunning() const {
+        return activityIsScan(m_scanning, m_script != nullptr);
+    }
+
     bool isScanPending() const {
         const bool noError = !m_error || m_error->text().isEmpty();
-        return m_scanning || (!m_hasScanned && noError);
+        return scanRunning() || (!m_hasScanned && noError);
     }
 
     QString scanStatusText() const {
@@ -2717,16 +2789,15 @@ private:
     void applyScanProgressUi() {
         const QString msg = scanStatusText();
         statusBar()->showMessage(msg);
-        if (m_count && m_scanning) m_count->setText(msg);
-        const QString ov = QStringLiteral("Scanning…");
+        if (m_scanning && m_count) setCountText(countLineWithScanStatus(m_count->text(), msg));
         if (m_scanning && m_ovLeftEmpty && m_ovLeftEmpty->isVisible()) {
-            m_ovLeftEmpty->setText(ov);
+            m_ovLeftEmpty->setText(msg);
         }
         if (m_scanning && m_ovStaleEmpty && m_ovStaleEmpty->isVisible()) {
-            m_ovStaleEmpty->setText(ov);
+            m_ovStaleEmpty->setText(msg);
         }
         if (m_scanning && m_ovOutEmpty && m_ovOutEmpty->isVisible()) {
-            m_ovOutEmpty->setText(ov);
+            m_ovOutEmpty->setText(msg);
         }
         if (m_scanBar) {
             m_scanBar->setToolTip(msg);
@@ -2752,7 +2823,8 @@ private:
             m_search->text(),
             m_ignored.size(),
             m_filter->currentData().toString(),
-            m_error->text()
+            m_error->text(),
+            m_search->text().trimmed().isEmpty() ? m_scanNotes : QStringList()
         );
     }
 
@@ -2891,8 +2963,12 @@ private:
             // finding on the page to look at an empty/size result throws the
             // order away, and this runs on every selection change.
             if (filteredRows(page, false).isEmpty()) {
-                title = emptyTitle(page);
-                body = emptyDetail(page);
+                const bool searching = !m_search->text().trimmed().isEmpty();
+                const bool pending = emptyScanPending() || (scanRunning() && !searching);
+                title = pageEmptyTitle(
+                    page, pending, emptyScanFailed(), searching ? QStringList() : m_scanNotes
+                );
+                body = pending ? scanStatusText() : emptyDetail(page);
             } else if (page == Page::Leftovers) {
                 title = QStringLiteral("Select a leftover");
             } else if (page == Page::Stale) {
@@ -2912,7 +2988,7 @@ private:
         if (!m_selectedChild.isEmpty() && page == Page::Packages) {
             m_inspectorLay->addWidget(inspectorLabel(m_selectedChild, aaTitleFont(), t.text));
             addFact(QStringLiteral("What"), QStringLiteral("Dependency of %1").arg(displayName(*f)), t.text);
-            addFact(QStringLiteral("Why"), QStringLiteral("Selected alone. Remove this package, not the parent tree."), t.text);
+            addFact(QStringLiteral("Why"), packageChildWhy(m_marked.contains(f->uid())), t.text);
         } else {
             m_inspectorLay->addWidget(inspectorLabel(displayName(*f), aaTitleFont(), t.text));
             addFact(QStringLiteral("What"), whatText(*f, page), t.text);
@@ -2933,8 +3009,13 @@ private:
         }
         if (!f->version.isEmpty()) addFact(QStringLiteral("Version"), f->version, t.text, true);
         if (!f->revision.isEmpty()) addFact(QStringLiteral("Revision"), f->revision, t.text, true);
-        if (!f->currentVersion.isEmpty()) addFact(QStringLiteral("Current"), f->currentVersion, t.text, true);
-        if (!f->latestVersion.isEmpty()) addFact(QStringLiteral("Latest"), f->latestVersion, t.amber, true);
+        if (page == Page::Outdated) {
+            addFact(QStringLiteral("Current"), versionSlotText(f->currentVersion), t.text, true);
+            addFact(QStringLiteral("Latest"), versionSlotText(f->latestVersion), t.amber, true);
+        } else {
+            if (!f->currentVersion.isEmpty()) addFact(QStringLiteral("Current"), f->currentVersion, t.text, true);
+            if (!f->latestVersion.isEmpty()) addFact(QStringLiteral("Latest"), f->latestVersion, t.amber, true);
+        }
         addFact(QStringLiteral("Size"), f->bytes >= 0 ? humanSize(f->bytes) : QStringLiteral("unknown"), t.text, true);
         // The Stale list calls this column "Last used", so the inspector does
         // too: one value, one name, whichever side of the window it is read on.
@@ -2958,57 +3039,76 @@ private:
         sizeFactKeys();
         m_inspectorLay->addStretch();
 
+        QCheckBox *inc = nullptr;
+        QCheckBox *keep = nullptr;
         if (!m_selectedChild.isEmpty() && page == Page::Packages) {
             const QString child = m_selectedChild;
             const QString uid = f->uid();
             const QString key = packageChildMarkKey(uid, child);
-            auto *inc = new QCheckBox(QStringLiteral("Include this dependency in remove"));
-            inc->setChecked(m_marked.contains(key));
-            inc->setEnabled(!m_scanning && !packageChildCommand(*f, child).isEmpty());
-            connect(inc, &QCheckBox::toggled, this, [this, uid, child, key](bool on) {
+            auto *childInc = new QCheckBox(QStringLiteral("Include this dependency in remove"));
+            childInc->setChecked(m_marked.contains(key));
+            childInc->setEnabled(!m_scanning && !packageChildCommand(*f, child).isEmpty());
+            connect(childInc, &QCheckBox::toggled, this, [this, uid, child, key](bool on) {
                 if (on) m_marked.insert(key);
                 else m_marked.remove(key);
                 m_model->refreshUid(uid, child);
                 refreshMarkChrome();
             });
-            m_inspectorLay->addWidget(inc);
+            m_inspectorLay->addWidget(childInc);
         } else if (canMarkCleanup(*f, page)) {
-            auto *inc = new QCheckBox(
+            inc = new QCheckBox(
                 page == Page::Outdated ? QStringLiteral("Include in update")
                                        : (page == Page::Packages ? QStringLiteral("Include in remove")
                                                                  : QStringLiteral("Include in cleanup"))
             );
+            inc->setObjectName(QStringLiteral("mark-include"));
             inc->setChecked(m_marked.contains(f->uid()));
             inc->setEnabled(!m_scanning);
+            m_inspectorLay->addWidget(inc);
+        }
+        if (page == Page::Packages && canMarkManual(*f)) {
+            keep = new QCheckBox(QStringLiteral("Mark as manually installed"));
+            keep->setObjectName(QStringLiteral("mark-manual"));
+            keep->setChecked(m_markedManual.contains(f->uid()));
+            keep->setEnabled(!m_scanning);
+            m_inspectorLay->addWidget(keep);
+        }
+        // The two marks exclude each other. Updating the set without the other
+        // box left both looking ticked. Rebuilding the inspector here would
+        // destroy the checkbox that is emitting.
+        if (inc) {
             const QString uid = f->uid();
-            connect(inc, &QCheckBox::toggled, this, [this, uid](bool on) {
+            connect(inc, &QCheckBox::toggled, this, [this, uid, keep](bool on) {
                 if (on) {
                     m_marked.insert(uid);
                     m_markedManual.remove(uid);
                 } else {
                     m_marked.remove(uid);
                 }
+                if (keep) {
+                    const QSignalBlocker block(keep);
+                    keep->setChecked(m_markedManual.contains(uid));
+                }
                 m_model->refreshUid(uid);
                 refreshMarkChrome();
             });
-            m_inspectorLay->addWidget(inc);
         }
-        if (page == Page::Packages && canMarkManual(*f)) {
-            auto *keep = new QCheckBox(QStringLiteral("Mark as manually installed"));
-            keep->setChecked(m_markedManual.contains(f->uid()));
-            keep->setEnabled(!m_scanning);
+        if (keep) {
             const QString uid = f->uid();
-            connect(keep, &QCheckBox::toggled, this, [this, uid](bool on) {
+            connect(keep, &QCheckBox::toggled, this, [this, uid, inc](bool on) {
                 if (on) {
                     m_markedManual.insert(uid);
                     m_marked.remove(uid);
                 } else {
                     m_markedManual.remove(uid);
                 }
+                if (inc) {
+                    const QSignalBlocker block(inc);
+                    inc->setChecked(m_marked.contains(uid));
+                }
                 m_model->refreshUid(uid);
                 refreshMarkChrome();
             });
-            m_inspectorLay->addWidget(keep);
         }
         if (!f->path.isEmpty()) {
             auto *reveal = new QPushButton(QStringLiteral("Show in Files"));
@@ -3053,14 +3153,13 @@ private:
 
     void refreshActionBar() {
         qint64 bytes = 0;
-        int n = 0;
         int unsized = 0;
         for (const Finding &f : m_findings) {
             if (!m_marked.contains(f.uid()) && !m_markedManual.contains(f.uid())) continue;
-            ++n;
             if (f.bytes < 0) ++unsized;
             else bytes = addSatBytes(bytes, f.bytes);
         }
+        const int n = actionBarSelectionCount(m_findings, m_marked, m_markedManual);
         const Page page = currentPage();
         m_actionBar->setVisible(
             n > 0 && page != Page::Overview && page != Page::Settings && page != Page::DiskUsage
@@ -3270,6 +3369,7 @@ private:
        walking its connection list. Detaching first also keeps a handler that
        starts the next run from seeing the object it is being called from. */
     void retireScript() {
+        m_scriptProgress.clear();
         ScriptProcess *done = m_script;
         m_script = nullptr;
         if (done) done->deleteLater();
@@ -3286,6 +3386,7 @@ private:
             showError(writeError);
             return;
         }
+        m_scriptProgress = progress;
         m_scanning = true;
         // The run reads the selection, so the inspector's include boxes go
         // with it: they are the same control as the column-0 mark, which the
@@ -3301,7 +3402,7 @@ private:
             m_scanBar->setToolTip(progress);
             m_scanBar->show();
         }
-        if (m_count) m_count->setText(progress);
+        setCountText(progress);
         refreshActionBar();
         /* cordis-boundary: emission. The script mutates packages and files in
            other processes; it cannot be reverted, so it is withheld until the
@@ -3408,6 +3509,9 @@ private:
                 statusBar()->showMessage(done);
                 m_marked.clear();
                 m_markedManual.clear();
+                // The rescan is a scan. Retire the script first, or the busy
+                // flag still looks like a removal and the new walk is hidden.
+                retireScript();
                 rescan();
             }
             retireScript();
@@ -3456,6 +3560,7 @@ private:
         resetWidgetPalette(m_ovLeftovers);
         resetWidgetPalette(m_ovStale);
         resetWidgetPalette(m_ovOutdated);
+        resetWidgetPalette(m_diskPage);
         if (m_sidebar) aaApplySourceList(m_sidebar);
         if (m_settingsNav) aaApplySourceList(m_settingsNav);
         m_applyingAppearance = false;
@@ -3741,6 +3846,8 @@ private:
     QThread *m_scanThread = nullptr;
     ScanWorker *m_worker = nullptr;
     ScriptProcess *m_script = nullptr;
+    QString m_scriptProgress;
+    QStringList m_scanNotes;
     QVector<Finding> m_findings;
 #ifndef NDEBUG
     QString m_shotDir;

@@ -56,7 +56,7 @@ struct Finding {
     // U+001E, not '\n': every field here is filesystem text, and a newline is
     // a legal byte in a Linux filename, so a '\n'-joined key can be produced by
     // two different findings. The sibling key for the same job already uses
-    // U+001E (see packageChildMarkKey, ui/linux-qt/main.cpp), a byte a
+    // U+001E (see packageChildMarkKey), a byte a
     // POSIX filename cannot contain.
     //
     // `path` and `name` go through `pathIdentityKey` like every other identity
@@ -228,14 +228,81 @@ int countPageRows(const QVector<Finding> &findings, Page page);
 /// it is recorded the same way: without it a truncated render and a plugin
 /// that genuinely found nothing are indistinguishable on the page.
 /// Swift makes the same fact scan-level: `ScanData.incomplete`, not a
-/// per-item string. `main.cpp` renders this list in the status bar, which is
-/// where a count a user has to notice is already announced.
+/// per-item string. The status bar carries the clause. An empty Outdated or
+/// Packages page does too, and so does an empty Leftovers page when the note
+/// came from a path plugin or an unreadable result. A package-manager note
+/// does not turn a genuinely empty leftover list into a failed one. Stale
+/// stays the installed-apps sentence.
 void appendFindingsFromBlob(QVector<Finding> &out, const QByteArray &line,
                             QStringList *notes = nullptr);
 /// The status-bar clause for the notes a scan collected, empty when every
 /// plugin answered completely. Redacted: a note names the command that failed,
 /// and a command line carries a home path.
 QString scanNoteClause(const QStringList &notes);
+/// Clause for a finished Outdated or Packages page when the scan collected
+/// notes. Empty when the scan has not finished or collected nothing, so the
+/// caller keeps its own sentence. A failed scan and a search miss are not this.
+QString scanShortEmptyDetail(bool finished, const QStringList &notes);
+/// Linux has no installed-app count. The instrument stays on screen as this
+/// marker. A zero would say the machine was measured and was empty.
+QString linuxInstalledInstrumentText();
+/// Stale rows are installed apps. This Linux scan does not measure those.
+/// A positive count is rows that arrived anyway. Zero while a scan runs is
+/// in progress. Zero after a scan is the missing-value marker.
+QString linuxStaleInstrumentText(bool scanning, int count);
+QString linuxStaleEmptyDetail();
+/// Status-bar phrase for the stale slot. Zero is not a clean count.
+QString linuxStaleSummaryPhrase(int count);
+/// Leaves are distro orphans (`kind == "orphan"`). Globals are language
+/// globals. Other package rows stay on All and off both chips.
+bool packageMatchesFilter(const Finding &f, const QString &filter);
+/// The native tickbox is the leftover column. Other lists show an `in` mark.
+bool listMarkUsesTickbox(Page page);
+/// A running scan with no rows on this page has not answered. Rows from
+/// another plugin do not make this page a finished empty.
+bool pageScanStillOpen(bool scanning, int pageRows);
+/// A progress tick replaces the scan-age suffix and leaves the row count.
+QString countLineWithScanStatus(const QString &countLine, const QString &status);
+/// A script run sets the same busy flag as a scan so the buttons stay
+/// disabled. It is not a scan: empty pages and the stale instrument must not
+/// flip to in-progress copy while a removal or update is running.
+bool activityIsScan(bool scanning, bool scriptRunning);
+/// Toolbar suffix: the script line while a script runs, the scan phase while
+/// a scan runs, otherwise the age of the last scan.
+QString toolbarActivitySuffix(
+    bool scriptRunning,
+    const QString &scriptProgress,
+    bool scanning,
+    const QString &scanStatus,
+    const QString &scanAge
+);
+/// Missing version slot. The list cell already says this; the inspector must too.
+QString versionSlotText(const QString &version);
+/// Outdated version column. One missing side stays on screen as `unknown`.
+/// Both missing collapse to that one word. An untrusted tap is not a version.
+QString outdatedVersionLabel(const Finding &f);
+/// Why line for one package dependency. The parent command removes it when the
+/// parent is marked. "Selected alone" is the other case, and only that case.
+QString packageChildWhy(bool parentMarked);
+/// Mark key for one dependency of a package row. Distinct from the parent uid.
+QString packageChildMarkKey(const QString &parentUid, const QString &child);
+/// Rows that open the action bar. A dependency marked alone counts. A marked
+/// parent counts once and already covers its children.
+int actionBarSelectionCount(
+    const QVector<Finding> &findings,
+    const QSet<QString> &marked,
+    const QSet<QString> &markedManual
+);
+/// Path-plugin notes, and a result blob that could not be read. Other notes
+/// belong to the package pages.
+QStringList leftoverScanNotes(const QStringList &notes);
+/// Finished empty title. Scanning, a failed scan, and a search miss are the
+/// caller's. Stale never becomes a package-check failure.
+QString finishedListEmptyTitle(Page page, const QStringList &notes);
+/// REVIEW is amber, REMOVE is red, KEEP is green. On Packages a global is
+/// amber, and a review row is amber even when it is not a global.
+enum class StatusTone : int { Remove = 0, Review, Keep, Neutral };
+StatusTone findingStatusTone(const Finding &f, Page page);
 bool isGlobalKind(const Finding &f);
 QString distroManager(const Finding &f);
 bool canMarkManual(const Finding &f);
