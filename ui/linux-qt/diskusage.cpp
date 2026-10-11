@@ -216,6 +216,15 @@ static void noteUnreadable(DiskNode *node) {
     for (DiskNode *p = node->parent; p; p = p->parent) p->partial = true;
 }
 
+/// The node was never stat'd. Leaving the sizes at zero would print a measured
+/// empty folder. `humanSize` spells a negative count as unknown.
+static void noteUnmeasured(DiskNode *node) {
+    noteUnreadable(node);
+    if (!node) return;
+    node->apparent = -1;
+    node->allocated = -1;
+}
+
 void addChildTotals(DiskNode *node, const DiskNode *child) {
     node->apparent = addSatBytes(node->apparent, child->apparent);
     node->allocated = addSatBytes(node->allocated, child->allocated);
@@ -600,13 +609,13 @@ DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts) {
     const QByteArray native = QFile::encodeName(path);
     const int fd = open(native.constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) {
-        noteUnreadable(node);
+        noteUnmeasured(node);
         return node;
     }
     FileMeta meta;
     if (!fillMetaFd(fd, &meta) || !meta.isDir) {
         close(fd);
-        noteUnreadable(node);
+        noteUnmeasured(node);
         return node;
     }
     node->mtime = meta.mtime;
@@ -681,7 +690,7 @@ DiskNode *scanDiskTree(const QString &root, const DiskScanOptions &opts) {
     if (opts.dirDone && !isCancelled(opts)) opts.dirDone(*node, opts.user);
     orderScannedDiskTree(node, opts.sortAllocated);
 #else
-    noteUnreadable(node);
+    noteUnmeasured(node);
 #endif
     return node;
 }
@@ -790,9 +799,10 @@ QString diskChartFolderLabel(int childCount, int sizedChildCount, bool unreadabl
     return QStringLiteral("Empty folder");
 }
 
-QString diskContentsLabel(qint64 items, bool isDir, bool unreadable) {
+QString diskContentsLabel(qint64 items, bool isDir, bool unreadable, bool mountPoint) {
     if (!isDir) return QStringLiteral("1 file");
     if (unreadable && items <= 1) return QStringLiteral("unreadable");
+    if (mountPoint && items <= 1) return QStringLiteral("Not scanned");
     if (items <= 1) return QStringLiteral("Empty");
     const qint64 n = items - 1;
     if (n == 1) return QStringLiteral("1 item");

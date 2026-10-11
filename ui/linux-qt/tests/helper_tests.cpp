@@ -2261,6 +2261,44 @@ static int checkDiskUsage() {
         std::fprintf(stderr, "disk: unreadable directory must not read as empty\n");
         return 1;
     }
+    // A mount the walk did not enter keeps items == 1. That is not an empty folder.
+    if (diskContentsLabel(1, true, false, true) != QStringLiteral("Not scanned")
+        || diskContentsLabel(1, true, true, true) != QLatin1String("unreadable")
+        || diskContentsLabel(5, true, false, true) != localeCount(4) + QLatin1String(" items")) {
+        std::fprintf(stderr, "disk: skipped file system must not read as empty\n");
+        return 1;
+    }
+    DiskNode *missing = scanDiskTree(root + QStringLiteral("/gone-folder"), opts);
+    if (!missing || !missing->unreadable
+        || missing->apparent >= 0 || missing->allocated >= 0
+        || humanSize(missing->apparent) != QStringLiteral("unknown")
+        || humanSize(missing->allocated) != QStringLiteral("unknown")) {
+        std::fprintf(stderr, "disk: missing root reported a measured size\n");
+        delete missing;
+        return 1;
+    }
+    delete missing;
+    if (geteuid() != 0) {
+        const QString locked = root + QStringLiteral("/locked");
+        if (!QDir().mkpath(locked)) {
+            std::fprintf(stderr, "disk: locked dir failed\n");
+            return 1;
+        }
+        QFile::setPermissions(locked, QFileDevice::Permissions());
+        DiskNode *denied = scanDiskTree(locked, opts);
+        QFile::setPermissions(
+            locked,
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        if (!denied || !denied->unreadable
+            || denied->apparent >= 0 || denied->allocated >= 0
+            || humanSize(denied->apparent) != QStringLiteral("unknown")
+            || humanSize(denied->allocated) != QStringLiteral("unknown")) {
+            std::fprintf(stderr, "disk: unreadable root reported a measured size\n");
+            delete denied;
+            return 1;
+        }
+        delete denied;
+    }
     if (diskChartFolderLabel(0, 0, true) != QLatin1String("unreadable")
         || diskChartFolderLabel(2, 0, true) != QLatin1String("unreadable")
         || !diskChartFolderLabel(2, 1, true).isEmpty()) {

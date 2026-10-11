@@ -974,7 +974,7 @@ static QTreeWidgetItem *makeValueItem(
     it->setText(0, label);
     it->setText(1, humanSize(apparent));
     it->setText(2, humanSize(allocated));
-    it->setText(3, diskContentsLabel(items, isDir, unreadable));
+    it->setText(3, diskContentsLabel(items, isDir, unreadable, mountPoint));
     it->setText(4, diskModifiedLabel(mtime));
     it->setToolTip(0, plainTooltip(path));
     const QFont nums = aaNumericFont();

@@ -126,8 +126,11 @@ QVector<DiskVolume> listDiskVolumes();
 /// the pair that adds up, and it is what the Swift volume list carries.
 qint64 volumeUsedBytes(qint64 total, qint64 available);
 /// `unreadable` is a directory the walk could not enter. That is not an empty
-/// directory. The default keeps a readable folder on the existing wording.
-QString diskContentsLabel(qint64 items, bool isDir, bool unreadable = false);
+/// directory. `mountPoint` is a directory the walk did not enter because it is
+/// another file system or a directory already counted. That is not empty either.
+/// The default keeps a readable folder on the existing wording.
+QString diskContentsLabel(
+    qint64 items, bool isDir, bool unreadable = false, bool mountPoint = false);
 /// Treemap caption when no child has a positive size. A folder of zero-byte
 /// files is not an empty folder. An unreadable folder is not empty either.
 /// Empty when some child has a size, so the chart paints cells instead of a caption.
