@@ -287,4 +287,12 @@ final class DiskUsageTests: XCTestCase {
         XCTAssertTrue(vols.contains { $0.rootPath == slashed.path }, "\(vols.map(\.rootPath))")
     }
     #endif
+
+    func testVolumeCapacityBytesLeavesAnUnreadVolumeUnknown() {
+        XCTAssertEqual(volumeCapacityBytes(nil), -1)
+        XCTAssertEqual(humanSize(volumeCapacityBytes(nil)), "unknown")
+        XCTAssertEqual(volumeCapacityBytes(0), 0)
+        XCTAssertEqual(humanSize(volumeCapacityBytes(0)), localeCount(0) + " B")
+        XCTAssertEqual(volumeCapacityBytes(4096), 4096)
+    }
 }

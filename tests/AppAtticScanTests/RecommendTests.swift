@@ -664,6 +664,42 @@ final class RecommendTests: XCTestCase {
         XCTAssertEqual(overviewStaleTotalLabel(count: 2, bytes: 0), localeCount(2))
     }
 
+    func testOverviewStaleTotalLabelNamesUnmeasuredBytes() {
+        let measured = SoftwareItem(
+            name: "Measured", kind: "app", path: "/Measured.app", source: "pkg/other",
+            size_bytes: 100, size_measured: true, data_bytes: 20, tier: "remove", data_measured: true
+        )
+        let unread = SoftwareItem(
+            name: "Unread", kind: "app", path: "/Unread.app", source: "pkg/other",
+            size_measured: false, tier: "review", data_measured: false
+        )
+        let nilFlags = SoftwareItem(
+            name: "Legacy", kind: "app", path: "/Legacy.app", source: "pkg/other",
+            size_bytes: 40, data_bytes: 5, tier: "remove"
+        )
+        let kept = SoftwareItem(
+            name: "Kept", kind: "app", path: "/Kept.app", source: "pkg/other",
+            size_measured: false, tier: "keep", data_measured: false
+        )
+        let mixed = [measured, unread, nilFlags, kept]
+        XCTAssertEqual(staleUnmeasuredCount(mixed), 1)
+        XCTAssertEqual(staleUnmeasuredCount([nilFlags]), 0)
+        let mixedBytes = staleReclaimableBytes(mixed)
+        let mixedLabel = overviewStaleTotalLabel(
+            count: 3, bytes: mixedBytes, unmeasured: staleUnmeasuredCount(mixed)
+        )
+        XCTAssertTrue(mixedLabel.contains("partial"), mixedLabel)
+        XCTAssertTrue(mixedLabel.contains(humanSize(mixedBytes)), mixedLabel)
+
+        let unreadBytes = staleReclaimableBytes([unread])
+        let unreadLabel = overviewStaleTotalLabel(
+            count: 1, bytes: unreadBytes, unmeasured: staleUnmeasuredCount([unread])
+        )
+        XCTAssertEqual(unreadBytes, 0)
+        XCTAssertTrue(unreadLabel.contains("unknown"), unreadLabel)
+        XCTAssertNotEqual(unreadLabel, localeCount(1))
+    }
+
     func testScanJSONKeepsSoftwareDataPaths() {
         let sw = Software(
             name: "Sketch",

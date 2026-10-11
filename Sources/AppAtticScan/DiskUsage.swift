@@ -548,6 +548,15 @@ private func volumeBefore(_ a: DiskVolume, _ b: DiskVolume) -> Bool {
     return collatedBefore(a.rootPath, b.rootPath, tieBreak: a.rootPath, b.rootPath)
 }
 
+/// A volume capacity the devices list can print. Zero is a volume that
+/// reported no bytes. A missing reading is not that: `humanSize` prints a
+/// negative count as "unknown", which is the slot a nil resource value has
+/// to keep. Collapsing nil to zero shows "0 B" for a capacity nobody read.
+public func volumeCapacityBytes(_ reported: Int?) -> Int {
+    guard let reported else { return -1 }
+    return reported
+}
+
 /// The volumes to list, the root file system first, then the home one, then
 /// the rest in collated mount-path order. `mountsText` replaces the platform's
 /// mount table, so a caller can parse a captured one on either platform.
@@ -605,8 +614,8 @@ public func listDiskVolumes(
                 name: vals?.volumeName ?? (root as NSString).lastPathComponent,
                 rootPath: root,
                 fileSystem: "",
-                bytesTotal: vals?.volumeTotalCapacity ?? 0,
-                bytesAvailable: vals?.volumeAvailableCapacity ?? 0,
+                bytesTotal: volumeCapacityBytes(vals?.volumeTotalCapacity),
+                bytesAvailable: volumeCapacityBytes(vals?.volumeAvailableCapacity),
                 isRoot: root == "/",
                 isHome: home == root || home.hasPrefix(root == "/" ? "/" : root + "/")
             ))

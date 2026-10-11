@@ -2947,6 +2947,62 @@ static int checkScriptRunIsPrivateBeforeItsBody() {
     return 0;
 }
 
+/// A confirmed removal has to see the same user-tool directories the scan
+/// used. The scan prepends them and then puts the process PATH back, so a
+/// script built from the unrestored environment cannot find npm (and the
+/// other user-global tools) and its presence guard skips the uninstall
+/// without failing. The process PATH must be the one this check started
+/// with when the call returns, including when an assertion fails.
+static int checkScriptEnvironmentKeepsUserTools() {
+    const QByteArray pathBefore = qgetenv("PATH");
+    const bool hadPath = qEnvironmentVariableIsSet("PATH");
+    const QByteArray homeBefore = qgetenv("HOME");
+    const bool hadHome = qEnvironmentVariableIsSet("HOME");
+    const QByteArray flatpakBefore = qgetenv("FLATPAK_ID");
+    const bool hadFlatpak = qEnvironmentVariableIsSet("FLATPAK_ID");
+    auto putBack = [&]() {
+        if (hadPath) qputenv("PATH", pathBefore);
+        else qunsetenv("PATH");
+        if (hadHome) qputenv("HOME", homeBefore);
+        else qunsetenv("HOME");
+        if (hadFlatpak) qputenv("FLATPAK_ID", flatpakBefore);
+        else qunsetenv("FLATPAK_ID");
+    };
+
+    QTemporaryDir tmp;
+    if (!tmp.isValid()) {
+        std::fprintf(stderr, "script path: temp home failed\n");
+        return 1;
+    }
+    const QString bin = tmp.path() + QStringLiteral("/.local/bin");
+    if (!QDir().mkpath(bin)) {
+        putBack();
+        std::fprintf(stderr, "script path: could not make the tool dir\n");
+        return 1;
+    }
+    qputenv("HOME", tmp.path().toLocal8Bit());
+    qunsetenv("FLATPAK_ID");
+    const QProcessEnvironment env = scriptRunEnvironment();
+    const QByteArray pathAfter = qgetenv("PATH");
+    putBack();
+    if (pathAfter != pathBefore) {
+        std::fprintf(stderr, "script path: the window PATH was left augmented\n");
+        return 1;
+    }
+    const QStringList parts = env.value(QStringLiteral("PATH")).split(QLatin1Char(':'));
+    if (!parts.contains(bin)) {
+        std::fprintf(stderr, "script path: confirmed script does not see the user tool dir\n");
+        return 1;
+    }
+    if (env.value(QStringLiteral("DEBIAN_FRONTEND")) != QLatin1String("noninteractive")
+        || env.value(QStringLiteral("APT_LISTCHANGES_FRONTEND")) != QLatin1String("none")) {
+        std::fprintf(stderr, "script path: package-manager prompts were not suppressed\n");
+        return 1;
+    }
+    std::fprintf(stdout, "script path: ok\n");
+    return 0;
+}
+
 /// A real run through ScriptProcess: the temp file the runner writes must be
 /// gone once the script has finished, and the runner must not report one left
 /// behind. The removal that did not land is pinned above against a path that
@@ -3458,6 +3514,7 @@ int main(int argc, char **argv) {
         checkScriptFailedRunIsOver(),
         checkScriptLeavesTheSandbox(),
         checkScriptRunIsPrivateBeforeItsBody(),
+        checkScriptEnvironmentKeepsUserTools(),
     };
     for (const int rc : checks) {
         if (rc != 0) return rc;

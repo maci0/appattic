@@ -1,5 +1,7 @@
 #include "scriptproc.h"
 
+#include "hostexec.h"
+
 #include <QDir>
 #include <QFile>
 #include <QProcess>
@@ -113,6 +115,24 @@ void scriptCommand(const QString &path, const QString &flatpakId, QString *progr
     *program = QStringLiteral("/bin/sh");
     *args = {path};
     if (scriptOnStdin) *scriptOnStdin = false;
+}
+
+QProcessEnvironment scriptRunEnvironment() {
+    const bool hadPath = qEnvironmentVariableIsSet("PATH");
+    const QByteArray saved = qgetenv("PATH");
+    appattic_host_apply_user_path();
+    const QByteArray augmented = qgetenv("PATH");
+    appattic_host_restore_user_path();
+    const QByteArray now = qgetenv("PATH");
+    if (now != saved || qEnvironmentVariableIsSet("PATH") != hadPath) {
+        if (hadPath) qputenv("PATH", saved);
+        else qunsetenv("PATH");
+    }
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("PATH"), QString::fromLocal8Bit(augmented));
+    env.insert(QStringLiteral("DEBIAN_FRONTEND"), QStringLiteral("noninteractive"));
+    env.insert(QStringLiteral("APT_LISTCHANGES_FRONTEND"), QStringLiteral("none"));
+    return env;
 }
 
 ScriptProcess::ScriptProcess(QObject *parent) : ScriptProcess(kScriptTimeoutMs, parent) {}
@@ -236,10 +256,7 @@ bool ScriptProcess::prepare(const QString &script, QString *errorText) {
     /* stdin is set in `start`, where the program is known: a host run has no
        input, and a sandboxed run hands the script itself over the same pipe
        (see `start`). Setting it here would make that write go to /dev/null. */
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert(QStringLiteral("DEBIAN_FRONTEND"), QStringLiteral("noninteractive"));
-    env.insert(QStringLiteral("APT_LISTCHANGES_FRONTEND"), QStringLiteral("none"));
-    proc->setProcessEnvironment(env);
+    proc->setProcessEnvironment(scriptRunEnvironment());
 
     connect(proc, &QProcess::readyRead, this, [this, proc] { appendOutput(proc->readAll()); });
     connect(proc, &QProcess::finished, this, [this, proc, path = tmp.fileName()](int code) {

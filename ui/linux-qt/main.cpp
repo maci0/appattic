@@ -3704,6 +3704,10 @@ private:
            land is not a reason to refuse the save the user asked for. */
         keepSettingsBackup(path);
         if (!writeDurableFile(encodeSettingsJson(s), path)) {
+            /* The backup may already be on disk when the new file cannot be
+               written. The button reads that file, so it has to be refreshed
+               on the way out as well as after a save that landed. */
+            refreshRestoreButton();
             showError(settingsUnwritableMessage(path));
             return false;
         }
@@ -3712,6 +3716,7 @@ private:
         m_errorBar->hide();
         m_error->clear();
         refreshIgnoredList();
+        refreshRestoreButton();
         return true;
     }
 

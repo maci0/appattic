@@ -3,6 +3,7 @@
 
 #include <QByteArray>
 #include <QObject>
+#include <QProcessEnvironment>
 #include <QString>
 
 class QProcess;
@@ -34,6 +35,15 @@ bool scriptRunsOnHost(const QString &flatpakId);
 /// nothing.
 void scriptCommand(const QString &path, const QString &flatpakId, QString *program,
                    QStringList *args, bool *scriptOnStdin);
+
+/// Environment a confirmed script runs with. The scan finds user-global tools
+/// by prepending their directories to PATH and then putting the process PATH
+/// back. The script has to see those directories: a presence guard that cannot
+/// run the tool skips the removal, and `set -e` does not fail a false `if`,
+/// so the window would report success having removed nothing. This applies
+/// that PATH, copies it, and restores the process PATH before returning.
+/// Debian and apt prompts stay noninteractive, as they were.
+QProcessEnvironment scriptRunEnvironment();
 
 /// How long a generated cleanup, update, or mark-manual script may run before
 /// it is stopped, and the whole minutes the stop message reports. Exposed so

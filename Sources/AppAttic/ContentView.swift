@@ -491,7 +491,11 @@ struct ContentView: View {
                     overviewStat("Leftover data", leftoverDataLabel, Color.appRed)
                     overviewStat(
                         "Stale",
-                        overviewStaleTotalLabel(count: vm.listedStaleCount, bytes: staleReclaimableBytes(staleRows)),
+                        overviewStaleTotalLabel(
+                            count: vm.listedStaleCount,
+                            bytes: staleReclaimableBytes(staleRows),
+                            unmeasured: staleUnmeasuredCount(staleRows)
+                        ),
                         Color.appYellow
                     )
                     overviewStat("Outdated", "\(totals.outdated_apps ?? 0)", Color.appYellow)

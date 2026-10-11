@@ -215,10 +215,32 @@ public func staleReclaimableBytes(_ items: [SoftwareItem]) -> Int {
         .reduce(0) { addBytes($0, $1.totalBytes) }
 }
 
+/// Selectable stale rows whose app size or owned data was explicitly not
+/// measured. A nil flag is not that: rows loaded without the key still carry
+/// a real size, and treating the absence as unmeasured would mark a complete
+/// total as partial.
+public func staleUnmeasuredCount(_ items: [SoftwareItem]) -> Int {
+    items.reduce(into: 0) { count, item in
+        guard StaleTier.isSelectable(item.tierKind) else { return }
+        if item.size_measured == false || item.data_measured == false {
+            count += 1
+        }
+    }
+}
+
 /// The Overview stale total: a count, with a size behind it once there is
 /// one. Call it with `staleReclaimableBytes`, which counts REVIEW and REMOVE
 /// rows only, so the number matches what cleanup can actually reclaim.
-public func overviewStaleTotalLabel(count: Int, bytes: Int) -> String {
+/// `unmeasured` is `staleUnmeasuredCount` for those same rows. A mixed total
+/// says the measured sum is partial. A total with nothing measured says
+/// unknown instead of dropping the slot. A fully measured zero stays the count.
+public func overviewStaleTotalLabel(count: Int, bytes: Int, unmeasured: Int = 0) -> String {
+    if unmeasured > 0 {
+        if bytes > 0 {
+            return "\(localeCount(count)) · \(humanSize(bytes)) partial"
+        }
+        return "\(localeCount(count)) · unknown"
+    }
     if bytes > 0 {
         return "\(localeCount(count)) · \(humanSize(bytes))"
     }
