@@ -32,7 +32,7 @@ final class CLIFlagTests: XCTestCase {
         XCTAssertEqual(serve.parseError, .unknownCommand("serve"))
         XCTAssertEqual(
             serve.error,
-            "unknown command: serve; try one of: config, disk, erase, leftovers, outdated, packages, report, restore, stale, update"
+            "unknown command: serve; try one of: config, disk, erase, leftovers, outdated, packages, report, restore, schema, stale, update"
         )
         let leaves = parseCLIArguments(["brew-leaves"])
         XCTAssertEqual(leaves.parseError, .unknownCommand("brew-leaves"))

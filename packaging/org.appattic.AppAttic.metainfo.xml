@@ -36,6 +36,12 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.2.0" date="2026-10-15">
+      <description>
+        <p><code>appattic schema</code> prints a clispec v0.3 description of the commands and exits without reading settings. <code>-o</code> and <code>--output</code> select <code>auto</code>, <code>text</code>, or <code>json</code>. <code>auto</code> keeps the text report on a terminal and writes the same JSON document <code>--json FILE</code> writes when standard output is not a terminal. <code>-o text</code> keeps the text report when piped. <code>--json FILE</code> still writes that side file. In JSON mode a failure ends with one JSON error object on standard error. <code>erase</code> reports <code>changed</code>, false when the snapshot was already gone. <code>update</code> without a terminal still exits 2 unless <code>--yes</code> is set, and the JSON error names that flag.</p>
+        <p><code>appattic update</code> lists each package it would upgrade, with the manager and the current and latest versions, before the prompt. If an upgrade command fails, the message says earlier commands may already have run and to rescan before trying the rest. A search on the outdated list also matches the current version and the latest version. A settings file that will not load says to repair it and rescan, or to restore the backup. A cleanup total skips rows whose size was not measured.</p>
+      </description>
+    </release>
     <release version="3.1.2" date="2026-10-12">
       <description>
         <p>The Linux AppImage is published with its update file again. That file was left in the build directory instead of beside the image, so the release stopped after building the image and an update check had nothing to download.</p>

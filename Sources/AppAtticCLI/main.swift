@@ -6,6 +6,9 @@ import Glibc
 #endif
 import AppAtticScan
 
+/// Set once `main` knows whether this process should write JSON on stdout.
+var cliJSONStdout = false
+
 @main
 enum AppAtticCLI {
     static func main() {
@@ -21,6 +24,23 @@ enum AppAtticCLI {
         // token elsewhere on the line.
         if opts.version {
             print("appattic \(appAtticVersion)")
+            return
+        }
+        cliJSONStdout = cliOutputIsJSON(flag: opts.output, stdoutIsTTY: isatty(STDOUT_FILENO) != 0)
+        if opts.command == "schema" {
+            if let err = opts.error { failUsage(err) }
+            do {
+                var data = try cliSpecJSON(
+                    path: opts.schemaPath,
+                    pretty: isatty(STDOUT_FILENO) != 0
+                )
+                if data.last != 0x0A { data.append(0x0A) }
+                try FileHandle.standardOutput.write(contentsOf: data)
+            } catch let error as CLISpecError {
+                failUsage(error.description)
+            } catch {
+                failUsage(String(describing: error))
+            }
             return
         }
         if let err = opts.error {
@@ -47,7 +67,11 @@ enum AppAtticCLI {
         do {
             settings = try loadSettings()
         } catch {
-            fputs("error: \(terminalSafe(redactHomePaths(error.localizedDescription)))\n", stderr)
+            let message = redactHomePaths(error.localizedDescription)
+            fputs("error: \(terminalSafe(message))\n", stderr)
+            if cliJSONStdout {
+                fputs(cliErrorEnvelope(kind: "parse", message: message, hint: nil), stderr)
+            }
             Foundation.exit(2)
         }
         let includeSystem = effectiveIncludeSystem(cliFlag: opts.includeSystem, settings: settings)
@@ -92,29 +116,27 @@ enum AppAtticCLI {
         }
         let ignored = Set(settings.ignoredLeftoverPaths)
         let result = scanResult(from: resolved.data, ignoringLeftovers: ignored, now: now)
-        if let jsonPath = opts.json {
-            writeJSONFile(
-                exportedScanData(
-                    from: resolved.data,
-                    ignoringLeftovers: ignored,
-                    fromCache: resolved.fromCache,
-                    now: now
-                ),
-                to: jsonPath
-            )
-        }
+        let exported = exportedScanData(
+            from: resolved.data,
+            ignoringLeftovers: ignored,
+            fromCache: resolved.fromCache,
+            now: now
+        )
+        publishJSON(exported, file: opts.json)
         if opts.dryRun {
-            print(
-                dryRunScript(
-                    command: opts.command,
-                    result: result,
-                    category: opts.category,
-                    top: opts.top,
-                    leftoversOnly: opts.leftoversOnly,
-                    staleOnly: opts.staleOnly
-                ),
-                terminator: ""
+            let script = dryRunScript(
+                command: opts.command,
+                result: result,
+                category: opts.category,
+                top: opts.top,
+                leftoversOnly: opts.leftoversOnly,
+                staleOnly: opts.staleOnly
             )
+            if cliJSONStdout {
+                fputs(script, stderr)
+            } else {
+                print(script, terminator: "")
+            }
             return
         }
         if opts.command == "update" {
@@ -122,11 +144,19 @@ enum AppAtticCLI {
             let updating = result.outdated.filter(\.updatable)
             let n = updating.count
             if n == 0 {
-                print("Nothing to update. \(outdatedSkippedManagersNote)")
+                let line = "Nothing to update. \(outdatedSkippedManagersNote)"
+                if cliJSONStdout {
+                    fputs(line + "\n", stderr)
+                } else {
+                    print(line)
+                }
                 return
             }
-            if !confirmUpdate(entries: updating, assumeYes: opts.yes) {
+            if !confirmUpdate(entries: updating, assumeYes: opts.yes, jsonMode: cliJSONStdout) {
                 fputs("Update cancelled.\n", stderr)
+                if cliJSONStdout {
+                    fputs(cliErrorEnvelope(kind: "failure", message: "Update cancelled.", hint: nil), stderr)
+                }
                 Foundation.exit(1)
             }
             fputs("Updating \(localeCount(n)) package(s)…\n", stderr)
@@ -146,11 +176,22 @@ enum AppAtticCLI {
                 fputs(cacheNote, stderr)
                 fputs("error: \(terminalSafe(commandFailureMessage(status: run.status, stderr: run.stderr)))\n", stderr)
                 fputs("Commands before the failure may already have run. Rescan before trying the rest again.\n", stderr)
+                if cliJSONStdout {
+                    fputs(
+                        cliErrorEnvelope(
+                            kind: "failure",
+                            message: "update failed",
+                            hint: "Commands before the failure may already have run."
+                        ),
+                        stderr
+                    )
+                }
                 Foundation.exit(1)
             }
             fputs(cacheNote, stderr)
             return
         }
+        if cliJSONStdout { return }
         switch opts.command {
         case "leftovers":
             printLeftovers(result, limit: opts.top, category: opts.category)
@@ -180,12 +221,12 @@ enum AppAtticCLI {
 /// resolved to. Nothing is scanned, so it is safe to run anywhere.
 func runConfigCommand(_ opts: CLIOptions, settings: AppAtticSettings) {
     let config = EffectiveConfig(settings: settings, includeSystemFlag: opts.includeSystem)
-    for line in config.lines {
-        print(terminalSafe(line))
+    if !cliJSONStdout {
+        for line in config.lines {
+            print(terminalSafe(line))
+        }
     }
-    if let jsonPath = opts.json {
-        writeJSONFile(config, to: jsonPath)
-    }
+    publishJSON(config, file: opts.json)
 }
 
 /// Delete the stored scan snapshot and report what happened. The line printed
@@ -198,18 +239,22 @@ func runEraseCommand(_ opts: CLIOptions) {
     do {
         erased = try eraseScanCache(at: url)
     } catch {
-        fputs("error: \(terminalSafe(redactHomePaths(error.localizedDescription)))\n", stderr)
+        let message = redactHomePaths(error.localizedDescription)
+        fputs("error: \(terminalSafe(message))\n", stderr)
+        if cliJSONStdout {
+            fputs(cliErrorEnvelope(kind: "failure", message: message, hint: nil), stderr)
+        }
         Foundation.exit(1)
     }
-    // The command's result goes to stdout, like every other command that
-    // reports one (report, config, disk, and update's "Nothing to update"), so
-    // `appattic erase` is pipeable and `appattic erase | grep removed` works.
-    // It used to go to stderr, which left the whole result off stdout.
+    // Text mode prints the result on stdout, so
+    // `appattic -o text erase | grep removed` works. When stdout is not a
+    // terminal, auto writes the JSON document instead. The result used to go
+    // to stderr, which left it off stdout.
     let shown = terminalSafe(redactHomePaths(url.path))
-    print(erased ? "removed \(shown)" : "no scan snapshot at \(shown)")
-    if let jsonPath = opts.json {
-        writeJSONFile(EraseResult(path: url.path, erased: erased), to: jsonPath)
+    if !cliJSONStdout {
+        print(erased ? "removed \(shown)" : "no scan snapshot at \(shown)")
     }
+    publishJSON(ErasePayload(path: url.path, erased: erased, changed: erased), file: opts.json)
 }
 
 /// Put `settings.json.bak` back in place of `settings.json`, and say what was
@@ -240,8 +285,19 @@ func runRestoreCommand(_ opts: CLIOptions) {
         // machine's state, not a usage error, and the runbook tells the user to
         // stop and leave the files alone rather than treat it as a bad command.
         // Nothing on disk has changed by the time this prints.
-        fputs("error: \(terminalSafe(redactHomePaths(error.localizedDescription)))\n", stderr)
+        let message = redactHomePaths(error.localizedDescription)
+        fputs("error: \(terminalSafe(message))\n", stderr)
         fputs("nothing was changed; docs/runbooks/state-recovery.md says what to do next\n", stderr)
+        if cliJSONStdout {
+            fputs(
+                cliErrorEnvelope(
+                    kind: "failure",
+                    message: message,
+                    hint: "nothing was changed; docs/runbooks/state-recovery.md says what to do next"
+                ),
+                stderr
+            )
+        }
         Foundation.exit(1)
     }
     // These are the rules `restoreSettingsBackup` keeps a replaced file under,
@@ -252,25 +308,25 @@ func runRestoreCommand(_ opts: CLIOptions) {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     let encoded = (try? encoder.encode(written)) ?? Data()
     let keptThisRestore = replaced != nil && !replaced!.isEmpty && replaced != encoded
-    print("restored \(terminalSafe(redactHomePaths(url.path))) from \(terminalSafe(redactHomePaths(backup.path)))")
-    print(
-        "includeSystem: \(written.includeSystem), confirmDelete: \(written.confirmDelete), "
-            + "ignoredLeftoverPaths: \(localeCount(written.ignoredLeftoverPaths.count))"
-    )
-    if keptThisRestore {
-        print("the settings file this restore replaced is at \(terminalSafe(redactHomePaths(rejected.path)))")
-    }
-    if let jsonPath = opts.json {
-        writeJSONFile(
-            RestoreResult(
-                path: url.path,
-                restoredFrom: backup.path,
-                replacedPath: keptThisRestore ? rejected.path : "",
-                settings: written
-            ),
-            to: jsonPath
+    if !cliJSONStdout {
+        print("restored \(terminalSafe(redactHomePaths(url.path))) from \(terminalSafe(redactHomePaths(backup.path)))")
+        print(
+            "includeSystem: \(written.includeSystem), confirmDelete: \(written.confirmDelete), "
+                + "ignoredLeftoverPaths: \(localeCount(written.ignoredLeftoverPaths.count))"
         )
+        if keptThisRestore {
+            print("the settings file this restore replaced is at \(terminalSafe(redactHomePaths(rejected.path)))")
+        }
     }
+    publishJSON(
+        RestoreResult(
+            path: url.path,
+            restoredFrom: backup.path,
+            replacedPath: keptThisRestore ? rejected.path : "",
+            settings: written
+        ),
+        file: opts.json
+    )
 }
 
 func runDiskCommand(_ opts: CLIOptions) {
@@ -287,19 +343,23 @@ func runDiskCommand(_ opts: CLIOptions) {
     // apparent size, so re-rank by the metric being shown or `--top N` slices
     // the wrong rows.
     tree.sortChildren(allocatedSize: opts.allocated)
-    print(formatDiskTree(tree, allocatedSize: opts.allocated, top: opts.top), terminator: "")
-    if let top = opts.top {
-        let hidden = diskTreeHiddenEntries(tree, top: top)
-        if hidden > 0 {
-            print(C.dim("  \(hidden) more \(hidden == 1 ? "entry" : "entries") not shown (--top \(top))"))
+    if !cliJSONStdout {
+        print(formatDiskTree(tree, allocatedSize: opts.allocated, top: opts.top), terminator: "")
+        if let top = opts.top {
+            let hidden = diskTreeHiddenEntries(tree, top: top)
+            if hidden > 0 {
+                print(C.dim("  \(hidden) more \(hidden == 1 ? "entry" : "entries") not shown (--top \(top))"))
+            }
         }
     }
-    if let jsonPath = opts.json {
-        do {
-            try writeJSONFile(try diskUsageJSON(tree), to: jsonPath)
-        } catch {
-            failJSONWrite(error)
+    do {
+        let payload = try diskUsageJSON(tree)
+        if let jsonPath = opts.json {
+            try writeJSONFile(payload, to: jsonPath)
         }
+        if cliJSONStdout { writeJSONStdoutData(payload) }
+    } catch {
+        failJSONWrite(error)
     }
 }
 
@@ -326,14 +386,62 @@ func writeJSONFile<T: Encodable>(_ value: T, to path: String) {
 }
 
 func failJSONWrite(_ error: Error) -> Never {
-    fputs("error writing JSON: \(terminalSafe(redactHomePaths(error.localizedDescription)))\n", stderr)
+    let message = "error writing JSON: \(redactHomePaths(error.localizedDescription))"
+    fputs("\(terminalSafe(message))\n", stderr)
+    if cliJSONStdout {
+        fputs(cliErrorEnvelope(kind: "failure", message: message, hint: nil), stderr)
+    }
     Foundation.exit(1)
 }
 
 func failUsage(_ message: String) -> Never {
     fputs("error: \(terminalSafe(message))\n", stderr)
     fputs("\(cliUsageHint)\n", stderr)
+    if cliJSONStdout {
+        fputs(cliErrorEnvelope(kind: "usage", message: message, hint: cliUsageHint), stderr)
+    }
     Foundation.exit(2)
+}
+
+struct ErasePayload: Encodable {
+    let path: String
+    let erased: Bool
+    let changed: Bool
+}
+
+func publishJSON<T: Encodable>(_ value: T, file: String?) {
+    if let file { writeJSONFile(value, to: file) }
+    if cliJSONStdout { writeJSONStdout(value) }
+}
+
+func writeJSONStdout<T: Encodable>(_ value: T) {
+    let encoder = JSONEncoder()
+    var formatting: JSONEncoder.OutputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    if isatty(STDOUT_FILENO) != 0 { formatting.insert(.prettyPrinted) }
+    encoder.outputFormatting = formatting
+    do {
+        var data = try encoder.encode(value)
+        if data.last != 0x0A { data.append(0x0A) }
+        try FileHandle.standardOutput.write(contentsOf: data)
+    } catch {
+        failJSONWrite(error)
+    }
+}
+
+func writeJSONStdoutData(_ data: Data) {
+    var payload = data
+    if isatty(STDOUT_FILENO) == 0,
+        let object = try? JSONSerialization.jsonObject(with: data),
+        let compact = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    {
+        payload = compact
+    }
+    if payload.last != 0x0A { payload.append(0x0A) }
+    do {
+        try FileHandle.standardOutput.write(contentsOf: payload)
+    } catch {
+        failJSONWrite(error)
+    }
 }
 
 enum C {
@@ -636,11 +744,16 @@ func printPackages(_ result: ScanResult) {
     print(C.dim("  Remove and mark-manual are confirm + script only. Distro upgrades are never included."))
 }
 
-func confirmUpdate(entries: [OutdatedPkg], assumeYes: Bool) -> Bool {
+func confirmUpdate(entries: [OutdatedPkg], assumeYes: Bool, jsonMode: Bool) -> Bool {
     if assumeYes { return true }
     if isatty(STDIN_FILENO) == 0 {
-        fputs("error: update needs confirmation and stdin is not a terminal\n", stderr)
-        fputs("       pass --yes to run it unattended, or --dry-run to print the script\n", stderr)
+        let message = "update needs confirmation and stdin is not a terminal"
+        let hint = "pass --yes to run it unattended, or --dry-run to print the script"
+        fputs("error: \(message)\n", stderr)
+        fputs("       \(hint)\n", stderr)
+        if jsonMode {
+            fputs(cliErrorEnvelope(kind: "confirmation_required", message: message, hint: hint), stderr)
+        }
         Foundation.exit(2)
     }
     for entry in entries {

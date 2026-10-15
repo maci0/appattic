@@ -1,4 +1,4 @@
-.TH APPATTIC 1 "2026-10-12" "appattic 3.1.2" "User Commands"
+.TH APPATTIC 1 "2026-10-15" "appattic 3.2.0" "User Commands"
 .SH NAME
 appattic \- find leftover data, unused software, outdated packages, and disk usage
 .SH SYNOPSIS
@@ -26,10 +26,15 @@ With no command it prints the full report. A scan is cached and reused for 24
 hours; the status line on standard error names the time and points at
 .BR \-\-fresh .
 .PP
-Progress and status go to standard error. Reports and
+Progress and status go to standard error. On a terminal, reports and
 .B \-\-dry\-run
-scripts go to standard output, so a report pipes cleanly:
-.B appattic leftovers --top 10 | head
+scripts go to standard output. When standard output is not a terminal, it
+carries the same JSON document
+.B \-\-json
+writes, unless
+.B \-o text
+is set.
+.B appattic -o text leftovers --top 10 | head
 shows ten rows and no status lines.
 .SH COMMANDS
 .TP
@@ -82,11 +87,17 @@ It reads no current settings first, so it works on a machine whose
 .I settings.json
 no longer parses.
 .TP
+.B schema
+Print the clispec v0.3 document and exit. A command name after it keeps that
+command. The document is JSON even when
+.B \-o text
+is set, and the command reads no settings.
+.TP
 .BI "update " [ \-\-yes ]
 Upgrade the named packages the scan found. It prompts on a terminal and exits
 2 without one unless
 .B \-\-yes
-is given.
+is given. The JSON error names that flag.
 .PP
 .B \-\-
 ends the options, so a
@@ -94,6 +105,15 @@ ends the options, so a
 root that starts with a dash is passed as given:
 .B appattic disk -- -backup
 .SH OPTIONS
+.TP
+.BR \-o ", " \-\-output " " MODE
+.BR auto ", " text ", or " json .
+.B auto
+is the default: text on a terminal, and the JSON document
+.B \-\-json
+would write when standard output is not a terminal.
+.B \-o text
+keeps the text report when piped. The flag may come before the command.
 .TP
 .BI \-\-json " FILE"
 Also write this command's result to FILE, which has to end in

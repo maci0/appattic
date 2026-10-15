@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Assert the built CLI's contract: exit codes, stdout vs stderr, and that a
 # result a script needs is on stdout. This is the check that catches a stream
-# mix-up or a wrong exit code — the failures a script consuming this CLI cannot
+# mix-up or a wrong exit code, the failures a script consuming this CLI cannot
 # see until something downstream breaks.
+#
+# Piped stdout is JSON unless -o text. The text assertions pass -o text so they
+# still check the human report. A pipe with no -o checks the JSON document.
 #
 # Hermetic and safe: it runs against a temporary HOME and XDG_* tree and a
 # temporary directory for `disk`, so the real account's settings and scan cache
@@ -140,16 +143,22 @@ run 0 "--help after bad token" --nope --help
 want_out "--help wins over a bad token" "usage:"
 
 # --- a command's result is on stdout, progress on stderr -------------------
-# `config` reports what the machine resolves; the result belongs on stdout so it
-# can be piped. Nothing is scanned and HOME is a temp dir, so it is safe.
-run 0 "config" config
-if [[ -n "$OUT" ]]; then ok "config prints its result on stdout"; else bad "config printed nothing to stdout"; fi
+# `config` reports what the machine resolves. A pipe gets the JSON document.
+# -o text keeps the lines. Nothing is scanned and HOME is a temp dir, so it is safe.
+run 0 "config piped json" config
+if [[ "$OUT" == '{'* && "$OUT" == *'"settingsPath"'* && "$OUT" == *'"includeSystem"'* ]]; then
+    ok "piped config is a JSON document"
+else
+    bad "piped config is not JSON (stdout: ${OUT:0:120})"
+fi
+run 0 "config" -o text config
+want_out "config text stays on stdout with -o text" "settings file:"
 
-# `disk` on a temp directory: the tree (the result) on stdout, the "scanning"
-# progress line on stderr. Also the fast proof that a piped stdout carries no
-# SGR escape despite colour being available on a TTY.
+# `disk` on a temp directory: -o text keeps the tree on stdout, and the
+# "scanning" progress line stays on stderr. Also the fast proof that a piped
+# stdout carries no SGR escape despite colour being available on a TTY.
 mkdir -p "$TMP/tree/sub"; echo hi > "$TMP/tree/sub/f.txt"
-run 0 "disk tree" disk "$TMP/tree"
+run 0 "disk tree" -o text disk "$TMP/tree"
 # The root row is the folder's name, like every row below it; the full path is
 # on the stderr "scanning" line.
 want_out "disk prints the root row on stdout" 'tree  '
@@ -159,6 +168,12 @@ if [[ "$OUT" == *$'\033['* ]]; then
     bad "disk piped: ANSI escape on stdout despite TERM=dumb"
 else
     ok "piped stdout carries no ANSI escape"
+fi
+run 0 "disk json" disk "$TMP/tree"
+if [[ "$OUT" == '{'* && "$OUT" == *'"apparent"'* ]]; then
+    ok "piped disk is a JSON document"
+else
+    bad "piped disk is not JSON (stdout: ${OUT:0:120})"
 fi
 
 # A disk root that does not exist is a usage error (exit 2), not exit 0.
@@ -171,8 +186,14 @@ want_err "disk missing root says so" "no such directory"
 # the command unpipeable. The temp XDG_DATA_HOME/HOME means this can only
 # remove a temp snapshot that does not exist; the real account's cache is
 # never touched.
-run 0 "erase" erase
+run 0 "erase" -o text erase
 want_out "erase reports its result on stdout" "no scan snapshot at"
+run 0 "erase json" -o json erase
+if [[ "$OUT" == *'"changed":false'* && "$OUT" == *'"erased":false'* ]]; then
+    ok "erase json reports changed false when nothing was there"
+else
+    bad "erase json missing changed (stdout: ${OUT:0:160})"
+fi
 
 # `restore` puts the settings backup back and reports on stdout like every
 # other command that reports a result. There is no backup in the temp XDG tree,
@@ -189,7 +210,7 @@ if [[ -z "$OUT" ]]; then ok "a failed restore writes nothing to stdout"; else ba
 mkdir -p "$TMP/xdg-data/appattic"
 printf '{ "confirmDelete": false }\n' > "$TMP/xdg-data/appattic/settings.json.bak"
 printf 'not settings\n' > "$TMP/xdg-data/appattic/settings.json"
-run 0 "restore" restore
+run 0 "restore" -o text restore
 want_out "restore reports on stdout" "restored"
 want_out "restore names the file it kept" "settings.json.bad"
 if grep -qE '"confirmDelete" *: *false' "$TMP/xdg-data/appattic/settings.json"; then
@@ -213,7 +234,7 @@ fi
 # normalized output.
 cp "$TMP/xdg-data/appattic/settings.json" "$TMP/xdg-data/appattic/settings.json.bak"
 cp "$TMP/xdg-data/appattic/settings.json" "$TMP/xdg-data/appattic/settings.json.bad"
-run 0 "restore over identical settings" restore
+run 0 "restore over identical settings" -o text restore
 want_out "restore over identical settings reports the restore" "restored"
 if [[ "$OUT" == *"settings.json.bad"* ]]; then
     bad "restore claimed to keep a file it did not replace"
@@ -228,7 +249,7 @@ fi
 printf 'the old settings\n' > "$TMP/xdg-data/appattic/settings.json.bad"
 printf 'the old settings\n' > "$TMP/xdg-data/appattic/settings.json"
 printf '{ "includeSystem": true }\n' > "$TMP/xdg-data/appattic/settings.json.bak"
-run 0 "restore over a file matching an older .bad" restore
+run 0 "restore over a file matching an older .bad" -o text restore
 want_out "restore over a file matching an older .bad reports the restore" "restored"
 want_out "restore names the kept file when its bytes match an older .bad" "settings.json.bad"
 if grep -q 'the old settings' "$TMP/xdg-data/appattic/settings.json.bad"; then
@@ -236,6 +257,32 @@ if grep -q 'the old settings' "$TMP/xdg-data/appattic/settings.json.bad"; then
 else
     bad "the file this restore replaced was lost"
 fi
+
+# schema answers with no settings file, and a JSON-mode usage error ends with
+# the envelope. Both are piped here, which is the auto JSON case.
+run 0 "schema" schema
+if [[ "$OUT" == '{'* && "$OUT" == *'"clispec":"0.3"'* && "$OUT" == *'"name":"appattic"'* ]]; then
+    ok "schema prints a clispec document"
+else
+    bad "schema is not a clispec document (stdout: ${OUT:0:160})"
+fi
+# Restore already wrote settings.json in this tree. schema must leave it alone.
+before="$(cksum "$TMP/xdg-data/appattic/settings.json")"
+run 0 "schema leaves settings" schema
+after="$(cksum "$TMP/xdg-data/appattic/settings.json")"
+if [[ "$before" == "$after" ]]; then
+    ok "schema leaves settings.json untouched"
+else
+    bad "schema changed settings.json"
+fi
+run 2 "json usage" --output json --nope
+last="${ERR##*$'\n'}"
+if [[ "$last" == '{"error":'* && "$last" == *'"kind":"usage"'* ]]; then
+    ok "json usage envelope is the last stderr line"
+else
+    bad "json usage envelope missing (stderr tail: ${last:0:160})"
+fi
+if [[ -z "$OUT" ]]; then ok "json usage writes nothing to stdout"; else bad "json usage wrote to stdout: $OUT"; fi
 
 if [[ "$fails" -eq 0 ]]; then
     echo "cli-contract: ok"

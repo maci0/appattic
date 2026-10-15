@@ -13,6 +13,7 @@ public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStr
     case conflictingFilters
     case yesNeedsUpdateCommand
     case optionNeedsCommand(option: String, commands: [String])
+    case outputRequiresMode
 
     public var description: String {
         switch self {
@@ -38,6 +39,8 @@ public enum CLIParseError: Error, Equatable, LocalizedError, Sendable, CustomStr
         case .optionNeedsCommand(let option, let commands):
             let noun = commands.count == 1 ? "command" : "commands"
             return "\(option) only applies to the \(cliCommandNames(commands)) \(noun)"
+        case .outputRequiresMode:
+            return "--output requires auto, text, or json"
         }
     }
 
@@ -65,6 +68,10 @@ public struct CLIOptions {
     public var allFileSystems: Bool
     public var allocated: Bool
     public var yes: Bool
+    /// `auto`, `text`, or `json`. `auto` is the default.
+    public var output: String
+    /// Words after `schema`. Empty prints the whole document.
+    public var schemaPath: [String]
     /// Whether `--top`/`--category` was given at all. The value alone cannot
     /// answer it: a value-taking flag that was handed nothing sets neither
     /// `top` nor `category`, and the command-scoped check below would then
@@ -91,6 +98,8 @@ public struct CLIOptions {
         allFileSystems: Bool = false,
         allocated: Bool = false,
         yes: Bool = false,
+        output: String = "auto",
+        schemaPath: [String] = [],
         parseError: CLIParseError? = nil
     ) {
         self.command = command
@@ -109,13 +118,15 @@ public struct CLIOptions {
         self.allFileSystems = allFileSystems
         self.allocated = allocated
         self.yes = yes
+        self.output = output
+        self.schemaPath = schemaPath
         self.sawTop = false
         self.sawCategory = false
         self.parseError = parseError
     }
 }
 
-let cliCommands: Set<String> = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk", "erase", "restore"]
+let cliCommands: Set<String> = ["config", "report", "leftovers", "stale", "outdated", "packages", "update", "disk", "erase", "restore", "schema"]
 
 /// Options that stand alone: the flag name and the field it sets. `cliHelpText`
 /// lists these; `parseCLIArguments` walks the table.
@@ -166,6 +177,12 @@ let cliCommandScopedOptions: [CLICommandScopedOption] = [
 
 func cliCommandList() -> String {
     cliCommands.sorted().joined(separator: ", ")
+}
+
+/// Whether `value` is an `--output` mode. Anything else is a usage error, so
+/// `-o config` does not swallow the command.
+func cliOutputMode(_ value: String) -> Bool {
+    value == "auto" || value == "text" || value == "json"
 }
 
 /// Whether `value` names the JSON file `--json` is documented to write. A value
@@ -259,11 +276,17 @@ commands:
                 checking the backup loads; the file it replaces is kept as
                 settings.json.bad. It reads no current settings first, so it
                 works on a machine whose settings.json no longer parses
+  schema [CMD]  print the clispec v0.3 document and exit. A command name keeps
+                that command
   update        named package upgrades (prompts on a TTY; --dry-run prints the script). Not a full distro upgrade
 
   `--` ends the options: `appattic disk -- -backup` reads `-backup` as the PATH.
 
 options:
+  -o, --output MODE   auto, text, or json (default auto). auto is text on a
+                      terminal and the same JSON document --json FILE would
+                      write when stdout is not a terminal. -o text keeps the
+                      text report, including a --dry-run script, when piped
   --json FILE         also write this command's result as JSON to FILE, which
                       has to end in .json. The report commands and update write
                       the whole scan, disk the disk tree, config, erase and
@@ -304,7 +327,8 @@ question and exit, so a bad token anywhere on the line does not suppress them.
 
 Progress and status go to stderr. Reports, --dry-run scripts, and what a
 command reports (config's resolved settings, disk's tree, erase's result,
-restore's result) go to stdout, so every command can be piped or redirected.
+restore's result) go to stdout. When stdout is not a terminal, stdout is the
+JSON document instead, unless -o text. schema always prints JSON.
 
 exit codes:
   0  success
@@ -323,6 +347,7 @@ examples:
   appattic config
   appattic erase
   appattic restore
+  appattic schema
   appattic help
 
 settings.json (includeSystem, confirmDelete, ignored leftover paths):
@@ -437,6 +462,27 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
             i += 1
             continue
         }
+        if a == "-o" || a == "--output" {
+            i += 1
+            guard i < args.count, cliOutputMode(args[i]) else {
+                if opts.parseError == nil { opts.parseError = .outputRequiresMode }
+                continue
+            }
+            opts.output = args[i]
+            i += 1
+            continue
+        }
+        if a.hasPrefix("--output=") {
+            let value = String(a.dropFirst("--output=".count))
+            guard cliOutputMode(value) else {
+                if opts.parseError == nil { opts.parseError = .outputRequiresMode }
+                i += 1
+                continue
+            }
+            opts.output = value
+            i += 1
+            continue
+        }
         if a.hasPrefix("--json=") {
             let value = String(a.dropFirst("--json=".count))
             if !cliJSONPath(value) {
@@ -522,7 +568,9 @@ public func parseCLIArguments(_ args: [String]) -> CLIOptions {
             }
         } else if cliCommands.contains(first) {
             opts.command = first
-            if first == "disk" {
+            if first == "schema" {
+                opts.schemaPath = Array(positional.dropFirst())
+            } else if first == "disk" {
                 if positional.count >= 2 {
                     // A root is a path, and a path carries a separator or is the
                     // dash-leading name `--` exists to pass through. A bare word
