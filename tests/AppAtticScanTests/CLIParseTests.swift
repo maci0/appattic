@@ -490,6 +490,20 @@ final class CLIToneTests: XCTestCase {
                 "\(CliTone.light.forRole(role)) measures \(ratio):1 on white, below the 4.5:1 floor"
             )
         }
+        // The shadow location uses the review tone scaled by the opacity the
+        // row applies. The solid tone clears the floor. A fade toward white
+        // does not, which is the reading the location used to have.
+        let parts = CliTone.light.forRole(.review).split(separator: ";").compactMap { Int($0) }
+        XCTAssertEqual(parts.count, 5)
+        let opacity = shadowLocationOpacity()
+        let blended = parts.dropFirst(2).map { channel -> Int in
+            Int((opacity * Double(channel) + (1 - opacity) * 255).rounded())
+        }
+        let onWhite = 0.2126 * linear(blended[0])
+            + 0.7152 * linear(blended[1])
+            + 0.0722 * linear(blended[2])
+        let faded = 1.05 / (onWhite + 0.05)
+        XCTAssertGreaterThanOrEqual(faded, 4.5, "shadow location measures \(faded):1 on white")
     }
 
     func testToneFollowsColorFgbg() {

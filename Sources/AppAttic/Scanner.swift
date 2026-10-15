@@ -132,19 +132,42 @@ final class ScannerViewModel {
 
     var cleanupSelectionCount: Int { selectedLeftovers.count + selectedApps.count + selectedPackages.count }
 
-    var selectionReclaimableBytes: Int {
-        var total = 0
-        guard let data = scanData else { return 0 }
+    /// Bytes the cleanup would reclaim. App data is not in the uninstall, so a
+    /// stale row counts the measured app size only. An unmeasured row stays out
+    /// of the sum and makes the label say the total is partial or unknown.
+    var selectionByteLabel: String {
+        guard let data = scanData else { return measuredBytesLabel(bytes: 0, sized: 0, unsized: 0) }
+        var bytes = 0
+        var sized = 0
+        var unsized = 0
+        func add(measured: Bool, value: Int?) {
+            if measured, let value {
+                bytes = addBytes(bytes, value)
+                sized += 1
+            } else {
+                unsized += 1
+            }
+        }
         for item in data.leftovers where selectedLeftovers.contains(item.path) {
-            total = addBytes(total, item.size_bytes ?? 0)
+            add(measured: item.size_measured, value: item.size_bytes)
         }
         for item in data.software where selectedApps.contains(item.path) {
-            total = addBytes(total, item.totalBytes)
+            add(measured: item.size_measured != false, value: item.size_bytes)
         }
         for item in data.packages ?? [] where selectedPackages.contains(item.id) {
-            total = addBytes(total, item.size_bytes ?? 0)
+            add(measured: item.size_measured, value: item.size_bytes)
         }
-        return total
+        return measuredBytesLabel(bytes: bytes, sized: sized, unsized: unsized)
+    }
+
+    /// True when a selected app has data the uninstall does not remove.
+    var selectionLeavesAppData: Bool {
+        guard let data = scanData else { return false }
+        for item in data.software where selectedApps.contains(item.path) {
+            if (item.data_bytes ?? 0) > 0 { return true }
+            if let paths = item.data_paths, !paths.isEmpty { return true }
+        }
+        return false
     }
 
     func start(includeSystem: Bool) {
@@ -567,8 +590,10 @@ final class ScannerViewModel {
                     // software that is gone.
                     if !run.finished {
                         // A stopped run always carries the reason in its
-                        // stderr, so there is no empty case to skip.
-                        vm.errorMessage = scriptStoppedMessage() + " Selection kept.\n"
+                        // stderr, so there is no empty case to skip. The stop
+                        // sentence already says earlier commands may have run.
+                        vm.errorMessage = scriptStoppedMessage()
+                            + " Selection kept. Rescan before trying the rest again.\n"
                             + commandFailureMessage(status: run.status, stderr: run.stderr)
                         clearScanCache()
                         completion(false)
@@ -576,7 +601,8 @@ final class ScannerViewModel {
                     }
                     if run.status != 0 {
                         vm.errorMessage = commandFailureMessage(status: run.status, stderr: run.stderr)
-                            + " Selection kept."
+                            + " Commands before the failure may already have run. "
+                            + "Selection kept. Rescan before trying the rest again."
                         clearScanCache()
                         completion(false)
                         return

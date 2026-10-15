@@ -201,16 +201,17 @@ inline int aaRowPx(const QWidget *w = nullptr) {
     return qMax(sz.height(), floor);
 }
 
-/// Let a toolbar's informational labels give up width before its controls do.
+/// Let a toolbar label give up width before the controls do.
 ///
 /// A `QToolBar` that cannot fit its items does not shrink them: it moves the
 /// tail into the "»" overflow chevron, and the first to go is whatever sits
 /// rightmost. On this window the rightmost items are the ones the user needs to
 /// act -- Search, Select All, Rescan -- so at the window's own minimum width
 /// the primary actions sat behind a chevron with no field and no button on
-/// screen. A page title and a count only restate what the page already says, so
-/// they are the items that may yield: `Ignored` lets them elide down to
-/// `minPx` and no further, and the controls keep their natural width.
+/// screen. The count restates the page, so it may yield: `Ignored` lets it
+/// elide down to `minPx` and no further, and the controls keep their natural
+/// width. The page title does not use this. It is the only Michroma name of
+/// the page, and the same floor clipped it to a partial word.
 ///
 /// `minPx` is a floor in real pixels, not a font metric, so a longer
 /// translation elides instead of pushing the controls out again.

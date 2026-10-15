@@ -57,7 +57,11 @@ public func softwareMatchesSearch(_ item: SoftwareItem, _ q: String?) -> Bool {
 }
 
 /// An outdated row matches when the query is in its name, manager, title,
-/// summary, or reason.
+/// summary, reason, or either version. The versions are a column on the row,
+/// so a search for the number on screen has to find it.
 public func outdatedMatchesSearch(_ entry: OutdatedEntry, _ q: String?) -> Bool {
-    searchMatches(q, entry.name, entry.manager, entry.title, entry.summary, entry.reason)
+    searchMatches(
+        q, entry.name, entry.manager, entry.title, entry.summary, entry.reason,
+        entry.current_version, entry.latest_version
+    )
 }

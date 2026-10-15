@@ -72,9 +72,9 @@ public func settingsErrorUserMessage(_ error: Error) -> String {
     }
     switch error {
     case .unreadable(let path, let reason):
-        return redactHomePaths("Could not read settings at \(path) (\(reason)). AppAttic will not overwrite that file until you save settings.")
+        return redactHomePaths("Could not read settings at \(path) (\(reason)). AppAttic will not overwrite that file. Repair it and click Rescan, or restore the backup.")
     case .invalid(let path, let reason):
-        return redactHomePaths("Settings at \(path) are not valid (\(reason)). AppAttic will not overwrite that file until you save settings.")
+        return redactHomePaths("Settings at \(path) are not valid (\(reason)). AppAttic will not overwrite that file. Repair it and click Rescan, or restore the backup.")
     case .unwritable(let path, let reason):
         return redactHomePaths("Could not save settings to \(path) (\(reason)).")
     }

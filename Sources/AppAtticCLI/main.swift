@@ -119,12 +119,13 @@ enum AppAtticCLI {
         }
         if opts.command == "update" {
             let script = updateScript(result.outdated)
-            let n = result.outdated.filter(\.updatable).count
+            let updating = result.outdated.filter(\.updatable)
+            let n = updating.count
             if n == 0 {
                 print("Nothing to update. \(outdatedSkippedManagersNote)")
                 return
             }
-            if !confirmUpdate(count: n, assumeYes: opts.yes) {
+            if !confirmUpdate(entries: updating, assumeYes: opts.yes) {
                 fputs("Update cancelled.\n", stderr)
                 Foundation.exit(1)
             }
@@ -144,6 +145,7 @@ enum AppAtticCLI {
             if run.status != 0 {
                 fputs(cacheNote, stderr)
                 fputs("error: \(terminalSafe(commandFailureMessage(status: run.status, stderr: run.stderr)))\n", stderr)
+                fputs("Commands before the failure may already have run. Rescan before trying the rest again.\n", stderr)
                 Foundation.exit(1)
             }
             fputs(cacheNote, stderr)
@@ -634,14 +636,24 @@ func printPackages(_ result: ScanResult) {
     print(C.dim("  Remove and mark-manual are confirm + script only. Distro upgrades are never included."))
 }
 
-func confirmUpdate(count: Int, assumeYes: Bool) -> Bool {
+func confirmUpdate(entries: [OutdatedPkg], assumeYes: Bool) -> Bool {
     if assumeYes { return true }
     if isatty(STDIN_FILENO) == 0 {
         fputs("error: update needs confirmation and stdin is not a terminal\n", stderr)
         fputs("       pass --yes to run it unattended, or --dry-run to print the script\n", stderr)
         Foundation.exit(2)
     }
-    fputs("Update \(localeCount(count)) package(s)? [y/N] ", stderr)
+    for entry in entries {
+        let name = (entry.title?.isEmpty == false ? entry.title : nil) ?? entry.name
+        let current = entry.currentVersion ?? "-"
+        let latest = entry.latestVersion ?? "?"
+        fputs(
+            "  \(terminalSafe(name))  \(terminalSafe(entry.manager))  "
+                + "\(terminalSafe(current)) → \(terminalSafe(latest))\n",
+            stderr
+        )
+    }
+    fputs("Update \(localeCount(entries.count)) package(s)? [y/N] ", stderr)
     fflush(stderr)
     guard let line = readLine() else { return false }
     let answer = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

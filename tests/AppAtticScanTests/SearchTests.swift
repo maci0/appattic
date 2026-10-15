@@ -116,6 +116,15 @@ final class SearchTests: XCTestCase {
         XCTAssertFalse(outdatedMatchesSearch(entry, searchQuery("whisky")))
     }
 
+    func testOutdatedSearchMatchesTheVersionsOnTheRow() {
+        let entry = OutdatedEntry(
+            name: "wget", manager: "brew", current_version: "1.21.4", latest_version: "1.24.5"
+        )
+        XCTAssertTrue(outdatedMatchesSearch(entry, searchQuery("1.21.4")))
+        XCTAssertTrue(outdatedMatchesSearch(entry, searchQuery("1.24.5")))
+        XCTAssertFalse(outdatedMatchesSearch(entry, searchQuery("9.9.9")))
+    }
+
     func testSearchFoldsAnNFDNameAgainstAnNFCQuery() {
         // macOS reports filenames in NFD; the search box takes NFC. The same
         // rule `filterPackages` already pins for the Packages page.
