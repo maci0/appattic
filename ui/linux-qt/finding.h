@@ -269,6 +269,12 @@ bool pageScanStillOpen(bool scanning, int pageRows);
 /// that has no rows of its own yet, and it does not hide a miss once those
 /// rows exist.
 bool listEmptyIsScan(bool scanPending, bool scanning, int pageRowCount, bool searching);
+/// A search miss is a filter over rows this page already produced.
+/// `unfilteredCount` is that page before the search box. Zero rows is the
+/// page's own empty result (incomplete, not scanned, or genuinely empty).
+/// The search box does not turn that into "nothing matched". Twin of
+/// `emptySearchIsMiss` in Sources/AppAtticScan/Format.swift.
+bool emptySearchIsMiss(int unfilteredCount, const QString &search);
 /// A progress tick replaces the scan-age suffix and leaves the row count.
 QString countLineWithScanStatus(const QString &countLine, const QString &status);
 /// A script run sets the same busy flag as a scan so the buttons stay

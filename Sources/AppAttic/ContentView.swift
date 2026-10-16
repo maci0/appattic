@@ -639,7 +639,12 @@ struct ContentView: View {
         .onTapGesture(perform: action)
     }
 
-    private func emptyCopy(title: String, detail: String, packageCheck: Bool = false) -> (title: String, detail: String) {
+    private func emptyCopy(
+        title: String,
+        detail: String,
+        packageCheck: Bool = false,
+        producedCount: Int = 0
+    ) -> (title: String, detail: String) {
         if let pending = dashboardPendingCopy(
             scanning: vm.isScanning,
             hasResults: vm.scanData != nil,
@@ -647,7 +652,10 @@ struct ContentView: View {
         ) {
             return (pending.title, pending.detail)
         }
-        if packageCheck, vm.searchText.isEmpty, vm.scanData?.incomplete == true {
+        // A search over rows that arrived is a miss. A search over a package
+        // list that never arrived stays the incomplete copy.
+        if packageCheck, vm.scanData?.incomplete == true,
+           !emptySearchIsMiss(unfilteredCount: producedCount, search: vm.searchText) {
             let copy = dashboardIncompleteCopy()
             return (copy.title, copy.detail)
         }
@@ -737,7 +745,8 @@ struct ContentView: View {
             detail: vm.searchText.isEmpty
                 ? "Brew, Flatpak, Snap, apt, pacman, AUR, dnf, yum, zypper, and the App Store reported nothing, or those tools are not installed."
                 : "No outdated packages match this search.",
-            packageCheck: true
+            packageCheck: true,
+            producedCount: vm.scanData?.outdated?.count ?? 0
         )
         return HStack(alignment: .top, spacing: 0) {
             listPane(
@@ -796,7 +805,13 @@ struct ContentView: View {
     var packagePage: some View {
         let rows = packageRows
         let selectedId = resolvedSelection(packageSel, visibleIds: rows.map(\.id))
-        let empty = emptyCopy(title: "No unused packages", detail: packageEmptyDetail, packageCheck: true)
+        let produced = filterPackages(vm.allPackages, filter: packageFilter, search: "").count
+        let empty = emptyCopy(
+            title: "No unused packages",
+            detail: packageEmptyDetail,
+            packageCheck: true,
+            producedCount: produced
+        )
         return HStack(alignment: .top, spacing: 0) {
             listPane(
                 isEmpty: rows.isEmpty,

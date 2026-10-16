@@ -359,7 +359,7 @@ void DiskChart::paintTreemap(QPainter &p, const QRect &box) {
         }
     }
     const QString emptyLabel = diskChartFolderLabel(
-        m_view->children.size(), kids.size(), m_view->unreadable
+        m_view->children.size(), kids.size(), m_view->unreadable, m_view->mountPoint
     );
     if (!emptyLabel.isEmpty()) {
         p.setPen(palette().placeholderText().color());
@@ -382,22 +382,9 @@ QVector<DiskNode *> DiskChart::navigableNodes() const {
 
 QString DiskChart::cursorDescription() const {
     if (!m_cursor) return QString();
-    const qint64 bytes = qMax(qint64(0), m_cursor->metric(m_allocated));
-    QString s = m_cursor->name;
-    s += QStringLiteral(", ");
-    s += humanSize(bytes);
-    // The share is what the ring angle and the cell area encode visually, and
-    // the size column alone does not say how much of the folder this is.
-    const qint64 total = m_view ? qMax(qint64(0), m_view->metric(m_allocated)) : qint64(0);
-    if (total > 0) {
-        const int pct = qRound(100.0 * double(bytes) / double(total));
-        // `localeCount` for the digits and grouping: the raw `int` in `arg`
-        // stayed in the C locale, so an Arabic window read "42 percent" in
-        // Latin digits beside a size column printed in Arabic-Indic ones.
-        s += QStringLiteral(", %1 percent of this folder").arg(localeCount(pct));
-    }
-    if (m_cursor->isDir) s += QStringLiteral(", opens on Enter");
-    return s;
+    const qint64 total = m_view ? m_view->metric(m_allocated) : qint64(-1);
+    return diskChartCursorLine(
+        m_cursor->name, m_cursor->metric(m_allocated), total, m_cursor->isDir);
 }
 
 QString DiskChart::viewDescription() const {

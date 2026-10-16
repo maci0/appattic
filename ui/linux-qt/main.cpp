@@ -161,6 +161,8 @@ static QString pageEmptyDetail(
     if (scanFailed) {
         return errorText.isEmpty() ? QStringLiteral("Click Rescan to try again.") : errorText;
     }
+    // Callers pass the search only when this page already produced rows.
+    // A page with none of its own keeps the incomplete or not-scanned copy.
     if (!search.trimmed().isEmpty()) return pageSearchEmpty(page);
     switch (page) {
     case Page::Leftovers: {
@@ -2192,10 +2194,13 @@ private:
 
         const bool searching = !m_search->text().trimmed().isEmpty();
         // The count is the page before the search box. A typed search on a
-        // page that has not produced a row yet is still the scan, not
-        // "nothing matched". A miss on rows that already arrived is a miss.
+        // page that produced no row is still that empty result, not a miss.
+        // A miss on rows that already arrived is a miss, and that miss drops
+        // the scan notes because the page did answer.
+        const int unfiltered = countPage(page);
+        const bool searchMiss = emptySearchIsMiss(unfiltered, m_search->text());
         const bool scanningEmpty = listEmptyIsScan(
-            emptyScanPending(), scanRunning(), countPage(page), searching);
+            emptyScanPending(), scanRunning(), unfiltered, searching);
         const bool scanFailed = emptyScanFailed();
         const bool settingsBlocked = m_settingsError && !m_hasScanned && m_findings.isEmpty() && !m_scanning;
         if (rows.isEmpty() && scanningEmpty) {
@@ -2214,14 +2219,14 @@ private:
                         : m_error->text()
                 );
             } else {
-                const QStringList notesForEmpty = searching ? QStringList() : m_scanNotes;
+                const QStringList notesForEmpty = searchMiss ? QStringList() : m_scanNotes;
                 m_emptyTitle->setText(pageEmptyTitle(page, scanningEmpty, scanFailed, notesForEmpty));
                 m_emptyDetail->setText(
                     pageEmptyDetail(
                         page,
                         scanningEmpty,
                         scanFailed,
-                        m_search->text(),
+                        searchMiss ? m_search->text() : QString(),
                         m_ignored.size(),
                         m_filter->currentData().toString(),
                         m_error->text(),
@@ -2806,15 +2811,16 @@ private:
     }
 
     QString emptyDetail(Page page) const {
+        const bool searchMiss = emptySearchIsMiss(countPage(page), m_search->text());
         return pageEmptyDetail(
             page,
             emptyScanPending(),
             emptyScanFailed(),
-            m_search->text(),
+            searchMiss ? m_search->text() : QString(),
             m_ignored.size(),
             m_filter->currentData().toString(),
             m_error->text(),
-            m_search->text().trimmed().isEmpty() ? m_scanNotes : QStringList()
+            searchMiss ? QStringList() : m_scanNotes
         );
     }
 
@@ -2954,10 +2960,12 @@ private:
             // order away, and this runs on every selection change.
             if (filteredRows(page, false).isEmpty()) {
                 const bool searching = !m_search->text().trimmed().isEmpty();
+                const int unfiltered = countPage(page);
+                const bool searchMiss = emptySearchIsMiss(unfiltered, m_search->text());
                 const bool pending = listEmptyIsScan(
-                    emptyScanPending(), scanRunning(), countPage(page), searching);
+                    emptyScanPending(), scanRunning(), unfiltered, searching);
                 title = pageEmptyTitle(
-                    page, pending, emptyScanFailed(), searching ? QStringList() : m_scanNotes
+                    page, pending, emptyScanFailed(), searchMiss ? QStringList() : m_scanNotes
                 );
                 body = pending ? scanStatusText() : emptyDetail(page);
             } else if (page == Page::Leftovers) {

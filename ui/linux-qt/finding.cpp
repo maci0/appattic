@@ -1598,6 +1598,10 @@ bool listEmptyIsScan(bool scanPending, bool scanning, int pageRowCount, bool sea
     return scanPending || pageScanStillOpen(scanning, pageRowCount);
 }
 
+bool emptySearchIsMiss(int unfilteredCount, const QString &search) {
+    return unfilteredCount > 0 && !search.trimmed().isEmpty();
+}
+
 QString countLineWithScanStatus(const QString &countLine, const QString &status) {
     const QString sep = QStringLiteral(" · ");
     const int at = countLine.indexOf(sep);

@@ -218,6 +218,11 @@ final class FormatTests: XCTestCase {
         let incomplete = dashboardIncompleteCopy()
         XCTAssertEqual(incomplete.title, "Scan incomplete")
         XCTAssertFalse(incomplete.detail.isEmpty)
+        XCTAssertFalse(emptySearchIsMiss(unfilteredCount: 0, search: "zzz"))
+        XCTAssertFalse(emptySearchIsMiss(unfilteredCount: 0, search: "  "))
+        XCTAssertFalse(emptySearchIsMiss(unfilteredCount: 4, search: ""))
+        XCTAssertTrue(emptySearchIsMiss(unfilteredCount: 4, search: "zzz"))
+        XCTAssertTrue(emptySearchIsMiss(unfilteredCount: 1, search: " z "))
         XCTAssertEqual(updateConfirmTitle(count: 2, managers: []), "Update 2 packages?")
         XCTAssertEqual(updateConfirmTitle(count: 1, managers: ["apt"]), "Update 1 apt package?")
         XCTAssertEqual(

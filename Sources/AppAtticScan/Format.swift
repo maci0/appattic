@@ -228,6 +228,14 @@ public func dashboardIncompleteCopy() -> (title: String, detail: String) {
     ("Scan incomplete", "A package check failed, so this list is not a complete answer.")
 }
 
+/// A search is a miss only over rows the page already produced. Zero rows
+/// stays that empty result. The search field does not turn an incomplete
+/// package list into "nothing matched". Twin of `emptySearchIsMiss` in
+/// `ui/linux-qt/finding.cpp`.
+public func emptySearchIsMiss(unfilteredCount: Int, search: String) -> Bool {
+    unfilteredCount > 0 && !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+}
+
 /// One version slot. Empty and missing both stay on screen as `unknown`.
 public func versionSlotText(_ version: String?) -> String {
     guard let version, !version.isEmpty else { return "unknown" }

@@ -2301,8 +2301,26 @@ static int checkDiskUsage() {
     }
     if (diskChartFolderLabel(0, 0, true) != QLatin1String("unreadable")
         || diskChartFolderLabel(2, 0, true) != QLatin1String("unreadable")
-        || !diskChartFolderLabel(2, 1, true).isEmpty()) {
+        || !diskChartFolderLabel(2, 1, true).isEmpty()
+        || diskChartFolderLabel(0, 0, true, true) != QLatin1String("unreadable")) {
         std::fprintf(stderr, "disk: unreadable chart caption\n");
+        return 1;
+    }
+    if (diskChartFolderLabel(0, 0, false, true) != QStringLiteral("Not scanned")
+        || diskChartFolderLabel(0, 0, false, false) != QLatin1String("Empty folder")) {
+        std::fprintf(stderr, "disk: skipped file system chart caption must not read as empty\n");
+        return 1;
+    }
+    const QString announced = diskChartCursorLine(QStringLiteral("gone"), -1, -1, true);
+    const QString measured = diskChartCursorLine(QStringLiteral("keep"), 50, 100, false);
+    if (announced.contains(QLatin1String("0 B"))
+        || !announced.contains(QLatin1String("unknown"))
+        || !announced.startsWith(QLatin1String("gone, "))
+        || measured.contains(QLatin1String("unknown"))
+        || !measured.contains(humanSize(50))
+        || !measured.contains(QLatin1String("percent of this folder"))) {
+        std::fprintf(stderr, "disk: chart announced an unmeasured size as 0 B: %s\n",
+            qPrintable(announced));
         return 1;
     }
     DiskNode scanRoot;
@@ -3360,6 +3378,14 @@ int checkDashboardStates() {
         || listEmptyIsScan(false, false, 0, true)
         || !listEmptyIsScan(true, false, 0, false)) {
         std::fprintf(stderr, "a search must not finish a page that has no rows yet\n");
+        return 1;
+    }
+    if (emptySearchIsMiss(0, QStringLiteral("zzz"))
+        || emptySearchIsMiss(0, QStringLiteral("  "))
+        || emptySearchIsMiss(4, QString())
+        || !emptySearchIsMiss(4, QStringLiteral("zzz"))
+        || !emptySearchIsMiss(1, QStringLiteral(" z "))) {
+        std::fprintf(stderr, "a search must not turn a page with no rows into a miss\n");
         return 1;
     }
     if (actionBarBytesText(0, 1, 0) != humanSize(0)

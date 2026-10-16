@@ -792,11 +792,30 @@ qint64 volumeUsedBytes(qint64 total, qint64 available) {
     return total - available;
 }
 
-QString diskChartFolderLabel(int childCount, int sizedChildCount, bool unreadable) {
+QString diskChartFolderLabel(
+    int childCount, int sizedChildCount, bool unreadable, bool mountPoint
+) {
     if (sizedChildCount > 0) return {};
     if (unreadable) return QStringLiteral("unreadable");
+    // No children because the walk stopped at another file system. The tree
+    // column for that node says "Not scanned"; the chart caption has to agree.
+    if (mountPoint && childCount <= 0) return QStringLiteral("Not scanned");
     if (childCount > 0) return QStringLiteral("No file here has a size");
     return QStringLiteral("Empty folder");
+}
+
+QString diskChartCursorLine(const QString &name, qint64 metric, qint64 total, bool isDir) {
+    QString s = name;
+    s += QStringLiteral(", ");
+    s += humanSize(metric);
+    // A negative metric was not measured. It is not a share of the folder,
+    // and it is not zero.
+    if (metric >= 0 && total > 0) {
+        const int pct = qRound(100.0 * double(metric) / double(total));
+        s += QStringLiteral(", %1 percent of this folder").arg(localeCount(pct));
+    }
+    if (isDir) s += QStringLiteral(", opens on Enter");
+    return s;
 }
 
 QString diskContentsLabel(qint64 items, bool isDir, bool unreadable, bool mountPoint) {

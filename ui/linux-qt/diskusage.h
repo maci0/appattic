@@ -133,8 +133,15 @@ QString diskContentsLabel(
     qint64 items, bool isDir, bool unreadable = false, bool mountPoint = false);
 /// Treemap caption when no child has a positive size. A folder of zero-byte
 /// files is not an empty folder. An unreadable folder is not empty either.
+/// `mountPoint` is a directory the walk did not enter. That caption is
+/// "Not scanned", the same words as the tree column for that node.
 /// Empty when some child has a size, so the chart paints cells instead of a caption.
-QString diskChartFolderLabel(int childCount, int sizedChildCount, bool unreadable = false);
+QString diskChartFolderLabel(
+    int childCount, int sizedChildCount, bool unreadable = false, bool mountPoint = false);
+/// One announced chart line: name, size, share of the folder, and whether
+/// Enter opens it. An unmeasured metric stays `unknown`. Clamping it to zero
+/// first would publish `0 B` for a folder the walk could not read.
+QString diskChartCursorLine(const QString &name, qint64 metric, qint64 total, bool isDir);
 /// Move to Trash is a finished child of a finished scan. The scan root, a
 /// null selection, and the folder the walk is still reading are not targets.
 bool diskTrashAllowed(bool scanning, const DiskNode *selected, const DiskNode *root);
