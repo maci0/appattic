@@ -164,11 +164,12 @@ const fuzz_deps_nulls = fuzzsupport.packFuzzSlice("{\"dependencies\":{\"a\":null
 const fuzz_deps_overflow = blk: {
     var text: [40 * 1024]u8 = undefined;
     var w = std.Io.Writer.fixed(text[0 .. 128 * (32 + 200)]);
+    const dashes: [200]u8 = @splat('-');
     w.writeAll("{\"dependencies\":{") catch unreachable;
     for (0..128) |row| {
         var name_buf: [16]u8 = undefined;
         const name = std.fmt.bufPrint(&name_buf, "pkg-{d:0>4}", .{row}) catch unreachable;
-        w.print("\"{s}\":{{\"version\":\"{s}\"}}", .{ name, "-" ** 200 }) catch unreachable;
+        w.print("\"{s}\":{{\"version\":\"{s}\"}}", .{ name, dashes[0..] }) catch unreachable;
         w.writeAll(if (row == 127) "}}" else ",") catch unreachable;
     }
     break :blk fuzzsupport.packFuzzSlice(text[0..w.end]);

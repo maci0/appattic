@@ -247,7 +247,7 @@ fn findShadowsExec(
     // a buffer per iteration would work too, and a single one keeps every
     // entry naming its own text.
     var pkg_cmd_buf: [512]u8 = undefined;
-    var pkg_listings: [max_package_dirs]?[]const u8 = .{null} ** max_package_dirs;
+    var pkg_listings: [max_package_dirs]?[]const u8 = @splat(null);
     const pkg_count = @min(packageDirs.len, max_package_dirs);
     for (packageDirs[0..pkg_count], 0..) |pdir, i| {
         // `-b`, so a name holding a newline stays on one line instead of

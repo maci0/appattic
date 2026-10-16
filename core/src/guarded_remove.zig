@@ -222,11 +222,11 @@ test "row guard composes a name at the longest jsonbuf accepts" {
     // guards it are separate expressions: a change to one that misses the
     // other either turns a rejected name into a silently truncated guard, or
     // into an assert that fires on every row guard the managers generate.
-    var buf = [_]u8{undefined} ** 1024;
-    var q_buf = [_]u8{undefined} ** 512;
+    var buf: [1024]u8 = @splat(undefined);
+    var q_buf: [512]u8 = @splat(undefined);
     var w = jsonbuf.W{ .buf = &buf };
     const name_len = jsonbuf.max_pkg_name_len;
-    var name = [_]u8{undefined} ** name_len;
+    var name: [name_len]u8 = @splat(undefined);
     @memset(&name, 'a');
     try std.testing.expect(jsonbuf.isSafePkgName(&name));
     writeRowGuard(&w, &q_buf, "npm ls -g --depth=0", .{ .before = "package ", .after = " " }, "npm -g uninstall ", &name);

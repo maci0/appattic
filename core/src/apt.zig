@@ -63,8 +63,8 @@ pub const PpaSource = struct {
 fn isPpaFile(name: []const u8) bool {
     if (name.len == 0 or name[0] == '.') return false;
     if (std.mem.eql(u8, name, "ubuntu.sources") or std.mem.eql(u8, name, "debian.sources")) return false;
-    return std.ascii.indexOfIgnoreCase(name, "ppa") != null or
-        std.ascii.indexOfIgnoreCase(name, "launchpad") != null;
+    return std.ascii.findIgnoreCase(name, "ppa") != null or
+        std.ascii.findIgnoreCase(name, "launchpad") != null;
 }
 
 /// Parse `dpkg -l`. Keep `rc` rows (removed, config remains).

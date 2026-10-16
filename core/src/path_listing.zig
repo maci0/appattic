@@ -976,7 +976,7 @@ fn fuzzParseListing(_: void, smith: *std.testing.Smith) !void {
             // frame.
             try std.testing.expect(sliceInside(&paths, hit.path));
             try std.testing.expectEqualStrings(hit.name, pstore.basenameOf(hit.path));
-            const joined = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ spec.root, hit.name });
+            const joined = try std.testing.allocator.print("{s}/{s}", .{ spec.root, hit.name });
             defer std.testing.allocator.free(joined);
             try std.testing.expectEqualStrings(joined, hit.path);
         }

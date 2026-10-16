@@ -334,7 +334,7 @@ fn fuzzZypperTables(_: void, smith: *std.testing.Smith) !void {
     }
 
     // The cell splitter itself: every cell it hands back is a span of the row.
-    var row = [_]u8{0} ** 256;
+    var row: [256]u8 = @splat(0);
     if (text.len > 0) @memcpy(row[0..text.len], text);
     var cols: [8][]const u8 = undefined;
     const ncol = splitPipeCols(&row, &cols);

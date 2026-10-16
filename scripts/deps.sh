@@ -48,8 +48,8 @@ EOF
 ARTIFACTS=$(cat <<'EOF'
 swift-5.10.1-RELEASE-ubuntu22.04.tar.gz|5.10.1|pkg:generic/swift|https://download.swift.org|https://download.swift.org/swift-5.10.1-release/ubuntu2204/swift-5.10.1-release/swift-5.10.1-RELEASE-ubuntu22.04.tar.gz|
 swift-5.10.1-RELEASE-ubuntu22.04-aarch64.tar.gz|5.10.1|pkg:generic/swift|https://download.swift.org|https://download.swift.org/swift-5.10.1-release/ubuntu2204-aarch64/swift-5.10.1-release/swift-5.10.1-RELEASE-ubuntu22.04-aarch64.tar.gz|
-zig-x86_64-linux-0.16.0.tar.xz|0.16.0|pkg:generic/zig|https://ziglang.org/download/0.16.0|https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz|
-zig-aarch64-linux-0.16.0.tar.xz|0.16.0|pkg:generic/zig|https://ziglang.org/download/0.16.0|https://ziglang.org/download/0.16.0/zig-aarch64-linux-0.16.0.tar.xz|
+zig-x86_64-linux-0.17.0.tar.xz|0.17.0|pkg:generic/zig|https://ziglang.org/download/0.17.0|https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz|
+zig-aarch64-linux-0.17.0.tar.xz|0.17.0|pkg:generic/zig|https://ziglang.org/download/0.17.0|https://ziglang.org/download/0.17.0/zig-aarch64-linux-0.17.0.tar.xz|
 wasmtime-v28.0.0-x86_64-linux-c-api.tar.xz|28.0.0|pkg:github/bytecodealliance/wasmtime|https://github.com/bytecodealliance/wasmtime/releases|https://github.com/bytecodealliance/wasmtime/releases/download/v28.0.0/wasmtime-v28.0.0-x86_64-linux-c-api.tar.xz|WASMTIME_C_API_VERSION:-28.0.0
 wasmtime-v28.0.0-aarch64-linux-c-api.tar.xz|28.0.0|pkg:github/bytecodealliance/wasmtime|https://github.com/bytecodealliance/wasmtime/releases|https://github.com/bytecodealliance/wasmtime/releases/download/v28.0.0/wasmtime-v28.0.0-aarch64-linux-c-api.tar.xz|WASMTIME_C_API_VERSION:-28.0.0
 linuxdeploy-x86_64.AppImage|1-alpha-20251107-1|pkg:github/linuxdeploy/linuxdeploy|https://github.com/linuxdeploy/linuxdeploy|https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage|LINUXDEPLOY_VER=1-alpha-20251107-1
@@ -745,7 +745,9 @@ check_version_anchors() {
 # No file in the tree may spell a Zig or Wasmtime artifact version that differs
 # from the table above: the flatpak script and manifest repeat those names, and
 # a stale repeat would fetch something the checksum file does not cover.
-# packaging/aur repeats them too: those recipes download the same tarballs.
+# packaging/aur is the Zig exception: those recipes name the toolchain of the
+# tag they package (pkgver), which is not this branch's .zig-version. Wasmtime
+# in the same recipes is still checked against the table.
 check_artifact_versions_in_tree() {
     local manifest zig wasmtime
     zig="$(tr -d '[:space:]' <"$ROOT/.zig-version")"
@@ -765,6 +767,8 @@ check_artifact_versions_in_tree() {
             [[ -n "$found" ]] || continue
             case "$found" in
                 zig-*-linux-*.tar.xz)
+                    # packaging/aur names the toolchain of pkgver, not .zig-version.
+                    [[ "$manifest" == "$ROOT"/packaging/aur/* ]] && continue
                     name_version="${found#*-linux-}"
                     name_version="${name_version%.tar.xz}"
                     [[ "$name_version" == "$zig" ]] \

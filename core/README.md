@@ -2,7 +2,7 @@
 
 Design: [`docs/specs/2026-08-26-zig-wasm-core-design.md`](../docs/specs/2026-08-26-zig-wasm-core-design.md).
 
-Needs `zig` 0.16 (`.zig-version`) and, to run the host, the Wasmtime C API (`brew install zig wasmtime`, or `scripts/linux-deps.sh --install-wasmtime` on Linux). Test one plugin with `./core/build.sh test brew.zig`.
+Needs `zig` 0.17 (`.zig-version`) and, to run the host, the Wasmtime C API (`brew install zig wasmtime`, or `scripts/linux-deps.sh --install-wasmtime` on Linux). Test one plugin with `./core/build.sh test brew.zig`.
 
 Every manager and leftover path is a plugin: one `<id>.zig` compiled to `<id>.wasm`, except `core.zig`, which is the loader and lands as `appattic_core.wasm`. Built WASM matches the spec **Host load list**.
 

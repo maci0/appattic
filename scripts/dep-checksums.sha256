@@ -2,9 +2,9 @@
 # Swift 5.10.1 Ubuntu 22.04 tarballs (homebrew-core Formula/s/swift.rb bootstrap hashes)
 cab1bfffd33b79ebd49f4b7475bef6c7eb2d60cf3948cbc693d61afabd23c282  swift-5.10.1-RELEASE-ubuntu22.04.tar.gz
 871b00f0a7f96e0d28da53b232181c900a7540cb4be37fe4916c15ab411f83c9  swift-5.10.1-RELEASE-ubuntu22.04-aarch64.tar.gz
-# Zig 0.16.0: ziglang.org/download/index.json
-70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig-x86_64-linux-0.16.0.tar.xz
-ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17  zig-aarch64-linux-0.16.0.tar.xz
+# Zig 0.17.0: ziglang.org/download/index.json
+1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026  zig-x86_64-linux-0.17.0.tar.xz
+9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8  zig-aarch64-linux-0.17.0.tar.xz
 # Wasmtime C API 28.0.0: GitHub release assets
 23f282f333f07ec82a838928cbc86355cc4978c3618080d1a2e5714fec8411bf  wasmtime-v28.0.0-x86_64-linux-c-api.tar.xz
 6eeeae50f71a92120cb53d92d5fe57dc56cfcc03a9239dcd2ae5a06811c2233f  wasmtime-v28.0.0-aarch64-linux-c-api.tar.xz
