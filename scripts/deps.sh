@@ -745,6 +745,7 @@ check_version_anchors() {
 # No file in the tree may spell a Zig or Wasmtime artifact version that differs
 # from the table above: the flatpak script and manifest repeat those names, and
 # a stale repeat would fetch something the checksum file does not cover.
+# packaging/aur repeats them too: those recipes download the same tarballs.
 check_artifact_versions_in_tree() {
     local manifest zig wasmtime
     zig="$(tr -d '[:space:]' <"$ROOT/.zig-version")"
@@ -753,7 +754,8 @@ check_artifact_versions_in_tree() {
         return
     }
     for manifest in "$ROOT"/.github/workflows/*.yml "$ROOT"/scripts/*.sh \
-        "$ROOT"/packaging/flatpak/*.yml "$ROOT"/Dockerfile "$ROOT"/Dockerfile.arch; do
+        "$ROOT"/packaging/flatpak/*.yml "$ROOT"/packaging/aur/*/PKGBUILD \
+        "$ROOT"/Dockerfile "$ROOT"/Dockerfile.arch; do
         [[ -f "$manifest" ]] || continue
         # This file is the table the check compares against; it would only
         # report each pin against itself.

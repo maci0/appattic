@@ -36,6 +36,11 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.3.1" date="2026-10-16">
+      <description>
+        <p>Arch Linux packages are on the AUR. appattic is the command line. appattic-qt is the window, built against the distribution's Qt 6. appattic-bin is the published AppImage of that window.</p>
+      </description>
+    </release>
     <release version="3.3.0" date="2026-10-16">
       <description>
         <p>A search typed on a list that produced no rows stays that empty result. An incomplete leftover or package scan still says the scan is incomplete, and installed system apps on Linux still say they were not scanned. A search that filters rows which did arrive still says nothing matched.</p>

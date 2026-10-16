@@ -270,6 +270,8 @@ bash scripts/verify-qt-link.sh           # assert the link proof; CI and both im
 bash scripts/verify-qt-link.sh release   # assert the Release link proof instead
 ```
 
+Arch packages of a published release are on the AUR. `appattic` is the command line. `appattic-qt` is the window, linked against the distribution's Qt 6. `appattic-bin` is the published AppImage of that window, and it conflicts with `appattic-qt`. The recipes in `packaging/aur/` package the tag, not the branch tip.
+
 `./build.sh [release|debug]` links the Qt UI in the same config it gives the CLI: `release` builds `ui/linux-qt/build-release`, `debug` builds `ui/linux-qt/build`. Each config keeps its own tree, so a release link never picks up a stale Debug binary. `./run.sh --ui` prefers `build-release/` and falls back to `build/`.
 
 AppImage (portable Qt UI, no system Qt at runtime):
@@ -335,7 +337,7 @@ Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Disk Usage, Settin
 | `docs/runbooks/release-rollback.md` | What to do about a release that shipped a bad build: why a version is immutable, how to withdraw a release, and how to re-release |
 | `core/` | Zig `wasm32` scan core (loader + plugins + C Wasmtime embedder). The Linux window runs on it |
 | `scripts/` | Contributor gates: `check.sh` (fast local loop), `test.sh`, `lint.sh`, the tool finders, and the packaging, AppImage, Flatpak and release steps. Every script finds the project root itself, so run it by path from anywhere |
-| `packaging/` | Desktop entry, AppStream metainfo, man pages for `appattic` and `appattic-qt`, macOS `Info.plist` and icons, and the Flatpak manifest. `scripts/check-packaging.sh` is what keeps the copies in step |
+| `packaging/` | Desktop entry, AppStream metainfo, man pages for `appattic` and `appattic-qt`, macOS `Info.plist` and icons, the Flatpak manifest, and `packaging/aur/` (AUR recipes for the published tag). `scripts/check-packaging.sh` is what keeps the copies in step |
 | `benchmarks/AppAtticBench/` | The `appattic-bench` executable target, on the scan library |
 
 ## Notes
