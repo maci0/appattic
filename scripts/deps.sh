@@ -745,9 +745,7 @@ check_version_anchors() {
 # No file in the tree may spell a Zig or Wasmtime artifact version that differs
 # from the table above: the flatpak script and manifest repeat those names, and
 # a stale repeat would fetch something the checksum file does not cover.
-# packaging/aur is the Zig exception: those recipes name the toolchain of the
-# tag they package (pkgver), which is not this branch's .zig-version. Wasmtime
-# in the same recipes is still checked against the table.
+# packaging/aur repeats them too: those recipes download the same tarballs.
 check_artifact_versions_in_tree() {
     local manifest zig wasmtime
     zig="$(tr -d '[:space:]' <"$ROOT/.zig-version")"
@@ -767,8 +765,6 @@ check_artifact_versions_in_tree() {
             [[ -n "$found" ]] || continue
             case "$found" in
                 zig-*-linux-*.tar.xz)
-                    # packaging/aur names the toolchain of pkgver, not .zig-version.
-                    [[ "$manifest" == "$ROOT"/packaging/aur/* ]] && continue
                     name_version="${found#*-linux-}"
                     name_version="${name_version%.tar.xz}"
                     [[ "$name_version" == "$zig" ]] \
