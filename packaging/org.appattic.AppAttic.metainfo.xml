@@ -36,6 +36,12 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.3.0" date="2026-10-16">
+      <description>
+        <p>A search typed on a list that produced no rows stays that empty result. An incomplete leftover or package scan still says the scan is incomplete, and installed system apps on Linux still say they were not scanned. A search that filters rows which did arrive still says nothing matched.</p>
+        <p>A folder on another file system that the disk view did not enter says Not scanned on the chart, the same as the list beside it. A folder the chart could not measure is announced as unknown, not as a size of zero. A measured zero stays 0 B.</p>
+      </description>
+    </release>
     <release version="3.2.0" date="2026-10-15">
       <description>
         <p><code>appattic schema</code> prints a clispec v0.3 description of the commands and exits without reading settings. <code>-o</code> and <code>--output</code> select <code>auto</code>, <code>text</code>, or <code>json</code>. <code>auto</code> keeps the text report on a terminal and writes the same JSON document <code>--json FILE</code> writes when standard output is not a terminal. <code>-o text</code> keeps the text report when piped. <code>--json FILE</code> still writes that side file. In JSON mode a failure ends with one JSON error object on standard error. <code>erase</code> reports <code>changed</code>, false when the snapshot was already gone. <code>update</code> without a terminal still exits 2 unless <code>--yes</code> is set, and the JSON error names that flag.</p>
