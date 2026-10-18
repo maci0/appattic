@@ -541,6 +541,7 @@ public:
         m_filter->setToolTip(
             QStringLiteral("Leaves are distro orphans. Globals are user-level language tools.")
         );
+        aaComboFitsLabel(m_filter);
         m_selectAll = new QPushButton(QStringLiteral("Select All"));
         m_selectAll->setToolTip(
             QStringLiteral("Include every visible item in cleanup, update, or remove")

@@ -339,11 +339,9 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         QStringLiteral("Select a disk or folder, then press Enter to scan it.")
     );
     d->volumes->header()->setStretchLastSection(false);
-    // Name takes the slack, like the overview panels: stretching Location too
-    // left a wide hole between the two.
-    d->volumes->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    d->volumes->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    for (int c = 2; c < 6; ++c) {
+    // Size every column to its text. A stretched Name column parked the path
+    // at the far side of the window, a blank field away from the name.
+    for (int c = 0; c < 6; ++c) {
         d->volumes->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
     }
     d->volumes->header()->setHighlightSections(false);
@@ -394,6 +392,8 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
     d->sizeMode->setAccessibleName(QStringLiteral("Size measured"));
     d->sizeMode->addItem(QStringLiteral("Allocated"), 1);
     d->sizeMode->addItem(QStringLiteral("Apparent"), 0);
+    aaComboFitsLabel(d->chartMode);
+    aaComboFitsLabel(d->sizeMode);
     d->oneFs = new QCheckBox(QStringLiteral("This file system only"));
     d->oneFs->setChecked(true);
     // The two mode pickers beside it redraw the tree as they change; this one
@@ -559,12 +559,12 @@ DiskPage::DiskPage(QWidget *parent) : QWidget(parent), d(new Impl) {
         if (it) d->tree->setCurrentItem(it);
         QMenu m(d->tree);
         m.addAction(QStringLiteral("Open"), this, [this] { openSelected(); });
-        m.addAction(QStringLiteral("Copy path"), this, [this] { copyPath(); });
+        m.addAction(QStringLiteral("Copy Path"), this, [this] { copyPath(); });
         if (diskTrashAllowed(m_scanning, d->selected, d->root)) {
             m.addAction(QStringLiteral("Move to Trash"), this, [this] { trashSelected(); });
         }
         if (d->selected && d->selected->isDir) {
-            m.addAction(QStringLiteral("Scan this folder"), this, [this] {
+            m.addAction(QStringLiteral("Scan This Folder"), this, [this] {
                 if (d->selected) startScan(d->selected->path);
             });
         }
@@ -1074,7 +1074,7 @@ void DiskPage::openSelected() {
     QString path = n->path;
     if (!n->isDir) path = QFileInfo(path).absolutePath();
     if (!QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
-        // "Copy path" and "Move to Trash" both say what they did, and this
+        // "Copy Path" and "Move to Trash" both say what they did, and this
         // button was the one that could do nothing at all: with no handler
         // for the scheme the click left the window exactly as it was.
         QMessageBox box(

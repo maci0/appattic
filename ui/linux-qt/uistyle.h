@@ -5,6 +5,7 @@
 #include <QAccessible>
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QFont>
 #include <QFontDatabase>
 #include <QFontInfo>
@@ -12,7 +13,9 @@
 #include <QFrame>
 #include <QLabel>
 #include <QPalette>
+#include <QSizePolicy>
 #include <QStyle>
+#include <QStyleOptionComboBox>
 #include <QStyleOptionViewItem>
 #include <QToolBar>
 #include <QWidget>
@@ -219,6 +222,27 @@ inline void aaElidableToolbarLabel(QLabel *label, int minPx = 120) {
     if (!label) return;
     label->setMinimumWidth(minPx);
     label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+}
+
+/// A combo's own minimum is the arrow and a couple of letters, so a toolbar
+/// that is short on room draws "All" as "Al" instead of moving a later control
+/// into the overflow. Hold the closed label at the width of its longest item.
+inline void aaComboFitsLabel(QComboBox *box) {
+    if (!box) return;
+    box->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    int text = 0;
+    const QFontMetrics fm(box->font());
+    for (int i = 0; i < box->count(); ++i)
+        text = qMax(text, fm.horizontalAdvance(box->itemText(i)));
+    QStyleOptionComboBox opt;
+    opt.initFrom(box);
+    const int arrow = box->style()->subControlRect(
+        QStyle::CC_ComboBox, &opt, QStyle::SC_ComboBoxArrow, box).width();
+    const int frame = box->style()->pixelMetric(QStyle::PM_ComboBoxFrameWidth, &opt, box);
+    // sizeHint() before the widget is shown is the arrow plus a couple of
+    // letters, which is how "All" was drawn as "Al".
+    box->setMinimumWidth(text + qMax(arrow, 18) + frame * 2 + 16);
+    box->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
 }
 
 /// The width a toolbar needs before it starts hiding items into the overflow
