@@ -36,6 +36,11 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.5.0" date="2026-10-18">
+      <description>
+        <p>The package kind menu shows All, Leaves, and Globals in full. On the disk list, each name sits next to its path.</p>
+      </description>
+    </release>
     <release version="3.4.1" date="2026-10-16">
       <description>
         <p>The Arch packages are rebuilt for 3.4.0. appattic-qt compiles that tag with Zig 0.17.0.</p>
