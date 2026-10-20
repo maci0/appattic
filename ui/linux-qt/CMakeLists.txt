@@ -13,7 +13,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 # Format 1 omits resource timestamps; the embedded icons and fonts do not use them.
-set(CMAKE_AUTORCC_OPTIONS --format-version 1)
+set(CMAKE_AUTORCC_OPTIONS --format-version 1 --compress-algo zlib)
 
 include(CheckPIESupported)
 check_pie_supported()
