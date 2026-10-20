@@ -163,24 +163,16 @@ final class PackagingTests: XCTestCase {
         XCTAssertTrue(checkVersion.contains("date="), checkVersion)
     }
 
-    /// The Swift resource is a symlink to the one table the Zig core embeds,
-    /// so the two cannot drift. A copy here is a second file to forget, which
-    /// is how the table first got the same four names twice.
-    func testSystemNamesTableIsOneSymlinkedFile() throws {
+    /// SwiftPM preserves symlinks in copied resources, leaving a broken link
+    /// in the built bundle. Keep a regular file and verify its bytes here.
+    func testSystemNamesTableMatchesCore() throws {
         let root = repoRoot()
         let packaged = root.appendingPathComponent("Sources/AppAtticScan/linux-system-names.txt")
         let values = try packaged.resourceValues(forKeys: [.isSymbolicLinkKey])
-        XCTAssertEqual(values.isSymbolicLink, true, packaged.path)
-        // Resolved from the link's own directory, not with
-        // `resolvingSymlinksInPath`: on Linux Swift 5.10.1 that returns a
-        // relative link's path unchanged (an absolute target resolves), and the
-        // repository's link has to stay relative so a checkout works from any
-        // mount.
-        let target = try FileManager.default.destinationOfSymbolicLink(atPath: packaged.path)
+        XCTAssertEqual(values.isSymbolicLink, false, packaged.path)
         XCTAssertEqual(
-            packaged.deletingLastPathComponent().appendingPathComponent(target).standardizedFileURL.path,
-            root.appendingPathComponent("core/src/linux-system-names.txt").path,
-            "the Swift resource must resolve to the table the Zig core embeds"
+            try Data(contentsOf: packaged),
+            try Data(contentsOf: root.appendingPathComponent("core/src/linux-system-names.txt"))
         )
 
         let core = try String(
