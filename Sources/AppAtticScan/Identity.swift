@@ -51,10 +51,14 @@ func loadLinuxSystemNamesText() -> String {
     {
         return decodeUTF8(data)
     }
+    #if DEBUG
     let here = URL(fileURLWithPath: #filePath)
     let repo = here.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let file = repo.appendingPathComponent("core/src/linux-system-names.txt")
     return readUTF8File(file.path) ?? ""
+    #else
+    return ""
+    #endif
 }
 
 let linuxSystemNames: Set<String> = parseNewlineNameSet(loadLinuxSystemNamesText())

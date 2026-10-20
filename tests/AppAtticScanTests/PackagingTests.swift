@@ -374,6 +374,7 @@ final class PackagingTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(keepNames.contains("gtk-3.0"), keepNames)
+        XCTAssertEqual(linuxSystemNames, parseNewlineNameSet(keepNames))
         XCTAssertFalse(linuxSystemNames.isEmpty)
         XCTAssertTrue(linuxSystemNames.contains("gtk-3.0"))
     }
