@@ -36,6 +36,11 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.6.0" date="2026-10-21">
+      <description>
+        <p>This maintenance release updates the build and release actions. The Swift command line build maps source paths out of compiler metadata, and the test suite handles privileged runners and macOS session stubs correctly.</p>
+      </description>
+    </release>
     <release version="3.5.0" date="2026-10-18">
       <description>
         <p>The package kind menu shows All, Leaves, and Globals in full. On the disk list, each name sits next to its path.</p>
