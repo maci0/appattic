@@ -12,9 +12,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-if(NOT DEFINED ENV{SOURCE_DATE_EPOCH} OR "$ENV{SOURCE_DATE_EPOCH}" STREQUAL "")
-    set(ENV{SOURCE_DATE_EPOCH} "0")
-endif()
+# Format 1 omits resource timestamps; the embedded icons and fonts do not use them.
+set(CMAKE_AUTORCC_OPTIONS --format-version 1)
 
 include(CheckPIESupported)
 check_pie_supported()
