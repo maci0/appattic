@@ -38,7 +38,15 @@ func parseNewlineNameSet(_ text: String) -> Set<String> {
 /// convention the rest of the scanners follow: invalid bytes become U+FFFD, a
 /// leading BOM is not content.
 func loadLinuxSystemNamesText() -> String {
-    if let url = Bundle.module.url(forResource: "linux-system-names", withExtension: "txt"),
+    // SwiftPM's generated accessor embeds an absolute build-path fallback.
+    #if os(Linux)
+    let bundleName = "AppAttic_AppAtticScan.resources"
+    #else
+    let bundleName = "AppAttic_AppAtticScan.bundle"
+    #endif
+    let bundleURL = Bundle.main.bundleURL.appendingPathComponent(bundleName)
+    if let bundle = Bundle(url: bundleURL),
+       let url = bundle.url(forResource: "linux-system-names", withExtension: "txt"),
        let data = try? Data(contentsOf: url)
     {
         return decodeUTF8(data)
