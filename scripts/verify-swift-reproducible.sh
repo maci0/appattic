@@ -84,6 +84,7 @@ build_cli() {
         swift build -c release \
             -Xswiftc -file-prefix-map -Xswiftc "$tree=." \
             -Xswiftc -debug-prefix-map -Xswiftc "$tree=." \
+            -Xswiftc -Xfrontend -Xswiftc -no-clang-module-breadcrumbs \
             -Xcc "-ffile-prefix-map=$tree=." \
             -Xcc "-fdebug-prefix-map=$tree=." \
             -Xcc "-fmacro-prefix-map=$tree=." \

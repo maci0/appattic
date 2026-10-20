@@ -1168,7 +1168,11 @@ private class StubURLSession: URLSession {
 }
 
 private func stubURLSession(status: Int, body: Data = Data(), error: Error? = nil) -> URLSession {
+    #if canImport(FoundationNetworking)
     let session = StubURLSession(configuration: .ephemeral)
+    #else
+    let session = StubURLSession()
+    #endif
     session.status = status
     session.body = body
     session.error = error

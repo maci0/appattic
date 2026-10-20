@@ -688,17 +688,18 @@ public func reinstallHint(_ source: String) -> String? {
 
 /// Map cached reason strings from older scans onto current copy. New verdicts already use the new wording.
 public func displayStaleReason(_ reason: String) -> String {
-    let rules: [(String, String)] = [
-        ("trivial to reinstall", ". Easy to reinstall with brew."),
-        ("manual reinstall would be required", ". Manual reinstall if you still want it."),
-    ]
-    for (needle, suffix) in rules {
-        guard reason.contains(needle) else { continue }
-        let prefix = reason.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
-            .first.map(String.init) ?? reason
-        return prefix.trimmingCharacters(in: .whitespaces) + suffix
+    // Swift 5.10 emits unstable code for the equivalent tuple-array loop.
+    let suffix: String
+    if reason.contains("trivial to reinstall") {
+        suffix = ". Easy to reinstall with brew."
+    } else if reason.contains("manual reinstall would be required") {
+        suffix = ". Manual reinstall if you still want it."
+    } else {
+        return reason
     }
-    return reason
+    let prefix = reason.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+        .first.map(String.init) ?? reason
+    return prefix.trimmingCharacters(in: .whitespaces) + suffix
 }
 
 /// One verdict per software row, in the order given. `now` is the instant the

@@ -811,7 +811,7 @@ echo "doc citations: ok (no line numbers to go stale)"
 # mapping added to one and not the other would let the gate pass on a build the
 # release never makes. Read the flag list out of both and compare, the same way
 # the host-exec argv check above compares two lists that must not drift.
-for flag in -file-prefix-map -debug-prefix-map -ffile-prefix-map= -fdebug-prefix-map= -fmacro-prefix-map=; do
+for flag in -file-prefix-map -debug-prefix-map -no-clang-module-breadcrumbs -ffile-prefix-map= -fdebug-prefix-map= -fmacro-prefix-map=; do
     for file in scripts/swift-build.sh scripts/verify-swift-reproducible.sh; do
         if ! grep -q -- "$flag" "$ROOT/$file"; then
             echo "error: $file does not pass $flag; it and scripts/swift-build.sh" >&2

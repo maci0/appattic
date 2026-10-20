@@ -8,6 +8,7 @@
 #
 # Map both Swift metadata and the Clang importer's paths; -Xcc alone leaves
 # Swift source paths in the release binary.
+# Clang module breadcrumbs reference build-only caches whose hashes vary by root.
 appattic_swift_build() {
     local config="$1"; shift
     local root
@@ -15,6 +16,7 @@ appattic_swift_build() {
     swift build -c "$config" \
         -Xswiftc -file-prefix-map -Xswiftc "$root=." \
         -Xswiftc -debug-prefix-map -Xswiftc "$root=." \
+        -Xswiftc -Xfrontend -Xswiftc -no-clang-module-breadcrumbs \
         -Xcc "-ffile-prefix-map=$root=." \
         -Xcc "-fdebug-prefix-map=$root=." \
         -Xcc "-fmacro-prefix-map=$root=." \
