@@ -84,6 +84,7 @@ fi
 # and 36 reads clean.
 # SC2317 is not listed on its own: shellcheck pulls in SC2312 with it, so
 # enabling it here would fail the gate on the masked returns named above.
+# Use rules available in Ubuntu 24.04's ShellCheck 0.9 as well as newer builds.
 # Every name below is one `--list-optional` prints, and the gate below proves
 # it rather than trusting it: shellcheck accepts an unknown --enable name
 # silently and exits 0, so a misspelled rule reads as a passing gate that never
@@ -93,7 +94,7 @@ fi
 # all. `--list-optional` is where a name comes from.
 # `shellcheck --enable=all` on this list is what the numbers above are.
 shellcheck -x -P SCRIPTDIR \
-    --enable=add-default-case,avoid-negated-conditions,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,require-double-brackets,useless-use-of-cat \
+    --enable=add-default-case,avoid-nullary-conditions,check-unassigned-uppercase,deprecate-which,quote-safe-variables,require-double-brackets \
     "${shell_files[@]}"
 
 # Every name the flag above carries is a rule this shellcheck implements. Read
@@ -810,7 +811,7 @@ echo "doc citations: ok (no line numbers to go stale)"
 # mapping added to one and not the other would let the gate pass on a build the
 # release never makes. Read the flag list out of both and compare, the same way
 # the host-exec argv check above compares two lists that must not drift.
-for flag in -ffile-prefix-map= -fdebug-prefix-map= -fmacro-prefix-map=; do
+for flag in -file-prefix-map -debug-prefix-map -ffile-prefix-map= -fdebug-prefix-map= -fmacro-prefix-map=; do
     for file in scripts/swift-build.sh scripts/verify-swift-reproducible.sh; do
         if ! grep -q -- "$flag" "$ROOT/$file"; then
             echo "error: $file does not pass $flag; it and scripts/swift-build.sh" >&2

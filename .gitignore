@@ -5,6 +5,8 @@ ui/linux-qt/build-release/
 .deps/
 .zig-cache/
 .zig-cache-local/
+zig-out/
+zig-pkg/
 .swiftpm/
 __pycache__/
 *.pyc

@@ -82,6 +82,8 @@ build_cli() {
         # The flag list is the helper's, and scripts/lint.sh fails if the two
         # spellings part.
         swift build -c release \
+            -Xswiftc -file-prefix-map -Xswiftc "$tree=." \
+            -Xswiftc -debug-prefix-map -Xswiftc "$tree=." \
             -Xcc "-ffile-prefix-map=$tree=." \
             -Xcc "-fdebug-prefix-map=$tree=." \
             -Xcc "-fmacro-prefix-map=$tree=." \

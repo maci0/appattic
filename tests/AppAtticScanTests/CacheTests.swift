@@ -1,6 +1,8 @@
 import XCTest
 
-#if canImport(Glibc)
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
 import Glibc
 #endif
 
@@ -700,12 +702,10 @@ final class CacheTests: XCTestCase {
     /// call under test really does reach `removeItem` rather than returning on
     /// the absent-file guard.
     ///
-    /// The parent directory is read-and-execute only, so the unlink is refused
-    /// with `EACCES`, which no uid can bypass: root's `CAP_DAC_OVERRIDE` drops
-    /// to a directory's own execute bit here, and the suite has to hold under
-    /// a root run. Restored in teardown, before the directory is taken, so a
-    /// failed assertion cannot strand the next test's tmp.
+    /// The parent directory is read-and-execute only. Root bypasses these
+    /// permissions, so this case requires an unprivileged test process.
     func testClearScanCacheIsFalseWhenARemovalDoesNotLand() throws {
+        try XCTSkipIf(geteuid() == 0, "root can unlink from a read-only directory")
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("appattic-clear-\(UUID().uuidString)")
         let url = dir.appendingPathComponent("last-scan.json")

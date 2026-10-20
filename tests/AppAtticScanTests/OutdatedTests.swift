@@ -1143,16 +1143,9 @@ private class StubTask: URLSessionDataTask {
 }
 
 private class StubURLSession: URLSession {
-    let status: Int
-    let body: Data
-    let error: Error?
-
-    init(status: Int, body: Data, error: Error?) {
-        self.status = status
-        self.body = body
-        self.error = error
-        super.init(configuration: .ephemeral)
-    }
+    var status = 200
+    var body = Data()
+    var error: Error?
 
     override func dataTask(
         with request: URLRequest,
@@ -1175,5 +1168,9 @@ private class StubURLSession: URLSession {
 }
 
 private func stubURLSession(status: Int, body: Data = Data(), error: Error? = nil) -> URLSession {
-    return StubURLSession(status: status, body: body, error: error)
+    let session = StubURLSession(configuration: .ephemeral)
+    session.status = status
+    session.body = body
+    session.error = error
+    return session
 }
