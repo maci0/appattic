@@ -38,7 +38,7 @@
   <releases>
     <release version="3.6.0" date="2026-10-21">
       <description>
-        <p>This maintenance release updates the build and release actions. The Swift command line build maps source paths out of compiler metadata, and the test suite handles privileged runners and macOS session stubs correctly.</p>
+        <p>The Swift command line ships its system-name table as a readable resource, including when installed away from the source checkout. Release builds no longer contain source checkout paths. Artifact publishing and build checks work with the pinned toolchains.</p>
       </description>
     </release>
     <release version="3.5.0" date="2026-10-18">
