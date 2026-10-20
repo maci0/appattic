@@ -789,7 +789,7 @@ cite_re='`[A-Za-z0-9_./-]+\.(zig|swift|cpp|h|c|sh):[0-9]+`|`:[0-9]+`'
 for _cite_src in "${doc_cite_files[@]}"; do
     # shellcheck disable=SC2016  # the two citation forms, as literals
     for _plant in '`core/src/apt.zig:94`' '`:94`'; do
-        if ! rg -N -o "$cite_re" <(printf '%s\n' "$_plant") 2>/dev/null | grep -qxF "$_plant"; then
+        if ! printf '%s\n' "$_plant" | rg -N -o "$cite_re" 2>/dev/null | grep -qxF "$_plant"; then
             echo "error: the doc-citation regex does not flag $_plant" >&2
             echo "       it is meant to, so a doc citing that shape would pass" >&2
             echo "       this gate and ship a citation that rots." >&2

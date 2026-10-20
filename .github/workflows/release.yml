@@ -35,7 +35,8 @@ jobs:
       - name: Check the tag matches the declared version, and is not already released
         if: startsWith(github.ref, 'refs/tags/')
         run: bash scripts/check-version.sh --tag "$GITHUB_REF_NAME"
-      - uses: swift-actions/setup-swift@364295d9c23900ce04d4e5cc708387921b4e50f9 # v3
+      # shortcut: v3 fails to verify the pinned Swift download, upgrade when its installer supports 5.10.1.
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "5.10.1"
       - name: Test scan library
@@ -100,7 +101,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: bash scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
       - name: Install Swift
-        uses: swift-actions/setup-swift@364295d9c23900ce04d4e5cc708387921b4e50f9 # v3
+        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "5.10.1"
       - name: Install Qt 6 and build tools
@@ -176,7 +177,7 @@ jobs:
       # publish a macOS zip the AppImage job would have refused: a tag that
       # does not match the declared version, a version already released, or a
       # red scan suite stops the release at the gate instead of here.
-      - uses: swift-actions/setup-swift@364295d9c23900ce04d4e5cc708387921b4e50f9 # v3
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "5.10.1"
       - name: Build AppAtticUI

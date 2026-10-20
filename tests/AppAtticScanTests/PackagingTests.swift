@@ -505,7 +505,7 @@ final class PackagingTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(yaml.contains("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"), yaml)
-        XCTAssertTrue(yaml.contains("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"), yaml)
+        XCTAssertTrue(yaml.contains("actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"), yaml)
         XCTAssertTrue(yaml.contains("actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"), yaml)
         XCTAssertFalse(yaml.contains("actions/checkout@v4\n"), yaml)
         XCTAssertFalse(yaml.contains("setup-swift@v2\n"), yaml)
