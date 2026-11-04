@@ -197,6 +197,10 @@ public func applyUntrustedCasks(_ pkgs: [OutdatedPkg], refused: [UntrustedCask])
 }
 
 func aurHelperBin(_ which: WhichFn = whichCommand) -> String {
+    // Gated by the system-PATH lookup in `whichCommandExcludesUserDirectories`:
+    // the returned name is interpolated into a `pacman`-escalation line, and
+    // a `paru`/`yay`/`pikaur` planted in a user-writable directory must not
+    // be what that line runs at root.
     for name in ["paru", "yay", "pikaur"] {
         if which(name) != nil { return name }
     }

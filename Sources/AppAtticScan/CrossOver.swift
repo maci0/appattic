@@ -98,6 +98,13 @@ func appendCrossOverBottles(_ apps: inout [AppRecord], seen: inout Set<String>, 
 func crossoverBottleBinary() -> String {
     let mac = "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/cxbottle"
     if FileManager.default.isExecutableFile(atPath: mac) { return mac }
+    // `whichCommand("cxbottle")` already skips user-writable directories for
+    // this name (see `whichCommandExcludesUserDirectories`): the resolved
+    // path is interpolated into the shell script that deletes the bottle, so
+    // a `cxbottle` in `~/.local/bin` must not be what it runs. Returning the
+    // bare name when nothing is found keeps the script's quoted invocation
+    // failing loudly rather than falling back to a user-directory lookup at
+    // script time.
     return whichCommand("cxbottle") ?? "cxbottle"
 }
 

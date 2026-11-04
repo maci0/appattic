@@ -328,35 +328,64 @@ final class ProcessTests: XCTestCase {
         XCTAssertEqual(nvmVersionOrder(["v"]), ["v"])
     }
 
-    /// Every spawned process, including the generated cleanup and update
-    /// scripts, runs with this PATH. The cleanup directories go first so a
-    /// stale user copy cannot shadow the one the script is about to remove,
-    /// and a directory already listed is not listed twice: a repeat still
-    /// resolves, but it makes the script's own comment about the first match
-    /// wrong.
+    /// A generated script runs with a fixed system PATH, never the caller's.
+    ///
+    /// The script is the destructive surface (`rm`, package removal, and
+    /// `pkexec`/`sudo` escalation through `rootcmd`). Inheriting a PATH —
+    /// especially one that puts `~/.local/bin` and `~/bin` ahead of
+    /// `/usr/bin` — lets a `pkexec`, `rm`, or `sudo` planted in a
+    /// user-writable directory run at the prompt the script opens, and a
+    /// fake `pkexec` there turns a confirmed removal into root code
+    /// execution. See `docs/THREAT_MODEL.md` (abuse case 6) and `SECURITY.md`.
+    /// The fix ignores the supplied PATH entirely rather than prepending
+    /// system dirs in front of it: an entry that appeared ahead of `/usr/bin`
+    /// in the result would still win.
     func testAugmentedProcessEnvironmentPutsCleanupDirsFirstWithoutDuplicates() throws {
-        // `augmentedProcessEnvironment` reads the account home itself, so the
-        // expected list has to be built from the same source. A hardcoded home
-        // here made the test assert the runner's account name: it passed only
-        // where the home happened to be the literal one.
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let cleanup = cleanupPathDirectories(home: home)
+        let safe = scriptSafePathDirectories()
         let out = augmentedProcessEnvironment(env: [
             "PATH": "/opt/tools:\(cleanup[0]):/opt/tools",
             "APPATTIC_KEEP": "1",
         ])
         let path = try XCTUnwrap(out["PATH"]?.split(separator: ":", omittingEmptySubsequences: false).map(String.init))
-        XCTAssertEqual(Array(path.prefix(cleanup.count)), cleanup)
+        // The supplied PATH contributes nothing, not even its system-looking
+        // entries: every resolved entry is one of the fixed system dirs.
+        XCTAssertEqual(path, safe, "PATH is the fixed system list, not the caller's: \(path)")
         XCTAssertEqual(Set(path).count, path.count, "a directory listed twice: \(path)")
-        XCTAssertEqual(path.last, "/opt/tools", "the caller's own PATH entries are kept: \(path)")
-        XCTAssertEqual(out["APPATTIC_KEEP"], "1", "only PATH is rewritten")
+        XCTAssertFalse(path.contains("/opt/tools"), "a caller-supplied dir reached the script: \(path)")
+        // No user-writable directory is on the script PATH.
+        let userBin = (home as NSString).appendingPathComponent(".local/bin")
+        let homeBin = (home as NSString).appendingPathComponent("bin")
+        XCTAssertFalse(path.contains(userBin), "~/.local/bin on the script PATH: \(path)")
+        XCTAssertFalse(path.contains(homeBin), "~/bin on the script PATH: \(path)")
+        XCTAssertFalse(path.contains("."), "an empty entry (cwd) on the script PATH: \(path)")
+        XCTAssertEqual(out["APPATTIC_KEEP"], "1", "non-PATH keys are preserved")
 
-        // An empty or absent PATH still yields the cleanup directories, so a
-        // process launched from a stripped environment can still find a shell.
+        // An empty or absent PATH still yields the same fixed system PATH.
         for env in [["PATH": ""], [:]] as [[String: String]] {
             let stripped = augmentedProcessEnvironment(env: env)
             let dirs = try XCTUnwrap(stripped["PATH"]?.split(separator: ":", omittingEmptySubsequences: false).map(String.init))
-            XCTAssertEqual(dirs, cleanup, "env=\(env)")
+            XCTAssertEqual(dirs, safe, "env=\(env)")
         }
+    }
+
+    /// The fixed script PATH contains no user directory and no empty entry,
+    /// and covers the system package managers the scripts invoke.
+    func testScriptSafePathIsSystemOnly() throws {
+        let safe = scriptSafePathDirectories()
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let userBins = [
+            (home as NSString).appendingPathComponent(".local/bin"),
+            (home as NSString).appendingPathComponent("bin"),
+            (home as NSString).appendingPathComponent(".bun/bin"),
+        ]
+        for dir in safe {
+            XCTAssertFalse(userBins.contains(dir), "user dir \(dir) in script PATH")
+            XCTAssertFalse(dir.isEmpty, "empty entry in script PATH")
+        }
+        XCTAssertTrue(safe.contains("/usr/bin"))
+        XCTAssertTrue(safe.contains("/bin"))
+        XCTAssertTrue(safe.contains("/opt/homebrew/bin"))
     }
 }
