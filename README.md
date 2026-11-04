@@ -112,6 +112,12 @@ Settings live in `settings.json` next to the scan cache (same file for CLI, macO
 }
 ```
 
+Copy `settings.json.example` (at the repository root) to that path for a
+starting point; it holds the three valid keys at their defaults and nothing
+else. The loader rejects any other key rather than ignoring a misspelling, so
+an example that drifts from the schema would fail every new file's first
+load.
+
 `includeSystem` defaults to false (OS system apps stay out of the stale list). The CLI also reads it; `--include-system` turns it on for that run. There is no flag to turn it off when the file already has `true`. `confirmDelete` defaults to true and is UI-only. `ignoredLeftoverPaths` hides those leftovers in both the UI and CLI. Each entry is the full path a report prints: a relative one, a `~` one, or one with a trailing slash matches nothing, so the file is rejected with the offending entry named rather than storing a setting that does nothing. A missing file uses those defaults. A malformed file is an error: the CLI exits 2, the UI shows the path and does not overwrite the file until you save settings. `appattic config` prints the file it resolved and the values in force, which is how you check a setting that looks ignored.
 
 The Linux window used to keep its settings in `$XDG_CONFIG_HOME/AppAttic/AppAttic.conf` (a `QSettings` file) and copies them into `settings.json` the first time it starts with no `settings.json`. A value in that old file that is neither true nor false, or an `ignoredLeftovers` entry that is not a full path, is not carried over: the window opens with no settings, names the key and the old file, and leaves both files alone, because writing the defaults would overwrite a value you wrote. Edit that old file (or delete it to start from the defaults) and start the window again; saving settings inside the window does not clear this. Reading that old file narrows its mode to `0600` (group and other lose read and write on it): its `ignoredLeftovers` list is full paths under your own home, and `QSettings` wrote the file readable by group and other. A migration that lands in `settings.json` deletes the old file, so the paths are not left in a second copy that nothing opens; a migration that could not be written leaves it, because then it is the only copy.
@@ -137,6 +143,15 @@ Environment:
 | `ANDROID_SDK_ROOT` | CLI and macOS UI | The other spelling of the same Android SDK root, searched after `ANDROID_HOME`. A value here that holds no SDK is reported by `appattic config` as ignored rather than as the root in force. |
 | `LANG` | CLI and macOS UI | The locale whose `.lproj` directory the macOS app-name lookup reads for an app's localized name. Unset, empty, or a value that is only an encoding opens the base English names. `appattic config` prints the locale it resolved to, so a diff of two machines shows why the same app is named differently. |
 | `FLATPAK_ID` | Linux Qt and the core host | Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags and package-manager queries go through `/run/host` and `flatpak-spawn --host`. Unset or empty is a normal host run. |
+| `HOME` | CLI, macOS UI, Linux Qt, core host | User home directory. Fallback root for every XDG path when its variable is unset or empty, and for the Qt window's home-dot scan. The macOS/CLI side reads it through the system user database rather than the variable, so the two can disagree. |
+| `PATH` | CLI, macOS UI, Linux Qt, core host | Colon-separated list of executable directories. Resolved before every subprocess (including the generated cleanup/update `sh` script and its `rm`/`pkexec`/`brew` calls), with user bin dirs such as `~/.local/bin` searched first. The core host forwards it to allowlisted queries. |
+| `USER` / `LOGNAME` | CLI, macOS UI | Account name, used whenever a resolved path is compared against the current user (for example, telling a leftover under your own home from another account's). `USER` is read first, then `LOGNAME`. |
+| `HOMEBREW_NO_AUTO_UPDATE` | CLI, macOS UI | Not read as configuration: the app sets it to `1` for any subprocess it resolves as `brew`, so a scan never triggers a Homebrew self-update. Setting it in your own environment has no effect on AppAttic's output. |
+| `QT_QPA_PLATFORM` | Linux Qt | Qt platform plugin. `offscreen` lets `--smoke` and `--dev-check` run headless; the window itself sets it to `offscreen` only when no display-related variables are present and no platform was requested. |
+| `WASMTIME_DIR` | Linux Qt, build time only | Wasmtime C API prefix, used when building/linking the core, not at run time. The AppImage/Flatpak builds set it to the install prefix. |
+| `APPATTIC_NO_MAC_UI` | macOS build time only | `1`/`true`/`yes`/`on` (same spellings as the host-exec switches) drops the macOS UI target and its Swift 6 dependency so `swift test` builds on the pinned Swift 5.10.1. Set by `scripts/test.sh` on macOS. |
+| `APPATTIC_BUILD_JOBS` | Build time only | Whole number of at least 1 overriding the core build's job count; anything else is a build error. Used by `core/build.sh`. |
+| `SOURCE_DATE_EPOCH` | Build time only | Unix timestamp the reproducible builds use as the build date, so a rebuild from the same source produces identical artifacts. Honored by the WASM and Qt reproducible-build checks. |
 
 Per the XDG Base Directory specification, empty or relative XDG paths are ignored and the standard user defaults are used. A trailing separator is dropped from a root that ends in one, so `XDG_CONFIG_HOME=/srv/config/` and `XDG_CONFIG_HOME=/srv/config` name the same directory to the CLI, to the Linux window, and to the core host.
 
