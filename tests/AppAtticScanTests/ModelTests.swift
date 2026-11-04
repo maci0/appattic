@@ -159,9 +159,13 @@ final class ModelTests: XCTestCase {
     func testLeftoverAndSoftwareTypedEnums() {
         XCTAssertTrue(isListedLeftoverStatus(LeftoverStatus.orphaned))
         XCTAssertTrue(isListedLeftoverStatus(LeftoverStatus.shadow))
+        XCTAssertTrue(isListedLeftoverStatus(LeftoverStatus.review))
+        XCTAssertFalse(isListedLeftoverStatus(LeftoverStatus.keep))
         XCTAssertFalse(isListedLeftoverStatus(LeftoverStatus.owned))
         XCTAssertTrue(isListedLeftoverStatus("orphaned"))
         XCTAssertTrue(isListedLeftoverStatus("shadow"))
+        XCTAssertTrue(isListedLeftoverStatus("review"))
+        XCTAssertFalse(isListedLeftoverStatus("keep"))
         XCTAssertFalse(isListedLeftoverStatus("owned"))
         XCTAssertFalse(isListedLeftoverStatus("future"))
         XCTAssertTrue(outdatedIsUpdatable(manager: "brew-formula", kind: nil))

@@ -24,12 +24,12 @@ const commands = [_][3][]const u8{
     .{ "podman " ++ q_images, "podman " ++ q_volumes, "podman " ++ q_ps },
 };
 
-var result_buf: [16384]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
-var images_buf: [4096]u8 = undefined;
-var volumes_buf: [4096]u8 = undefined;
-var ps_buf: [4096]u8 = undefined;
+var images_buf: [32768]u8 = undefined;
+var volumes_buf: [32768]u8 = undefined;
+var ps_buf: [32768]u8 = undefined;
 
 const none_json =
     \\{"plugin":"container-runtime","engine":null,"findings":[],"script":null,"dialog":{"title":"No container engine","body":"Install docker or podman to scan runtime leftovers. Nothing to remove."},"note":"no container engine"}
