@@ -52,6 +52,7 @@ struct DiskUsageView: View {
                 Button("Scan Path") { scan(path) }
                     .disabled(scanning || path.isEmpty)
                 TextField("Folder path", text: $path)
+                    .accessibilityLabel("Folder path")
                 Spacer()
             }
             .padding(Metrics.lg)
@@ -66,6 +67,7 @@ struct DiskUsageView: View {
                     Text(status.isEmpty ? "Scanning…" : status)
                         .font(.system(size: TypeScale.body))
                         .foregroundColor(Color.appDim)
+                        .accessibilityLabel(status.isEmpty ? "Scanning…" : status)
                     Spacer()
                     Button("Stop") { stopScan() }
                 }

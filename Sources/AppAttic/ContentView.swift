@@ -229,26 +229,30 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: Metrics.tight) {
             ForEach(SidebarItem.allCases, id: \.id) { item in
                 let on = selected == item
-                HStack {
-                    Text(item.rawValue)
-                        .font(.system(size: TypeScale.body))
-                        .foregroundColor(on ? Color.appOnAccent : Color.appText)
-                    Spacer()
-                    if let count = sidebarCount(item) {
-                        Text("\(count)")
-                            .font(.system(size: TypeScale.small))
-                            .foregroundColor(on ? Color.appOnAccent.opacity(0.9) : Color.appDim)
-                    }
-                }
-                .padding(Metrics.md)
-                .padding(Metrics.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(on ? Color.appBlue : Color.clear)
-                .cornerRadius(Metrics.radiusMd)
-                .onTapGesture {
+                Button {
                     guard item != selected else { return }
                     selected = item
+                } label: {
+                    HStack {
+                        Text(item.rawValue)
+                            .font(.system(size: TypeScale.body))
+                            .foregroundColor(on ? Color.appOnAccent : Color.appText)
+                        Spacer()
+                        if let count = sidebarCount(item) {
+                            Text("\(count)")
+                                .font(.system(size: TypeScale.small))
+                                .foregroundColor(on ? Color.appOnAccent : Color.appDim)
+                        }
+                    }
+                    .padding(Metrics.md)
+                    .padding(Metrics.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(on ? Color.appBlue : Color.clear)
+                    .cornerRadius(Metrics.radiusMd)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.rawValue)
+                .accessibilityAddTraits(on ? .isSelected : [])
             }
             Spacer()
         }
@@ -292,6 +296,7 @@ struct ContentView: View {
                 Text(vm.progressMessage)
                     .font(.system(size: TypeScale.body))
                     .foregroundColor(Color.appDim)
+                    .accessibilityLabel(vm.progressMessage)
                 if let fraction = scanProgressFraction(line: vm.progressMessage) {
                     ProgressView(value: fraction)
                         .frame(width: 120)
@@ -300,11 +305,13 @@ struct ContentView: View {
                 Text(vm.statusText)
                     .font(.system(size: TypeScale.small))
                     .foregroundColor(Color.appDim)
+                    .accessibilityLabel(vm.statusText)
             }
             if vm.scanData != nil && (selected == .leftovers || selected == .stale || selected == .outdated || selected == .packages) {
-                TextField("Search", text: $vm.searchText)
+                TextField("Search this list", text: $vm.searchText)
                     .font(.system(size: TypeScale.body))
                     .frame(width: 200)
+                    .accessibilityLabel("Search this list")
                 // The empty state offers "Clear search", but a search that
                 // still matches rows has no way back: the field holds the text
                 // and selecting and deleting it by hand is the only exit.
@@ -630,13 +637,16 @@ struct ContentView: View {
     }
 
     func overviewTappableRow(_ name: String, _ detail: String, _ trailing: String, action: @escaping () -> Void) -> some View {
-        VStack(spacing: 0) {
-            overviewDetailRow(name, detail, trailing)
-                .padding(Metrics.lg)
-                .padding(Metrics.sm)
-            HRule()
+        Button(action: action) {
+            VStack(spacing: 0) {
+                overviewDetailRow(name, detail, trailing)
+                    .padding(Metrics.lg)
+                    .padding(Metrics.sm)
+                HRule()
+            }
         }
-        .onTapGesture(perform: action)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(name), \(detail), \(trailing)")
     }
 
     private func emptyCopy(
@@ -789,17 +799,21 @@ struct ContentView: View {
 
     func packageFilterChip(_ title: String, _ filter: PackageListFilter) -> some View {
         let on = packageFilter == filter
-        return Text(title)
-            .font(.system(size: TypeScale.small))
-            .foregroundColor(on ? Color.appOnAccent : Color.appText)
-            .padding(Metrics.sm)
-            .padding(Metrics.xs)
-            .background(on ? Color.appBlue : Color.appChrome)
-            .cornerRadius(Metrics.radiusSm)
-            .onTapGesture {
-                guard filter != packageFilter else { return }
-                packageFilter = filter
-            }
+        return Button {
+            guard filter != packageFilter else { return }
+            packageFilter = filter
+        } label: {
+            Text(title)
+                .font(.system(size: TypeScale.small))
+                .foregroundColor(on ? Color.appOnAccent : Color.appText)
+                .padding(Metrics.sm)
+                .padding(Metrics.xs)
+                .background(on ? Color.appBlue : Color.appChrome)
+                .cornerRadius(Metrics.radiusSm)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     var packagePage: some View {
@@ -862,16 +876,19 @@ struct ContentView: View {
         onTap: @escaping () -> Void,
         @ViewBuilder row: () -> Row
     ) -> some View {
-        VStack(spacing: 0) {
-            row()
-                .padding(Metrics.md)
-                .frame(height: 28)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(selected ? Color.appBlue : Color.clear)
-            HRule()
+        Button(action: onTap) {
+            VStack(spacing: 0) {
+                row()
+                    .padding(Metrics.md)
+                    .frame(height: 28)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(selected ? Color.appBlue : Color.clear)
+                HRule()
+            }
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
-        .onTapGesture(perform: onTap)
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     func listPane<Header: View, Rows: View>(
@@ -1013,7 +1030,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(leftoverLocationLabel(rootLabel: item.root, extraCount: item.extra_paths?.count ?? 0))
                 .font(.system(size: TypeScale.small))
-                .foregroundColor(selected ? Color.appOnAccent.opacity(0.9) : leftoverSecondaryColor(item))
+                .foregroundColor(selected ? Color.appOnAccent : leftoverSecondaryColor(item))
                 .frame(width: Col.loc, alignment: .leading)
             Text(formatDate(item.mtime))
                 .font(.system(size: TypeScale.small))
@@ -1163,7 +1180,7 @@ struct ContentView: View {
     }
 
     func rowSecondary(_ selected: Bool) -> Color {
-        selected ? Color.appOnAccent.opacity(0.9) : Color.appDim
+        selected ? Color.appOnAccent : Color.appDim
     }
 
     func leftoverInspector(_ item: LeftoverItem) -> some View {
@@ -1191,13 +1208,8 @@ struct ContentView: View {
             }
             Spacer()
             inspectorSection {
-                HStack {
-                    Text("Include in cleanup")
-                        .font(.system(size: TypeScale.body))
-                    Spacer()
-                    Toggle("", isOn: leftoverToggle(item.path))
-                        .toggleStyle(.switch)
-                }
+                Toggle("Include in cleanup", isOn: leftoverToggle(item.path))
+                    .toggleStyle(.switch)
                 Button(revealLabel) { revealPath(item.path) }
                 Button("Ignore leftover") {
                     vm.ignoreLeftover(item)
@@ -1242,13 +1254,8 @@ struct ContentView: View {
             Spacer()
             inspectorSection {
                 if StaleTier.isSelectable(item.tierKind) {
-                    HStack {
-                        Text("Include in cleanup")
-                            .font(.system(size: TypeScale.body))
-                        Spacer()
-                        Toggle("", isOn: staleToggle(item.path))
-                            .toggleStyle(.switch)
-                    }
+                    Toggle("Include in cleanup", isOn: staleToggle(item.path))
+                        .toggleStyle(.switch)
                 }
                 Button(revealLabel) { revealPath(item.path) }
             }
@@ -1278,13 +1285,8 @@ struct ContentView: View {
             Spacer()
             inspectorSection {
                 if item.updatable {
-                    HStack {
-                        Text("Include in update")
-                            .font(.system(size: TypeScale.body))
-                        Spacer()
-                        Toggle("", isOn: outdatedToggle(item.id))
-                            .toggleStyle(.switch)
-                    }
+                    Toggle("Include in update", isOn: outdatedToggle(item.id))
+                        .toggleStyle(.switch)
                 } else if item.kind == "untrusted" {
                     Text("Listed so you can see it. AppAttic will not trust the tap.")
                         .font(.system(size: TypeScale.small))
@@ -1317,21 +1319,11 @@ struct ContentView: View {
             }
             Spacer()
             inspectorSection {
-                HStack {
-                    Text("Include in remove")
-                        .font(.system(size: TypeScale.body))
-                    Spacer()
-                    Toggle("", isOn: packageToggle(item.id))
-                        .toggleStyle(.switch)
-                }
+                Toggle("Include in remove", isOn: packageToggle(item.id))
+                    .toggleStyle(.switch)
                 if item.canMarkManual {
-                    HStack {
-                        Text("Mark as manually installed")
-                            .font(.system(size: TypeScale.body))
-                        Spacer()
-                        Toggle("", isOn: markManualToggle(item.id))
-                            .toggleStyle(.switch)
-                    }
+                    Toggle("Mark as manually installed", isOn: markManualToggle(item.id))
+                        .toggleStyle(.switch)
                 }
             }
         }
@@ -1420,26 +1412,16 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: Metrics.lg * 2) {
                 settingsSection("Scan") {
-                    HStack {
-                        Text("Include system apps in scan")
-                            .font(.system(size: TypeScale.body))
-                        Spacer()
-                        Toggle("", isOn: includeSystemBinding)
-                            .toggleStyle(.switch)
-                            .disabled(vm.isScanning)
-                    }
+                    Toggle("Include system apps in scan", isOn: includeSystemBinding)
+                        .toggleStyle(.switch)
+                        .disabled(vm.isScanning)
                     Text("Off by default. System apps are easy to misread as unused.")
                         .font(.system(size: TypeScale.small))
                         .foregroundColor(Color.appDim)
                 }
                 settingsSection("Deletion") {
-                    HStack {
-                        Text("Confirm before running")
-                            .font(.system(size: TypeScale.body))
-                        Spacer()
-                        Toggle("", isOn: confirmDeleteBinding)
-                            .toggleStyle(.switch)
-                    }
+                    Toggle("Confirm before running", isOn: confirmDeleteBinding)
+                        .toggleStyle(.switch)
                     Text("Shows an alert before rm, brew uninstall, package remove, or named package updates. Off runs the script immediately.")
                         .font(.system(size: TypeScale.small))
                         .foregroundColor(Color.appDim)
