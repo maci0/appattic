@@ -40,7 +40,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 #ifdef __linux__
-#include <sys/syscall.h>
 #include <sys/sysmacros.h>
 // The statx() wrapper and its STATX_* constants reach <sys/stat.h> in glibc
 // 2.28, so on an older glibc the call and the struct do not exist to compile
@@ -372,7 +371,7 @@ void walkDirFd(
     alignas(8) char buf[16384];
     for (;;) {
         if (isCancelled(*ctx->opts)) return;
-        const long nread = syscall(SYS_getdents64, fd, buf, sizeof buf);
+        const long nread = getdents64(fd, buf, sizeof buf);
         if (nread < 0) {
             if (errno == EINTR) continue;
             noteUnreadable(node);
@@ -498,7 +497,7 @@ void measureWalkFd(
     alignas(8) char buf[16384];
     for (;;) {
         if (isCancelled(opts)) return;
-        const long nread = syscall(SYS_getdents64, fd, buf, sizeof buf);
+        const long nread = getdents64(fd, buf, sizeof buf);
         if (nread < 0) {
             if (errno == EINTR) continue;
             return;
