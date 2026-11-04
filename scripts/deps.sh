@@ -876,6 +876,86 @@ check_pinned_swift_versions() {
             fi
         done < <(sed -n 's/^[[:space:]]*FROM[[:space:]]\{1,\}swift:\([0-9][0-9.]*\).*$/\1/p' "$image")
     done
+    return 0
+}
+
+# Container images are pulled by tag in four places: the FROM of each
+# Dockerfile and the `container:` of the jammy and archlinux jobs in
+# linux.yml. A tag alone names a moving target, so the same tree builds
+# against whatever the registry serves that morning; a digest pins the
+# bytes. These are the rules the pins already in the tree satisfy:
+#   - every FROM and every container: carries a @sha256: digest;
+#   - the swift image and the archlinux image each carry one digest, the
+#     same in both places that name them, so a bump cannot reach the image
+#     without reaching the job that runs it.
+# The digest value itself is not recorded anywhere else in the tree, so
+# a bump is a deliberate edit to both files rather than a registry update
+# that arrives unnoticed.
+check_container_digests() {
+    local workflow image line ref digest swift_digest arch_digest
+    swift_digest=""
+    arch_digest=""
+    for workflow in "$ROOT"/.github/workflows/*.yml; do
+        [[ -f "$workflow" ]] || continue
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            # Trim leading whitespace, then `container: `, so ref is the image
+            # reference alone and the case below matches the image name.
+            line="${line#"${line%%[![:space:]]*}"}"
+            ref="${line#container: }"
+            ref="${ref#container:}"
+            digest="${ref#*@sha256:}"
+            case "$ref" in
+                swift:*)
+                    if [[ "$digest" == "$ref" || -z "$digest" || "${#digest}" -ne 64 || "$digest" == *[!0-9a-f]* ]]; then
+                        fail "${workflow#"$ROOT"/} runs container $ref without a @sha256: digest; a tag names a moving target"
+                        continue
+                    fi
+                    if [[ -n "$swift_digest" && "$swift_digest" != "$digest" ]]; then
+                        fail "${workflow#"$ROOT"/} runs swift container digest sha256:$digest, already pinned to sha256:$swift_digest"
+                    fi
+                    swift_digest="$digest"
+                    ;;
+                archlinux:*)
+                    if [[ "$digest" == "$ref" || -z "$digest" || "${#digest}" -ne 64 || "$digest" == *[!0-9a-f]* ]]; then
+                        fail "${workflow#"$ROOT"/} runs container $ref without a @sha256: digest; a tag names a moving target"
+                        continue
+                    fi
+                    if [[ -n "$arch_digest" && "$arch_digest" != "$digest" ]]; then
+                        fail "${workflow#"$ROOT"/} runs archlinux container digest sha256:$digest, already pinned to sha256:$arch_digest"
+                    fi
+                    arch_digest="$digest"
+                    ;;
+            esac
+        done < <(grep -hE '^[[:space:]]*container:[[:space:]]+(swift|archlinux):' "$workflow" || true)
+    done
+    for image in "$ROOT/Dockerfile" "$ROOT/Dockerfile.arch"; do
+        [[ -f "$image" ]] || continue
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            ref="${line#FROM }"
+            digest="${ref#*@sha256:}"
+            if [[ "$digest" == "$ref" || -z "$digest" || "${#digest}" -ne 64 || "$digest" == *[!0-9a-f]* ]]; then
+                fail "${image#"$ROOT"/} builds FROM $ref without a @sha256: digest; a tag names a moving target"
+                continue
+            fi
+            case "$ref" in
+                swift:*)
+                    if [[ -n "$swift_digest" && "$swift_digest" != "$digest" ]]; then
+                        fail "${image#"$ROOT"/} builds FROM swift digest sha256:$digest, linux.yml pins sha256:$swift_digest"
+                    fi
+                    swift_digest="$digest"
+                    ;;
+                archlinux:*)
+                    if [[ -n "$arch_digest" && "$arch_digest" != "$digest" ]]; then
+                        fail "${image#"$ROOT"/} builds FROM archlinux digest sha256:$digest, linux.yml pins sha256:$arch_digest"
+                    fi
+                    arch_digest="$digest"
+                    ;;
+            esac
+        done < <(grep -hE '^FROM[[:space:]]+(swift|archlinux):' "$image" || true)
+    done
+    return 0
 }
 
 # SwiftPM pins the whole tree by commit revision, so an unpinned pin means a
@@ -1107,6 +1187,7 @@ run_check() {
     check_action_pins
     check_cache_steps
     check_pinned_swift_versions
+    check_container_digests
     check_swiftpm_pins
     if [[ "$FAILURES" -ne 0 ]]; then
         echo "deps: $FAILURES problem(s) with third-party pins" >&2
