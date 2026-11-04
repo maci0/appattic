@@ -200,7 +200,10 @@ jobs:
           # BSD touch (macOS) has no -h and no @epoch form, and BSD date has no
           # -d: -t and -r are the one spelling of each that macOS accepts.
           stamp="$(date -u -r "$epoch" +%Y%m%d%H%M.%S)"
-          find dist -name AppAtticUI -exec touch -t "$stamp" {} +
+          # TZ=UTC: touch -t reads its argument in local time, and the stamp
+          # above is rendered in UTC, so without it the zip entries carry the
+          # runner's zone offset and two builds of one source differ.
+          find dist -name AppAtticUI -exec env TZ=UTC touch -t "$stamp" {} +
           (cd dist && find AppAtticUI -type f | LC_ALL=C sort | TZ=UTC zip -X -q AppAttic-macos-arm64.zip -@)
           # The zip is the artifact; a run that wrote no file would otherwise
           # pass and reach `zip` below it as a missing input.
