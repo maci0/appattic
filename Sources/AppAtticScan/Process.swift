@@ -10,18 +10,49 @@ import Glibc
 /// *before* `PATH`, so a `brew` in `~/.local/bin` wins over an earlier `PATH`
 /// entry on purpose: those directories are where this project's own overlays
 /// put a tool, and a stale copy in `PATH` would scan the wrong install.
+///
+/// Names that select more than one binary on the system are excluded from
+/// the user-directory search. `whichCommand` is also what decides which
+/// program a *destructive* path will run: `crossoverBottleBinary()`
+/// resolves `cxbottle` through it and the resolved path is interpolated
+/// into the shell script, and `aurHelperBin()` resolves `paru`/`yay`/`pikaur`
+/// and interpolates the helper name into a `pacman`-escalation line. A
+/// user-writable `~/.local/bin/cxbottle` or `~/bin/paru` would otherwise be
+/// what a confirmed cleanup or update runs — and, once `rootcmd` escalates,
+/// at root. The scan-side tools (`brew`, `mas`, `flatpak`, node via nvm)
+/// stay on the user search: they are queries, not the escalation surface.
+/// A name whose result could be gated only by a prompt is not a query.
 public func whichCommand(_ name: String) -> String? {
     if name.isEmpty { return nil }
     if name.contains("/") {
         return FileManager.default.isExecutableFile(atPath: name) ? name : nil
     }
+    let excludeUserDirs = whichCommandExcludesUserDirectories(name)
     for dir in whichSearchDirectories() {
+        if excludeUserDirs, !scriptSafePathDirectories().contains(dir) {
+            continue
+        }
         let candidate = (dir as NSString).appendingPathComponent(name)
         if FileManager.default.isExecutableFile(atPath: candidate) {
             return candidate
         }
     }
     return nil
+}
+
+/// Whether resolving `name` must skip user-writable directories.
+///
+/// Only the binaries whose resolved path is interpolated into a destructive
+/// script or gated by a root escalation live here. Everything else keeps the
+/// user-directory search, so a tool a user installed for themselves is still
+/// found for scanning.
+func whichCommandExcludesUserDirectories(_ name: String) -> Bool {
+    switch name {
+    case "cxbottle", "paru", "yay", "pikaur":
+        return true
+    default:
+        return false
+    }
 }
 
 /// The directories `whichCommand` walks, de-duplicated, first-wins.
@@ -189,20 +220,73 @@ func currentUsername() -> String {
     return resolved
 }
 
-/// Process environment with `cleanupPathDirectories()` prepended to PATH,
-/// de-duplicated and first-wins.
+/// PATH for a generated script: system directories only, never the
+/// caller-supplied `PATH`.
+///
+/// A `PATH` that came from the environment (a launchd/CLI invocation, or a
+/// caller-supplied value in tests) is attacker-influenced input, and the
+/// generated script is the destructive surface: it runs `rm`, `brew`, `apt`,
+/// `pacman`, etc. and, through `rootcmd`, escalates through `pkexec`/`sudo`.
+/// Resolving any of those through a user-writable directory (`~/.local/bin`,
+/// `~/bin`, or whatever the supplied `PATH` happens to name first) lets a
+/// value planted there run at the prompt the script opens, and a fake
+/// `pkexec` there turns a confirmed removal into root code execution. That
+/// is the boundary documented in `docs/THREAT_MODEL.md` (abuse case 6) and
+/// `SECURITY.md`.
+///
+/// The fix is to hand `/bin/sh` a fixed system `PATH` and nothing else. It
+/// keeps the directories that hold the system package managers and core
+/// utilities, drops every user directory, and ignores the supplied `PATH`
+/// entirely rather than de-duplicating it in behind the system ones — a
+/// supplied entry that appeared before `/usr/bin` in the result would still
+/// win for `rm`/`pkexec`/`sudo`. The scan path (`runCommand`/`whichCommand`)
+/// is unchanged: it still resolves the user's own tools, which is a query,
+/// not a destructive action.
+///
+/// `cleanupPathDirectories()` is kept for the scan-side lookup and for tests
+/// that pin its shape; it is no longer the script `PATH`.
 public func augmentedProcessEnvironment(
     env: [String: String] = ProcessInfo.processInfo.environment
 ) -> [String: String] {
+    // The child's own environment is this process's, with the caller's
+    // PATH discarded. A caller-supplied PATH is the thing being defended
+    // against, so it is never inherited, not even de-duplicated in behind
+    // the system directories: a supplied entry ahead of `/usr/bin` in the
+    // result would still resolve `rm`/`pkexec`/`sudo` to a user-writable
+    // directory.
+    // Preserve caller-supplied keys other than PATH (a test may pass a
+    // marker variable, and future callers may pass real ones), but never
+    // let a caller-supplied PATH reach the child.
     var out = env
+    out["PATH"] = scriptSafePathDirectories().joined(separator: ":")
+    return out
+}
+
+/// The fixed `PATH` a generated script runs with: system directories only.
+///
+/// `/opt/homebrew/bin` and `/usr/local/bin` lead because that is where
+/// Homebrew installs its formulae and the `brew` the script runs, and they
+/// are admin-installed, not user-writable on the machines this targets. The
+/// user directories (`~/.local/bin`, `~/bin`, `~/.bun/bin`, …) that
+/// `cleanupPathDirectories()` and `whichSearchDirectories()` search for scan
+/// queries are deliberately absent: nothing here needs a user-installed tool
+/// to remove a package, and everything here would run whatever is there.
+public func scriptSafePathDirectories() -> [String] {
     var seen = Set<String>()
-    var parts: [String] = []
-    for dir in cleanupPathDirectories() + (env["PATH"] ?? "").split(separator: ":").map(String.init) {
+    var out: [String] = []
+    for dir in [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/home/linuxbrew/.linuxbrew/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ] {
         if !dir.isEmpty, seen.insert(dir).inserted {
-            parts.append(dir)
+            out.append(dir)
         }
     }
-    out["PATH"] = parts.joined(separator: ":")
     return out
 }
 
