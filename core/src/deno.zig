@@ -16,10 +16,10 @@ const plugin_id = "deno";
 // `parseDenoGlobalList` takes the escaping back off per line after the split.
 const query_cmd = "ls -1b " ++ path_store.home_sentinel ++ "/.deno/bin";
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
-var exec_buf: [4096]u8 = undefined;
+var exec_buf: [32768]u8 = undefined;
 
 const none_json =
     \\{"plugin":"deno","engine":null,"findings":[],"script":null,"dialog":{"title":"No deno","body":"deno is not on PATH. Plugin inactive."},"note":"deno missing"}

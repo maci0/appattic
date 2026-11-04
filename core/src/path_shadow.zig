@@ -346,7 +346,7 @@ pub fn findShadows(
     return findShadowsNative(overlayDirs, packageDirs, out, path_store);
 }
 
-var result_buf: [8192]u8 = undefined;
+var result_buf: [65536]u8 = undefined;
 var note: querynote.Log = .{};
 var result_nbytes: u32 = 0;
 

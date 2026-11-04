@@ -3,12 +3,16 @@ import Foundation
 /// Leftover classification stored as a string on JSON models so unknown values stay round-trippable.
 ///
 /// The Linux Qt shell reads the same wire vocabulary through its own
-/// `LeftoverStatus` (`ui/linux-qt/finding.h`), which is a superset of this
-/// enum: it also names `review` and `keep`, so a row this half cannot produce
-/// is still decided there rather than read as an orphan.
+/// `LeftoverStatus` (`ui/linux-qt/finding.h`). Both sides name the same
+/// cases, so a status written by one half is decided by the other rather than
+/// read as an unknown one: `review` is listed and cleanable (apt PPA sources
+/// and container-runtime stopped containers), and `keep` is a row the desktop
+/// list has marked not to delete.
 public enum LeftoverStatus: String, Codable, Sendable, Hashable, CaseIterable {
     case orphaned
     case shadow
+    case review
+    case keep
     case owned
     case system
     case active
@@ -101,7 +105,7 @@ extension LeftoverItem {
     /// `status` as a typed value, or nil when it is not a known status (a cache written by a newer AppAttic).
     public var leftoverStatus: LeftoverStatus? { LeftoverStatus(rawValue: status) }
 
-    /// True for the rows the leftover lists keep: orphaned and shadow.
+    /// True for the rows the leftover lists keep: orphaned, shadow, and review.
     public var isListedLeftover: Bool { isListedLeftoverStatus(status) }
 
     public var totalBytes: Int { size_bytes ?? 0 }
@@ -169,9 +173,10 @@ public func leftoverIgnorePaths(_ item: LeftoverItem) -> [String] {
     [item.path] + (item.extra_paths ?? [])
 }
 
-/// Leftovers shown in the list: orphaned data and PATH/desktop overlays (`shadow`). Owned, system, and active stay hidden.
+/// Leftovers shown in the list: orphaned data, PATH/desktop overlays (`shadow`),
+/// and `review` rows (listed and cleanable). Owned, system, active, and keep stay hidden.
 public func isListedLeftoverStatus(_ status: LeftoverStatus) -> Bool {
-    status == .orphaned || status == .shadow
+    status == .orphaned || status == .shadow || status == .review
 }
 
 /// The listed-leftover test for a raw `status` string. A value this build does

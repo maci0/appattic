@@ -339,7 +339,7 @@ public func leftoverWhyText(
 
 public func applyOrphanReasons(_ items: [DataItem], catalog: [String: String] = [:]) {
     for item in items {
-        if item.leftoverStatus == .orphaned {
+        if item.leftoverStatus == .orphaned || item.leftoverStatus == .review {
             item.reason = leftoverWhyText(rootLabel: item.rootLabel, kind: item.kind, extraPaths: item.extraPaths)
             item.summary = leftoverSummary(
                 rootLabel: item.rootLabel,
