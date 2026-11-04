@@ -290,7 +290,7 @@ jobs:
   jammy:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    container: swift:5.10.1-jammy
+    container: swift:5.10.1-jammy@sha256:ffc42e399ad0cad324f68d58f65e4d5f2c22eb9df73c4dfa249e898d497254b3
     # `shell: bash` on every step in this job, and the reason is the
     # container. A step with no `shell:` runs under `sh -e {0}`, and this
     # job's image has dash at /bin/sh, not bash. The runner hands a
@@ -388,7 +388,7 @@ jobs:
   archlinux:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    container: archlinux:base-devel
+    container: archlinux:base-devel@sha256:767de6eaa40dcfeda5263a48737ea03a782caabdf3a403b6e6a203c7fd333681
     # shell: bash for the same reason as the jammy job above: this image's
     # /bin/sh is dash too.
     steps:
