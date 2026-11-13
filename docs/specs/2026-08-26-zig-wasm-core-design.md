@@ -1,60 +1,75 @@
 # AppAttic Zig WASM core
 
 Date: 2026-08-26
-Updated: 2026-10-01
-Status: Accepted
+Updated: 2026-11-13
+Status: Accepted. This is the Linux Qt scan path. The Swift CLI and the macOS UI still scan in `AppAtticScan` and do not load this core.
 
-## Context
+The Python-to-Swift port is the historical record [`archive/2026-08-17-swift-scan-port-design.md`](archive/2026-08-17-swift-scan-port-design.md).
 
-Follow-on to [`2026-08-17-swift-scan-port-design.md`](archive/2026-08-17-swift-scan-port-design.md) (that port is implemented; `AppAtticScan` remains until a later Zig copy of its tests). This record is the decision that has been made, not a proposal.
+## What ships
 
-## Decision
+Linux Qt loads `appattic_core.wasm` through `core/host/embed.c` and refuses to scan without it. Every package manager and every Linux leftover root in scope is a WASM plugin. `core/src/core.zig` exports `core_abi_version` only (`ABI_VERSION` in `core/src/abi.zig`, integer 1). Load, unload, the argv tag passed to `plugin_query`, and the capability intercept live in `core/host/embed.c`.
 
-Replace in-process Swift scan logic with a Zig core compiled to WebAssembly. **Every package manager and every leftover scan path is a WASM plugin.** Native SwiftCrossUI stays on macOS (AppKit). Linux UI is C++ Qt 6 Widgets (`ui/linux-qt`), matching TMOG Linux. Do not silent-delete. Named distro upgrades (`apt install --only-upgrade pkg`, `pacman -S pkg`, `dnf upgrade pkg`) wait for confirm. No full `apt upgrade` / `pacman -Syu`. `scripts/linux-qt-link.sh` is the Linux link step; CI and the Dockerfiles run it, and a `LINUX_QT_LINK=ok` line from it is the gate (`tests/AppAtticScanTests/PackagingTests.swift` fails a build file that hardcodes the line instead of running the check). Build on the distro you run.
+The native shell owns what the Zig module does not:
 
-Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability*, https://github.com/cordiverse/paper (PDF, 88 pages). Text taken with `pdftotext` from `paper.pdf` on 2026-08-26. Cordis is TypeScript. AppAttic follows the same composability rules in Zig + WASM.
+- Windows, lists, the inspector, buttons, alerts, and the script sheet.
+- The presence tag per plugin (`pluginTag`, `kExecRules`, `kXdgRules`, `kHomeRules` in `ui/linux-qt/corehost.cpp`). The tag decides whether a coeffect is present. It does not decide which `.wasm` files load.
+- Grouping of findings the plugins already produced (`groupLinuxLeftovers` in `ui/linux-qt/finding.cpp`).
+- Joining the confirmed `sh` and running it (`cleanupScript` in `ui/linux-qt/main.cpp`).
 
-## Rule
+Plugin membership is `wasm_sources` in `core/build.sh`. One `core/src/<id>.zig` compiles to `core/out/<id>.wasm`. There is no manifest directory. The host argv does not switch on `apt` versus `pacman` versus `npm`. Per-manager knowledge is the plugin, the `host.exec` allowlist (`appattic_host_exec_allowed` in `core/host/hostexec.c`, declared in `core/host/hostexec.h`), and the presence tables.
 
-The core is a loader: ABI, inject/coeffects, capability intercept, leftover *grouping* of findings plugins already produced, script concatenation, confirm boundary. As built those parts sit around the Zig module rather than inside it: `core/src/core.zig` exports only `core_abi_version` (`core/src/abi.zig`), `core/host/embed.c` owns load/unload, passes each plugin's argv tag to `plugin_query`, and capability intercept, and the native shell owns grouping (`groupLinuxLeftovers`, `ui/linux-qt/finding.cpp`) and script concatenation (`cleanupScript`, `ui/linux-qt/main.cpp`) behind the confirm boundary. Which plugins exist lives in one place (`wasm_sources`, `core/build.sh`), so no part of the load path switches on `apt` vs `pacman` vs `npm`. Per-manager knowledge is one plugin per manager, the `host.exec` allowlist (`appattic_host_exec_allowed` in `core/host/hostexec.c`, declared at `core/host/hostexec.h`), and the native shell's presence table (`kExecRules`, `ui/linux-qt/corehost.cpp`), which decides only the presence tag, never what gets loaded. A path plugin declares the root it queries and tags 0 when the root is absent (`spec_table`, `core/src/path_listing.zig`); the shell repeats those presence roots in `kXdgRules` (`ui/linux-qt/corehost.cpp`) and `kHomeRules` (`ui/linux-qt/corehost.cpp`) to compute that tag, so a new path root is a second entry as well. `path-home-dot` has no table entry: `pluginTag` special-cases it on `$HOME` existing (`ui/linux-qt/corehost.cpp`). A manager or path that is missing its coeffect (binary not on PATH, root dir absent) stays INACTIVE. It does not crash the scan. Native UI is widgets only. Query is read-only (`host.exec`; `APPATTIC_HOST_EXEC_FIXTURE` selects canned fixtures, and it defaults on Darwin, where `APPATTIC_HOST_EXEC_LIVE=1` is the only way to exec for real. Linux sets it explicitly, in `core/build.sh` and in CI, so a test run never reaches a real package manager). Emission (`rm`, `snap remove`, `dnf upgrade`) waits for confirm + reviewed `sh`.
+`pluginWasmFiles` loads every `*.wasm` in `core/out` except `appattic_core.wasm`. A plugin with no presence rule gets tag `1`. Adding a plugin means adding it to `wasm_sources`. `scripts/lint.sh` rebuilds the argv from that list and fails when this file or `core/README.md` quotes a different `try:` line.
 
-`AppAtticScan` keeps building until a later port copies its tests into Zig. The core does not delete it. The Swift CLI (`appattic`) parses in `AppAtticScan` (`CLIParse.swift`); it is not a WASM guest. Linux Qt loads `appattic_core.wasm` through `core/host/embed.c`, and refuses to scan without it.
+A missing coeffect (binary not on `PATH`, root directory absent) is tag `0`: the plugin still loads and returns empty findings. It does not fail the scan. A missing `.wasm` file is skipped.
 
-## Paper principles that bind AppAttic
+`path-home-dot` is not in `kXdgRules` or `kHomeRules`. `pluginTag` returns 1 when `$HOME` exists and 0 otherwise. The names it reports come from the `allow` list on its `spec_table` entry (`core/src/path_listing.zig`).
+
+Query is read-only `host.exec`. `APPATTIC_HOST_EXEC_LIVE` is checked first: `1`, `true`, `yes`, or `on` forces a live `execvp` of allowlisted queries, including on Darwin. Otherwise Darwin uses canned fixtures. Other platforms use fixtures only when `APPATTIC_HOST_EXEC_FIXTURE` is on. Linux sets that variable in `core/build.sh` and in CI, so a test run does not reach a real package manager. Any other value is read as off.
+
+Emission (`rm`, `snap remove`, `dnf upgrade`, and the other script lines) is not `host.exec`. The shell writes a reviewed `sh` script. Whether an alert precedes the run is the `confirmDelete` setting, which defaults to on and can be turned off. See [`DESIGN.md`](../../DESIGN.md).
+
+`AppAtticScan` keeps building. The core does not replace it. `CLIParse.swift` parses the Swift CLI. That CLI is not a WASM guest.
+
+`scripts/linux-qt-link.sh` is the Linux link step. CI and the Dockerfiles run it. A `LINUX_QT_LINK=ok` line from it is the gate. `tests/AppAtticScanTests/PackagingTests.swift` fails a build file that hardcodes the line instead of running the check. Build on the distro you run.
+
+Paper: Shi, Zhang, Cui, *A Programming Paradigm for Spatiotemporal Composability*, https://github.com/cordiverse/paper (PDF, 88 pages). Text taken with `pdftotext` from `paper.pdf` on 2026-08-26. Cordis is TypeScript. The rules below are the ones this core follows. The next section says where the built code stops short of the paper.
+
+## Rules that bind
 
 1. **Temporal composability** (ch. 1.1, 3.1). Every in-core mutation has an inverse. Unload reverts LIFO. Loading WASM is a tracked effect (ch. 6.4): drop the instance to unload.
-2. **Spatial composability** (ch. 1.1, 3.2). Plugins declare `inject`. Missing provider: INACTIVE, not an error loop.
-3. **Component = fiber** (ch. 4, 5.1.3). `inject` + `apply`. LOADING / ACTIVE / UNLOADING / INACTIVE are the paper's names; the built form of the one state that shows in output is a plugin whose coeffect is missing: tag 0, empty findings.
-4. **Declarative loader** (ch. 5.2). Entries: `id`, `url`, `isolate`, `intercept`, `config`, `disabled`.
-5. **Capability inject + interception** (ch. 6.3). Declared keys are all a plugin may use. Allowlists live on the host.
-6. **WASM sandbox** (ch. 6.3, 6.7). Untrusted code sees only embedder imports.
-7. **System boundary** (ch. 6.1). Disk, images, distro packages sit outside Γ. Withhold emission until confirm. Script is compensation, not a tracked inverse of `rm`.
-8. **Key identity** (ch. 6.6). ABI integer 1 (`ABI_VERSION`, `core/src/abi.zig`). No `appattic.findings.<id>` namespace exists: a finding is identified by its own `"id"` inside the plugin's result JSON, and the UI prefixes it with the plugin id, so ids from two plugins never collide (`uid()`, `ui/linux-qt/finding.h`).
-9. **Zig comptime** (ch. 6.4). Later, for typed inject accessors. Not in this record.
+2. **Spatial composability** (ch. 1.1, 3.2). Plugins declare what they need from the host. A missing provider is inactive, not an error loop. In the build, that state is tag 0 and empty findings.
+3. **Component = fiber** (ch. 4, 5.1.3). The paper's names are `inject` plus `apply`, and LOADING / ACTIVE / UNLOADING / INACTIVE. The state that shows in output is the missing-coeffect case above.
+4. **Declarative loader** (ch. 5.2). Paper entries carry `id`, `url`, `isolate`, `intercept`, `config`, `disabled`. The built loader is `wasm_sources` plus the host argv, not that entry record.
+5. **Capability inject and interception** (ch. 6.3). Declared keys are all a plugin may use. Allowlists live on the host.
+6. **WASM sandbox** (ch. 6.3, 6.7). Guest exports are `i32` and there is no WASI. Untrusted code sees only embedder imports.
+7. **System boundary** (ch. 6.1). Disk, images, and distro packages sit outside the guest. The script is compensation for a removal, not a tracked inverse of `rm`.
+8. **Key identity** (ch. 6.6). ABI integer 1. There is no `appattic.findings.<id>` namespace. A finding is identified by its own `"id"` inside the plugin JSON, and the UI prefixes the plugin id (`uid()` in `ui/linux-qt/finding.h`), so ids from two plugins do not collide.
+9. **Zig comptime** (ch. 6.4). The paper uses comptime for typed inject accessors. This core does not.
 
-The paper does not treat dialogs as plugins. Adaptation: plugin supplies confirm copy and script text. Native toolkit draws the alert and the sheet.
+The paper does not treat dialogs as plugins. Here, the plugin supplies confirm copy and script text. The native toolkit draws the alert and the sheet.
 
-## Core vs plugin vs native
+## Layers
 
 | Layer | Owns | Does not own |
 |---|---|---|
-| Native shell | Windows, lists, inspector, buttons, alerts, sheet, grouping findings, presence tag per plugin, joining the confirmed `sh`, running it | CLI parsing, classify, the plugin inventory |
-| C host (`core/host/embed.c`) | ABI gate, load/unload, passing the argv tag to `plugin_query`, capability intercept | Deciding the tag, manager parsers, scan roots, brew/apt/snap parsers |
-| Zig core WASM (`core/src/core.zig`) | `core_abi_version` only | Everything else; the loading parts live in the C host and the native shell |
-| WASM plugins | Each manager, each leftover root, overlay/shadow, user-bin | Widgets |
+| Native shell | Windows, lists, inspector, buttons, alerts, sheet, grouping findings, the presence tag, joining `sh`, running it | CLI parsing, classify, the plugin inventory |
+| C host (`core/host/embed.c`) | ABI gate, load and unload, passing the argv tag to `plugin_query`, capability intercept | Choosing the tag, manager parsers, scan roots |
+| Zig core WASM (`core/src/core.zig`) | `core_abi_version` | Loading, plugins, and the shell |
+| WASM plugins | One manager, one leftover root, overlay and shadow, or user-bin | Widgets |
 
-## Plugin ABI (freeze = 1)
+## Plugin ABI (version 1)
 
-Guest exports, `i32`, no WASI:
+Guest exports, `i32`, no WASI. `plugin_abi.bind` in `core/src/plugin_abi.zig` emits the plugin exports. `core.zig` emits `core_abi_version` itself.
 
-| export | meaning |
+| Export | Meaning |
 |---|---|
-| `core_abi_version` / `plugin_abi_version` | must equal 1 |
-| `plugin_id_ptr` / `plugin_id_len` | UTF-8 id |
-| `plugin_query` | arg0 = presence tag. `0` = coeffect missing (empty findings). Non-zero is plugin-defined (`1` present, or `1` docker / `2` podman for `container-runtime`). Return 0 = ok |
-| `result_ptr` / `result_len` | UTF-8 JSON of last query |
+| `core_abi_version` or `plugin_abi_version` | Must equal 1. A mismatch does not call `plugin_query`. |
+| `plugin_id_ptr` and `plugin_id_len` | UTF-8 id |
+| `plugin_query` | Arg 0 is the presence tag. `0` means the coeffect is missing and findings are empty. Any other value is plugin-defined: `1` for present, or `1` docker and `2` podman for `container-runtime`. Return 0 means ok. |
+| `result_ptr` and `result_len` | UTF-8 JSON of the last query |
 
-Host does not hard-code a plugin id. Missing `.wasm` file: skip that plugin (INACTIVE).
+The host does not hard-code a plugin id.
 
 Result JSON:
 
@@ -69,75 +84,83 @@ Result JSON:
 }
 ```
 
-`note` is optional and present whenever the result is short of the machine. Two causes, same signal. A query command that did not answer (refused, failed, timed out, or output truncated): `"<cmd> did not answer: <reason>"` per command, `; ` separated, capped at 8. Or a list that hit the plugin's row limit: `"<n> list(s) hit the row limit: more rows exist than were shown"`. The row limit is the plugin's fixed finding array (`querynote.Log.addTruncatedRows`) and the rows a render sheds to fit `result_buf` (`addDroppedRows`). A run where every command answered and no list overflowed has no `note`, so an empty `findings` list means a clean scan rather than a silent one. Every row of a plugin carrying a `note` gets the note in its `dialogBody` (`ui/linux-qt/finding.cpp`), appended after the row's own `reason` so the reason cannot bury it: a user confirms a deletion from this list, and a list that is quietly incomplete must say so next to the checkbox.
+`note` is optional. `querynote.zig` writes it when a command did not answer or a list overflowed. A command that was refused, failed, timed out, or whose output was truncated becomes `"<cmd> did not answer: <reason>"`. Entries are separated by `"; "` and capped at 8 (`max_logged`). Further failures become `"<n> more command(s) did not answer"`. A list that hit the plugin's fixed finding array (`addTruncatedRows`) or whose render shed rows to fit `result_buf` (`addDroppedRows`) adds `"<n> list(s) hit the row limit: more rows exist than were shown"`. A run where every command answered and no list overflowed has no `note`. An empty `findings` array with no `note` is a clean scan.
 
-The `note` is a fact about the whole plugin result, not about one row. It is collected scan-level at ingest (`appendFindingsFromBlob`'s `notes` out-parameter, `ui/linux-qt/finding.cpp`) and rendered beside the scan counts in the window's status bar (`scanNoteClause`), which is the scan-level shape Swift already models as `ScanData.incomplete`. It also rides on each row's `dialogBody` when the plugin produced rows, appended after the row's own `reason`, because the reason is what the user reads next to the checkbox they are about to tick. The scan-level clause is what covers a result with an empty `findings` list: a plugin whose every command refused, or whose render could not fit a single row, has no row to carry the word, and the omission has to be visible somewhere.
+`appendFindingsFromBlob` in `ui/linux-qt/finding.cpp` collects `note` at ingest. `scanNoteClause` renders it beside the scan counts. That is the scan-level place for a result whose `findings` list is empty. When the plugin also produced rows, the same note is appended to each row's `dialogBody` after the row's own `reason`, so the reason cannot hide it. Swift models the same idea as `ScanData.incomplete` on the other stack.
 
-`script` is null when nothing named. Host intercept rejects a plugin result whose JSON contains any of these substrings: `system prune`, `rmi -f`, `volume prune`, `snap remove --purge`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`, `rm /usr/bin/flatpak` (`core/host/embed.c`).
+`script` is null when the plugin names nothing to run. The host rejects a plugin result whose JSON contains any of these substrings: `system prune`, `rmi -f`, `volume prune`, `snap remove --purge`, `rm /usr/bin/snap`, `rm -rf /usr/bin/snap`, `rm /usr/bin/flatpak` (`core/host/embed.c`).
 
-Every named removal a script runs survives a rerun. A manager line is wrapped in `if <present>; then <remove>; fi` (`core/src/guarded_remove.zig`); a file line carries a flag that is a no-op on an absent target (`rm -rf`, `rm -f`, `path_listing.zig`, `path_shadow.zig`, `path_user_bin.zig`, and the snapd orphan dirs). The script runs under `set -e`, and a manager exits nonzero when asked to remove something it already removed, so an unguarded manager line would stop a rerun at the first target the first run took and strand every line below it. The presence check is a read and never escalates: a package query (`dpkg -s`, `rpm -q`, `pacman -Qq`, `flatpak info`, `pip show`), a row of a listing the global tool already prints, grepped with `-qF` (`npm ls -g --depth=0`, `pnpm ls -g --depth=0`, `bun pm ls -g`, `uv tool list`, `pipx list`), a file the removal takes away (`test -e /var/lib/snapd/snaps/<name>_<rev>.snap`, `test -e ~/.deno/bin/`), or an engine query (`docker image inspect`, `docker volume inspect`, `docker container inspect`).
+A removal line has to survive a rerun. The script runs under `set -e`, and a manager exits nonzero when asked to remove something it already removed, so an unguarded line stops the rerun at the first target the first run took. `core/src/guarded_remove.zig` wraps a manager line in `if <present>; then <remove>; fi`. A file line uses a flag that is a no-op when the target is already gone (`rm -rf`, `rm -f` in `path_listing.zig`, `path_shadow.zig`, `path_user_bin.zig`, and the snapd orphan dirs). The presence check is a read: a package query (`dpkg -s`, `rpm -q`, `pacman -Qq`, `flatpak info`, `pip show`), a row of a listing the global tool already prints and grepped with `-qF` (`npm ls -g --depth=0`, `pnpm ls -g --depth=0`, `bun pm ls -g`, `uv tool list`, `pipx list`), a file the removal takes away (`test -e /var/lib/snapd/snaps/<name>_<rev>.snap`, `test -e ~/.deno/bin/`), or an engine query (`docker image inspect`, `docker volume inspect`, `docker container inspect`).
 
-The pacman-family upgrade carries the same guard, for a different reason: `pacman -S <name>` on a package already at the repo's version is a reinstall, not a no-op, so a rerun would download the package again, run its install scripts again, and rewrite its database entry. The check is the manager's own update query (`pacman -Qu <name>`, `paru -Qu <name>`), which exits 0 only while the package is still behind. Every other manager answers "nothing to do" on a package that is already current (`brew upgrade`, `flatpak update`, `apt-get --only-upgrade`, `dnf upgrade`), so those lines are left unguarded.
+The pacman-family upgrade uses the same guard for a different reason. `pacman -S <name>` on a package already at the repo version reinstalls it. The check is `pacman -Qu <name>` or `paru -Qu <name>`, which exits 0 only while the package is still behind. `brew upgrade`, `flatpak update`, `apt-get --only-upgrade`, and `dnf upgrade` answer "nothing to do" when the package is current, so those lines stay unguarded.
 
-## Inventory (in scope)
+## Inventory
 
-Plugin membership lives in one place: the `wasm_sources` list in `core/build.sh`. One `core/src/<id>.zig` compiles to `core/out/<id>.wasm`; there is no manifest directory. Backlog ids are not in `wasm_sources`, so no `.wasm` is built for them. Query plugins call `host.exec`. Darwin leftover roots stay in Swift `AppAtticScan`.
+Backlog ids are not in `wasm_sources`, so no `.wasm` is built for them. Query plugins call `host.exec`. Darwin leftover roots stay in Swift.
 
 ### Manager plugins
 
 | id | Coeffect | Reports | Suggested commands (named objects only) |
 |---|---|---|---|
-| `apt` | `host.exec` `apt-get` or `apt` or `dpkg` | Outdated (`apt list --upgradable`, `updatable`). Orphans from `apt-get -s autoremove`. | Never silent `apt upgrade`. Named `apt-get purge` and named `apt install --only-upgrade` after confirm. |
-| `pacman` | `host.exec` `pacman` | Outdated (`-Qu`, `updatable`). Orphans (`-Qdt`). | Named `pacman -Rns` and named `pacman -S pkg` after confirm. No `-Syu`. |
-| `aur` | `host.exec` `paru` or `yay` or `pikaur` | Outdated (`-Qua`, `updatable`). | Named `paru/yay/pikaur -S pkg` after confirm. |
-| `dnf` | `host.exec` `dnf5` or `dnf` or `yum` (first found; yum is an alias, not its own id) | Outdated (`updatable`). Unneeded packages (`repoquery --unneeded`). | Named `dnf remove` / `yum remove`. Named `dnf upgrade pkg` / `yum upgrade pkg` after confirm. No full `dnf upgrade`. |
-| `zypper` | `host.exec` `zypper` | Outdated (`list-updates`, `updatable`). Unneeded (`packages --unneeded`). | Named `zypper rm` and named `zypper update pkg` after confirm. |
-| `brew` | `host.exec` `brew` | Outdated formulas/casks (`outdated --json=v2`), every row `updatable: true`. The untrusted-cask rule stays in Swift: `brew.zig` does not read Homebrew's `Refusing to load cask` error, so an outdated cask from an untrusted tap is offered for update like any other. No uninstall lines. | Named `brew upgrade <name>` only, after confirm. No greedy auto-cask force. |
-| `flatpak` | `host.exec` `flatpak` | Unused runtimes (`flatpak uninstall --unused --dry-run`). Outdated apps (`remote-ls --updates --app` plus `list --app`). Leftover `.var/app` stays on `path-var-app`. | Named `flatpak uninstall` unused runtimes. Named `flatpak update` after confirm. Never `rm /usr/bin/flatpak`. |
-| `snapd` | `host.exec` `snap` | Disabled leftover **revisions**. Orphan `~/snap/<name>` when the snap is not installed. Snap cache: not queried, nothing reported (see open questions). Not the uninstall of still-installed snap apps (that stays Swift Stale/Outdated until the core port). | `snap remove <name> --revision <n>` named. `rm -rf` named `~/snap/<name>` only. Never silent `snap remove`. Never `rm /usr/bin/snap`. Never `snap remove --purge '*'`. |
-| `npm` | `host.exec` `npm` | User-global `-g` leftovers. Outdated (`npm outdated -g --json`) report-only. Not every repo `node_modules`. | `npm -g uninstall` named. |
-| `pnpm` | `host.exec` `pnpm` | User-global leftovers. | `pnpm remove -g` named. |
-| `bun` | `host.exec` `bun` | User-global leftovers. | `bun remove -g` named. |
-| `pip` | `host.exec` `pip` or `pip3` | Top-level user-site packages (`pip list --user --not-required`). Outdated report-only. Not walking every venv. | Named `pip uninstall` for globals. |
-| `deno` | `host.exec` `deno` (globals read with `ls` of `~/.deno/bin`) | User-global Deno installs. Not every project. | Named `deno uninstall --global`. |
-| `pipx` | `host.exec` `pipx` | Unused pipx tools. | `pipx uninstall` named. |
-| `uv` | `host.exec` `uv` | `uv tool` leftovers. | `uv tool uninstall` named. |
-| `gem` | `host.exec` `gem` | User-install outdated (`gem outdated`). Report-only. No removal path at all: `gem.zig` emits `"script":null`, so no `gem uninstall` line exists. | Named `gem update` on the row after confirm, `updatable: false` keeps it out of the update script. |
-| `composer` | `host.exec` `composer` | Global outdated (`composer global outdated`). Report-only. Not every project `vendor/`. No removal path at all: `composer.zig` emits `"script":null`, so no `composer global remove` line exists. | Named `composer global update` on the row after confirm, `updatable: false` keeps it out of the update script. |
-| `container-runtime` | `host.exec` `docker` and/or `podman` | Dangling images, dangling volumes, exited containers. Idle-days skipped. Abandoned compose/pods and unnamed build cache not queried this turn. | Named `rmi` / `volume rm` / `rm`. Never `system prune -af`. Never delete the engine binary. |
+| `apt` | `host.exec` `apt-get` or `apt` or `dpkg` | Outdated (`apt list --upgradable`, `updatable`). Orphans from `apt-get -s autoremove`. PPA files from `ls` of `/etc/apt/sources.list.d` (`parsePpaSources` in `apt.zig`). Swift has no counterpart for that PPA parser. | Never a full `apt upgrade`. Named `apt-get purge` and named `apt install --only-upgrade` after the script runs. |
+| `pacman` | `host.exec` `pacman` | Outdated (`-Qu`, `updatable`). Orphans (`-Qdt`). | Named `pacman -Rns` and named `pacman -S pkg`. No `-Syu`. |
+| `aur` | `host.exec` `paru` or `yay` or `pikaur` | Outdated (`-Qua`, `updatable`). | Named `paru`, `yay`, or `pikaur -S pkg`. |
+| `dnf` | `host.exec` `dnf5` or `dnf` or `yum` (first found; yum is an alias, not its own id) | Outdated (`updatable`). Unneeded (`repoquery --unneeded`). | Named `dnf remove` or `yum remove`. Named `dnf upgrade pkg` or `yum upgrade pkg`. No full `dnf upgrade`. |
+| `zypper` | `host.exec` `zypper` | Outdated (`list-updates`, `updatable`). Unneeded (`packages --unneeded`). | Named `zypper rm` and named `zypper update pkg`. |
+| `brew` | `host.exec` `brew` | Outdated formulas and casks (`outdated --json=v2`). Every row is `updatable: true`. `brew.zig` does not read Homebrew's "Refusing to load cask" error, so a cask from an untrusted tap is offered for update. Swift `BrewInfo.swift` marks those rows `untrusted` and does not update them. No uninstall lines. | Named `brew upgrade <name>` only. No greedy auto-cask force. |
+| `flatpak` | `host.exec` `flatpak` | Unused runtimes (`flatpak uninstall --unused --dry-run`). Outdated apps (`remote-ls --updates --app` plus `list --app`). Leftover `.var/app` stays on `path-var-app`. | Named `flatpak uninstall` for unused runtimes. Named `flatpak update`. Never `rm /usr/bin/flatpak`. |
+| `snapd` | `host.exec` `snap` | Disabled leftover revisions. Orphan `~/snap/<name>` when the snap is not installed. Snap cache is not queried. Uninstall of a still-installed snap stays on the Swift stale and outdated lists until a later port. | `snap remove <name> --revision <n>`. `rm -rf` of a named `~/snap/<name>` only. Never a silent `snap remove`. Never `rm /usr/bin/snap`. Never `snap remove --purge '*'`. |
+| `npm` | `host.exec` `npm` | User-global `-g` leftovers. Outdated (`npm outdated -g --json`) is report-only. Not every repo `node_modules`. | `npm -g uninstall` of a named package. |
+| `pnpm` | `host.exec` `pnpm` | User-global leftovers. | `pnpm remove -g` of a named package. |
+| `bun` | `host.exec` `bun` | User-global leftovers. | `bun remove -g` of a named package. |
+| `pip` | `host.exec` `pip` or `pip3` | Top-level user-site packages (`pip list --user --not-required`). Zig also runs `pip list --user --outdated --format=json` and reports outdated rows Swift does not. Not every venv. | Named `pip uninstall` for globals. |
+| `deno` | `host.exec` `deno` (globals from `ls` of `~/.deno/bin`) | User-global Deno installs. Not every project. | Named `deno uninstall --global`. |
+| `pipx` | `host.exec` `pipx` | Unused pipx tools. | `pipx uninstall` of a named tool. |
+| `uv` | `host.exec` `uv` | `uv tool` leftovers. | `uv tool uninstall` of a named tool. |
+| `gem` | `host.exec` `gem` | User-install outdated (`gem outdated`). Report-only. `gem.zig` emits `"script":null`, so there is no `gem uninstall` line. Swift has no `gem` parser. | Named `gem update` on the row. `updatable: false` keeps it out of the update script. |
+| `composer` | `host.exec` `composer` | Global outdated (`composer global outdated`). Report-only. Not every project `vendor/`. `composer.zig` emits `"script":null`. Swift has no `composer` parser. | Named `composer global update` on the row. `updatable: false` keeps it out of the update script. |
+| `container-runtime` | `host.exec` `docker` or `podman` | Dangling images, dangling volumes, exited containers. Idle-days skipped. Abandoned compose projects and pods are not queried. The unnamed build cache is not queried. It is still reported as a `build-cache` finding with `"id": null`, `"status": "review"`, and no command. | Named `rmi`, `volume rm`, and `rm`. Never `system prune -af`. Never delete the engine binary. |
 
-`~/snap` orphan dirs belong to `snapd`, not a second path plugin.
+`~/snap` orphan directories belong to `snapd`, not a second path plugin.
 
 ### Path plugins
 
-Linux leftover roots plus `path-user-bin`, `path-home-dot`, and `path-shadow`. Darwin leftover roots stay in Swift. Path plugins query via `ls` on `host.exec`. `path-user-bin` also uses `test` (`-h` / `-e`). `path-shadow` also uses `realpath` (one path, no flags) and `test -f`.
+Linux leftover roots, plus `path-user-bin`, `path-home-dot`, and `path-shadow`. Path plugins query with `ls` on `host.exec`. `path-user-bin` also uses `test` (`-h` and `-e`). `path-shadow` also uses `realpath` (one path, no flags) and `test -f`. A missing root is tag 0 and empty findings.
 
 | id | Coeffect (path) | Reports | Suggested commands |
 |---|---|---|---|
-| `path-xdg-config` | `XDG_CONFIG_HOME` or `~/.config` | Orphan dirs/files in that root | `rm -rf` named path after confirm |
+| `path-xdg-config` | `XDG_CONFIG_HOME` or `~/.config` | Orphan dirs and files in that root | `rm -rf` of the named path |
 | `path-xdg-data` | `XDG_DATA_HOME` or `~/.local/share` | Same | named `rm` |
 | `path-xdg-cache` | `XDG_CACHE_HOME` or `~/.cache` | Same | named `rm` |
 | `path-xdg-state` | `XDG_STATE_HOME` or `~/.local/state` | Same | named `rm` |
 | `path-xdg-lib` | `~/.local/lib` | Same | named `rm` |
-| `path-var-app` | `~/.var/app` | Flatpak user data when the app is gone (ids still come from `flatpak` when that plugin is ACTIVE) | named `rm` of leftover dir; uninstall still via `flatpak` |
-| `path-home-dot` | the `path-home-dot` spec's `allow` list in `spec_table` (`core/src/path_listing.zig`): `.mozilla`, `.thunderbird`, `.steam`, `.wine`, `.java`, `.gradle`, `.android`, `.m2` | Leaf leftovers at `$HOME` | named `rm`. `.steam` here is a dir leaf, not the `steam` backlog plugin. Swift `homeDotData` (`Sources/AppAtticScan/Leftovers.swift`) carries eight more leaves (`.docker`, `.kube`, `.aws`, `.gnupg`, `.ssh`, `.npm`, `.cargo`, `.rustup`); the two lists are not gated against each other, so a leaf can be scanned on one platform and not the other |
-| `path-shadow` | `~/.local/bin`, `~/bin`, `~/.cargo/bin`, `~/.local/share/applications` against `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/usr/local/bin`, `/usr/share/applications`, `/usr/local/share/applications` | User overlays that hide a same-named packaged file (`status` shadow). Cleanup removes the overlay only | named `rm` of overlay path |
+| `path-var-app` | `~/.var/app` | Flatpak user data when the app is gone (ids still come from `flatpak` when that plugin is active) | named `rm` of the leftover dir. Uninstall still goes through `flatpak` |
+| `path-home-dot` | `$HOME`, then the allow list in `spec_table`: `.mozilla`, `.thunderbird`, `.steam`, `.wine`, `.java`, `.gradle`, `.android`, `.m2` | Those leaves at `$HOME` | named `rm`. `.steam` here is a directory leaf, not the `steam` backlog id |
+| `path-shadow` | `~/.local/bin`, `~/bin`, `~/.cargo/bin`, `~/.local/share/applications`, compared with `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/usr/local/bin`, `/usr/share/applications`, `/usr/local/share/applications` | User overlays that hide a same-named packaged file (`status` shadow). Cleanup removes the overlay only | named `rm` of the overlay |
 | `path-user-bin` | `~/.local/bin`, `~/bin` | Broken symlinks | named `rm` of the link |
+
+Swift `homeDotData` (`Sources/AppAtticScan/Leftovers.swift`) also lists `.docker`, `.kube`, `.aws`, `.gnupg`, `.ssh`, `.npm`, `.cargo`, and `.rustup`. The two lists are not checked against each other, so those eight leaves are scanned on the Swift side only.
+
+The shadow overlay roots are one list in three trees: the constants in `core/src/path_shadow.zig`, the `path_shadow` entry of `kHomeRules`, and `defaultOverlayShadowRoots` (`Sources/AppAtticScan/Overlays.swift`). The plugin tag and the plugin query have to name the same roots. Otherwise a machine whose only overlay sits in a root the plugin does not read is tagged present and reports no shadows. `scripts/lint.sh` compares the Zig constants with `kHomeRules`.
+
+Swift `listShadowingOverlays` and `ShadowTests` stay in `AppAtticScan`. The core may still group extra paths.
 
 ## Backlog
 
-Not built. No `core/src/<id>.zig`, so no `.wasm` is built and the host load list never contains one.
+Not built. No `core/src/<id>.zig`, so the host load list never contains one.
 
 | id | Scope |
 |---|---|
-| `chocolatey` | Windows Chocolatey outdated/orphan packages |
-| `nuget` | User-global NuGet leftovers (not every project `packages.config`) |
-| `appstore` | Microsoft Store leftovers and outdated on Windows. macOS App Store / `mas` stays in Swift until a later `mas` plugin; that is a different id |
-| `steam` | Steam games/leftovers on Windows. Linux/macOS Steam stays in Swift for now. Remaining Steam leftover work as this plugin later |
+| `chocolatey` | Windows Chocolatey outdated and orphan packages |
+| `nuget` | User-global NuGet leftovers, not every project `packages.config` |
+| `appstore` | Microsoft Store leftovers and outdated on Windows. macOS App Store and `mas` stay in Swift until a later `mas` plugin. That is a different id |
+| `steam` | Steam games and leftovers on Windows. Linux and macOS Steam stay in Swift. Remaining Steam leftover work waits on this id |
 
 ## Host load list
 
-`core/build.sh` emits `appattic_core.wasm` plus one `.wasm` per in-scope plugin, and prints the argv below. Linux Qt (`pluginWasmFiles`, `ui/linux-qt/corehost.cpp`) keeps no second load registry: it loads every `.wasm` in `core/out` except the core. So a new plugin reaches both sides by being added to `wasm_sources` in `core/build.sh`, never by being listed in a second place; the shell then tags it from the presence table, and a plugin with no rule there gets tag `1`. The argv printed here and the copy in `core/README.md` are documentation of that one list, not registries: `scripts/lint.sh` rebuilds the argv from `core/build.sh` and fails when either document quotes a different one, so adding a plugin to `wasm_sources` and pasting the new `try:` line into both is the whole change. Tag `0` on any of them: coeffect missing, empty findings, plugin still loads. Missing file: host skips that argv (INACTIVE). `chocolatey`, `nuget`, `appstore`, `steam` are backlog: no `.wasm` is built for them, so they are never arguments. `core/build.sh` also precompiles each module to a `<id>.wasm.cwasm` sidecar and a `<id>.wasm.cwasm.stamp` recording the size and mtime of the `.wasm` that image was built from; the host deserializes the sidecar only when the stamp names the `.wasm` it is loading and compiles the source otherwise, so a sidecar from another build costs speed, never correctness.
+`core/build.sh` emits `appattic_core.wasm` plus one `.wasm` per in-scope plugin and prints the argv below. Linux Qt keeps no second load registry. Tag `0` on any argument means the coeffect is missing: empty findings, plugin still loads. A missing file is skipped. `chocolatey`, `nuget`, `appstore`, and `steam` are never arguments.
+
+`core/build.sh` also asks the host to precompile each module to `<id>.wasm.cwasm` plus a `<id>.wasm.cwasm.stamp` of the source size and mtime. The host deserializes the sidecar only when the stamp names the `.wasm` it is loading, and compiles the source otherwise. A sidecar from another build costs speed, not correctness. A precompile failure warns and does not fail the build.
 
 ```bash
 ./core/build.sh
@@ -173,51 +196,47 @@ Not built. No `core/src/<id>.zig`, so no `.wasm` is built and the host load list
 
 ## container-runtime
 
-User-global docker/podman leftovers. Both engines: tag findings with `engine`, do not merge IDs. Safety: never `system prune -af`, never unnamed bulk prune. `plugin_query` 0/1/2 = none/docker/podman.
+User-level docker or podman leftovers. One engine per scan. `pluginTag` in `ui/linux-qt/corehost.cpp` returns 2 when `podman` is on `PATH`, otherwise 1 when `docker` is, otherwise 0. Podman wins when both are installed. `query_impl` reads that tag and runs only that engine's three queries. Findings carry `engine` (`docker` or `podman`). There is no Settings picker and no merged list of both engines.
 
-Queries (named objects only): `images -f dangling=true`, `volume ls -f dangling=true`, `ps -a -f status=exited`. Idle-days skipped (CLI CREATED is relative text, not a timestamp). Abandoned compose/pods are not queried this turn. The unnamed build cache is not queried either, but it is still reported as a `build-cache` finding with `"id": null`, `"status": "review"`, and no command, so the omission is visible in the list instead of reading as a clean scan. Confirm script may include named `rmi <id>`, `volume rm <name>`, `rm <id>`. Live `host.exec` denies `rmi`, `rm`, `system prune`, `volume prune`.
+Queries, named objects only: `images -f dangling=true`, `volume ls -f dangling=true`, `ps -a -f status=exited`. Idle-days are skipped because the CLI `CREATED` column is relative text, not a timestamp. Abandoned compose projects and pods are not queried. The unnamed build cache is reported as the `build-cache` finding above so the omission is a row, not a clean scan. The confirm script may include named `rmi <id>`, `volume rm <name>`, and `rm <id>`. Live `host.exec` denies `rmi`, `rm`, `system prune`, and `volume prune`. Stopped containers are review-only, with a named `rm` in the script.
 
 ## snapd
 
-Ubuntu/Debian-family snap leftover *state*. Installed snap apps stay on Swift Stale Apps / Outdated (`snap remove <name>` / `snap refresh --list`) until the core port. This plugin queries `snap list --all` and `ls` of `~/snap`: disabled revisions and orphan `~/snap/<name>`. The cache is not queried.
+Snap leftover state on Ubuntu and Debian-family hosts. Installed snap apps stay on the Swift stale and outdated lists (`snap remove <name>`, `snap refresh --list`) until a later port. This plugin queries `snap list --all` and `ls` of `~/snap`: disabled revisions and orphan `~/snap/<name>`.
 
-## path leftover roots
-
-Each path plugin is a leftover-root guest (not a manager). Linux Qt and the host CLI load them with the manager plugins. Query is `ls` on `host.exec`. `path-user-bin` also uses `test` (`-h` / `-e`). `path-shadow` also uses `realpath` (one path, no flags) and `test -f`. Missing root: tag 0, empty findings.
-
-## Shadowing
-
-Overlay-vs-packaged findings are plugin `path-shadow` (`path_shadow.wasm`), not a special case in core. Swift `listShadowingOverlays` and `ShadowTests` remain in `AppAtticScan` until the Swift scan is ported. Core may still group extra paths.
-
-The overlay roots are one list in three trees: the constants in `core/src/path_shadow.zig`, the `path_shadow` entry of `kHomeRules` (`ui/linux-qt/corehost.cpp`), and `defaultOverlayShadowRoots` (`Sources/AppAtticScan/Overlays.swift`). The plugin's tag and its query have to name the same roots, or a machine whose only overlay lives in a root the plugin does not read is tagged ACTIVE and reports no shadows, which reads as a clean machine. `scripts/lint.sh` compares the Zig constants against `kHomeRules` for that reason.
+The snap cache is not queried. Earlier drafts of this record described it as review-only when not user-owned, and also as review-only when unnamed. `core/src/snapd.zig` reports nothing for it. Which rule binds, if any, is undecided.
 
 ## Errors
 
-- Missing coeffect: INACTIVE or query tag 0, empty findings.
-- ABI mismatch: do not run `plugin_query`.
+- Missing coeffect: tag 0, empty findings.
+- ABI mismatch: `plugin_query` is not called.
 - No object ids: no script lines.
 
-## Consequences: what stays Swift until ported
+## Still in Swift
 
-Linux Qt already loads the WASM plugins. These remain in Swift for the macOS UI and the `appattic` CLI:
+Linux Qt already loads the WASM plugins. These stay in Swift for the macOS UI and the `appattic` CLI:
 
-- `AppAtticScan` discover, usage, leftovers (including shadowing and `~/snap` as a leftover root), stale, outdated (`apt`/`pacman`/`dnf`/`zypper`/`brew`/`flatpak`/`snap`/`mas`), packages, recommend, cache, cleanup
-- macOS App Store / `mas` (not the backlog `appstore` id)
-- Linux/macOS Steam and CrossOver helpers
-- CLI and SwiftCrossUI
-- Settings, ignore list
+- Discover, usage, leftovers (including shadowing and `~/snap` as a leftover root), stale, outdated (`apt`, `pacman`, `dnf`, `zypper`, `brew`, `flatpak`, `snap`, `mas`), packages, recommend, cache, cleanup
+- macOS App Store and `mas` (not the backlog `appstore` id)
+- Linux and macOS Steam, and CrossOver helpers
+- The CLI and SwiftCrossUI
+- Settings and the ignore list
 - Tests under `tests/AppAtticScanTests`
+
+The same tool-output grammars exist twice. A parser fix on one side has to land on the other. `ParserParityTests` pin the shared edges. `linux-system-names.txt` is copied the same way, and `scripts/lint.sh` fails when the copies differ. Asymmetries called out above: `gem`, `composer`, and apt PPA sources have no Swift parser. Zig `pip` reports an extra outdated query. Zig `brew` does not apply the untrusted-cask rule.
 
 ## Tests
 
-Host exit 0 loading the built plugin set (`core/build.sh` builds it; CI runs `bash scripts/linux-qt-link.sh` and then `scripts/verify-qt-link.sh`, which asserts the `ui/linux-qt/build/LINUX_QT_LINK.txt` proof). JSON plugin ids match. No `system prune`, no `snap remove --purge '*'`, no `rm -rf /usr/bin/snap`, no `apt-get purge -y` / `dpkg --purge` (`core/host/tests/hostexec_test.c` asserts those). Tag 0 yields empty findings.
+Host exit 0 on the built plugin set. CI runs `bash scripts/linux-qt-link.sh` and then `scripts/verify-qt-link.sh`, which checks `ui/linux-qt/build/LINUX_QT_LINK.txt`. JSON plugin ids match the sources. `core/host/tests/hostexec_test.c` asserts the denied forms: no `system prune`, no `snap remove --purge '*'`, no `rm -rf /usr/bin/snap`, no `apt-get purge -y`, no `dpkg --purge`. Tag 0 yields empty findings.
 
-## Settled and open questions
+## Settled
 
-Settled by this record, kept here only so a later change knows what was decided: both docker and podman are listed and tagged by `engine` (no Settings picker); stopped containers are review-only with a named `rm` after confirm; the embedder is the Wasmtime C API, which `core/build.sh` requires and fails the build without.
+- One engine per scan: podman when it is on `PATH`, otherwise docker. The finding's `engine` field names which one ran. No Settings picker, and the two engines are not merged.
+- Stopped containers are review-only, with a named `rm` in the script.
+- The embedder is the Wasmtime C API. `core/build.sh` requires it and fails the build without it.
 
-Still open, and deliberately undecided by this record:
+## Open
 
-- Snap cache: earlier revisions of this record described it two ways, review-only when not user-owned and review-only when unnamed, and `core/src/snapd.zig` reports nothing for it either way. Which rule, if any, binds is undecided.
-- `idleDays` default 30? No plugin emits `idleDays` (`container_runtime.zig` pins its absence) and nothing is filtered by age today. The native `Finding.idleDays` (`ui/linux-qt/finding.h`) is filled from `mtime` for the row label only, so a default is still undecided.
-- podman-docker shim vs Docker Desktop?
+- Snap cache: see [snapd](#snapd). Undecided.
+- `idleDays`: no plugin emits it. `container_runtime.zig` asserts the field is absent, and nothing is filtered by age. `Finding.idleDays` (`ui/linux-qt/finding.h`) is filled from `mtime` for the row label only. A default is undecided.
+- podman-docker shim versus Docker Desktop: undecided.

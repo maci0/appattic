@@ -1,4 +1,4 @@
-.TH APPATTIC 1 "2026-11-04" "appattic 3.7.0" "User Commands"
+.TH APPATTIC 1 "2026-11-13" "appattic 3.7.1" "User Commands"
 .SH NAME
 appattic \- find leftover data, unused software, outdated packages, and disk usage
 .SH SYNOPSIS
@@ -16,14 +16,19 @@ appattic \- find leftover data, unused software, outdated packages, and disk usa
 .SH DESCRIPTION
 .B appattic
 scans the machine for data left behind by uninstalled apps, installed software
-nothing has used, unused distro and language packages, packages with a newer
-version, and folder sizes. The reporting commands delete nothing.
+with little recorded usage, unused distro and language packages, packages with
+a newer version, and folder sizes.
 .B appattic update
-is the one command that runs something, and only the named package upgrades
-the scan found, never a full distro upgrade.
+runs named package upgrades after confirmation.
+.B erase
+deletes the scan snapshot, and
+.B restore
+replaces settings from a backup. Reporting commands may refresh the local
+scan cache; they do not remove software or leftover data.
 .PP
 With no command it prints the full report. A scan is cached and reused for 24
-hours; the status line on standard error names the time and points at
+hours while its fingerprint remains current; the status line on standard
+error names the scan time and points at
 .BR \-\-fresh .
 .PP
 Progress and status go to standard error. On a terminal, reports and
@@ -35,14 +40,18 @@ writes, unless
 .B \-o text
 is set.
 .B appattic -o text leftovers --top 10 | head
-shows ten rows and no status lines.
+keeps the report as text while status stays on standard error.
+In JSON mode, a
+.B \-\-dry\-run
+script goes to standard error; use
+.B \-o text
+to capture the script on standard output.
 .SH COMMANDS
 .TP
 .B config
-Print the settings file, its values, the path of the settings backup and of
-the file a restore replaced (each with whether it is there), the scan cache
-path, and the XDG paths this machine resolves, then exit.
-Nothing is scanned, so it is safe to run anywhere.
+Print effective settings, state-file paths, resolved XDG roots, and relevant
+environment values. Nothing is scanned. Output includes full ignored paths
+and environment values; review it before sharing.
 .TP
 .B report
 Leftovers, stale software, outdated packages, and packages. The default.
@@ -60,32 +69,28 @@ Installed packages with a newer version available.
 Distro orphans and language globals.
 .TP
 .BI "disk " [PATH ]
-Folder sizes as a tree. PATH defaults to the home directory. PATH is a path:
-it carries a separator, it is
-.B .
-or
-.BR .. ,
-or it is a name that starts with a dash and came behind
-.BR \-\- .
+Folder sizes as a tree. PATH defaults to the home directory. Prefix a bare
+folder name with
+.B ./
+to distinguish it from a command. Use
+.B \-\-
+before a path that starts with a dash.
 .TP
 .B erase
-Delete the stored scan snapshot. It reads nothing first to decide, and it runs
-before the settings are read, so it works on a machine whose
-.I settings.json
-no longer parses.
+Delete the stored scan snapshot without prompting. Settings and their backups
+are kept. This works even when settings cannot be parsed.
 .TP
 .B restore
-Put
+Validate
 .I settings.json.bak
-back in place of
+and restore it as
 .IR settings.json .
-The backup is read with the app's own loader first, so a backup that does not
-load changes nothing on disk and the command exits 1; the file it replaces is
-kept as
+Readable, nonempty differing current contents are kept in
 .IR settings.json.bad .
-It reads no current settings first, so it works on a machine whose
-.I settings.json
-no longer parses.
+An invalid or missing backup exits 1 without changing files. Current settings
+do not have to parse. Before repeating a restore, copy any existing
+.I settings.json.bad
+elsewhere if you need to keep it.
 .TP
 .B schema
 Print the clispec v0.3 document and exit. A command name after it keeps that
@@ -97,7 +102,8 @@ is set, and the command reads no settings.
 Upgrade the named packages the scan found. It prompts on a terminal and exits
 2 without one unless
 .B \-\-yes
-is given. The JSON error names that flag.
+is given. Always scans live. A failed or timed-out script may have applied
+some upgrades; rescan before retrying.
 .PP
 .B \-\-
 ends the options, so a
@@ -133,12 +139,7 @@ write what those commands reported.
 .B \-\-leftovers\-only
 and
 .B \-\-stale\-only
-shape what is printed, not what is written. A value that names no JSON file is a
-usage error, so
-.B appattic \-\-json erase
-cannot write a file named
-.B erase
-instead of running the erase command.
+shape text reports, not JSON output. Other filename extensions are usage errors.
 .TP
 .B \-\-include\-system
 On report, leftovers, stale, outdated, packages, update, and config: include OS
@@ -158,12 +159,8 @@ On report and leftovers: only the N largest. On disk: the N largest entries per
 folder.
 .TP
 .BI \-\-category " CAT"
-On report and leftovers: filter by category, substring match, repeatable. A
-value that names a command is refused rather than taken, so
-.B appattic \-\-category erase
-reports the missing value and still reads
-.B erase
-as the command.
+On report and leftovers: filter by category substring. Repeat for multiple
+categories. A command name is not accepted as the value.
 .TP
 .B \-\-leftovers\-only
 On report: skip stale, outdated, and packages.
@@ -191,17 +188,15 @@ On update: skip the prompt. Required without a terminal.
 Print the version and exit.
 .TP
 .BR \-\-help ", " \-h
-Print the help and exit.
+Print help and exit.
 .B appattic help
-is the same, and a command name after it is checked for a typo.
+is equivalent; an optional command name is validated.
 .PP
-An option that names the commands it belongs to ("on report", "on disk", "on
-update") is a usage error on every other command, so a flag that would be
-ignored fails instead of running:
+Command-specific options are rejected on other commands. For example,
 .B appattic stale --top 5
-exits 2 rather than printing the full table.
+exits 2.
 .BR \-\-help " and " \-\-version
-win over a usage error anywhere on the line.
+take precedence over usage errors.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -287,13 +282,13 @@ effects are the ones
 prints.
 .SH FILES
 .PP
-The two files below sit in one directory, which is
+State files share one directory:
 .I $XDG_DATA_HOME/appattic
 (default
 .IR ~/.local/share/appattic )
 on Linux and
 .I ~/Library/Application Support/AppAttic
-on macOS. It holds everything the app writes for the account.
+on macOS. Generated scripts use temporary files outside this directory.
 .TP
 .I ~/.local/share/appattic/settings.json
 .IR includeSystem ", " confirmDelete ", and the ignored leftover paths, which
@@ -301,32 +296,29 @@ must each be the full path a report prints. A missing file uses the defaults. A
 malformed file is an error, and the run exits 2 without overwriting it.
 .TP
 .I ~/.local/share/appattic/settings.json.bak
-The settings file as it was before the last change, kept so an emptied or
-mangled
+Previous differing settings bytes, when backup creation succeeded, kept so
+an emptied or mangled
 .I settings.json
 can be put back with
 .B appattic restore
 or, by hand, with a
 .BR "cp" .
-Nothing reads it while AppAttic runs.
+It is not loaded as active settings.
 .TP
 .I ~/.local/share/appattic/settings.json.bad
-The settings file a restore replaced, kept so a restore that turns out to be
-the wrong one is not a second loss. Written by
-.B appattic restore
-and by a window's "Restore settings from backup". Like
-.IR settings.json.bak ,
-nothing reads it while AppAttic runs, and
+Readable, nonempty differing settings bytes preserved before a restore.
+A later restore can replace this copy; copy it elsewhere first if needed.
+It is not loaded as active settings, and
 .B appattic erase
-leaves it: that command removes the scan snapshot only. The procedure is
+leaves it. See
 .IR docs/runbooks/state-recovery.md .
 .TP
 .I ~/.local/share/appattic/last-scan.json
-The scan cache, a full list of the app and leftover paths the last scan found
-under your home directory. It is owner-only. A run that updates packages drops
+The owner-only scan cache, including discovered app and leftover paths. A run that updates packages drops
 it, so does
 .BR "appattic erase" ,
-and so does a run more than 24 hours after the one that wrote it.
+and so does a run more than 24 hours after the one that wrote it. It may also be discarded earlier when the
+machine fingerprint changes or the snapshot cannot be decoded.
 .SH EXAMPLES
 .PP
 Ten largest leftovers:
@@ -341,7 +333,7 @@ Export the whole scan and keep the report on standard output:
 .PP
 .RS
 .nf
-appattic report --json "$HOME/scan.json" > report.txt
+appattic -o text report --json "$HOME/scan.json" > report.txt
 .fi
 .RE
 .PP

@@ -1,4 +1,4 @@
-.TH APPATTIC\-QT 1 "2026-11-04" "appattic-qt 3.7.0" "User Commands"
+.TH APPATTIC\-QT 1 "2026-11-13" "appattic-qt 3.7.1" "User Commands"
 .SH NAME
 appattic\-qt \- Qt 6 window for leftover, stale app, package and disk scans
 .SH SYNOPSIS
@@ -10,15 +10,20 @@ appattic\-qt \- Qt 6 window for leftover, stale app, package and disk scans
 .B appattic\-qt
 is the Linux window of AppAttic. It shows leftovers from uninstalled apps,
 stale installed apps, outdated versions, unused distro and language packages,
-and disk usage. Nothing is deleted until a script is reviewed in the window
-or the move is confirmed.
+and disk usage. Cleanup, updates, and marking packages manual show a script
+confirmation by default. Turning off
+.I confirmDelete
+skips that confirmation. Disk items move to Trash after a separate confirmation.
 .PP
 Package-manager queries run on the host. As a Flatpak they are spawned with
 .B flatpak-spawn --host
 and plugin tags are read from
 .IR /run/host ;
-installed as a plain CMake or AppImage package they run directly. Scan plugins
-cannot delete files or run a distro upgrade.
+installed as a plain CMake or AppImage package they run directly. The host
+query API rejects destructive commands. Cleanup and update
+scripts run separately through
+.IR /bin/sh ,
+on the host when packaged as a Flatpak. Full distro upgrades are not generated.
 .PP
 The WASM modules are read from
 .IR $APPATTIC_CORE_OUT ,
@@ -58,15 +63,15 @@ and the rest still pass through.
 .SH ENVIRONMENT
 .TP
 .B APPATTIC_CORE_OUT
-Directory holding the compiled WASM modules. Unset or empty searches
+Directory holding the compiled WASM modules. Unset, blank, or relative searches
 .I ../share/appattic
 and the build output directories next to the binary.
 .TP
 .B APPATTIC_HOST_EXEC_LIVE
 .B 1
-runs the core's allowlisted package queries against the real binaries instead
-of the built-in fixtures. Off by default, and read as off for any value other
-than
+forces live allowlisted queries, overriding fixtures even on macOS. Linux
+uses live queries by default unless fixture mode is enabled. Accepted true
+values are
 .BR 1 ,
 .BR true ,
 .BR yes ,
@@ -77,7 +82,9 @@ or
 .B 1
 serves the built-in fixtures on non-macOS hosts. Same accepted values as
 .BR APPATTIC_HOST_EXEC_LIVE .
-macOS uses fixtures either way.
+macOS uses fixtures by default unless
+.B APPATTIC_HOST_EXEC_LIVE
+is enabled. Other values leave the switch off.
 .TP
 .B APPATTIC_PAGE
 Initial sidebar page:
@@ -93,12 +100,12 @@ An unset or empty value opens the overview; an unknown name is reported on
 stderr and also opens the overview.
 .TP
 .B FLATPAK_ID
-Set by Flatpak. Any non-empty value means the app is sandboxed, so plugin tags
-and package-manager queries go through
-.I /run/host
-and
-.BR flatpak-spawn --host .
-Unset or empty is a normal host run.
+Set by Flatpak. A non-blank value selects sandboxed operation: plugin tags
+read from
+.IR /run/host ,
+and package-manager queries use
+.BR "flatpak-spawn --host" .
+Unset or blank is a normal host run.
 .TP
 .B XDG_DATA_HOME
 Absolute data root. Parent of
@@ -116,13 +123,14 @@ Absolute cache root scanned for leftovers.
 Absolute state root scanned for leftovers.
 .TP
 .B XDG_RUNTIME_DIR
-Session runtime root, read for the
+Session runtime root. The network-folder chooser starts at its
 .I gvfs
-directory the network-folder disk scan opens at. Unset, empty, relative, or
-naming a root with no
-.I gvfs
-in it uses
-.IR ~/.gvfs .
+subdirectory, or
+.I ~/.gvfs
+when the variable is unset, empty, or relative. If that directory is absent,
+the chooser starts at
+.I /mnt
+when present, otherwise home.
 .TP
 .B WASMTIME_DIR
 Wasmtime C API prefix used at build time, not at run time.
@@ -138,7 +146,8 @@ prints.
 The window closed normally, or the requested option completed.
 .TP
 .B 1
-The scan failed, or the smoke test failed.
+A smoke test or debug gate failed. Interactive scan failures are shown in the
+window and do not determine its exit status.
 .TP
 .B 2
 Usage error: an option this build does not take, or a gate name it does not
@@ -151,28 +160,27 @@ Confirm-before-running and ignored leftover paths. Include-system-apps is a macO
 entry is not the full path a report prints, is named in an error and left unoverwritten, and the window opens with no settings until it is corrected.
 .TP
 .I ~/.local/share/appattic/settings.json.bak
-The settings file as it was before the last change, written owner-only by every
-settings save that changed the file. It is what the window's "Restore settings
+Previous differing settings bytes, written owner-only when backup creation
+succeeds. It is what the window's "Restore settings
 from backup" puts back, and
 .B appattic restore
-puts back from the command line, after checking it loads. Nothing reads it while
-the window runs.
+puts back from the command line, after checking it loads. The backup is not
+loaded as active settings.
 .TP
 .I ~/.local/share/appattic/settings.json.bad
-The settings file a restore replaced, kept so a restore that turns out to be the
-wrong one is not a second loss. Nothing reads it while the window runs, and
+Readable, nonempty differing settings bytes preserved before a restore.
+A later restore can replace this copy. It is not loaded as active settings, and
 .B appattic erase
 leaves it. The procedure is
 .IR docs/runbooks/state-recovery.md .
 .TP
 .I ~/.local/share/appattic/last-scan.json
-The scan cache, a full list of the app and leftover paths the last scan found
-under your home directory. It is owner-only. A run that removes or updates
-something drops it, so the next run scans again, and so does a run more than 24
-hours after the one that wrote it.
+The Swift CLI and macOS window's owner-only scan snapshot. The Qt window
+scans live and invalidates this shared snapshot after cleanup or updates.
 .B appattic erase
-removes it on demand, whatever its age, and reports on standard output whether
-there was one, so the result is pipeable like every other command's.
+removes it on demand and reports on standard output (JSON when piped unless
+.B \-o text
+is set). It does not remove settings or backups.
 .TP
 .I $XDG_CONFIG_HOME/AppAttic/AppAttic.conf
 Settings the window used before

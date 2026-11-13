@@ -1,98 +1,64 @@
 # Recovering a bad release
 
-A release here is a GitHub release holding the AppImage, its `.zsync`, its
-`.buildinfo` and its `.sbom.json`, attached to a `v*` tag. The tag is the
-trigger, so the release is whatever that tag built.
+Recover a published bad build by shipping a corrected **new version**. Keep published tags fixed: an existing AppImage embeds a `.zsync` URL under its own `vX.Y.Z` tag. It does not discover a later tag automatically. Announce the replacement and give users its download link.
 
-Two rules make a bad release awkward on purpose, and this page is what to do
-about them:
+The tag-triggered `release` workflow currently publishes an x86_64 AppImage, `.zsync`, `.buildinfo`, and `.sbom.json`. The macOS release job is disabled. Manual workflow dispatch can build artifacts without publishing a tag release.
 
-- A version is immutable. `scripts/check-version.sh` fails when the declared
-  version is a tag that points at another commit, so the same number cannot be
-  shipped twice with different bytes.
-- Nothing rewrites a published tag. There is no rollback step in the workflow,
-  and there cannot be: the AppImage carries the update URL of its own tag, so a
-  second build under that number would be an image that checks for an update to
-  itself.
+## Choose the recovery
 
-So recovering means moving the release to a new version, not replacing the old
-one. The alternative, force-moving the tag, makes every AppImage already
-downloaded point at a `.zsync` that no longer matches its own bytes.
+- **Bad binary already distributed:** fix or revert the defect and release a new version. Explain the impact and any recovery steps in its notes. If the old binary must no longer be available, withdraw its release assets as described below.
+- **Failed build before publication:** inspect the failure. Infrastructure failures may be retried at the same tag; source changes require a new version and tag.
+- **Incorrect notes or metainfo:** correct the source and include the correction in the next release. A public release-body clarification can warn users sooner, but does not change metainfo embedded in existing binaries.
 
-## Decide which of the three it is
+Deleting a tag does not make reusing its version safe. `scripts/check-version.sh` rejects a declared version when an existing matching tag points at another commit; removing the tag removes that local check's evidence, not the copies users already downloaded.
 
-1. **The build is wrong, and no user has it yet.** The tag has not been
-   announced. Delete the tag and the release below, fix the tree, bump the
-   version, tag the new commit.
-2. **The build is wrong and users have it.** Users who checked for updates get
-   the new version the moment it is tagged. Ship it as a new version; do not
-   try to retract the old one. Say in the new release's AppStream
-   `<description>` what was wrong and what a caller has to change, because that
-   text is the GitHub release body and the only place a user reads it.
-3. **Only the metainfo or the note is wrong, and the binary is fine.** The
-   release note is the newest `<release>` in
-   `packaging/org.appattic.AppAttic.metainfo.xml`, and the note is the
-   `<description>` under it. Edit that entry, bump the patch version, and tag
-   again, so the published note and the shipped note are the same text.
+## Withdraw unsafe assets
 
-## Withdrawing a release
-
-Every step is a `gh` call; `gh auth status` first, and `gh release view vX.Y.Z`
-to confirm which release the tag produced.
+First inspect the release and record its tag, commit, asset names, and failure:
 
 ```bash
-gh release delete vX.Y.Z --yes --cleanup-tag   # the release, its assets, and the tag
+gh auth status
+gh release view vX.Y.Z
 ```
 
-`--cleanup-tag` is what deletes the tag, and it is what makes the number
-reusable: `scripts/check-version.sh` fails when the declared version already
-carries a tag pointing at a different commit, so without it the same number
-cannot be shipped again. (A tag pointing at the commit under the tree is that
-normal release build, not a reuse.) If the tag is wanted for the history, delete
-the release alone and move the tag yourself only when no user has downloaded
-from it.
+When withdrawal is necessary, delete the release while retaining its tag:
 
-The release page keeps a `deleted` marker rather than a redirect, so a user
-following an old download link lands on a 404. That is the correct outcome for
-a build that must not be installed, and it is why step 2 above ships a new
-version rather than deleting and stopping.
+```bash
+gh release delete vX.Y.Z --yes
+```
 
-## Re-releasing
+Old asset/update links will no longer provide the withdrawn files. Deletion cannot recall downloaded copies. Publish a separate corrective release and communicate how to obtain it. Do not move the old tag or use `--cleanup-tag` to recycle a published version.
 
-1. Fix the tree and land it. The tag is the trigger, so nothing releases until
-   it is pushed.
-2. Bump the version in all five declarations in one commit:
-   `Sources/AppAtticScan/Version.swift`, the newest `<release>` in
-   `packaging/org.appattic.AppAttic.metainfo.xml`, `packaging/Info.plist`, and
-   the `.TH` and version headers in `packaging/appattic.1` and
-   `packaging/appattic-qt.1`. `bash scripts/check-version.sh` fails when any of
-   them disagree, and it runs in `scripts/lint.sh`, so a partial bump fails CI
-   rather than a release.
-3. Tag and push:
+## Publish the correction
+
+1. Fix or revert the defect and validate the result. A revert restores code behavior, not files already deleted or package state already changed on users' machines.
+2. Update the version declaration and packaging copies together:
+   - `Sources/AppAtticScan/Version.swift`.
+   - The new highest-version `<release>` entry in `packaging/org.appattic.AppAttic.metainfo.xml`, with date and consumer-facing `<description>`.
+   - `CFBundleShortVersionString` in `packaging/Info.plist`; also increment its positive integer `CFBundleVersion`.
+   - The `.TH` version headers in `packaging/appattic.1` and `packaging/appattic-qt.1`.
+
+   Run the version check and scan tests before tagging:
 
    ```bash
-   git tag vX.Y.Z && git push origin vX.Y.Z
+   bash scripts/check-version.sh
+   bash scripts/test.sh
    ```
 
-   The tag is the trigger. `linux.yml` and `release.yml` both run on it, and
-   `release.yml` does not depend on `linux.yml`: the two workflows are
-   separate, so a green `linux.yml` alone does not stop the release. Its own
-   `gate` job runs `scripts/check-version.sh --tag` and `scripts/test.sh`, and
-   both release jobs declare `needs: [gate]`, so a red scan suite or a
-   mistagged push stops the release before anything is published, and the
-   suite runs once per tag rather than in every job that wanted it.
-4. Watch the `release` workflow. A failure after `Publish AppImage` is not
-   half-published: `fail_on_unmatched_files: true` means the release is only
-   written once all four artifacts exist.
+3. Commit the reviewed correction, then tag and push that commit:
 
-## What is deliberately not automated
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
 
-- No automatic rollback. The only safe rollback is a new version, and a
-  workflow cannot decide whether a build is bad; a human sees the failure.
-- No delete-the-tag rollback. The immutability check and the embedded update
-  URL both exist so a version means one set of bytes, and an automated way
-  around that is a way to break it silently.
-- No re-run of a failed publish against a rebuilt image. Re-run the workflow
-  for the same tag: the artifacts are rebuilt from the same commit with
-  `SOURCE_DATE_EPOCH` taken from it, and the cache key in `release.yml` names
-  the toolchain and the sources, so the rebuild is the same bytes.
+4. Watch the `release` workflow. Its `gate` checks the tag/version and runs the scan suite before either release job can start. The separate `linux` workflow is not a dependency of `release`; check it as well for broader platform coverage.
+5. Verify the release body and all four assets, download the AppImage, and smoke-test the corrected behavior. The body comes from the matching AppStream release description via `scripts/release-notes.sh`. Announce the replacement download; users of the old tag do not automatically find it through the embedded update URL.
+
+## Failed or partial publication
+
+Inspect the actual release assets before retrying. `fail_on_unmatched_files: true` requires the expected files to exist locally, but publication is not an atomic transaction across uploads. A failed publish may leave a release or a subset of assets.
+
+A retry at the same tag rebuilds from that commit. `SOURCE_DATE_EPOCH` and reproducibility checks reduce variation, but moving package repositories and host libraries mean the whole AppImage is not guaranteed byte-identical. Do not silently replace an already distributed image with different bytes under the same version. If that may have happened, use a new version and retain the old tag for traceability.
+
+There is no automated rollback or recovery of user data. Release withdrawal and a corrective version are distribution actions; users may still need separate state or data recovery. See [state recovery](state-recovery.md).

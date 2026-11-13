@@ -1,183 +1,72 @@
 # AppAttic Swift scan port (ARCHIVED)
 
-> Archived: implemented in full. The canonical architecture record is
-> [`2026-08-26-zig-wasm-core-design.md`](../2026-08-26-zig-wasm-core-design.md).
-> This file is kept for history; do not extend it.
-
 Date: 2026-08-17
-Updated: 2026-09-27
-Status: Implemented, superseded by [`2026-08-26-zig-wasm-core-design.md`](../2026-08-26-zig-wasm-core-design.md)
+Updated: 2026-11-13
+Status: Historical. The port landed. Do not extend this file.
 
-Port the Python scanner into Swift so the Mac UI and Linux CLI/UI run with no Python. Product behavior stays the same: leftovers, stale software, outdated version signal. Nothing auto-deletes. Outdated is report-only except Homebrew formulas/casks and Flatpak, which apply only through the explicit `update` command or UI confirm. Distro managers, Snap, and the App Store stay report-only.
+The current Linux scan path is [`2026-08-26-zig-wasm-core-design.md`](../2026-08-26-zig-wasm-core-design.md). The Swift CLI and the macOS UI still use `AppAtticScan`. Current commands, flags, and window behavior are in the source and in [`DESIGN.md`](../../../DESIGN.md), not in the lists below.
 
-Follow-on architecture (Zig WASM core + plugins; Linux Qt already loads it): [`2026-08-26-zig-wasm-core-design.md`](../2026-08-26-zig-wasm-core-design.md).
+## What this record decided
 
-## Goal
+Port the Python scanner into Swift so the Mac UI and the CLI run with no Python. Product behavior stayed the same at the time of the port: leftovers, stale software, and an outdated-version signal. Nothing auto-deleted.
 
 One Foundation scan library, two executables:
 
-- `appattic`: CLI (`report`, `leftovers`, `stale`, `outdated`, `packages`, `update`)
-- `AppAtticUI`: SwiftCrossUI window on macOS (AppKit; SwiftPM product name `AppAtticUI` because APFS is case-insensitive and would collide with `appattic`). Linux UI is C++ Qt 6 in `ui/linux-qt`.
+- `appattic`, the CLI, linking `AppAtticScan` only.
+- `AppAtticUI`, the SwiftCrossUI window on macOS (AppKit). The SwiftPM product is `AppAtticUI` because APFS is case-insensitive and `AppAttic` would collide with `appattic`. The target name is `AppAttic`.
 
-The Python package is gone. Icons live in `packaging/`.
+On Linux, `Package.swift` omits the SwiftCrossUI product. The platform floor in the manifest is macOS 13. Linux UI is C++ Qt 6 in `ui/linux-qt`, linked by `scripts/linux-qt-link.sh`. Headless `appattic` does not link Gtk.
 
-## Out of scope
+The Python package is gone: no `APPATTIC_PYTHON`, no `python3 -m appattic`, no `tests/*.py`. Icons live in `packaging/`.
 
-- `serve` / `web.py` (optional web dashboard). Not ported.
-- `brew-leaves` CLI command. Not in this port.
-- Rewriting the window chrome or DESIGN.md visual rules.
-- AppKit, SF Symbols, materials, or AppKit `List` in any target Linux compiles.
+Left out of the port, and still absent: a `serve` command and the old `web.py` dashboard, and a `brew-leaves` command (`parseCLIArguments` rejects it as an unknown command).
 
-## Package layout
+`AppAtticScan` and `appattic` do not import AppKit. `ContentView.swift` may keep `#if os(macOS)` for Reveal in Finder versus Files.
 
-`Package.swift` defines:
+Library files at the port: `Discover.swift`, `Usage.swift`, `BrewInfo.swift`, `Outdated.swift`, `Leftovers.swift`, `Recommend.swift`, `Scan.swift`, `Cleanup.swift`, `Cache.swift`, `Settings.swift`, `Packages.swift`, `Steam.swift`, `CrossOver.swift`, and `CLIParse.swift`. `Util.swift` held subprocess, `du`, human size, and date helpers, and was later split into `Process.swift`, `DiskSize.swift`, `Format.swift`, `Dates.swift`, and `Text.swift`.
 
-| Target | Kind | Depends on |
-|--------|------|------------|
-| `AppAtticScan` | library | Foundation only |
-| `appattic` | executable | `AppAtticScan` |
-| `AppAtticUI` | executable (macOS only; target name `AppAttic`) | `AppAtticScan`, SwiftCrossUI, DefaultBackend |
-| `AppAtticScanTests` | test (`tests/AppAtticScanTests`) | `AppAtticScan` |
+## Scan order at the port
 
-On Linux, `Package.swift` omits the SwiftCrossUI product and dependency. Platform floor: macOS 13. Linux is a first-class scan and CLI host. Linux UI needs Qt 6 Widgets at build and run (`scripts/linux-qt-link.sh`).
-
-## Library files (`Sources/AppAtticScan/`)
-
-The table below is the file list as of the port. `Util.swift` has since been
-split into the modules that own its parts (`Process`, `DiskSize`, `Format`,
-`Dates`, `Text`); read [`README.md`](../../../README.md) for the current one.
-
-| File | Responsibility |
-|------|----------------|
-| `Util.swift` | subprocess, `du`, human size, date helpers |
-| `Discover.swift` | installed apps (`.app` / `.desktop`) |
-| `Usage.swift` | last-used (Spotlight, processes, shell history, xbel) |
-| `BrewInfo.swift` | formulas, casks, leaves, `desc`, untrusted-cask retry |
-| `Outdated.swift` | brew / MAS / flatpak / snap / apt / pacman / dnf / zypper; attach summaries |
-| `Leftovers.swift` | data-dir scan, classify owned/system/orphaned, reasons |
-| `Recommend.swift` | software list, KEEP / REVIEW / REMOVE |
-| `Scan.swift` | `runFullScan(includeSystem:progress:)` |
-| `Cleanup.swift` | reviewable `/bin/sh` script |
-| `Cache.swift` | last-scan cache (`--fresh` bypasses it) |
-| `Settings.swift` | include-system, confirm, ignore list, cleanup selection |
-| `Packages.swift` | distro orphans and language globals |
-| `Steam.swift` | Steam leftovers / uninstall helpers |
-| `CrossOver.swift` | CrossOver bottle helpers |
-
-`Sources/AppAtticScan/CLIParse.swift` owns CLI flags and commands.
-
-Scan types the UI already decodes (`ScanData`, `LeftoverItem`, `SoftwareItem`, `OutdatedEntry`, `ScanTotals`, `PackageEntry`) live in the library. The UI target imports `AppAtticScan`. `Sources/AppAttic/Models.swift` keeps only UI helpers (`formatDate`) that are not scan types.
-
-## Scan pipeline
-
-Same order as `scan.run_full_scan`:
+The Swift scan followed the old `scan.run_full_scan` order:
 
 1. Discover apps. Drop system apps unless `includeSystem`.
 2. Fill usage metadata.
-3. Collect Homebrew info (`brew` missing → `available == false`, empty lists).
-4. Outdated: brew outdated + Linux managers + App Store. Report only in the scan result. Homebrew/Flatpak apply through `update` / UI confirm, never from the leftover cleanup script.
-5. Leftover data dirs + orphan LaunchAgents.
+3. Collect Homebrew info. A missing `brew` means `available == false` and empty lists.
+4. Outdated: brew, the Linux managers, and the App Store. Report only inside the scan result. Homebrew and Flatpak apply through `update` or a UI confirm, never from the leftover cleanup script.
+5. Leftover data dirs and orphan LaunchAgents.
 6. Prefs-mtime fallback for apps with no last-used.
-7. `buildSoftware` + apply outdated flags + copy summaries + `evaluateAll`.
+7. `buildSoftware`, apply outdated flags, copy summaries, `evaluateAll`.
 8. Distro orphans and language globals (`collectPackages`).
 
-Progress is a `String` callback, same messages the UI status line already shows.
+Progress is a `String` callback.
 
-## Mac vs Linux
+One library, with `#if os(macOS)` and `#if os(Linux)` inside the scan files.
 
-One library, `#if os(macOS)` / `#if os(Linux)` inside the files above. Not two apps.
+Shared: leftover classify rules, tier thresholds, brew JSON (`--formula` / `--cask --installed`, drop refused casks, join desc by path, artifact, or title), apt, pacman, dnf, zypper, flatpak, and snap parsers, and cleanup script text.
 
-Shared on both: leftover classify rules, tier thresholds, brew JSON (`--formula/--cask --installed`, drop refused casks, join desc by path / artifact / title), apt/pacman/dnf/zypper/flatpak/snap parsers, cleanup script text.
+Darwin only: Spotlight through `Process` (`mdls` / `mdfind`), `.app` bundles, Info.plist and InfoPlist.strings through Foundation `PropertyListSerialization`, MAS receipt and `mas outdated` (never `--accurate`).
 
-Darwin only: Spotlight via `Process` (`mdls` / `mdfind`), `.app` bundles, Info.plist + InfoPlist.strings via Foundation `PropertyListSerialization`, MAS receipt / `mas outdated` (never `--accurate`).
+Linux only, on this stack: `.desktop` files from XDG application dirs, XDG config, data, cache, and state leftover roots, `recently-used.xbel`, and the Linux system-name list.
 
-Linux only: `.desktop` from XDG application dirs, XDG config/data/cache/state leftover roots, `recently-used.xbel`, Linux system-name classify.
+A missing or failing `brew`, `mas`, `flatpak`, `snap`, `apt`, `pacman`, `dnf`, or `zypper` contributes `[]`. The scan continues. An untrusted Homebrew cask is listed and is not updated. Other formula and cask `desc` rows still load. That untrusted-cask rule is Swift-only. The Zig `brew` plugin does not apply it. A thrown scan failure is `errorMessage` in the UI and stderr plus a non-zero exit in the CLI.
 
-Forbidden in `AppAtticScan` and `appattic`: `import AppKit`, `NSImage`, SF Symbols, `NSVisualEffectView`, AppKit `List`.
+The cleanup script comments outdated lines. It does not run them. Homebrew and Flatpak upgrades live in `update` and in the UI confirm path.
 
-`ContentView.swift` may keep existing `#if os(macOS)` for Reveal in Finder vs Files.
+`ScannerViewModel` calls `AppAtticScan.runFullScan` on a background queue. There is no `executePythonScan` path. Cleanup writes a temp `.sh` and runs `/bin/sh`.
 
-## CLI (`Sources/AppAtticCLI/`, product name `appattic`)
+## What has moved since
 
-Default command is `report` if none is given.
+Treat the following as history of the port, not as the current tree.
 
-Commands: `report`, `leftovers`, `stale`, `outdated`, `packages`, `update`.
+- CLI commands at the port were `report` (the default), `leftovers`, `stale`, `outdated`, `packages`, and `update`. Flags were `--json FILE`, `--include-system`, `--fresh`, `--dry-run`, `--top N`, `--category`, `--leftovers-only`, `--stale-only`, `--version`, and `--help`. Later commands (`config`, `disk`, `erase`, `restore`, `schema`) and later flags are in `CLIParse.swift`.
+- `update` at the port upgraded Homebrew formulas and casks and Flatpak apps. Distro managers, Snap, and the App Store stayed report-only. Later updatable managers are in the Zig spec and in `Outdated.swift`.
+- The port sidebar was Overview, Leftovers, Stale Apps, Outdated, Packages, and Settings. Disk Usage came later.
+- `confirmDelete` already existed. It defaults to on and can be turned off, so "always confirm" was never a hard rule. See [`DESIGN.md`](../../../DESIGN.md).
+- Version at the port was `1.2.1`. `appAtticVersion` in `Sources/AppAtticScan/Version.swift` is the source of truth.
+- `run.sh` execs the `appattic` binary from `.build`. `./run.sh --ui` execs `AppAtticUI` on macOS or the Qt binary on Linux. `build.sh` builds the CLI, and builds the Qt UI when `pkg-config Qt6Widgets` succeeds. The macOS UI build depends on a Swift 6 compiler for SwiftCrossUI. The pinned Swift 5.10.1 toolchain cannot build it, and `build.sh` rejects other Swift versions before reaching the UI build. Its fallback builds the CLI only; a Swift 6 UI build needs a separate setup.
 
-Flags (not `serve`):
-
-- `--json FILE`
-- `--include-system`
-- `--fresh` (ignore the last-scan cache)
-- `--dry-run` (print cleanup or update script, do not run it)
-- `--top N` (largest leftovers)
-- `--category` (leftover root substring filter)
-- `--leftovers-only` / `--stale-only` on `report`
-- `--version`
-- `--help`
-
-`update` upgrades only updatable Homebrew formulas/casks and Flatpak apps. Distro managers, Snap, and the App Store stay report-only. `report`, `leftovers`, `stale`, `outdated`, and `packages` reuse the last scan when it is still current; `update` always scans live.
-
-Exit 0 on a completed scan. Non-zero if the scan throws. Missing optional tools do not fail the scan.
-
-Headless Linux: this binary must link without Gtk.
-
-## UI
-
-`ScannerViewModel` calls `AppAtticScan.runFullScan` on a background queue. There is no `executePythonScan` / `APPATTIC_PYTHON` path.
-
-Cleanup still writes a temp `.sh` and runs `/bin/sh`. Selection, confirm alert, and script sheet stay in the UI. Sidebar: Overview, Leftovers, Stale Apps, Outdated, Packages, Settings.
-
-## Errors
-
-- `brew`, `mas`, `flatpak`, `snap`, `apt`, `pacman`, `dnf`, `zypper` missing or failing: that manager contributes `[]`. Scan continues.
-- Untrusted Homebrew cask: listed on Outdated, not updated; other formula/cask `desc` still load.
-- Thrown scan failure: UI `errorMessage`; CLI stderr + non-zero exit.
-- Cleanup script comments outdated lines, does not run them. Homebrew/Flatpak upgrades live only in `update` / UI confirm.
-
-## Tests
-
-`tests/AppAtticScanTests` ports the old Python cases with fixtures (fake apps, temp dirs, canned JSON/stdout). No requirement to hit live Spotlight or network.
-
-Must cover:
-
-- Leftover false positives (`ClassifyTests.swift`)
-- KEEP / REVIEW / REMOVE thresholds (`RecommendTests.swift`)
-- Prefs-mtime fallback and `effectiveLastUsed` (`UsageTests.swift`)
-- Brew untrusted-cask retry and desc join (`BrewInfoTests.swift`)
-- Outdated parsers: apt, mas, brew JSON, pacman, dnf, zypper (`OutdatedTests.swift`)
-- Linux `.desktop` / XDG system names (`DiscoverTests.swift`)
-- CLI flags including `packages`, `update`, `--fresh` (`ScanTests.swift`)
-- Packages orphans/globals (`PackageTests.swift`)
-
-Live `Process` wrappers are injectable so tests pass canned output.
-
-Command: `swift test` (needs unrestricted permissions in this environment, same as `swift build`).
+Tests for the port live in `tests/AppAtticScanTests` and use fixtures. They do not require live Spotlight or a network. Live `Process` wrappers are injectable. `swift test` on the pinned toolchain needs `APPATTIC_NO_MAC_UI=1` because `AppAtticUI` does not build on Swift 5.10. `scripts/test.sh` sets that.
 
 ## Cutover
 
-Completed. `ScannerViewModel` calls `AppAtticScan.runFullScan`. The CLI links `AppAtticScan`. The runtime Python package, `tests/*.py`, `APPATTIC_PYTHON`, and `copy_python` / `link_python` are gone.
-
-No dual-run of Python and Swift in production.
-
-## Scripts and docs
-
-`run.sh`:
-
-- `./run.sh` and `./run.sh report|leftovers|stale|outdated|packages|update` exec the `appattic` CLI binary from `.build`.
-- `./run.sh --ui` execs `AppAtticUI` on macOS or `ui/linux-qt/build/appattic-qt` on Linux.
-- No `PYTHONPATH`. No `python3 -m appattic`.
-
-`build.sh`:
-
-- macOS: build UI, stage `AppAttic.app`, ad-hoc codesign. Do not copy Python.
-- Linux: always build `appattic` CLI. Build Qt UI via `scripts/linux-qt-link.sh` only if `pkg-config Qt6Widgets` succeeds. Do not fail the whole script for missing Qt when the user only needs CLI.
-
-`README.md` matches the above. Version at the port was `1.2.1`; `appAtticVersion` in `Sources/AppAtticScan/Version.swift` is the source of truth.
-
-## Success
-
-- `swift test` passes the ported cases.
-- Mac: `open AppAttic.app` scans with Python uninstalled or not on `PATH`.
-- Linux: `appattic report` runs without Gtk.
-- Linux UI still requires Qt 6 Widgets (`ui/linux-qt`).
-- User-visible leftover/stale/outdated rules and copy stay equivalent to the Python scanner (including brew `desc` after the untrusted-cask fix).
+Done. The CLI links `AppAtticScan`. Production does not run Python and Swift together. Linux Qt later took its own scan path and loads the WASM core. That split is the accepted spec, not a leftover of this port.

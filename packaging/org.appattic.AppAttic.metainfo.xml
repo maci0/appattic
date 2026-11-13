@@ -17,13 +17,14 @@
     <p>
       AppAttic finds leftover data from uninstalled apps, unused installed
       software, unused distro and language packages, outdated versions, and
-      large folders. Nothing is deleted until you review a script or confirm
-      in the window. Disk usage can move a folder to Trash after you confirm.
+      large folders. Cleanup and updates show a script confirmation by default;
+      you can disable it in Settings. Disk usage moves selected items to Trash
+      after a separate confirmation.
     </p>
     <p>
       The Linux window is Qt 6. Package-manager queries run on the host when
-      installed as a Flatpak (flatpak-spawn --host). Named package updates
-      wait for confirm. Full distro upgrades are not run.
+      installed as a Flatpak (flatpak-spawn --host). Updates target named packages
+      rather than a full distro upgrade.
     </p>
   </description>
   <categories>
@@ -36,6 +37,11 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="3.7.1" date="2026-11-13">
+      <description>
+        <p>Documentation is shorter and reorganized. Setup, scanner differences, confirmation settings, privacy, state recovery, and release procedures now match the current implementation. The macOS UI requires a separate Swift 6 build outside the pinned workflow. Swift action scripts use a fixed system and Homebrew PATH; Qt scripts still search user tool directories.</p>
+      </description>
+    </release>
     <release version="3.7.0" date="2026-11-04">
       <description>
         <p>Adds review and keep status support across scan models and core query buffers. Hardens generated cleanup scripts by restricting PATH and command lookup to system directories. Enhances UI accessibility labels and interactive controls. Pins build and CI container image digests with verification gates.</p>
